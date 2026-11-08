@@ -40,6 +40,7 @@ pub struct OffsetsFile {
     pub locators: BTreeMap<String, LocatorDef>,
     #[serde(default)]
     pub signals: BTreeMap<String, SignalDef>,
+    pub player_position: Option<PlayerPositionLayout>,
     pub npcs: Option<NpcTableDef>,
     #[serde(default)]
     pub gcd: GcdCfg,
@@ -62,6 +63,9 @@ impl OffsetsFile {
 
     /// Check cross-references (signals -> bases/vars, etc.).
     pub fn validate(&self) -> anyhow::Result<()> {
+        if self.player_position.is_some() && self.client.build.is_none() {
+            anyhow::bail!("player_position: set client.build to the build these offsets were verified on");
+        }
         for (name, s) in &self.signals {
             match (&s.base, s.var, &s.locator) {
                 (Some(b), None, None) => {
@@ -128,6 +132,26 @@ impl OffsetsFile {
         }
         Ok(())
     }
+}
+
+/// The client's local-player lookup and the fields used by its CoordGrid getter.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayerPositionLayout {
+    pub client_ptr_rva: u64,
+    pub state: u64,
+    pub in_game_state: i32,
+    pub player_context: u64,
+    pub player_index: u64,
+    pub player_override: u64,
+    pub player_table: u64,
+    /// Offset of the table's adjacent start and end pointers.
+    pub table_range: u64,
+    pub slot_entity: u64,
+    pub plane: u64,
+    pub size: u64,
+    /// Offset of the entity's three f32 position components (x, height, z).
+    pub fine_position: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

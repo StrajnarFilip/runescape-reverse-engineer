@@ -47,6 +47,7 @@
   <section>
     <div class="card">
       <h2>Player</h2>
+      <div class="gauge"><div class="row"><span>Tile</span><span id="position">Waiting for tile</span></div></div>
       <div class="gauge"><div class="row"><span>Lifepoints</span><span id="lpv">–</span></div><div class="bar"><div id="lpb" style="background:var(--hp)"></div></div></div>
       <div class="gauge"><div class="row"><span>Prayer</span><span id="prv">–</span></div><div class="bar"><div id="prb" style="background:var(--pray)"></div></div></div>
       <div class="gauge"><div class="row"><span>Adrenaline</span><span id="adv">–</span></div><div class="bar"><div id="adb" style="background:var(--adren)"></div></div></div>
@@ -72,6 +73,9 @@ const lines = [];
 function pill(el, text, cls) { el.textContent = text; el.className = "pill" + (cls ? " " + cls : ""); }
 function setBar(id, v, max) { const p = max > 0 ? Math.max(0, Math.min(100, (v / max) * 100)) : 0; $(id).style.width = p + "%"; }
 function fmt(n) { return n == null ? "–" : Number(n).toLocaleString(); }
+function setPosition(tile, unavailable = "Waiting for tile") {
+  $("position").textContent = tile ? `${tile.x}, ${tile.y} · plane ${tile.plane}` : unavailable;
+}
 
 function log(ev) {
   const t = new Date(ev.unix_us / 1000).toISOString().slice(11, 23);
@@ -114,17 +118,21 @@ function bossAction(ev) {
 
 function onEvent(ev) {
   if (src != null && ev.src !== src) return;
+  if (src == null && ev.state !== "detached") src = ev.src;
   switch (ev.type) {
     case "status": {
       pill($("state"), ev.state + (ev.label ? " · " + ev.label : ""), ev.state === "ok" ? "ok" : ev.state === "waiting" || ev.state === "attaching" ? "warn" : "bad");
       const why = (ev.failing || []).join("; ") || (ev.state === "detached" ? "client closed; waiting for RuneScape to start again" : "");
       $("detail").textContent = ev.state === "ok" ? "" : why;
+      if (ev.state !== "ok") setPosition(null);
+      if (ev.state === "detached") src = null;
       break;
     }
     case "tick": $("tick").textContent = `tick ${ev.n} (${ev.basis})`; break;
     case "player.lifepoints": applyPlayer({ lifepoints: ev.new, lifepoints_max: ev.max }); break;
     case "player.prayer": applyPlayer({ prayer: ev.new, prayer_max: ev.max }); break;
     case "player.adrenaline": applyPlayer({ adrenaline: ev.new, adrenaline_pct: ev.pct }); break;
+    case "player.position": setPosition(ev.new); break;
     case "player.gcd": gcd = { end: ev.ends_at_unix_us / 1000, dur: ev.duration_ms }; break;
     case "player.gcd_ready": gcd = null; break;
     case "boss.action": bossAction(ev); break;
@@ -140,6 +148,7 @@ function onSnapshot(s) {
   if (s.state === "ok") $("detail").textContent = "";
   else if (s.state === "waiting" || s.state === "attaching") $("detail").textContent = "finding game values in memory (~20-60 s)…";
   applyPlayer(s.player);
+  setPosition(s.player.position, Object.hasOwn(s.player, "position") ? "Waiting for tile" : "Server update needed");
   if (s.player.gcd_ends_at_unix_us) gcd = { end: s.player.gcd_ends_at_unix_us / 1000, dur: 1800 };
   const boss = s.npcs.find((n) => n.name);
   if (boss) { $("bossname").textContent = boss.name; if (boss.hp_pct != null) setBar("bosshpb", boss.hp_pct, 100); }
@@ -159,6 +168,7 @@ let connectTimer = null;
 function connect() {
   clearTimeout(retry);
   clearTimeout(connectTimer);
+  setPosition(null);
   if (ws) {
     // Detach the old socket first so its close can't schedule another reconnect.
     const old = ws;
@@ -174,6 +184,7 @@ function connect() {
     if (ws !== sock) return;
     clearTimeout(connectTimer);
     pill($("conn"), "disconnected", "bad");
+    setPosition(null, "Disconnected");
     retry = setTimeout(connect, 1500);
   };
   sock.onmessage = (m) => {
@@ -181,8 +192,8 @@ function connect() {
     if (msg.seq != null) return onEvent(msg);
     if (msg.type === "snapshot") return onSnapshot(msg.snapshot);
     if (msg.type === "hello") {
-      if (msg.sources.length) src = msg.sources[0];
-      else { pill($("state"), "no client", "warn"); $("detail").textContent = "Start RuneScape; the server attaches automatically."; }
+      src = msg.sources[0] ?? null;
+      if (src == null) { pill($("state"), "no client", "warn"); $("detail").textContent = "Start RuneScape; the server attaches automatically."; }
     }
     if (msg.type === "resync") log({ type: "resync", unix_us: Date.now() * 1000, missed: msg.missed });
   };

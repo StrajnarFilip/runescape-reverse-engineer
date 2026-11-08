@@ -60,6 +60,17 @@ pub enum TickBasis {
     Estimated,
 }
 
+/// A tile in the active game scene. In an instance, these are the live instance coordinates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TilePosition {
+    /// East-west world tile coordinate.
+    pub x: i32,
+    /// South-north world tile coordinate (called z in Jagex's CoordGrid).
+    pub y: i32,
+    /// Map level, from 0 through 3.
+    pub plane: u8,
+}
+
 /// One NPC as currently observed.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct NpcInfo {
@@ -119,6 +130,8 @@ pub enum Event {
     Prayer { old: Option<i64>, new: i64, max: Option<i64> },
     #[serde(rename = "player.adrenaline")]
     Adrenaline { old: Option<i64>, new: i64, pct: Option<f64> },
+    #[serde(rename = "player.position")]
+    Position { old: Option<TilePosition>, new: Option<TilePosition> },
     #[serde(rename = "player.ability_used")]
     AbilityUsed {
         /// What detected it: `signal:<name>` or `adrenaline_heuristic`.
@@ -178,6 +191,7 @@ impl Event {
             Event::Lifepoints { .. } => "player.lifepoints",
             Event::Prayer { .. } => "player.prayer",
             Event::Adrenaline { .. } => "player.adrenaline",
+            Event::Position { .. } => "player.position",
             Event::AbilityUsed { .. } => "player.ability_used",
             Event::Gcd { .. } => "player.gcd",
             Event::GcdReady { .. } => "player.gcd_ready",
@@ -234,6 +248,7 @@ pub struct PlayerState {
     pub prayer_max: Option<i64>,
     pub adrenaline: Option<i64>,
     pub adrenaline_pct: Option<f64>,
+    pub position: Option<TilePosition>,
     pub gcd_end_tick: Option<u64>,
     pub gcd_ends_at_unix_us: Option<u64>,
 }
@@ -316,6 +331,7 @@ mod tests {
             Event::BossAction { boss: "telos".into(), uid: 1, action: "Tendrils".into(), anim_id: Some(5), spotanim_id: None },
             Event::NpcSpawn { npc: NpcInfo { uid: 3, npc_id: Some(9001), anim: Some(-1), ..Default::default() } },
             Event::Signal { name: "x".into(), old: None, new: Num::F(1.5) },
+            Event::Position { old: Some(TilePosition { x: 3165, y: 3482, plane: 0 }), new: None },
             Event::Tick { n: 5, basis: TickBasis::Counter, interval_ms: Some(600.0) },
         ] {
             let e = Envelope { seq: 1, t_us: 1, unix_us: 1, tick: None, tick_phase_ms: None, src: 1, ev };

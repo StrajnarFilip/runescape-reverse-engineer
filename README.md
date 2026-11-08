@@ -3,6 +3,7 @@
 This reads RuneScape 3 client state straight from `rs2client.exe` memory and streams it as typed events. There's no OCR or screen capture, and nothing is injected into the client. A separate process calls `ReadProcessMemory` about 1000 times a second. It compares each sample with the previous one, then emits:
 
 - `player.lifepoints` / `player.prayer` / `player.adrenaline` with the old and new values (and max / pct)
+- `player.position` with the old and new occupied tiles
 - `tick`, `player.ability_used`, `player.gcd` (start tick, end tick, wall-clock end), `player.gcd_ready`
 - `npc.spawn` / `npc.despawn` / `npc.health` / `npc.animation` / `npc.spotanim`
 - `boss.action` / `boss.hp` / `boss.phase` for NPCs listed in `data/bosses/*.toml` (Telos first)
@@ -64,6 +65,34 @@ Any WebSocket client can connect:
 
 Flags: `--open`, `--record <file.jsonl>`, `--pid`, `--all` (one source per client), `--period-us 500`, `--offsets`, `--bosses`, `--bind`. Relative `--offsets`/`--bosses` paths are also searched next to the executable, so the server finds the repo's files from any working directory.
 
+## Player tiles
+
+The viewer shows the active scene tile as `x, y, plane`. Subscribe to `player.position`
+for tile changes or read `snapshot.player.position` for the current value.
+An event's `new` is `null` when the tile becomes unavailable, such as when leaving
+the game scene. The snapshot reports `position: null` while the tile is unavailable.
+If the viewer says **Server update needed**, stop the server on its selected port
+and launch the updated build.
+
+```json
+{"type":"player.position","old":{"x":3165,"y":3482,"plane":0},"new":{"x":3166,"y":3482,"plane":0}}
+```
+
+`x` increases east, `y` increases north (Jagex calls it `z`), and `plane` is the
+map level from 0 to 3. One tile is 512 fine units. The reader follows the local
+player and uses the same footprint-origin conversion as its CoordGrid getter.
+Jagex's five-part notation is `plane,mapSquareX,mapSquareZ,localX,localZ`. For
+example, `0,49,54,29,26` is `{x:3165,y:3482,plane:0}` because each map square is
+64 tiles wide. [PlayerEntity reference](https://developer.runescape.com/rs/game/entity/playerentity.html) · [CoordGrid reference](https://developer.runescape.com/rs/game/coordgrid.html)
+
+For a repeatable boss marker, pick a recognizable tile in the arena as the origin,
+then store signed `dx` and `dy` offsets in tiles plus the target plane. Capture the
+origin's live position each run and add the offsets. For example, `dx = 2, dy = -1`
+means two tiles east and one south of the origin. If an arena can rotate, use
+a second landmark to establish its orientation. The stream supplies live instance
+coordinates.
+[Jagex instance coordinate reference](https://developer.runescape.com/rs/cheats.html#getcoord)
+
 ## What's mapped (client build 6ada3f59-1a86000)
 
 | Signal | Where | Encoding |
@@ -73,8 +102,9 @@ Flags: `--open`, `--record <file.jsonl>`, `--pid`, `--all` (one source per clien
 | Server tick | `+0x180` in objects with vtable `rs2client.exe+0x15b3a88` | u32, +1 every 600 ms, counts from login |
 | Lifepoints | var **13537** through the var index | plain integer |
 | Lifepoints max (candidate) | var **13538** through the var index | reads 9900 = orb max; not yet confirmed to follow gear changes |
+| Player position | local player entity through the active client context | CoordGrid tile from plane, footprint size, and fine X/Z |
 
-Every signal is found by **locators** at attach, so no pointer paths are needed. Locators scan memory for a container's *structure*, then read values by key. That takes 15–60 seconds after `rs3-eventd` starts or a client appears; the status is `waiting` until it finishes:
+Scalar signals are found by **locators** at attach. Locators scan memory for a container's *structure*, then read values by key. That takes 15–60 seconds after `rs3-eventd` starts or a client appears; the status is `waiting` until it finishes. Player position follows the entity lookup in `[player_position]` on the matching `[client].build`.
 
 - `sorted_table`: the varp table is 2048 entries of 0x30 bytes, `{i32 id @+0, value @+8}`, sorted by id. It was ascending in one session and **descending after a restart**; both are handled. An 11k-entry definition table also matches; `max_entries` and an "id+1 values" check reject it.
 - `var_index`: the client's chained hash table over **all** vars. It has 8783 slots; slot `id % 8783` points at the first entry of its chain. Every entry, whether a varp table row or a separately allocated var node, is a 0x30-byte record `{i32 id @0, value @8, next @0x28}`. Lookup walks the chain. To find the index, every pointer into the varp table "votes" for `slot address − (id % 8783) × 8`. The most-voted start that resolves the probe vars wins. Because the client keeps this index current when it reallocates nodes, reads through it are never stale.

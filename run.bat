@@ -6,11 +6,13 @@ rem Set RS3_NO_OPEN=1 to skip opening the browser.
 setlocal
 cd /d "%~dp0"
 
-tasklist /FI "IMAGENAME eq rs3-eventd.exe" 2>nul | find /I "rs3-eventd.exe" >nul
-if %errorlevel%==0 (
-  echo rs3-eventd is already running. Opening the viewer...
-  if not "%RS3_NO_OPEN%"=="1" start "" "http://127.0.0.1:7878/"
-  exit /b 0
+if "%~1"=="" (
+  powershell.exe -NoProfile -NonInteractive -Command "$listener = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 7878 -State Listen -ErrorAction SilentlyContinue; if ($listener -and (Get-Process -Id $listener.OwningProcess -ErrorAction SilentlyContinue).ProcessName -eq 'rs3-eventd') { exit 0 }; exit 1"
+  if not errorlevel 1 (
+    echo rs3-eventd is already serving port 7878. Stop it before rerunning to load updates.
+    if not "%RS3_NO_OPEN%"=="1" start "" "http://127.0.0.1:7878/"
+    exit /b 0
+  )
 )
 
 where cargo >nul 2>nul

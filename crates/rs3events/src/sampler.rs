@@ -5,7 +5,7 @@ use crate::gcd::GcdTracker;
 use crate::tick::{TickTracker, TickUpdate};
 use crate::{ReaderConfig, Shared};
 use rsmem::{pe, MemRead, ModuleInfo, Process, ReadError, Ticker};
-use rsmodel::{Event, NpcInfo, Num, PlayerState, Snapshot, SourceState};
+use rsmodel::{Event, NpcInfo, Num, PlayerState, Snapshot, SourceState, TilePosition};
 use rsoffsets::{resolve_anchors, Anchors, BossDef, CodeCache, GcdUnit, NpcLayout, OffsetsFile, SignalDef, ValType};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::Ordering;
@@ -196,6 +196,7 @@ pub(crate) struct Sampler {
     failing: Vec<String>,
     tick: TickTracker,
     gcd: GcdTracker,
+    position: Option<TilePosition>,
     npcs: BTreeMap<u64, NpcInfo>,
     last_npc_poll: Option<Instant>,
     npc_bufs: Option<NpcBufs>,
@@ -290,6 +291,7 @@ impl Sampler {
             failing: Vec::new(),
             tick: TickTracker::new(shared_origin()),
             gcd: GcdTracker::new(cfg.offsets.gcd.ticks),
+            position: None,
             npcs: BTreeMap::new(),
             last_npc_poll: None,
             npc_bufs,
@@ -573,8 +575,8 @@ impl Sampler {
     /// Returns (desired state, failing reasons).
     fn evaluate(&self) -> (SourceState, Vec<String>) {
         let o = self.o();
-        if o.signals.is_empty() && o.npcs.is_none() {
-            return (SourceState::OffsetsStale, vec!["offsets.toml defines no signals or npcs yet".into()]);
+        if o.signals.is_empty() && o.npcs.is_none() && o.player_position.is_none() {
+            return (SourceState::OffsetsStale, vec!["offsets.toml defines no signals, position or npcs yet".into()]);
         }
         if !self.anchors.failures.is_empty() {
             return (SourceState::OffsetsStale, self.anchors.failures.clone());
@@ -773,6 +775,20 @@ impl Sampler {
             self.dirty = true;
         }
         self.prev.clone_from(&self.cur);
+    }
+
+    fn process_position(&mut self, now: Instant) {
+        let o = self.o();
+        let new = o
+            .player_position
+            .as_ref()
+            .filter(|_| self.state == SourceState::Ok && self.build.is_some() && o.client.build == self.build)
+            .and_then(|layout| crate::position::read(&self.proc, self.main.base, layout, o.sampler.torn_read_retries));
+        if self.position != new {
+            let old = std::mem::replace(&mut self.position, new);
+            self.emit(Event::Position { old, new }, now);
+            self.dirty = true;
+        }
     }
 
     fn emit_tick(&mut self, u: TickUpdate, now: Instant) {
@@ -1005,6 +1021,7 @@ impl Sampler {
             prayer_max: self.max_of("prayer"),
             adrenaline: adren,
             adrenaline_pct: adren.and_then(|a| self.max_of("adrenaline").filter(|m| *m > 0).map(|m| pct1(a as f64, m as f64))),
+            position: self.position,
             gcd_end_tick: self.gcd.active.as_ref().and_then(|a| a.end_tick),
             gcd_ends_at_unix_us: self.gcd.active.as_ref().map(|a| a.ends_at_unix),
         };
@@ -1038,6 +1055,9 @@ impl Sampler {
             // Phases compare cur vs prev, so they run before process_signals rolls prev.
             self.process_boss_phases(now);
             self.process_signals(now);
+        }
+        self.process_position(now);
+        if self.state == SourceState::Ok {
             self.process_npcs(now);
         }
         self.publish_snapshot();
@@ -1089,6 +1109,7 @@ pub(crate) fn run(shared: Arc<Shared>, cfg: Arc<ReaderConfig>, pid: u32, label: 
         ticker.wait();
     }
     s.state = SourceState::Detached;
+    s.process_position(Instant::now());
     s.status(Some(exit_detail));
     shared.snapshots.write().unwrap().remove(&pid);
     tracing::info!("[{pid}] detached");

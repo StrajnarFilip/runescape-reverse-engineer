@@ -101,6 +101,23 @@ type = "u32"
 ticks = 3
 # ability_signal: not found yet (needs a combat session)
 
+# The local player comes from the active player context and its indexed entity slot.
+# CoordGrid uses entity plane, footprint size, and world X/Z at +0x280/+0x288.
+# This layout is only used when the attached build matches [client].build.
+[player_position]
+client_ptr_rva = 0x18df2c8
+state = 0x19fc0
+in_game_state = 30
+player_context = 0x19fc8
+player_index = 0x48
+player_override = 0x58
+player_table = 0x19968
+table_range = 0x10
+slot_entity = 0x38
+plane = 0x50
+size = 0x18c
+fine_position = 0x280
+
 [[checks]]
 signal = "prayer"
 min = 0
