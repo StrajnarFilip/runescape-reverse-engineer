@@ -40,6 +40,10 @@ class Player(C.Structure):
                 [("gcd_reason", U32)])
 
 
+class Position(C.Structure):
+    _fields_ = [("valid", U32)] + fields(I32, "x y plane")
+
+
 class NPC(C.Structure):
     _fields_ = ([("instance_id", U64), ("runtime_id", U32), ("config_id", I32)] +
                 fields(U32, "flags health_reason") + fields(I32, "health_current health_max") +
@@ -95,8 +99,7 @@ def load_library(path=None):
         raise RuntimeError("rs3_native requires a 64-bit Python interpreter")
     path = library_path(path)
     if not path.is_file():
-        raise RuntimeError(f"Native library missing at {path}. Build with CMake, set RS3_NATIVE_LIBRARY, "
-                           "or select --backend python.")
+        raise RuntimeError(f"Native library missing at {path}. Build with CMake or set RS3_NATIVE_LIBRARY.")
     lib = C.CDLL(str(path))
     pointer = C.c_void_p
     signatures = {
@@ -108,7 +111,9 @@ def load_library(path=None):
         "start": (I32, [pointer, U32]), "stop": (I32, [pointer]),
         "copy_latest": (I32, [pointer, pointer]),
         "snapshot_info": (I32, [pointer, C.POINTER(Info), U32]),
+        "snapshot_client_version": (C.c_char_p, [pointer]),
         "snapshot_player": (I32, [pointer, C.POINTER(Player), U32]),
+        "snapshot_position": (I32, [pointer, C.POINTER(Position), U32]),
         "snapshot_npcs": (I32, [pointer, C.POINTER(NPC), U32, C.POINTER(U32)]),
         "snapshot_hits": (I32, [pointer, C.POINTER(Hit), U32, C.POINTER(U32)]),
         "events_since": (I32, [pointer, U64, C.POINTER(Event), U32, C.POINTER(U32),
@@ -120,11 +125,15 @@ def load_library(path=None):
         "load_catalog": (I32, [pointer, C.c_char_p]),
     }
     for name, (result, args) in signatures.items():
-        function = getattr(lib, "rs3_"+name)
+        try:
+            function = getattr(lib, "rs3_"+name)
+        except AttributeError as error:
+            raise RuntimeError(f"Native library is missing rs3_{name}. Rebuild with CMake.") from error
         function.restype, function.argtypes = result, args
     if lib.rs3_abi_version() != 1:
         raise RuntimeError("Unsupported rs3_native ABI version")
-    for kind, structure in enumerate((Options, Info, Player, NPC, Hit, Event, InventoryInfo, Item, Ability, ItemEvent), 1):
+    structures = (Options, Info, Player, NPC, Hit, Event, InventoryInfo, Item, Ability, ItemEvent, Position)
+    for kind, structure in enumerate(structures, 1):
         if lib.rs3_sizeof(kind) != C.sizeof(structure):
             raise RuntimeError("C/Python layout mismatch for "+structure.__name__)
     profile = (ROOT / "profiles" / "profile_951_3.json").read_bytes()
@@ -148,6 +157,7 @@ class Reader:
         self.context, self.snapshot = C.c_void_p(), C.c_void_p()
         self.worker_hz, self.cursor = worker_hz, 0
         self.info, self.player = Info(), Player()
+        self.position = Position()
         self.npcs, self.hits = (NPC*1024)(), (Hit*65536)()
         self.events = (Event*256)()
         self.inventory_info, self.items, self.abilities = InventoryInfo(), (Item*47)(), (Ability*2048)()
@@ -175,6 +185,7 @@ class Reader:
         self.check(function(self.context, self.snapshot))
         self.check(self.lib.rs3_snapshot_info(self.snapshot, C.byref(self.info), C.sizeof(Info)))
         self.check(self.lib.rs3_snapshot_player(self.snapshot, C.byref(self.player), C.sizeof(Player)))
+        self.check(self.lib.rs3_snapshot_position(self.snapshot, C.byref(self.position), C.sizeof(Position)))
         count = U32()
         self.check(self.lib.rs3_snapshot_npcs(self.snapshot, self.npcs, len(self.npcs), C.byref(count)))
         self.check(self.lib.rs3_snapshot_hits(self.snapshot, self.hits, len(self.hits), C.byref(count)))

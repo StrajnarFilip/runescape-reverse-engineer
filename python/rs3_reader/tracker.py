@@ -14,7 +14,7 @@ import time
 import tkinter as tk
 from tkinter import ttk
 
-from telemetry import Telemetry
+from native_telemetry import NativeTelemetry
 
 BG, PANEL, INK, MUTED = "#0c1220", "#151f30", "#eef4ff", "#93a4bd"
 GREEN, RED, BLUE, GOLD = "#55dfad", "#ff7385", "#69b4ff", "#f2c568"
@@ -91,10 +91,10 @@ def sync_rows(tree, rows):
         tree.delete(key)
 
 class Tracker:
-    def __init__(self, root, history_path=None, backend=None, native_hz=100, *, pid=None):
+    def __init__(self, root, history_path=None, native_hz=100, *, pid=None):
         self.root = root
         root.title("RS3 Live Tracker · direct memory reader")
-        self.backend, self.native_hz = backend, native_hz
+        self.native_hz = native_hz
         self.pid = pid
         root.geometry("1240x880")
         root.minsize(1060, 760)
@@ -199,7 +199,7 @@ class Tracker:
     def collect(self):
         telemetry = None
         try:
-            telemetry = Telemetry(pid=self.pid, backend=self.backend, worker_hz=self.native_hz)
+            telemetry = NativeTelemetry(pid=self.pid, worker_hz=self.native_hz)
             if self.history_path:
                 with Path(self.history_path).open(encoding="utf-8") as source:
                     for line in source:
@@ -228,7 +228,6 @@ class Tracker:
                         deadline = time.perf_counter()
                     self.stop.wait(max(0, delay))
         except Exception as error:
-            from native_telemetry import NativeTelemetry
             self.publish(NativeTelemetry.unavailable("Tracker: "+str(error)))
         finally:
             if telemetry is not None:
@@ -258,7 +257,7 @@ class Tracker:
                                 self.latest.get("read_duration_ms", 0),
                                 "C collector %s Hz · %s reads · lost events %s" %
                                 (native.get("worker_hz"), native.get("read_calls"), native.get("events_lost"))
-                                if native else "Python collector"))
+                                if native else "Waiting for collector"))
             if age > 1500:
                 self.status.config(text="STALE", fg=RED)
                 self.tile.config(text="Waiting for a fresh tile")
@@ -560,7 +559,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--history", type=Path, help="Import observed hits from an earlier local JSONL capture")
     parser.add_argument("--pid", type=int, help="Use a specific rs2client.exe process ID")
-    parser.add_argument("--backend", choices=("c", "python"), help="Default: C collector (RS3_BACKEND overrides)")
     parser.add_argument("--native-hz", type=int, default=100, help="Native collector frequency, 1..1000 Hz")
     args = parser.parse_args()
     if args.pid is not None and not 0 < args.pid <= 0xffffffff:
@@ -568,5 +566,5 @@ if __name__ == "__main__":
     if not 1 <= args.native_hz <= 1000:
         parser.error("native-hz must be 1..1000")
     root = tk.Tk()
-    Tracker(root, args.history, args.backend, args.native_hz, pid=args.pid)
+    Tracker(root, args.history, args.native_hz, pid=args.pid)
     root.mainloop()

@@ -3,7 +3,8 @@ import ctypes as C
 import time
 import unittest
 
-from native import Reader, Info, Player, Options, NPC, Hit, Event, InventoryInfo, Item, Ability, ItemEvent, library_path, load_library
+from native import (Ability, Event, Hit, Info, InventoryInfo, Item, ItemEvent, NPC,
+                    Options, Player, Position, Reader, library_path, load_library)
 from native_telemetry import NativeTelemetry
 from tracker import HitHistory
 
@@ -12,7 +13,8 @@ from tracker import HitHistory
 class NativeTests(unittest.TestCase):
     def test_struct_sizes_and_offsets(self):
         lib = load_library()
-        for i, structure in enumerate((Options, Info, Player, NPC, Hit, Event, InventoryInfo, Item, Ability, ItemEvent), 1):
+        structures = (Options, Info, Player, NPC, Hit, Event, InventoryInfo, Item, Ability, ItemEvent, Position)
+        for i, structure in enumerate(structures, 1):
             self.assertEqual(lib.rs3_sizeof(i), C.sizeof(structure))
         self.assertEqual(Info.message.offset, 192)
         self.assertEqual(Player.gcd_reason.offset, 132)
@@ -23,6 +25,7 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(Ability.name.offset,64)
         self.assertEqual(ItemEvent.before.offset,40)
         self.assertEqual(ItemEvent.after.offset,232)
+        self.assertEqual(Position.plane.offset, 12)
 
     def test_missing_process_produces_null_values_and_closes(self):
         telemetry = NativeTelemetry(pid=0xffffffff, worker_hz=100)
@@ -33,6 +36,7 @@ class NativeTests(unittest.TestCase):
             self.assertIsNone(record["health"])
             self.assertIsNone(record["adrenaline_percent"])
             self.assertIsNone(record["npcs"])
+            self.assertIsNone(record["position"])
             self.assertIsNone(record["inventory"]["slots"])
             self.assertEqual(record["equipment"]["configuration"],"unknown")
             self.assertEqual(record["abilities"]["entries"],[])

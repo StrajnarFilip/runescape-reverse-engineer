@@ -8,9 +8,13 @@
 
 #define EVENT_CAPACITY 4096u
 
+enum client_profile { PROFILE_NONE, PROFILE_COMBAT, PROFILE_POSITION };
+
 struct rs3_snapshot {
     rs3_info info;
+    enum client_profile profile;
     rs3_player player;
+    rs3_position position;
     rs3_npc npcs[RS3_MAX_NPCS];
     rs3_hit hits[RS3_MAX_HITS];
     rs3_inventory_info inventory_info;
@@ -32,6 +36,7 @@ struct rs3_context {
     SRWLOCK control, latest_lock, events_lock;
     HANDLE process, worker, stop_event, timer;
     uint32_t requested_pid, pid, retry_ms, hz, attached, module_size;
+    enum client_profile profile;
     uint64_t module_base, creation_time, retry_after, sequence, event_sequence;
     uint64_t calls, bytes, next_instance, clock_changed, clock_context;
     uint32_t last_clock, previous_valid;
@@ -72,6 +77,7 @@ void detach(rs3_context *c);
 void schedule_retry(rs3_context *c, uint64_t now);
 
 int decode(rs3_context *c, rs3_snapshot *s);
+int decode_position(rs3_context *c, rs3_snapshot *s);
 int capture(rs3_context *c, int client, uint64_t *out);
 int variable(rs3_context *c, uint64_t table, uint64_t count, uint64_t sentinel,
              uint32_t id, int64_t *value, int *present);

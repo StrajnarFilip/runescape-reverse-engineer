@@ -10,17 +10,15 @@ START
   No pip packages, injected game agent, or network server are required.
 
 COLLECTION
-  Default: C worker at 100 Hz; Python UI/log output at 20 Hz.
+  The C worker samples at 100 Hz by default. UI and log output run at 20 Hz.
   python python/rs3_reader/tracker.py --native-hz 500
   Requested rates depend on system load. A faster reader does not increase the
   game's server update rate. Raw/source tab shows engine timing and event gaps.
-  Use --backend python to select the original Python decoder explicitly.
-  RS3_BACKEND=python selects it through the environment. RS3_NATIVE_LIBRARY can
-  select an alternative DLL. Missing/mismatched DLLs fail explicitly.
+  RS3_NATIVE_LIBRARY can select an alternative DLL.
 
 LIVE PLAYER TILE IN CLIENT 6ada3f59-1a86000
-  Run python python/rs3_reader/tracker.py --backend python to see Player Tile at 20 Hz.
-  This profile covers position. Combat telemetry uses the 951-3 profile.
+  Start the tracker normally to see Player Tile at 20 Hz on this build.
+  Combat telemetry uses the 951-3 profile.
   The JSONL position field gives x (east), y (north) and plane (0–3).
   A null position indicates the tile is unavailable.
 
@@ -81,7 +79,6 @@ LIMITATIONS
 
 CLI AND TESTS
   python python/rs3_reader/reader.py --once --raw
-  python python/rs3_reader/reader.py --backend python --once
   python python/rs3_reader/reader.py --native-hz 500 --hz 20 --duration 60 --raw --output capture.jsonl
   python python/rs3_reader/tracker.py --history PATH_TO_EARLIER_CAPTURE.jsonl
   ctest --test-dir build -C Release --output-on-failure

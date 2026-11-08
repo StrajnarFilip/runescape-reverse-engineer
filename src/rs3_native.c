@@ -20,6 +20,7 @@
 _Static_assert(sizeof(void*)==8, "Build for Windows x64");
 _Static_assert(sizeof(rs3_info)==384, "ABI info layout");
 _Static_assert(sizeof(rs3_player)==136, "ABI player layout");
+_Static_assert(sizeof(rs3_position)==16, "ABI position layout");
 _Static_assert(sizeof(rs3_npc)==568, "ABI NPC layout");
 _Static_assert(sizeof(rs3_hit)==40, "ABI hit layout");
 _Static_assert(sizeof(rs3_event)==608, "ABI event layout");
@@ -30,6 +31,8 @@ _Static_assert(sizeof(rs3_item_event)==424, "ABI item event layout");
 
 static void copy_frame(rs3_snapshot *to,const rs3_snapshot *from) {
     to->info=from->info; to->player=from->player;
+    to->profile = from->profile;
+    to->position = from->position;
     memcpy(to->npcs,from->npcs,from->info.npc_count*sizeof(rs3_npc));
     memcpy(to->hits,from->hits,from->info.hit_count*sizeof(rs3_hit));
     to->inventory_info=from->inventory_info;
@@ -39,6 +42,7 @@ static void copy_frame(rs3_snapshot *to,const rs3_snapshot *from) {
 static void poll_and_publish(rs3_context *c,rs3_snapshot *s) {
     uint64_t begin=monotonic_ns(); DWORD exit_code=0;
     memset(&s->info,0,sizeof s->info); memset(&s->player,0,sizeof s->player);
+    s->position = (rs3_position){0};
     memset(&s->inventory_info,0,sizeof s->inventory_info);
     s->info.abi_version=RS3_ABI_VERSION; s->info.sequence=++c->sequence;
     s->info.timestamp_ns=unix_ns(); s->info.monotonic_ns=begin;
@@ -51,7 +55,9 @@ static void poll_and_publish(rs3_context *c,rs3_snapshot *s) {
     } else if (!ready && c->retry_reason) {
         fail(c,c->retry_reason,c->retry_error);
     }
-    if (!ready || !decode(c,s)) {
+    int decoded = ready && (c->profile == PROFILE_POSITION ? decode_position(c, s)
+                           : c->profile == PROFILE_COMBAT && decode(c, s));
+    if (!decoded) {
         if (!c->reason) fail(c,RS3_NO_CLIENT,"Waiting to reconnect to RS3");
         s->info.status=RS3_UNAVAILABLE; s->info.reason=c->reason;
         s->info.npc_count=s->info.hit_count=s->info.loaded_npcs=s->info.skipped_npcs=0;
@@ -64,7 +70,10 @@ static void poll_and_publish(rs3_context *c,rs3_snapshot *s) {
     }
     s->info.pid=c->pid; s->info.process_creation_time=c->creation_time;
     snprintf(s->info.executable_sha256,sizeof s->info.executable_sha256,"%s",c->actual_sha256);
-    snprintf(s->info.client_version,sizeof s->info.client_version,"%s",P_VERSION);
+    s->profile = c->profile;
+    const char *version = c->profile == PROFILE_POSITION ? POS_SHORT_VERSION
+                        : c->profile == PROFILE_COMBAT ? P_VERSION : "";
+    snprintf(s->info.client_version, sizeof s->info.client_version, "%s", version);
     s->info.event_sequence=c->event_sequence; s->info.read_calls=c->calls; s->info.read_bytes=c->bytes;
     s->info.sample_duration_ns=monotonic_ns()-begin;
     AcquireSRWLockExclusive(&c->latest_lock); copy_frame(c->latest,s); ReleaseSRWLockExclusive(&c->latest_lock);
@@ -90,7 +99,8 @@ uint32_t rs3_sizeof(uint32_t which) {
     case RS3_SIZE_PLAYER:return sizeof(rs3_player); case RS3_SIZE_NPC:return sizeof(rs3_npc);
     case RS3_SIZE_HIT:return sizeof(rs3_hit); case RS3_SIZE_EVENT:return sizeof(rs3_event);
     case RS3_SIZE_INVENTORY_INFO:return sizeof(rs3_inventory_info); case RS3_SIZE_ITEM:return sizeof(rs3_item);
-    case RS3_SIZE_ABILITY:return sizeof(rs3_ability); case RS3_SIZE_ITEM_EVENT:return sizeof(rs3_item_event); default:return 0; }
+    case RS3_SIZE_ABILITY:return sizeof(rs3_ability); case RS3_SIZE_ITEM_EVENT:return sizeof(rs3_item_event);
+    case RS3_SIZE_POSITION:return sizeof(rs3_position); default:return 0; }
 }
 const char *rs3_profile_sha256(void) { return P_PROFILE_SHA256; }
 const char *rs3_result_string(int32_t r) {
@@ -166,10 +176,24 @@ int32_t rs3_snapshot_info(const rs3_snapshot *s,rs3_info *out,uint32_t size) {
     *out = s->info;
     return RS3_OK;
 }
+const char *rs3_snapshot_client_version(const rs3_snapshot *s) {
+    if (!s) return "";
+    switch (s->profile) {
+    case PROFILE_COMBAT: return P_VERSION;
+    case PROFILE_POSITION: return POS_VERSION;
+    default: return "";
+    }
+}
 int32_t rs3_snapshot_player(const rs3_snapshot *s,rs3_player *out,uint32_t size) {
     if (!s || !out) return RS3_E_ARGUMENT;
     if (size < sizeof *out) return RS3_E_ABI;
     *out = s->player;
+    return RS3_OK;
+}
+int32_t rs3_snapshot_position(const rs3_snapshot *s, rs3_position *out, uint32_t size) {
+    if (!s || !out) return RS3_E_ARGUMENT;
+    if (size < sizeof *out) return RS3_E_ABI;
+    *out = s->position;
     return RS3_OK;
 }
 int32_t rs3_snapshot_npcs(const rs3_snapshot *s,rs3_npc *out,uint32_t capacity,uint32_t *required) {

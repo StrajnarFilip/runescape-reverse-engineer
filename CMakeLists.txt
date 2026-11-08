@@ -12,13 +12,14 @@ find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(profile "${CMAKE_CURRENT_SOURCE_DIR}/profiles/profile_951_3.json")
+set(position_profile "${CMAKE_CURRENT_SOURCE_DIR}/profiles/profile_6ada3f59.json")
 set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(profile_header "${generated_dir}/profile_generated.h")
 add_custom_command(
     OUTPUT "${profile_header}"
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_profile.py"
-            "${profile}" "${profile_header}"
-    DEPENDS tools/generate_profile.py "${profile}"
+            "${profile}" "${position_profile}" "${profile_header}"
+    DEPENDS tools/generate_profile.py "${profile}" "${position_profile}"
     VERBATIM
 )
 
@@ -27,6 +28,7 @@ add_library(rs3_objects OBJECT
     src/rs3_native.c
     src/process.c
     src/decode.c
+    src/position.c
     src/npcs.c
     src/inventory.c
     "${profile_header}"
@@ -66,7 +68,7 @@ if(BUILD_TESTING)
     target_link_libraries(test_native PRIVATE rs3_objects bcrypt user32)
     add_test(NAME native COMMAND test_native)
     add_test(NAME python COMMAND "${CMAKE_COMMAND}" -E env
-        "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/python/rs3_reader"
+        "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/python/rs3_reader;${CMAKE_CURRENT_SOURCE_DIR}/work/reference"
         "RS3_NATIVE_LIBRARY=$<TARGET_FILE:rs3_native>"
         "${Python3_EXECUTABLE}" -m unittest discover -s "${CMAKE_CURRENT_SOURCE_DIR}/tests/python" -v
     )

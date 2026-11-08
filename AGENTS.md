@@ -24,8 +24,9 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
   `python/rs3_reader/`. Shared client profiles: `profiles/`.
 - Our research scripts: `work/*.py`, `work/decompile.ps1`,
   `work/ghidra_scripts/ExportFunctions.java`. Generated research output is ignored.
-- The default acquisition engine is a Windows x64 C11 DLL. The Python UI uses
-  only the standard library; the original Python decoder is an explicit backend.
+- The sole runtime acquisition engine is a Windows x64 C11 DLL. The Python UI
+  uses the standard library. The independent decoder under `work/reference/`
+  supports research and parity benchmarks.
 - Configure and build: `cmake -S . -B build -A x64` and
   `cmake --build build --config Release`.
 - C and Python tests: `ctest --test-dir build -C Release --output-on-failure`.

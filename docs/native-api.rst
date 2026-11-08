@@ -12,7 +12,7 @@ Build
 -----
 
 See the repository README for the CMake configure, build and test commands.
-Python 3.9+ generates the private profile header from the pinned JSON at build
+Python 3.9+ generates the private header from the pinned JSON profiles at build
 time. The DLL links Windows system libraries, including BCrypt. C and Java
 consumers can load it directly without a Python runtime.
 
@@ -47,6 +47,8 @@ thread. ctypes CDLL calls release the GIL; the native worker does not acquire it
 The adapter in ``native_telemetry.py`` preserves the previous JSON/tracker schema
 and adds ``backend: c``, native read metrics, sample sequence, age and event gaps.
 Existing profile and executable hashes are checked before returning game data.
+The ``6ada3f59-1a86000`` profile provides player tiles. The ``951-3`` profile
+provides combat, inventory and ability telemetry.
 
 C example from the Visual Studio build::
 
@@ -103,6 +105,11 @@ Borrowed result/profile strings are immutable and valid while the DLL is loaded.
   high-resolution waitable timer when available, normal timer fallback.
 * ``rs3_copy_latest(context, snapshot)``: copies the latest frame without sampling.
   Before the first worker result, status is ``RS3_NO_SAMPLE``.
+* ``rs3_snapshot_position(snapshot, &position, sizeof position)`` copies the
+  tile. Read the coordinates only when ``position.valid`` is 1. A tile-only
+  snapshot has ``RS3_PARTIAL`` status and no valid combat fields.
+* ``rs3_snapshot_client_version(snapshot)`` returns the full version label as a
+  borrowed string. ``rs3_info.client_version`` holds a short label.
 * ``rs3_snapshot_info/player``: supply an output struct and its size. Too-small
   output returns ``RS3_E_ABI``. Snapshot NPC/hit accessors report required counts;
   too-small capacity returns ``RS3_E_BUFFER`` and writes no array records.
@@ -140,6 +147,7 @@ ID           Structure  Bytes
 8            item       192
 9            ability    192
 10           item_event 424
+11           position   16
 ============ ========== =====
 
 Foreign bindings can use the header directly. The included Java example documents

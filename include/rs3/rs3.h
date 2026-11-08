@@ -42,7 +42,7 @@ enum rs3_npc_flags { RS3_NPC_NAME=1, RS3_NPC_CONFIG=2, RS3_NPC_HEALTH=4 };
 enum rs3_hit_state { RS3_HIT_ACTIVE=1, RS3_HIT_SCHEDULED=2 };
 enum rs3_structure { RS3_SIZE_OPTIONS=1, RS3_SIZE_INFO, RS3_SIZE_PLAYER,
     RS3_SIZE_NPC, RS3_SIZE_HIT, RS3_SIZE_EVENT, RS3_SIZE_INVENTORY_INFO,
-    RS3_SIZE_ITEM, RS3_SIZE_ABILITY, RS3_SIZE_ITEM_EVENT };
+    RS3_SIZE_ITEM, RS3_SIZE_ABILITY, RS3_SIZE_ITEM_EVENT, RS3_SIZE_POSITION };
 
 #define RS3_MAX_ITEMS 47u /* 28 backpack slots + 19 equipment slots, including empties. */
 #define RS3_MAX_ABILITIES 2048u
@@ -97,7 +97,7 @@ typedef struct rs3_info {
     uint64_t process_creation_time, event_sequence, read_calls, read_bytes;
     uint32_t logic_tick, loaded_npcs, npc_count, skipped_npcs, hit_count, reserved;
     char executable_sha256[72];
-    char client_version[16];
+    char client_version[16]; /**< Short label. Use rs3_snapshot_client_version for the full label. */
     char message[192];
 } rs3_info;
 
@@ -108,6 +108,11 @@ typedef struct rs3_player {
     int32_t prayer_base_level, gcd_remaining_ms, gcd_duration_ms;
     uint32_t gcd_reason;
 } rs3_player;
+
+typedef struct rs3_position {
+    uint32_t valid; /**< 1 when all three coordinates are available, otherwise 0. */
+    int32_t x, y, plane; /**< Tile coordinates east, north, and plane (0..3). */
+} rs3_position;
 
 typedef struct rs3_npc {
     uint64_t instance_id;
@@ -139,9 +144,10 @@ RS3_API uint32_t rs3_abi_version(void);
  * runtime's monotonic clock may have a different origin. Not wall time. */
 RS3_API uint64_t rs3_monotonic_ns(void);
 RS3_API uint32_t rs3_sizeof(uint32_t structure);
-RS3_API const char *rs3_profile_sha256(void); /**< Borrowed immutable string. */
+RS3_API const char *rs3_profile_sha256(void); /**< Borrowed hash of the 951-3 JSON profile. */
 RS3_API const char *rs3_result_string(int32_t result); /**< Borrowed immutable string. */
-/** pid=0 discovers the unique rs2client.exe. No client is not a create error.
+/** pid=0 discovers a client automatically, preferring visible game windows.
+ * Missing clients are reported in snapshots.
  * options=NULL selects defaults. reserved must be zero. retry_ms=0 means 1000.
  */
 RS3_API int32_t rs3_create(const rs3_options *options, rs3_context **out);
@@ -163,7 +169,11 @@ RS3_API int32_t rs3_stop(rs3_context *context); /**< Joins; idempotent. */
 /** Copies the latest immutable sample; does not resample the game. */
 RS3_API int32_t rs3_copy_latest(rs3_context *context, rs3_snapshot *out);
 RS3_API int32_t rs3_snapshot_info(const rs3_snapshot *, rs3_info *out, uint32_t out_size);
+/** Borrowed immutable full version label, or an empty string if unavailable. */
+RS3_API const char *rs3_snapshot_client_version(const rs3_snapshot *);
 RS3_API int32_t rs3_snapshot_player(const rs3_snapshot *, rs3_player *out, uint32_t out_size);
+/** Additive ABI-v1 accessor. A missing or unmapped tile sets valid=0. */
+RS3_API int32_t rs3_snapshot_position(const rs3_snapshot *, rs3_position *out, uint32_t out_size);
 /** Arrays are caller-owned. BUFFER reports required count and writes no records. */
 RS3_API int32_t rs3_snapshot_npcs(const rs3_snapshot *, rs3_npc *out, uint32_t capacity, uint32_t *required);
 RS3_API int32_t rs3_snapshot_hits(const rs3_snapshot *, rs3_hit *out, uint32_t capacity, uint32_t *required);

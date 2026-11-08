@@ -38,12 +38,27 @@ int ptr(rs3_context *c,uint64_t a,uint64_t *out) {
 }
 int signatures(rs3_context *c,const char *hash) {
     unsigned char b[64];
-    if (strcmp(hash,P_SHA256)) return fail(c,RS3_UNSUPPORTED_CLIENT,"Unsupported executable SHA-256; offsets not used");
-    for (size_t i=0;i<sizeof p_signatures/sizeof p_signatures[0];i++) {
-        const profile_signature *s=p_signatures+i;
+    const profile_signature *patterns;
+    size_t count;
+    enum client_profile profile;
+    c->profile = PROFILE_NONE;
+    if (strcmp(hash, P_SHA256) == 0) {
+        profile = PROFILE_COMBAT;
+        patterns = p_signatures;
+        count = sizeof p_signatures / sizeof p_signatures[0];
+    } else if (strcmp(hash, POS_SHA256) == 0) {
+        profile = PROFILE_POSITION;
+        patterns = pos_signatures;
+        count = sizeof pos_signatures / sizeof pos_signatures[0];
+    } else {
+        return fail(c, RS3_UNSUPPORTED_CLIENT, "Unsupported executable SHA-256; offsets not used");
+    }
+    for (size_t i=0;i<count;i++) {
+        const profile_signature *s=patterns+i;
         if (!rd(c,c->module_base+s->rva,b,s->length)) return 0;
         if (memcmp(b,s->bytes,s->length)) return fail(c,RS3_UNSUPPORTED_CLIENT,"Loaded code does not match the pinned profile");
     }
+    c->profile = profile;
     return 1;
 }
 static int hash_file(const wchar_t *path,char result[72]) {
@@ -69,6 +84,7 @@ done:
 void detach(rs3_context *c) {
     if (c->process) CloseHandle(c->process);
     c->process=NULL; c->attached=0; c->previous_valid=0; c->clock_context=0;
+    c->profile = PROFILE_NONE;
     reset_identities(c);
     inventory_reset(c->inventory);
 }

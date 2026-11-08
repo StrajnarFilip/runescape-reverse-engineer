@@ -14,7 +14,8 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "python" / "rs3_reader"))
-from telemetry import PythonTelemetry
+sys.path.insert(0, str(ROOT / "work" / "reference"))
+from reference_telemetry import PythonTelemetry
 from native import library_path
 from native_telemetry import NativeTelemetry
 
@@ -48,6 +49,8 @@ def main():
     stable = matched = unstable = 0
     failures = []
     try:
+        if native.sample()["client_version"] != "951-3":
+            parser.error("The combat benchmark requires a verified 951-3 client")
         for _ in range(5):
             python.sample(True); native.sample(True)
         for _ in range(args.pairs):

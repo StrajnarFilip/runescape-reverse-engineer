@@ -1,7 +1,6 @@
-"""Read-only connection lifecycle shared by the CLI and desktop tracker."""
+"""Independent read-only reference for research and parity benchmarks."""
 import sys
 import time
-import os
 from winmem import ProcessMemory, processes, visible_client_pid, MemoryReadError
 from rs3 import RS3, ProfileError
 
@@ -66,14 +65,3 @@ class PythonTelemetry:
                 "status": "unavailable", "reason": message, "health": None, "prayer": None,
                 "adrenaline_percent": None, "gcd": None, "telos": None, "npcs": None, "hit_splats": None,
                 "position": None}
-
-
-def Telemetry(pid=None, backend=None, worker_hz=100):
-    """Select the C collector by default; Python is an explicit reference backend."""
-    backend = backend or os.environ.get("RS3_BACKEND", "c")
-    if backend == "python":
-        return PythonTelemetry(pid)
-    if backend == "c":
-        from native_telemetry import NativeTelemetry
-        return NativeTelemetry(pid, worker_hz)
-    raise ValueError("backend must be c or python")

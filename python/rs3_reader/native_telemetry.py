@@ -37,7 +37,7 @@ class NativeTelemetry:
         return {"schema_version": 1, "timestamp_ms": time.time_ns()//1000000, "backend": "c",
                 "pid": None, "status": "unavailable", "reason": message, "health": None,
                 "prayer": None, "adrenaline_percent": None, "gcd": None, "telos": None,
-                "npcs": None, "hit_splats": None}
+                "npcs": None, "hit_splats": None, "position": None}
 
     def sample(self, include_raw=False):
         info, player, npcs, hits = self.reader.sample()
@@ -48,10 +48,19 @@ class NativeTelemetry:
                   "read_calls": info.read_calls, "read_bytes": info.read_bytes,
                   "event_sequence": self.reader.cursor, "events_lost": lost,
                   "snapshot_age_ms": round(max(0, self.reader.lib.rs3_monotonic_ns()-info.monotonic_ns)/1e6, 3)}
-        if info.status not in (1, 2):
-            result = self.unavailable(text(info.message) or "Waiting for a native sample")
+        tile = self.reader.position
+        position = {"x": tile.x, "y": tile.y, "plane": tile.plane} if tile.valid else None
+        version = text(self.reader.lib.rs3_snapshot_client_version(self.reader.snapshot))
+        available = info.status in (1, 2)
+        if not available or not player.prayer_base_level:
+            # The position profile publishes a tile and leaves combat fields unavailable.
+            reason = text(info.message) or (None if available else "Waiting for a native sample")
+            result = self.unavailable(reason)
             result.update(timestamp_ms=info.timestamp_ns//1000000, pid=info.pid or None,
-                          native=native, process_creation_time=info.process_creation_time)
+                          native=native, process_creation_time=info.process_creation_time,
+                          position=position, status="partial" if available else "unavailable",
+                          client_version=version, executable_sha256=text(info.executable_sha256),
+                          source="native_memory", read_duration_ms=native["sample_duration_ms"])
             # Observations from earlier frames retain their own process/timestamp.
             result["hit_splats"] = {"status": "unavailable", "active": None,
                                    "newly_observed": new_events, "events_lost": lost}
@@ -93,8 +102,9 @@ class NativeTelemetry:
             "schema_version": 1, "backend": "c", "timestamp_ms": info.timestamp_ns//1000000,
             "monotonic_ms": round(info.monotonic_ns/1e6, 3), "pid": info.pid,
             "process_creation_time": info.process_creation_time, "native": native,
-            "executable_sha256": text(info.executable_sha256), "client_version": text(info.client_version),
+            "executable_sha256": text(info.executable_sha256), "client_version": version,
             "source": "native_memory", "status": "partial", "read_duration_ms": native["sample_duration_ms"],
+            "position": position,
             "freshness": {"observed_at_ms": info.timestamp_ns//1000000,
                           "client_logic_tick": info.logic_tick, "clock_stalled_ms": round(player.clock_stalled_ns/1e6, 1),
                           "server_update_age_ms": None},

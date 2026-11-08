@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 from rs3 import decode_gcd, extract_bits
-from telemetry import PythonTelemetry as Telemetry
+from reference_telemetry import PythonTelemetry
 
 class DecodingTests(unittest.TestCase):
     def test_prayer_packed(self):
@@ -22,15 +22,15 @@ class DecodingTests(unittest.TestCase):
         self.assertIsNone(decode_gcd(1000,1090,900)["remaining_ms"])
 
     def test_reconnect_deadline_does_not_slide(self):
-        t=Telemetry()
-        with patch("telemetry.processes", return_value=[]), patch("telemetry.time.perf_counter",return_value=10):
+        t=PythonTelemetry()
+        with patch("reference_telemetry.processes", return_value=[]), patch("reference_telemetry.time.perf_counter",return_value=10):
             self.assertEqual(t.sample()["status"],"unavailable")
         self.assertEqual(t.retry_after,11)
-        with patch("telemetry.processes") as process_list, patch("telemetry.time.perf_counter",return_value=10.5):
+        with patch("reference_telemetry.processes") as process_list, patch("reference_telemetry.time.perf_counter",return_value=10.5):
             self.assertEqual(t.sample()["status"],"unavailable")
             process_list.assert_not_called()
         self.assertEqual(t.retry_after,11)
-        with patch("telemetry.processes",return_value=[]) as process_list, patch("telemetry.time.perf_counter",return_value=11.1):
+        with patch("reference_telemetry.processes",return_value=[]) as process_list, patch("reference_telemetry.time.perf_counter",return_value=11.1):
             t.sample()
             process_list.assert_called_once()
 

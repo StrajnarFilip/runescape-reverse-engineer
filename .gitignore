@@ -1,6 +1,9 @@
 # Local research output, tools, caches and captures. Keep our own source scripts.
 /work/*
 !/work/*.py
+!/work/reference/
+/work/reference/*
+!/work/reference/*.py
 !/work/decompile.ps1
 !/work/ghidra_scripts/
 /work/ghidra_scripts/*

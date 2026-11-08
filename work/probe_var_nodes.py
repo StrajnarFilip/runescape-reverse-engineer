@@ -8,7 +8,7 @@ from pathlib import Path
 import struct
 import json
 import time
-sys.path.insert(0, str(Path(__file__).parent.parent / "python" / "rs3_reader"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "work" / "reference"))
 from winmem import ProcessMemory, processes, MemoryReadError
 
 targets = {13537: 8700, 13538: 8700, 3274: 840}

@@ -52,10 +52,14 @@ static int fake_read(void *user,uint64_t a,void *out,size_t size) {
     if(a==f->trigger && ++f->trigger_count==f->mutate_on) put32(f,f->target,f->replacement);
     unsigned char *p=at(f,a,size); if(!p)return 0; memcpy(out,p,size); return 1;
 }
-static fixture *make_fixture(void) {
+static fixture *empty_fixture(void) {
     fixture *f=calloc(1,sizeof *f); assert(f);
     assert(rs3_create(NULL,&f->c)==RS3_OK); assert(rs3_snapshot_create(&f->s)==RS3_OK);
     f->c->read=fake_read; f->c->read_user=f; f->c->module_base=BASE; f->c->pid=123; f->c->creation_time=456;
+    return f;
+}
+static fixture *make_fixture(void) {
+    fixture *f = empty_fixture();
     add(f,BASE+P_REGISTRY_RVA+P_REGISTRY_ROOT_OFFSET,8); add(f,DOMAINS,512);
     add(f,FUNCTIONS,512); add(f,VTABLES,512);
     put64(f,BASE+P_REGISTRY_RVA+P_REGISTRY_ROOT_OFFSET,DOMAINS);
@@ -199,12 +203,74 @@ static void failed_sample_clears_fields(void) {
     fixture *f=make_fixture();
     f->c->process=OpenProcess(PROCESS_QUERY_INFORMATION|PROCESS_VM_READ,FALSE,GetCurrentProcessId());
     assert(f->c->process); f->c->attached=1;
+    f->c->profile = PROFILE_COMBAT;
     assert(rs3_sample(f->c,f->s)==0 && f->s->player.valid_variables);
     put64(f,CLIENT+P_STATE_POINTER_OFFSET,0);
     assert(rs3_sample(f->c,f->s)==0 && f->s->info.status==RS3_UNAVAILABLE);
     assert(f->s->info.reason==RS3_READ_FAILED);
     assert(f->s->player.valid_variables==0 && f->s->info.npc_count==0 && f->s->info.hit_count==0);
     assert(f->c->event_sequence==1); dispose(f);
+}
+static void position_profile(void) {
+    fixture *f = empty_fixture();
+    for (size_t i = 0; i < sizeof pos_signatures / sizeof pos_signatures[0]; i++) {
+        const profile_signature *signature = &pos_signatures[i];
+        uint64_t address = BASE + signature->rva;
+        add(f, address, signature->length);
+        memcpy(at(f, address, signature->length), signature->bytes, signature->length);
+    }
+    unsigned char *first = at(f, BASE + pos_signatures[0].rva, 1);
+    *first ^= 1;
+    assert(!signatures(f->c, POS_SHA256) && f->c->profile == PROFILE_NONE);
+    *first ^= 1;
+    assert(signatures(f->c, POS_SHA256) && f->c->profile == PROFILE_POSITION);
+
+    add(f, BASE + POS_CLIENT_PTR_RVA, 8);
+    add(f, CLIENT, POS_PLAYER_CONTEXT + 8);
+    add(f, PLAYER, POS_PLAYER_OVERRIDE + 8);
+    add(f, MANAGER, POS_TABLE_RANGE + 16);
+    add(f, ENTRIES, 16);
+    add(f, CONFIG, POS_SLOT_ENTITY + 8);
+    add(f, ACTOR, POS_FINE_POSITION + 12);
+    put64(f, BASE + POS_CLIENT_PTR_RVA, CLIENT);
+    put32(f, CLIENT + POS_STATE, POS_IN_GAME_STATE);
+    put64(f, CLIENT + POS_PLAYER_CONTEXT, PLAYER);
+    put64(f, PLAYER, CLIENT);
+    put64(f, CLIENT + POS_PLAYER_TABLE, MANAGER);
+    put64(f, MANAGER + POS_TABLE_RANGE, ENTRIES);
+    put64(f, MANAGER + POS_TABLE_RANGE + 8, ENTRIES + 16);
+    put32(f, PLAYER + POS_PLAYER_INDEX, 1);
+    put64(f, ENTRIES + 8, CONFIG);
+    put64(f, CONFIG + POS_SLOT_ENTITY, ACTOR);
+    put32(f, ACTOR + POS_PLANE, 2);
+    put32(f, ACTOR + POS_SIZE, 2);
+    float fine[3] = {3166.5f * 512, 1234, 3483.5f * 512};
+    memcpy(at(f, ACTOR + POS_FINE_POSITION, sizeof fine), fine, sizeof fine);
+    f->c->process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, GetCurrentProcessId());
+    assert(f->c->process);
+    f->c->attached = 1;
+
+    rs3_position position;
+    assert(rs3_sample(f->c, f->s) == RS3_OK && f->s->info.status == RS3_PARTIAL);
+    assert(rs3_copy_latest(f->c, f->s) == RS3_OK);
+    assert(!strcmp(f->s->info.client_version, POS_SHORT_VERSION));
+    assert(!strcmp(rs3_snapshot_client_version(f->s), POS_VERSION));
+    assert(!f->s->player.valid_variables && f->s->player.gcd_reason == RS3_NOT_SET);
+    assert(rs3_snapshot_position(f->s, &position, 4) == RS3_E_ABI);
+    assert(rs3_snapshot_position(f->s, &position, sizeof position) == RS3_OK);
+    assert(position.valid && position.x == 3165 && position.y == 3482 && position.plane == 2);
+
+    put32(f, PLAYER + POS_PLAYER_INDEX, 2);
+    assert(rs3_sample(f->c, f->s) == RS3_OK && f->s->info.status == RS3_UNAVAILABLE);
+    assert(!f->s->position.valid);
+    put64(f, PLAYER + POS_PLAYER_OVERRIDE, ACTOR);
+    fine[0] += 512;
+    memcpy(at(f, ACTOR + POS_FINE_POSITION, sizeof fine), fine, sizeof fine);
+    assert(rs3_sample(f->c, f->s) == RS3_OK && f->s->position.valid && f->s->position.x == 3166);
+    put32(f, CLIENT + POS_STATE, 20);
+    assert(rs3_sample(f->c, f->s) == RS3_OK);
+    assert(rs3_copy_latest(f->c, f->s) == RS3_OK && !f->s->position.valid);
+    dispose(f);
 }
 static void worker_lifecycle(void) {
     rs3_context *c=NULL; rs3_snapshot *s=NULL;
@@ -360,6 +426,7 @@ int main(void) {
     torn_reads_and_transitions(); buffers_and_event_cursors(); failed_sample_clears_fields(); worker_lifecycle();
     inventory_identity_and_doses();ability_cooldowns_and_equipment();inventory_races_and_duplicates();
     catalog_validation_and_item_queue_gaps();
-    puts("PASS: 11 native test groups (inventory/doses/gear/cooldowns, catalog validation and queue gaps)");
+    position_profile();
+    puts("PASS: 12 native test groups (including the player tile profile)");
     return 0;
 }

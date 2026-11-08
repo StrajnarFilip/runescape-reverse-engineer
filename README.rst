@@ -11,7 +11,7 @@ Current capabilities
 
 * Version-pinned Windows x64 client **951-3**, executable SHA-256 and loaded-code
   signatures checked before using offsets.
-* Live player tiles on client **6ada3f59-1a86000** with the Python backend.
+* Live player tiles on client **6ada3f59-1a86000**, using its own pinned native profile.
 * Player current/max HP, prayer (maximum derived from base level), adrenaline,
   and global cooldown using the client's 20 ms logic clock.
 * Loaded NPC names, config/type IDs, runtime IDs, exact transmitted current/max HP.
@@ -82,22 +82,15 @@ PowerShell, replace ``12345`` with the ID from the game window's row::
     Get-Process rs2client | Select-Object Id, MainWindowTitle
     & ".\Start Tracker.cmd" --pid 12345
 
-The original Python decoder remains available explicitly for reference/comparison::
-
-    python python/rs3_reader/tracker.py --backend python
-    python python/rs3_reader/reader.py --backend python --once --raw
-
-Alternatively set ``RS3_BACKEND=python``. A missing or mismatched native library
-produces an explicit error rather than silently selecting a different engine.
+The tracker and CLI use the C collector. The independent Python decoder lives
+under ``work/reference/`` for research and parity benchmarks.
 The tracker rotates logs at about 25 MB, with three backups per run; buttons open
-the log directory or copy the latest JSON. Both implementations request only
+the log directory or copy the latest JSON. The collector requests only
 ``PROCESS_QUERY_INFORMATION | PROCESS_VM_READ``. No game calls, writes or inputs.
 
-On client build **6ada3f59-1a86000**, select ``--backend python`` to see **Player
-Tile** in the desktop tracker at 20 Hz. The Python profile for this build covers
-position. Combat telemetry uses the separate 951-3 profile. This tracker mode
-runs with standard-library Python and Tkinter. The launcher forwards
-``--backend python`` and looks for ``pythonw.exe`` in ``C:\Python39`` and on PATH.
+On client build **6ada3f59-1a86000**, the desktop tracker shows **Player Tile**
+at 20 Hz and leaves combat fields unavailable. Combat telemetry uses the
+separate **951-3** profile.
 
 JSONL records carry ``position`` with integer ``x`` (east), ``y`` (north), and
 ``plane`` (0–3). The tile is ``null`` when unavailable. For repeatable boss
@@ -109,7 +102,7 @@ Layout and verification
 
 * ``include/rs3/rs3.h`` defines the public C ABI.
 * ``src/`` contains the collector, process verification, and gameplay decoders.
-* ``python/rs3_reader/`` contains the ctypes binding, reference decoder, CLI and tracker.
+* ``python/rs3_reader/`` contains the ctypes binding, CLI and tracker.
 * ``profiles/`` contains pinned client hashes, signatures, offsets and ability bindings.
 * ``tests/`` contains deterministic C fixtures and Python tests, including DLL ABI checks.
 * ``examples/`` contains C, Python and Java consumers.
@@ -118,7 +111,7 @@ Layout and verification
 * ``work/`` contains research scripts and opt-in live validation tools.
 
 See `the native API guide <docs/native-api.rst>`_ for CMake installation and C, Python and Java usage.
-The live benchmark in ``work/benchmark_native.py`` needs a supported game client.
+The live combat benchmark in ``work/benchmark_native.py`` needs client **951-3**.
 
 Limits
 ------

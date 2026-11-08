@@ -1,6 +1,6 @@
 import sys, struct
 from pathlib import Path
-sys.path.insert(0,str(Path(__file__).resolve().parents[1] / "python" / "rs3_reader"))
+sys.path.insert(0,str(Path(__file__).resolve().parents[1] / "work" / "reference"))
 from winmem import ProcessMemory, processes, MemoryReadError
 from rs3 import RS3
 

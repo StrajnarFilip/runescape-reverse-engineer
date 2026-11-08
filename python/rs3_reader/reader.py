@@ -5,12 +5,11 @@ from pathlib import Path
 import sys
 import time
 
-from telemetry import Telemetry
+from native_telemetry import NativeTelemetry
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pid", type=int)
-    parser.add_argument("--backend", choices=("c", "python"), help="Default: C collector (RS3_BACKEND overrides)")
     parser.add_argument("--native-hz", type=int, default=100, help="Native worker rate, independent of JSON output rate")
     parser.add_argument("--hz", type=float, default=20)
     parser.add_argument("--duration", type=float, help="Stop after this many seconds")
@@ -21,7 +20,7 @@ def main():
     if not 0.1 <= args.hz <= 1000 or not 1 <= args.native_hz <= 1000 or (args.duration is not None and args.duration <= 0):
         parser.error("Use 0.1 <= hz <= 1000, native-hz 1..1000 and a positive duration")
     output = args.output.open("w", encoding="utf-8") if args.output else sys.stdout
-    telemetry = Telemetry(args.pid, args.backend, args.native_hz)
+    telemetry = NativeTelemetry(args.pid, args.native_hz)
     began = deadline = time.perf_counter()
     try:
         while args.duration is None or time.perf_counter()-began < args.duration:
