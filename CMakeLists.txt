@@ -29,6 +29,7 @@ add_library(rs3_objects OBJECT
     src/process.c
     src/decode.c
     src/position.c
+    src/input.c
     src/npcs.c
     src/inventory.c
     "${profile_header}"

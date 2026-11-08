@@ -2,6 +2,7 @@
 /* Assertions must run even when the toolchain defines NDEBUG for -O2. */
 #undef NDEBUG
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -446,6 +447,49 @@ static void catalog_validation_and_item_queue_gaps(void) {
     assert(written==1 && lost==3 && next==4 && event.sequence==4);
     dispose(f);
 }
+static void input_projection_and_guards(void) {
+    rs3_position tile = {1, 3200, 3200, 0};
+    rs3_minimap map = {
+        .anchor = tile, .screen_x = -250, .screen_y = 400,
+        .east_dx = 3, .east_dy = 4, .north_dx = 4, .north_dy = -3,
+        .radius_pixels = 25
+    };
+    POINT point;
+    assert(rs3_sizeof(RS3_SIZE_MINIMAP) == sizeof map);
+    assert(project_minimap_tile(&tile, &map, 3203, 3204, 0, &point) == RS3_OK);
+    assert(point.x == -225 && point.y == 400);
+    assert(project_minimap_tile(&tile, &map, 3199, 3198, 0, &point) == RS3_OK);
+    assert(point.x == -261 && point.y == 402);
+    assert(project_minimap_tile(&tile, &map, 3203, 3205, 0, &point) == RS3_E_TARGET);
+    assert(project_minimap_tile(&tile, &map, 3203, 3204, 1, &point) == RS3_E_TARGET);
+    assert(project_minimap_tile(&tile, &map, -1, 3200, 0, &point) == RS3_E_ARGUMENT);
+    tile.x++;
+    assert(project_minimap_tile(&tile, &map, 3203, 3204, 0, &point) == RS3_E_STATE);
+    tile.x--;
+    map.north_dx = NAN;
+    assert(project_minimap_tile(&tile, &map, 3203, 3204, 0, &point) == RS3_E_ARGUMENT);
+    map.north_dx = -2.25;
+    assert(project_minimap_tile(&tile, &map, 3203, 3204, 0, &point) == RS3_E_ARGUMENT);
+    map.north_dx = 4;
+
+    // A fresh fixture with no selected NPC or ability fails before dispatch.
+    fixture *f = empty_fixture();
+    assert(rs3_move_to_tile(f->s, 3200, 3200, 0, &map) == RS3_E_STATE);
+    assert(rs3_interact(f->s, 1, 0, 0, 0) == RS3_E_ARGUMENT);
+    assert(rs3_activate_ability(f->s, 1, VK_LWIN) == RS3_E_ARGUMENT);
+    f->s->profile = &pos_profile;
+    f->s->position = tile;
+    f->s->info.status = RS3_AVAILABLE;
+    f->s->info.pid = GetCurrentProcessId();
+    f->s->info.process_creation_time = process_creation_time(GetCurrentProcess());
+    f->s->info.monotonic_ns = rs3_monotonic_ns();
+    assert(rs3_activate_ability(f->s, 1, 'Q') == RS3_E_TARGET);
+    assert(rs3_interact(f->s, 1, RS3_ENTITY_OPEN_MENU, 0, 0) == RS3_E_TARGET);
+    assert(rs3_move_to_tile(f->s, 3210, 3200, 0, &map) == RS3_E_TARGET);
+    f->s->info.monotonic_ns += 5000000000ull;
+    assert(rs3_interact(f->s, 0, RS3_ENTITY_SELECT_OPTION, 0, 0) == RS3_E_STATE);
+    dispose(f);
+}
 int main(void) {
     player_and_sparse(); invalid_tables_and_profile(); hits_and_health();
     torn_reads_and_transitions(); buffers_and_event_cursors(); failed_sample_clears_fields(); worker_lifecycle();
@@ -453,6 +497,7 @@ int main(void) {
     catalog_validation_and_item_queue_gaps();
     position_profile();
     sparse_inventory_slots();
-    puts("PASS: 13 native test groups (including Compatibility Mode and sparse inventory)");
+    input_projection_and_guards();
+    puts("PASS: 14 native test groups");
     return 0;
 }

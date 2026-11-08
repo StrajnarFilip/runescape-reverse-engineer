@@ -8,6 +8,63 @@ receive typed snapshots through a plain C ABI. Python remains responsible for
 presentation, JSON serialization and the desktop UI. No callbacks into Python or
 Java are needed on the collector thread.
 
+Foreground input
+----------------
+
+The additive ABI-v1 exports ``rs3_move_to_tile``, ``rs3_activate_ability`` and
+``rs3_interact`` send Windows input to the foreground client. Each call takes an
+immutable snapshot from ``rs3_sample`` or ``rs3_copy_latest``. Take a fresh
+snapshot for each action. The DLL accepts verified samples up to one second old
+and checks the foreground window's PID and process creation time before dispatch.
+Mouse actions also check that the pixel is in the unobscured client area. Use
+physical desktop pixels, including negative coordinates on secondary monitors.
+Sampling keeps read-only process access.
+
+**Movement.** On the Compatibility Mode profile, copy the player's
+``rs3_position`` into ``rs3_minimap.anchor``. Measure the center of that tile on
+the minimap. Measure the pixel displacement to known tiles due east and due north,
+then divide each displacement by its tile separation to get the two basis
+vectors. Choose a radius that excludes minimap controls and edges. For example,
+if the player is at (3200, 3200, 0), the minimap is north-up, and each tile is
+four pixels wide::
+
+    rs3_minimap map = {
+        .anchor = player_tile,
+        .screen_x = 1000, .screen_y = 200,
+        .east_dx = 4, .north_dy = -4,
+        .radius_pixels = 60
+    };
+    int32_t result = rs3_move_to_tile(snapshot, 3203, 3202, 0, &map);
+
+This projects (3203, 3202) to pixel (1012, 192). Recalibrate if the minimap
+scrolls, rotates, zooms or changes layout. The destination must be on the player's
+plane and within the calibrated circle. The game handles routing from the click.
+
+**Abilities.** Build the local catalog and find the ability's ``struct_id`` in
+``rs3_snapshot_abilities``. Place that ability on the active action bar and
+configure an unmodified A–Z, 0–9 or F1–F12 shortcut in the game. For an ability
+bound to Q, call ``rs3_activate_ability(snapshot, struct_id, 'Q')``. The caller
+supplies the binding and checks that the game is ready to receive the shortcut.
+The game applies cooldown, resource and targeting rules.
+
+**Entities.** Provide the NPC's ``instance_id`` from the snapshot and the screen
+pixel over the visible entity. Pass zero for a scene object such as a bank
+booth or chest. Use ``RS3_ENTITY_DEFAULT`` for a left click or
+``RS3_ENTITY_OPEN_MENU`` for a right click. Once the menu is visible, take a
+fresh snapshot and call ``rs3_interact`` with ``RS3_ENTITY_SELECT_OPTION`` and
+the pixel over the desired **Talk-to**, **Bank** or other menu row. The caller
+resolves the entity's screen position and the option's visible location.
+
+``RS3_OK`` reports that Windows accepted the input events. Verify movement,
+ability use, dialogue or the bank interface through subsequent observations.
+``RS3_E_ARGUMENT`` indicates invalid parameters. ``RS3_E_STATE`` covers stale or
+unavailable samples, mismatched minimap anchors and held input. ``RS3_E_TARGET``
+covers missing IDs, off-map destinations and foreground or click-target
+mismatches. ``RS3_E_OS`` covers Windows input failures, which can include
+partially submitted events. Keep the client foreground and the visible UI stable
+while making a call. Windows dispatches through the desktop input stream.
+`Microsoft SendInput documentation <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput>`_.
+
 Build
 -----
 

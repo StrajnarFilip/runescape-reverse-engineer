@@ -21,6 +21,7 @@ _Static_assert(sizeof(void*)==8, "Build for Windows x64");
 _Static_assert(sizeof(rs3_info)==384, "ABI info layout");
 _Static_assert(sizeof(rs3_player)==136, "ABI player layout");
 _Static_assert(sizeof(rs3_position)==16, "ABI position layout");
+_Static_assert(sizeof(rs3_minimap)==64, "ABI minimap layout");
 _Static_assert(sizeof(rs3_npc)==568, "ABI NPC layout");
 _Static_assert(sizeof(rs3_hit)==40, "ABI hit layout");
 _Static_assert(sizeof(rs3_event)==608, "ABI event layout");
@@ -101,14 +102,16 @@ uint32_t rs3_sizeof(uint32_t which) {
     case RS3_SIZE_HIT:return sizeof(rs3_hit); case RS3_SIZE_EVENT:return sizeof(rs3_event);
     case RS3_SIZE_INVENTORY_INFO:return sizeof(rs3_inventory_info); case RS3_SIZE_ITEM:return sizeof(rs3_item);
     case RS3_SIZE_ABILITY:return sizeof(rs3_ability); case RS3_SIZE_ITEM_EVENT:return sizeof(rs3_item_event);
-    case RS3_SIZE_POSITION:return sizeof(rs3_position); default:return 0; }
+    case RS3_SIZE_POSITION:return sizeof(rs3_position); case RS3_SIZE_MINIMAP:return sizeof(rs3_minimap);
+    default:return 0; }
 }
 const char *rs3_profile_sha256(void) { return P_PROFILE_SHA256; }
 const char *rs3_result_string(int32_t r) {
     switch(r) { case RS3_OK:return "OK"; case RS3_E_ARGUMENT:return "Invalid argument";
     case RS3_E_MEMORY:return "Allocation failed"; case RS3_E_ABI:return "ABI layout mismatch";
     case RS3_E_BUFFER:return "Output buffer too small"; case RS3_E_STATE:return "Invalid lifecycle state";
-    case RS3_E_OS:return "Windows operation failed"; default:return "Unknown result"; }
+    case RS3_E_OS:return "Windows operation failed"; case RS3_E_TARGET:return "Input target unavailable";
+    default:return "Unknown result"; }
 }
 int32_t rs3_snapshot_create(rs3_snapshot **out) {
     if (!out) return RS3_E_ARGUMENT;

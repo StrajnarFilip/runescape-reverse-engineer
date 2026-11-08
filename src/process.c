@@ -19,6 +19,11 @@ uint64_t unix_ns(void) {
     x.LowPart=t.dwLowDateTime; x.HighPart=t.dwHighDateTime;
     return (x.QuadPart-116444736000000000ull)*100ull;
 }
+uint64_t process_creation_time(HANDLE process) {
+    FILETIME born, ended, kernel, user;
+    if (!GetProcessTimes(process, &born, &ended, &kernel, &user)) return 0;
+    return ((uint64_t)born.dwHighDateTime << 32) | born.dwLowDateTime;
+}
 int fail(rs3_context *c,uint32_t reason,const char *message) {
     c->reason=reason; snprintf(c->error,sizeof c->error,"%s",message); return 0;
 }
@@ -159,10 +164,9 @@ int attach(rs3_context *c) {
     if (list==INVALID_HANDLE_VALUE) return fail(c,RS3_READ_FAILED,"Module discovery failed");
     int found=Module32FirstW(list,&module); CloseHandle(list);
     if (!found) return fail(c,RS3_READ_FAILED,"Main module unavailable");
-    FILETIME born,ended,kernel,user; ULARGE_INTEGER time;
-    if (!GetProcessTimes(c->process,&born,&ended,&kernel,&user)) return fail(c,RS3_READ_FAILED,"Process identity unavailable");
-    time.LowPart=born.dwLowDateTime; time.HighPart=born.dwHighDateTime;
-    c->creation_time=time.QuadPart; c->module_base=(uint64_t)(uintptr_t)module.modBaseAddr;
+    c->creation_time=process_creation_time(c->process);
+    if (!c->creation_time) return fail(c,RS3_READ_FAILED,"Process identity unavailable");
+    c->module_base=(uint64_t)(uintptr_t)module.modBaseAddr;
     c->module_size=module.modBaseSize;
     if (!hash_file(module.szExePath,c->actual_sha256)) return fail(c,RS3_READ_FAILED,"Cannot hash the executable");
     if (!signatures(c,c->actual_sha256)) return 0;

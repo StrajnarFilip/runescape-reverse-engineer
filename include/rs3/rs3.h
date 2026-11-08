@@ -2,7 +2,7 @@
 #define RS3_NATIVE_H
 
 /** @file rs3.h
- * Read-only RS3 sampling ABI, version 1, Windows x64, C calling convention.
+ * RS3 sampling and foreground input ABI, version 1, Windows x64, C calling convention.
  * All strings are UTF-8. All public structs use the platform's default 8-byte
  * alignment. Call rs3_sizeof() to verify layouts in a foreign-language binding.
  * Never free library objects with a foreign allocator: use the matching destroy.
@@ -28,7 +28,7 @@ extern "C" {
 typedef struct rs3_context rs3_context;
 typedef struct rs3_snapshot rs3_snapshot;
 enum rs3_result { RS3_OK=0, RS3_E_ARGUMENT=-1, RS3_E_MEMORY=-2,
-    RS3_E_ABI=-3, RS3_E_BUFFER=-4, RS3_E_STATE=-5, RS3_E_OS=-6 };
+    RS3_E_ABI=-3, RS3_E_BUFFER=-4, RS3_E_STATE=-5, RS3_E_OS=-6, RS3_E_TARGET=-7 };
 enum rs3_status { RS3_NO_SAMPLE=0, RS3_AVAILABLE=1, RS3_PARTIAL=2, RS3_UNAVAILABLE=3 };
 enum rs3_reason { RS3_REASON_NONE=0, RS3_NOT_SET=1, RS3_READ_FAILED=2,
     RS3_UNSUPPORTED_CLIENT=3, RS3_NO_CLIENT=4, RS3_MULTIPLE_CLIENTS=5,
@@ -42,7 +42,7 @@ enum rs3_npc_flags { RS3_NPC_NAME=1, RS3_NPC_CONFIG=2, RS3_NPC_HEALTH=4 };
 enum rs3_hit_state { RS3_HIT_ACTIVE=1, RS3_HIT_SCHEDULED=2 };
 enum rs3_structure { RS3_SIZE_OPTIONS=1, RS3_SIZE_INFO, RS3_SIZE_PLAYER,
     RS3_SIZE_NPC, RS3_SIZE_HIT, RS3_SIZE_EVENT, RS3_SIZE_INVENTORY_INFO,
-    RS3_SIZE_ITEM, RS3_SIZE_ABILITY, RS3_SIZE_ITEM_EVENT, RS3_SIZE_POSITION };
+    RS3_SIZE_ITEM, RS3_SIZE_ABILITY, RS3_SIZE_ITEM_EVENT, RS3_SIZE_POSITION, RS3_SIZE_MINIMAP };
 
 #define RS3_MAX_ITEMS 47u /* 28 backpack slots + 19 equipment slots, including empties. */
 #define RS3_MAX_ABILITIES 2048u
@@ -113,6 +113,20 @@ typedef struct rs3_position {
     uint32_t valid; /**< 1 when all three coordinates are available, otherwise 0. */
     int32_t x, y, plane; /**< Tile coordinates east, north, and plane (0..3). */
 } rs3_position;
+
+/** Calibration for the currently displayed minimap, in physical screen pixels. */
+typedef struct rs3_minimap {
+    rs3_position anchor; /**< Player tile when the minimap was calibrated. */
+    int32_t screen_x, screen_y; /**< Center of the anchor tile on the minimap. */
+    double east_dx, east_dy; /**< Pixel displacement for one tile east. */
+    double north_dx, north_dy; /**< Pixel displacement for one tile north. */
+    uint32_t radius_pixels; /**< Safe clickable radius around the anchor. */
+    uint32_t reserved; /**< Must be zero. */
+} rs3_minimap;
+
+enum rs3_entity_action {
+    RS3_ENTITY_DEFAULT=1, RS3_ENTITY_OPEN_MENU, RS3_ENTITY_SELECT_OPTION
+};
 
 typedef struct rs3_npc {
     uint64_t instance_id;
@@ -202,6 +216,29 @@ RS3_API int32_t rs3_item_events_since(rs3_context *, uint64_t after, rs3_item_ev
  * pinned to the executable profile; missing metadata never invents item names.
  */
 RS3_API int32_t rs3_load_catalog(rs3_context *, const char *path);
+
+/** Foreground input is opt-in and requires a verified snapshot at most one
+ * second old. Keep the snapshot unchanged until the call returns. The game
+ * must be foreground. OK means Windows accepted the input, with the result
+ * in game left to the caller to observe.
+ */
+/** Click a visible tile on the calibrated minimap, on the player's plane.
+ * Calibration must describe the current view and match the sampled player tile.
+ */
+RS3_API int32_t rs3_move_to_tile(const rs3_snapshot *, int32_t x, int32_t y,
+    int32_t plane, const rs3_minimap *);
+/** Press the caller's configured action-bar key for a sampled ability struct ID.
+ * virtual_key is an unmodified Windows A-Z, 0-9 or F1-F12 virtual key.
+ */
+RS3_API int32_t rs3_activate_ability(const rs3_snapshot *, uint32_t struct_id,
+    uint32_t virtual_key);
+/** Click a visible entity or menu row, in physical screen pixels. A nonzero
+ * instance_id must appear in the snapshot's NPC list. Use zero for scene objects.
+ * OPEN_MENU sends a right click. DEFAULT and SELECT_OPTION send a left click.
+ * Resolve the visible option after opening the menu.
+ */
+RS3_API int32_t rs3_interact(const rs3_snapshot *, uint64_t instance_id,
+    uint32_t action, int32_t screen_x, int32_t screen_y);
 
 #ifdef __cplusplus
 }

@@ -7,6 +7,7 @@
 #include "rs3/rs3.h"
 
 #define EVENT_CAPACITY 4096u
+#define RS3_TILE_LIMIT 12800
 
 typedef struct {
     uint32_t rva, length;
@@ -79,6 +80,7 @@ static inline int valid_utf8(const char *s,uint32_t n) {
 
 uint64_t monotonic_ns(void);
 uint64_t unix_ns(void);
+uint64_t process_creation_time(HANDLE process);
 int fail(rs3_context *c, uint32_t reason, const char *message);
 int windows_read(void *user, uint64_t address, void *out, size_t size);
 int rd(rs3_context *c, uint64_t address, void *out, size_t size);
@@ -91,6 +93,8 @@ void schedule_retry(rs3_context *c, uint64_t now);
 int decode(rs3_context *c, rs3_snapshot *s);
 int player_scene(rs3_context *c, uint64_t *client);
 int decode_position(rs3_context *c, rs3_position *position);
+int32_t project_minimap_tile(const rs3_position *, const rs3_minimap *,
+    int32_t x, int32_t y, int32_t plane, POINT *out);
 int capture(rs3_context *c, int client, uint64_t *out);
 int variable(rs3_context *c, uint64_t table, uint64_t count, uint64_t sentinel,
              uint32_t id, int64_t *value, int *present);

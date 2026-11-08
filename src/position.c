@@ -40,7 +40,7 @@ static uint64_t read_tile(rs3_context *c, rs3_position *tile) {
     /* The tile describes the origin of the actor footprint. Fine Y is height. */
     double x = fine[0] / 512.0 - size / 2;
     double y = fine[2] / 512.0 - size / 2;
-    if (!(x >= 0 && x < 12800 && y >= 0 && y < 12800)) return 0;
+    if (!(x >= 0 && x < RS3_TILE_LIMIT && y >= 0 && y < RS3_TILE_LIMIT)) return 0;
     *tile = (rs3_position){1, (int32_t)x, (int32_t)y, plane};
     return player;
 }

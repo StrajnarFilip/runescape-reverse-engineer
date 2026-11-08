@@ -1,7 +1,7 @@
 RS3 native memory reader and live tracker
 ========================================
 
-A local, read-only RuneScape 3 telemetry project. A C11 DLL discovers and verifies
+A local RuneScape 3 telemetry project with read-only process access. A C11 DLL discovers and verifies
 ``rs2client.exe``, reads player variables and NPC structures, and publishes typed
 snapshots and hit observations. The Tkinter UI and JSON Lines output remain in
 Python. All project source, comments, interface text and documentation use English.
@@ -25,6 +25,8 @@ Current capabilities
   log refresh independently at 20 Hz. Actual throughput depends on system load.
 * Stable, documented C ABI with explicit ownership, validity flags and event gaps.
   Working Python ctypes and Java FFM consumers; no language-specific game agent.
+* Opt-in C commands for minimap movement, action-bar abilities and visible entity
+  options such as Talk-to and Bank. See `Foreground input <docs/native-api.rst#foreground-input>`_.
 
 Previously verified in live combat: Goblin **550/550 HP**, Giant spider
 **1000/1000 HP**, and Goblin **550 -> 326 HP** alongside the independently reported
