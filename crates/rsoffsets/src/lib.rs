@@ -95,6 +95,16 @@ impl OffsetsFile {
                 anyhow::bail!("var array {name}: unknown base {:?}", v.base);
             }
         }
+        for (name, l) in &self.locators {
+            if let LocatorDef::VarIndex { via, probe_keys, .. } = l {
+                if !matches!(self.locators.get(via), Some(LocatorDef::SortedTable { .. })) {
+                    anyhow::bail!("locator {name}: `via` must name a sorted_table locator, got {via:?}");
+                }
+                if probe_keys.is_empty() {
+                    anyhow::bail!("locator {name}: needs at least one probe key");
+                }
+            }
+        }
         if let Some(n) = &self.npcs {
             if !self.bases.contains_key(&n.base) {
                 anyhow::bail!("npcs: unknown base {:?}", n.base);
@@ -255,6 +265,21 @@ pub enum LocatorDef {
         #[serde(default = "d_true")]
         require_ref: bool,
     },
+    /// The client's var hash index: a chained hash table of `buckets` slots. Slot `key % buckets`
+    /// points at the first `{i32 key @0, value @8, next @0x28}` entry of its chain (varp table
+    /// rows and var nodes alike). Found through `via` (a sorted_table locator): every pointer into
+    /// that table votes for an index start, and the winner is verified with chained lookups.
+    VarIndex {
+        via: String,
+        probe_keys: Vec<i64>,
+        buckets: u64,
+        #[serde(default)]
+        entry_key_off: u32,
+        #[serde(default = "d_entry_value_off")]
+        entry_value_off: u32,
+        #[serde(default = "d_entry_next_off")]
+        entry_next_off: u32,
+    },
     /// Heap objects whose first qword is a vtable at `module + vtable_rva`.
     /// Signals use `key = 0` and read at the signal's `offset` inside the object.
     VtableObject {
@@ -269,17 +294,25 @@ pub enum LocatorDef {
 fn d_min_entries() -> u32 {
     256
 }
+fn d_entry_value_off() -> u32 {
+    8
+}
+fn d_entry_next_off() -> u32 {
+    0x28
+}
 
 impl LocatorDef {
     pub fn key_off(&self) -> u32 {
         match self {
             LocatorDef::SortedTable { key_off, .. } | LocatorDef::HashNodes { key_off, .. } => *key_off,
+            LocatorDef::VarIndex { entry_key_off, .. } => *entry_key_off,
             LocatorDef::VtableObject { .. } => 0,
         }
     }
     pub fn value_off(&self) -> u32 {
         match self {
             LocatorDef::SortedTable { value_off, .. } | LocatorDef::HashNodes { value_off, .. } => *value_off,
+            LocatorDef::VarIndex { entry_value_off, .. } => *entry_value_off,
             LocatorDef::VtableObject { .. } => 0,
         }
     }

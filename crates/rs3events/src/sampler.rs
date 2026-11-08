@@ -37,6 +37,11 @@ struct Group {
     b: Vec<u8>,
 }
 
+/// Percentage rounded to 0.1 (avoids 28.000000000000004 in the output).
+fn pct1(v: f64, max: f64) -> f64 {
+    (v / max * 1000.0).round() / 10.0
+}
+
 fn decode(ty: ValType, bytes: &[u8], bits: Option<(u8, u8)>, scale: Option<f64>) -> Num {
     let v = ty.decode_bits(bytes, bits);
     match scale {
@@ -145,6 +150,8 @@ struct Keyed {
     is_vtable: bool,
     /// Other live copies (hash nodes) to fail over to before rescanning.
     alternates: Vec<u64>,
+    /// Read through a var index every cycle (no cached entry).
+    is_index: bool,
 }
 
 struct Locators {
@@ -153,6 +160,8 @@ struct Locators {
     pending: std::collections::HashSet<String>,
     last_request: HashMap<String, Instant>,
     tables: HashMap<String, (u64, u64, bool)>,
+    /// Located var indexes: (array start, bucket count).
+    indexes: HashMap<String, (u64, u64)>,
     errors: HashMap<String, String>,
 }
 
@@ -237,6 +246,7 @@ impl Sampler {
                     vtable: None,
                     is_vtable,
                     alternates: Vec::new(),
+                    is_index: matches!(def, rsoffsets::LocatorDef::VarIndex { .. }),
                 })
             })
             .collect();
@@ -247,6 +257,7 @@ impl Sampler {
             pending: Default::default(),
             last_request: Default::default(),
             tables: Default::default(),
+            indexes: Default::default(),
             errors: Default::default(),
         };
         let n = defs.len();
@@ -331,6 +342,18 @@ impl Sampler {
             return;
         }
         let Some(def) = self.cfg.offsets.locators.get(name).cloned() else { return };
+        let mut ctx = crate::locate::LocateCtx { via: None };
+        if let rsoffsets::LocatorDef::VarIndex { via, .. } = &def {
+            // Needs its `via` table first; try again on a later cycle until it is located.
+            match self.loc.tables.get(via).copied() {
+                Some(t) => ctx.via = Some((self.cfg.offsets.locators[via].clone(), t)),
+                None => {
+                    let via = via.clone();
+                    self.request_locate(&via, now);
+                    return;
+                }
+            }
+        }
         let keys: Vec<i64> = self.keyed.iter().filter(|k| k.locator == name).map(|k| k.key).collect();
         self.loc.pending.insert(name.to_string());
         self.loc.last_request.insert(name.to_string(), now);
@@ -339,7 +362,7 @@ impl Sampler {
         let _ = std::thread::Builder::new()
             .name(format!("rs3events-locate-{n}"))
             .spawn(move || {
-                let _ = tx.send(crate::locate::run_locate(pid, n, def, keys));
+                let _ = tx.send(crate::locate::run_locate(pid, n, def, keys, ctx));
             });
     }
 
@@ -379,6 +402,11 @@ impl Sampler {
                             alts = HashMap::from([(0, alternates)]);
                             entries
                         }
+                        crate::locate::Located::Index { start, buckets } => {
+                            tracing::info!("[{pid}] {} located in {:.1}s: var index {start:#x}, {buckets} buckets", r.locator, r.secs);
+                            self.loc.indexes.insert(r.locator.clone(), (start, buckets));
+                            HashMap::new()
+                        }
                     };
                     self.loc.errors.remove(&r.locator);
                     for k in self.keyed.iter_mut().filter(|k| k.locator == r.locator) {
@@ -400,6 +428,41 @@ impl Sampler {
         let mut need: Vec<String> = Vec::new();
         for i in 0..self.keyed.len() {
             let k = &self.keyed[i];
+            if k.is_index {
+                let l = k.locator.clone();
+                let Some(&(start, buckets)) = self.loc.indexes.get(&l) else {
+                    if !self.loc.pending.contains(&l) {
+                        need.push(l);
+                    }
+                    continue;
+                };
+                let n = k.ty.size();
+                let next_off = match self.cfg.offsets.locators.get(&l) {
+                    Some(rsoffsets::LocatorDef::VarIndex { entry_next_off, .. }) => *entry_next_off,
+                    _ => 0x28,
+                };
+                let mut vbuf = [0u8; 8];
+                let hit = crate::locate::index_lookup(&self.proc, start, buckets, k.key, k.key_off, next_off)
+                    .filter(|p| self.proc.read_into(p + k.value_off as u64, &mut vbuf[..n]).is_ok());
+                match hit {
+                    Some(_) => self.cur[k.idx] = Some(decode(k.ty, &vbuf, k.bits, k.scale)),
+                    None => {
+                        // Index gone (rebuilt/freed) if even the probe keys no longer resolve.
+                        let probes_ok = match self.cfg.offsets.locators.get(&l) {
+                            Some(rsoffsets::LocatorDef::VarIndex { probe_keys, .. }) => probe_keys
+                                .iter()
+                                .all(|pk| crate::locate::index_lookup(&self.proc, start, buckets, *pk, k.key_off, next_off).is_some()),
+                            _ => false,
+                        };
+                        if !probes_ok {
+                            tracing::warn!("[{}] {l}: var index no longer valid; re-locating", self.proc.pid());
+                            self.loc.indexes.remove(&l);
+                            need.push(l);
+                        }
+                    }
+                }
+                continue;
+            }
             if k.is_vtable {
                 let ok = match (k.entry, k.vtable) {
                     (Some(e), Some(vt)) => self.proc.read::<u64>(e).is_ok_and(|q| q == vt),
@@ -646,7 +709,7 @@ impl Sampler {
                 }
                 "adrenaline" => {
                     self.tick.observe_server_change(now);
-                    let pct = self.max_of("adrenaline").filter(|m| *m > 0).map(|m| new.as_f64() / m as f64 * 100.0);
+                    let pct = self.max_of("adrenaline").filter(|m| *m > 0).map(|m| pct1(new.as_f64(), m as f64));
                     self.emit(Event::Adrenaline { old: old_i, new: new_i, pct }, now);
                     if gcd_cfg.derive_from_adrenaline && old.is_some() && !self.gcd.is_active() {
                         let basis = "adrenaline_heuristic".to_string();
@@ -781,8 +844,8 @@ impl Sampler {
             let hp_max = geti("hp_max");
             let headbar = geti("headbar");
             let hp_pct = match (hp, hp_max, headbar, def.headbar_max) {
-                (Some(h), Some(m), _, _) if m > 0 => Some(h as f64 / m as f64 * 100.0),
-                (_, _, Some(h), Some(m)) if m > 0 => Some(h as f64 / m as f64 * 100.0),
+                (Some(h), Some(m), _, _) if m > 0 => Some(pct1(h as f64, m as f64)),
+                (_, _, Some(h), Some(m)) if m > 0 => Some(pct1(h as f64, m as f64)),
                 _ => None,
             };
             let mut extra = BTreeMap::new();
@@ -941,7 +1004,7 @@ impl Sampler {
             prayer: geti("prayer"),
             prayer_max: self.max_of("prayer"),
             adrenaline: adren,
-            adrenaline_pct: adren.and_then(|a| self.max_of("adrenaline").filter(|m| *m > 0).map(|m| a as f64 / m as f64 * 100.0)),
+            adrenaline_pct: adren.and_then(|a| self.max_of("adrenaline").filter(|m| *m > 0).map(|m| pct1(a as f64, m as f64))),
             gcd_end_tick: self.gcd.active.as_ref().and_then(|a| a.end_tick),
             gcd_ends_at_unix_us: self.gcd.active.as_ref().map(|a| a.ends_at_unix),
         };

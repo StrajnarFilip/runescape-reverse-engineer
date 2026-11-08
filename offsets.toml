@@ -42,12 +42,27 @@ link_off = 0x28
 self_off = 0x30
 require_ref = true
 
-# DISABLED: var node 13537 holds lifepoints, but the client keeps ~20 referenced copies
-# (most stale, e.g. 0) and reallocates them over time, so "first live copy" can be wrong.
-# Re-enable once the owning container (or a copy-selection rule) is understood.
-# [signals.lifepoints]
-# locator = "var_nodes"
-# key = 13537
+# The client's var hash index: 8783 pointers, slot (id % 8783) -> that var's {i32 id, value @+8}
+# entry. It covers varp table rows *and* separately allocated var nodes such as lifepoints, and the
+# client updates the slot when it reallocates a node, so reads through it are never stale.
+# Found via the varps table: the slot for 3274 holds the address of varp 3274's table row.
+[locators.var_index]
+kind = "var_index"
+via = "varps"
+probe_keys = [3274, 679]
+buckets = 8783
+
+# Lifepoints: var 13537 (a var node, not in the varp table). Matched the orb through damage and
+# regen (9900 -> 7771 -> 4709 ...) and across client restarts.
+[signals.lifepoints]
+locator = "var_index"
+key = 13537
+
+# Candidate max lifepoints: var 13538 read 9900 (= the orb's max) in every session so far.
+# Not yet confirmed to change with gear, so it's not used in [[checks]].
+[signals.lifepoints_max]
+locator = "var_index"
+key = 13538
 
 # varp 3274: bits 0..14 = prayer points x10, bit 15 = flag, bits 16..23 = prayer level.
 [signals.prayer]
@@ -96,6 +111,11 @@ le_signal = "prayer_max"   # catches locking onto a wrong table (seen once: pray
 signal = "prayer_max"
 min = 10
 max = 2000
+
+[[checks]]
+signal = "lifepoints"
+min = 0
+max = 200000
 
 [[checks]]
 signal = "adrenaline"

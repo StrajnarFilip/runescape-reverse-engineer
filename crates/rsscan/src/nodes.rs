@@ -54,6 +54,55 @@ pub fn find_var_nodes<M: MemRead>(mem: &M, regions: &[RegionInfo], max_key: i32,
     out
 }
 
+/// Every self-linked node (any tag) whose i32 key at +0x38 is one of `keys`.
+pub fn find_nodes_by_key<M: MemRead>(mem: &M, regions: &[RegionInfo], keys: &[i32]) -> Vec<VarNode> {
+    let mut out = Vec::new();
+    for_each_chunk(mem, regions, |base, bytes| {
+        let mut i = ((8 - base % 8) % 8) as usize;
+        while i + 0x48 <= bytes.len() {
+            let n = base + i as u64;
+            if u64::from_le_bytes(bytes[i + SELF_OFF..i + SELF_OFF + 8].try_into().unwrap()) == n + LINK_OFF as u64 {
+                let key = i32::from_le_bytes(bytes[i + 0x38..i + 0x3C].try_into().unwrap());
+                if keys.contains(&key) {
+                    out.push(VarNode { node: n, tag: u64::from_le_bytes(bytes[i..i + 8].try_into().unwrap()), key });
+                }
+            }
+            i += 8;
+        }
+    });
+    out.sort_by_key(|n| n.node);
+    out
+}
+
+/// For each object start in `starts` (sorted), every qword elsewhere pointing into [start, start+span).
+/// Returns (holder address, index into starts, offset into the object).
+pub fn find_referrers<M: MemRead>(mem: &M, regions: &[RegionInfo], starts: &[u64], span: u64) -> Vec<(u64, usize, u64)> {
+    let mut out = Vec::new();
+    if starts.is_empty() {
+        return out;
+    }
+    let (lo, hi) = (starts[0], starts[starts.len() - 1] + span);
+    for_each_chunk(mem, regions, |base, bytes| {
+        let mut i = ((8 - base % 8) % 8) as usize;
+        while i + 8 <= bytes.len() {
+            let v = u64::from_le_bytes(bytes[i..i + 8].try_into().unwrap());
+            if v >= lo && v < hi {
+                let j = starts.partition_point(|s| *s <= v);
+                if j > 0 {
+                    let s = starts[j - 1];
+                    let holder = base + i as u64;
+                    // Skip the node's own self-link.
+                    if v - s < span && !(holder >= s && holder < s + span) {
+                        out.push((holder, j - 1, v - s));
+                    }
+                }
+            }
+            i += 8;
+        }
+    });
+    out
+}
+
 fn ptr_like(v: u64) -> bool {
     (0x10000..0x7FFF_FFFF_FFFF).contains(&v)
 }

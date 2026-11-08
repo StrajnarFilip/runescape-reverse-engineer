@@ -222,6 +222,26 @@ enum Cmd {
         #[arg(long)]
         max: Option<i64>,
     },
+    /// Walk an array of pointers to {i32 key @0, i32 value @8} entries.
+    Ptrarray {
+        /// Any slot in the array.
+        addr: String,
+        #[arg(long, default_value_t = 16)]
+        before: usize,
+        #[arg(long, default_value_t = 16)]
+        after: usize,
+        /// Walk outwards until this many consecutive non-entry slots, and print a summary only.
+        #[arg(long)]
+        bounds: bool,
+    },
+    /// List every self-linked var node with this key: value, header fields and who points at it.
+    Nodes {
+        #[arg(long)]
+        key: i32,
+        /// Save each node's value address as found-entry `<prefix><n>` for `watch --found`.
+        #[arg(long)]
+        save_prefix: Option<String>,
+    },
     /// Walk a table of fixed-size entries and print (key, value) pairs.
     /// Defaults match the sorted varp table: stride 0x30, key i32 at +0, value i32 at +8.
     Table {
@@ -787,6 +807,93 @@ fn main() -> Result<()> {
             println!("{} addresses match in {:.1?}:", by_addr.len(), t.elapsed());
             for (a, encs) in by_addr.iter().take(40) {
                 println!("  {:<40} {}", fmt_addr(*a, &c.modules), encs.iter().take(3).cloned().collect::<Vec<_>>().join("; "));
+            }
+        }
+        Cmd::Ptrarray { addr, before, after, bounds } => {
+            let slot0 = parse_addr(&addr, &c.proc, &c.modules)?;
+            let entry = |slot: u64| -> Option<(u64, i32, i32)> {
+                let p = c.proc.read::<u64>(slot).ok()?;
+                if p == 0 {
+                    return None;
+                }
+                let k = c.proc.read::<i32>(p).ok()?;
+                let v = c.proc.read::<i32>(p + 8).ok()?;
+                Some((p, k, v))
+            };
+            if bounds {
+                // Walk while slots are zero or point at readable entries with sane keys.
+                let ok = |s: u64| -> bool {
+                    match c.proc.read::<u64>(s) {
+                        Ok(0) => true,
+                        Ok(_) => entry(s).is_some_and(|e| e.1 >= 0 && e.1 < 1 << 20),
+                        Err(_) => false,
+                    }
+                };
+                let mut lo = slot0;
+                while ok(lo - 8) {
+                    lo -= 8;
+                }
+                let mut hi = slot0;
+                while ok(hi + 8) {
+                    hi += 8;
+                }
+                let n = (hi - lo) / 8 + 1;
+                let mut used = 0;
+                let mut keys = Vec::new();
+                for i in 0..n {
+                    if let Some(e) = entry(lo + i * 8) {
+                        used += 1;
+                        keys.push((i, e.1));
+                    }
+                }
+                println!("array {lo:#x}..{:#x}: {n} slots, {used} used; slot of {addr} = index {}", hi + 8, (slot0 - lo) / 8);
+                let sorted = keys.windows(2).all(|w| w[0].1 <= w[1].1);
+                println!("keys sorted by slot: {sorted}; first keys: {:?}", keys.iter().take(12).map(|k| k.1).collect::<Vec<_>>());
+                println!("index of key 13537: {:?}", keys.iter().find(|k| k.1 == 13537).map(|k| k.0));
+                return Ok(());
+            }
+            for i in -(before as i64)..=(after as i64) {
+                let s = (slot0 as i64 + i * 8) as u64;
+                match entry(s) {
+                    Some((p, k, v)) => println!("{i:>4} {s:#x} -> {p:#x}  key {k:>7}  value {v}"),
+                    None => println!("{i:>4} {s:#x} -> {:#x}", c.proc.read::<u64>(s).unwrap_or(0)),
+                }
+            }
+        }
+        Cmd::Nodes { key, save_prefix } => {
+            let regions = scan::select_regions(&c.proc.regions(), &RegionFilter::default(), &c.main);
+            let t = std::time::Instant::now();
+            let nodes = rsscan::nodes::find_nodes_by_key(&c.proc, &regions, &[key]);
+            println!("{} self-linked nodes with key {key} ({:.1?}); finding referrers...", nodes.len(), t.elapsed());
+            let starts: Vec<u64> = nodes.iter().map(|n| n.node).collect();
+            let refs = rsscan::nodes::find_referrers(&c.proc, &regions, &starts, 0x50);
+            let mut found = sess.found();
+            for (i, n) in nodes.iter().enumerate() {
+                let v = c.proc.read::<i32>(n.node + 0x40).unwrap_or(i32::MIN);
+                let q8 = c.proc.read::<u64>(n.node + 8).unwrap_or(0);
+                let hash = c.proc.read::<u64>(n.node + 0x20).unwrap_or(0);
+                let r: Vec<String> = refs
+                    .iter()
+                    .filter(|x| x.1 == i)
+                    .map(|x| format!("{}@+{:#x}", fmt_addr(x.0, &c.modules), x.2))
+                    .collect();
+                println!(
+                    "#{i:<3} node {:#x}  value {:>11}  +0 {:016x}  +8 {:016x}  hash {:016x}  refs[{}] {}",
+                    n.node,
+                    v,
+                    n.tag,
+                    q8,
+                    hash,
+                    r.len(),
+                    r.join(" ")
+                );
+                if let Some(p) = &save_prefix {
+                    found.insert(format!("{p}{i}"), Found { addr: format!("{:#x}", n.node + 0x40), ty: ValType::I32, note: format!("key {key} node #{i}") });
+                }
+            }
+            if save_prefix.is_some() {
+                sess.save_found(&found)?;
+                println!("saved value addresses as found entries");
             }
         }
         Cmd::Table { addr, stride, key_off, val_off, before, after, keys, raw } => {

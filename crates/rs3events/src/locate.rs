@@ -18,6 +18,78 @@ pub enum Located {
     /// Objects carrying `vtable` at +0 (key 0 = chosen object); `alternates` are other objects
     /// that agreed with it (fail-over candidates).
     Objects { vtable: u64, entries: HashMap<i64, u64>, count: usize, alternates: Vec<u64> },
+    /// Var hash index: slot `key % buckets` at `start + slot*8` points at the var's entry.
+    Index { start: u64, buckets: u64 },
+}
+
+/// Look `key` up in a chained var index: walk from slot `key % buckets` along `next` pointers.
+/// Returns the entry address.
+pub fn index_lookup<M: MemRead>(mem: &M, start: u64, buckets: u64, key: i64, key_off: u32, next_off: u32) -> Option<u64> {
+    let slot = start + key.rem_euclid(buckets as i64) as u64 * 8;
+    let mut p = mem.read::<u64>(slot).ok()?;
+    for _ in 0..64 {
+        if p == 0 {
+            return None;
+        }
+        if mem.read::<i32>(p + key_off as u64).ok()? as i64 == key {
+            return Some(p);
+        }
+        p = mem.read::<u64>(p + next_off as u64).ok()?;
+    }
+    None
+}
+
+/// Find the var index. Every bucket whose chain starts with a row of the already-located `via`
+/// table has a slot pointing at that row, so each pointer into the table votes for
+/// `index_start = slot_address - (row_key % buckets) * 8`. The most-voted start that resolves
+/// all probe keys (by chained lookup) to their table rows wins.
+pub fn locate_var_index<M: MemRead>(
+    mem: &M,
+    regions: &[RegionInfo],
+    def: &LocatorDef,
+    via_def: &LocatorDef,
+    table: (u64, u64, bool),
+) -> Result<Located, String> {
+    let LocatorDef::VarIndex { probe_keys, buckets, entry_key_off, entry_next_off, .. } = def else {
+        return Err("not a var index".into());
+    };
+    let LocatorDef::SortedTable { stride, key_off, .. } = via_def else {
+        return Err("`via` is not a sorted table".into());
+    };
+    let (ts, tc, td) = table;
+    let s = *stride as u64;
+    let rows = mem.read_vec(ts, (tc * s) as usize).map_err(|e| format!("reading via table: {e}"))?;
+    let entries: Vec<(i64, u64)> = probe_keys
+        .iter()
+        .map(|k| table_lookup(mem, ts, tc, td, *stride, *key_off, *k).map(|e| (*k, e)).ok_or(format!("probe key {k} not in the via table")))
+        .collect::<Result<_, _>>()?;
+    let (lo, hi) = (ts, ts + tc * s);
+    let b = *buckets;
+    let mut votes: HashMap<u64, u32> = HashMap::new();
+    for_each_chunk(mem, regions, |base, bytes| {
+        let mut i = ((8 - base % 8) % 8) as usize;
+        while i + 8 <= bytes.len() {
+            let v = u64::from_le_bytes(bytes[i..i + 8].try_into().unwrap());
+            if v >= lo && v < hi && (v - lo) % s == 0 {
+                let r = (v - lo) as usize + *key_off as usize;
+                let k = i32::from_le_bytes(rows[r..r + 4].try_into().unwrap()) as i64;
+                let holder = base + i as u64;
+                if let Some(start) = holder.checked_sub(k.rem_euclid(b as i64) as u64 * 8) {
+                    *votes.entry(start).or_default() += 1;
+                }
+            }
+            i += 8;
+        }
+        true
+    });
+    let mut ranked: Vec<(u64, u32)> = votes.into_iter().filter(|(_, n)| *n >= 8).collect();
+    ranked.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    for (start, _) in ranked.iter().take(16) {
+        if entries.iter().all(|(k, e)| index_lookup(mem, *start, b, *k, *entry_key_off, *entry_next_off) == Some(*e)) {
+            return Ok(Located::Index { start: *start, buckets: b });
+        }
+    }
+    Err(format!("no var index found ({} candidate starts with >= 8 votes)", ranked.len()))
 }
 
 pub fn locate_vtable_objects<M: MemRead>(mem: &M, regions: &[RegionInfo], vtable: u64, pick_by_mode_at: Option<u32>) -> Result<Located, String> {
@@ -261,8 +333,13 @@ pub fn locate_hash_nodes<M: MemRead>(mem: &M, regions: &[RegionInfo], def: &Loca
     Ok(Located::Nodes { entries, alternates })
 }
 
+/// Context for dependent locators (var_index needs its already-located `via` table).
+pub struct LocateCtx {
+    pub via: Option<(LocatorDef, (u64, u64, bool))>,
+}
+
 /// Run a locate on a fresh handle (called from a background thread).
-pub fn run_locate(pid: u32, name: String, def: LocatorDef, keys: Vec<i64>) -> LocateResult {
+pub fn run_locate(pid: u32, name: String, def: LocatorDef, keys: Vec<i64>, ctx: LocateCtx) -> LocateResult {
     let t = std::time::Instant::now();
     let result = match Process::open(pid) {
         Err(e) => Err(e.to_string()),
@@ -271,6 +348,10 @@ pub fn run_locate(pid: u32, name: String, def: LocatorDef, keys: Vec<i64>) -> Lo
             match &def {
                 LocatorDef::SortedTable { .. } => locate_sorted_table(&p, &regions, &def, &keys),
                 LocatorDef::HashNodes { .. } => locate_hash_nodes(&p, &regions, &def, &keys),
+                LocatorDef::VarIndex { .. } => match &ctx.via {
+                    Some((via_def, table)) => locate_var_index(&p, &regions, &def, via_def, *table),
+                    None => Err("its `via` table is not located yet".into()),
+                },
                 LocatorDef::VtableObject { vtable_rva, module, pick_by_mode_at } => {
                     let base = match module {
                         None => p.main_module().map(|m| m.base).map_err(|e| e.to_string()),
@@ -336,6 +417,48 @@ mod tests {
                 assert_eq!((s, count, desc), (ds, 300, true));
                 assert_eq!(entries[&450], ds + 149 * 0x30);
                 assert_eq!(entries[&0], ds + 299 * 0x30);
+            }
+            other => panic!("{other:?}"),
+        }
+        // Chained var index over the descending table (like the real client): slot key % B points
+        // at the first entry of its chain, entry+0x28 is `next`. Lifepoints (13537) is a separate
+        // node entry pushed onto a bucket that already has a table row, and probe key 450 is
+        // inserted early so a later row ends up in front of it in the chain.
+        const B: u64 = 211;
+        let mut mi = md.clone();
+        mi.add(0x40000, vec![0; (B * 8) as usize]);
+        mi.add(0x50000, vec![0; 0x100]);
+        let node_entry = 0x50000u64;
+        mi.write(node_entry, 13537i32);
+        mi.write(node_entry + 8, 9900i32);
+        let push = |m: &mut FakeMem, key: u64, entry: u64| {
+            let slot = 0x40000 + (key % B) * 8;
+            let head = m.read::<u64>(slot).unwrap();
+            m.write(entry + 0x28, head);
+            m.write(slot, entry);
+        };
+        for i in (0..300u64).rev() {
+            push(&mut mi, (299 - i) * 3, ds + i * 0x30); // keys ascending, so 450 is under later ones
+        }
+        push(&mut mi, 13537, node_entry);
+        let vi = LocatorDef::VarIndex {
+            via: "t".into(),
+            probe_keys: vec![450, 3],
+            buckets: B,
+            entry_key_off: 0,
+            entry_value_off: 8,
+            entry_next_off: 0x28,
+        };
+        // Probe key 3 is not first in its bucket: 636 (636 % 211 == 3) was pushed after it.
+        let row3 = ds + 298 * 0x30;
+        assert_ne!(mi.read::<u64>(0x40000 + 3 * 8).unwrap(), row3);
+        match locate_var_index(&mi, &mi.region_infos(), &vi, &def, (ds, 300, true)).unwrap() {
+            Located::Index { start, buckets } => {
+                assert_eq!((start, buckets), (0x40000, B));
+                let e = index_lookup(&mi, start, buckets, 13537, 0, 0x28).expect("lifepoints via chain");
+                assert_eq!(mi.read::<i32>(e + 8).unwrap(), 9900);
+                assert_eq!(index_lookup(&mi, start, buckets, 450, 0, 0x28), Some(ds + 149 * 0x30));
+                assert_eq!(index_lookup(&mi, start, buckets, 3, 0, 0x28), Some(row3), "found by walking the chain");
             }
             other => panic!("{other:?}"),
         }

@@ -71,23 +71,34 @@ Flags: `--open`, `--record <file.jsonl>`, `--pid`, `--all` (one source per clien
 | Prayer | varp **3274** in the varp table | bits 0–14 = points ×10, bit 15 = flag, bits 16–23 = prayer level (max = level ×10) |
 | Adrenaline | varp **679** | tenths of a percent (360 = 36.0%) |
 | Server tick | `+0x180` in objects with vtable `rs2client.exe+0x15b3a88` | u32, +1 every 600 ms, counts from login |
-| Lifepoints | var node, key **13537** | **Disabled**: see below |
+| Lifepoints | var **13537** through the var index | plain integer |
+| Lifepoints max (candidate) | var **13538** through the var index | reads 9900 = orb max; not yet confirmed to follow gear changes |
 
-All three enabled signals are found by **locators** at attach, so no pointer paths are needed. Locators scan memory for a container's *structure*, then read values by key. That takes 20–60 seconds after `rs3-eventd` starts or a client appears; the status is `waiting` until it finishes:
+Every signal is found by **locators** at attach, so no pointer paths are needed. Locators scan memory for a container's *structure*, then read values by key. That takes 15–60 seconds after `rs3-eventd` starts or a client appears; the status is `waiting` until it finishes:
 
 - `sorted_table`: the varp table is 2048 entries of 0x30 bytes, `{i32 id @+0, value @+8}`, sorted by id. It was ascending in one session and **descending after a restart**; both are handled. An 11k-entry definition table also matches; `max_entries` and an "id+1 values" check reject it.
-- `hash_nodes`: 0x50-byte nodes, self-link `[+0x30] == node+0x28`, key at +0x38, value at +0x40. The qword at +0 is leftover allocator data, not a tag. Only nodes that something points to at +0x38 are accepted, which rejects freed copies with stale values.
-- `vtable_object`: objects whose first qword is a given vtable. When many share it, `pick_by_mode_at` picks the copies that agree.
+- `var_index`: the client's chained hash table over **all** vars. It has 8783 slots; slot `id % 8783` points at the first entry of its chain. Every entry, whether a varp table row or a separately allocated var node, is a 0x30-byte record `{i32 id @0, value @8, next @0x28}`. Lookup walks the chain. To find the index, every pointer into the varp table "votes" for `slot address − (id % 8783) × 8`. The most-voted start that resolves the probe vars wins. Because the client keeps this index current when it reallocates nodes, reads through it are never stale.
+- `vtable_object`: objects whose first qword is a given vtable. When many share it, `pick_by_mode_at` picks the copies that agree, and the reader fails over between them when one is freed.
+- `hash_nodes` (no longer used): scanning for loose var nodes. Unreliable for lifepoints, because id 13537 also appears in about 20 unrelated id-keyed tables and the real node gets reallocated.
 
-**Lifepoints is disabled.** The client keeps about 20 referenced copies of var 13537, most of them stale (one read 0 while the orb showed 9,900). It also reallocates them over time, so a node can be valid at attach and wrong a few minutes later. Picking the right copy needs the owning container worked out. The plan is a damage session that shows which copies track HP, then reading the container they share.
+**How lifepoints was pinned down:**
+
+1. A damage test showed that only 2 of the 21 nodes with key 13537 followed the orb (9900 → 7771 → 4709).
+2. Their only referrers were slot 4754 of two 8783-slot arrays, and 13537 % 8783 = 4754.
+3. After a client restart, varp 3274 was hidden behind var 12057 in the same bucket (12057 % 8783 = 3274). 12057's entry linked to it at `+0x28`, which revealed the chaining.
 
 **Restart test (2026-11-08, same build):**
 
 - `rs3-eventd` in auto-attach mode noticed the old client exit and attached to the new one by itself.
 - Varps and tick re-located with no config changes. Values matched the screen (prayer 975/990, adrenaline 36%), and the tick counter restarted from login.
 - For comparison, pointer paths saved before the restart mostly broke: **4 of 496** tick paths and **0 of 45** lifepoints paths survived. The four survivors start at `rs2client.exe+0x1963d08`, `+0x1935480` and `+0x1935108`, and could make attach faster.
+- Lifepoints through the var index, checked against the orb on each run:
+  - run 1 (fresh client): 3897 ✓
+  - run 2 (server restart): 3704 ✓
+  - run 3 (client restart, index at a new address): 3365 ✓
+  - Regeneration streamed as events on tick boundaries (+9 every 10 ticks).
 
-Still to map: GCD and ability cooldowns (needs a combat session), lifepoints (see above), NPCs and Telos.
+Still to map: GCD and ability cooldowns (needs a combat session), NPCs and Telos.
 
 Not verified yet: the next weekly client update (the build id will change; the vtable offset likely moves).
 
