@@ -1,0 +1,15 @@
+[package]
+name = "rs3events"
+description = "RS3 game-state event library: samples client memory and emits typed events"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+crossbeam-channel.workspace = true
+rsmem.workspace = true
+rsmodel.workspace = true
+rsoffsets.workspace = true
+tracing.workspace = true

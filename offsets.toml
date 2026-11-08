@@ -1,0 +1,103 @@
+# Where RS3 game state lives in rs2client.exe memory. Loaded at runtime by rs3-eventd
+# and `rsscan resolve`. Discovered live on 2026-11-08 against client build 6ada3f59-1a86000.
+#
+# Address model (Cheat Engine semantics):
+#   anchor = module base + module_offset            (or a code signature, see `rsscan siggen`)
+#   chain  = [o1, o2, ...]:  addr = read_ptr(addr) + o1; addr = read_ptr(addr) + o2; ...
+#   signal = final addr + offset (no deref) -> typed value
+# Locators instead find a keyed container by scanning memory at attach (~1 min), then read
+# values by key. They survive client restarts without pointer paths.
+
+[client]
+exe = "rs2client.exe"
+window_title_prefix = "RuneScape"
+build = "6ada3f59-1a86000"
+
+[sampler]
+period_us = 1000
+npc_period_us = 5000
+torn_read_retries = 3
+check_grace_ms = 500
+
+# Sorted varp table: 0x30-byte entries {i32 id @+0, value @+8}, ids ascending (2048 entries, ids 0..~6084).
+[locators.varps]
+kind = "sorted_table"
+stride = 0x30
+key_off = 0
+value_off = 8
+probe_keys = [3274, 679]
+min_entries = 512
+max_entries = 4096   # an 11k-entry varp *definition* table also matches; values there are id+1
+
+# Hash-table var nodes: 0x50-byte nodes, tag 7 @+0, link @+0x28, self-link @+0x30 -> +0x28,
+# i32 key @+0x38, value @+0x40.
+[locators.var_nodes]
+kind = "hash_nodes"
+tag = 7
+key_off = 0x38
+value_off = 0x40
+link_off = 0x28
+self_off = 0x30
+
+[signals.lifepoints]
+locator = "var_nodes"
+key = 13537
+note = "current lifepoints (max not found yet)"
+
+# varp 3274: bits 0..14 = prayer points x10, bit 15 = flag, bits 16..23 = prayer level.
+[signals.prayer]
+locator = "varps"
+key = 3274
+bits = [0, 14]
+scale = 0.1
+
+[signals.prayer_max]
+locator = "varps"
+key = 3274
+bits = [16, 23]
+scale = 10.0
+
+# varp 679: adrenaline in tenths of a percent (360 = 36.0%).
+[signals.adrenaline]
+locator = "varps"
+key = 679
+max = 1000
+
+# Server tick counter (+1 every 600 ms) lives at +0x180 in objects whose vtable is
+# rs2client.exe+0x15b3a88 (several instances, all in sync). If it can't be found the reader
+# falls back to its tick estimator.
+[locators.tick_obj]
+kind = "vtable_object"
+vtable_rva = 0x15b3a88
+pick_by_mode_at = 0x180   # many objects share the vtable; the tick copies agree with each other
+
+[signals.tick]
+locator = "tick_obj"
+key = 0
+offset = 0x180
+type = "u32"
+
+[gcd]
+ticks = 3
+# ability_signal: not found yet (needs a combat session)
+
+[[checks]]
+signal = "prayer"
+min = 0
+max = 2000
+le_signal = "prayer_max"   # catches locking onto a wrong table (seen once: prayer 327, max 0)
+
+[[checks]]
+signal = "prayer_max"
+min = 10
+max = 2000
+
+[[checks]]
+signal = "adrenaline"
+min = 0
+max = 1200
+
+[[checks]]
+signal = "lifepoints"
+min = 0
+max = 200000

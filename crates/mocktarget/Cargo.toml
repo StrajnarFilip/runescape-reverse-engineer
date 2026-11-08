@@ -1,0 +1,22 @@
+[package]
+name = "mocktarget"
+description = "Fake game process with a known memory layout, for testing the reader without RS3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+windows-sys.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+futures-util.workspace = true
+rs3-eventd.workspace = true
+rs3events.workspace = true
+rsmem.workspace = true
+rsoffsets.workspace = true
+rsscan.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true

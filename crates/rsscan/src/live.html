@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rsscan live</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e8ee; --muted:#8a92a6; --hot:#e0b341; --hit:#4caf7a; font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif; }
+  body { margin:0; background:var(--bg); color:var(--text); }
+  header { position:sticky; top:0; background:var(--bg); display:flex; gap:10px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); flex-wrap:wrap; z-index:1; }
+  h1 { font-size:15px; margin:0; }
+  input, select { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 8px; font:inherit; font-size:13px; }
+  .muted { color:var(--muted); font-size:12px; }
+  table { border-collapse:collapse; width:100%; font-variant-numeric:tabular-nums; font-size:13px; }
+  th, td { text-align:left; padding:4px 12px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { color:var(--muted); font-weight:600; font-size:12px; background:var(--bg); }
+  td.v { font-weight:650; font-size:15px; }
+  tr.hot td { background: color-mix(in srgb, var(--hot) 18%, transparent); }
+  tr.label td.l { color: var(--hit); font-weight:600; }
+  td.h { color:var(--muted); font-family: ui-monospace, Consolas, monospace; font-size:12px; }
+  .wrap { padding: 0 16px 16px; overflow-x:auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">rsscan live</h1>
+  <input id="q" placeholder="filter: key, value or label" size="26" aria-label="filter">
+  <label class="muted">sort
+    <select id="sort"><option value="recent">recently changed</option><option value="key">key</option><option value="changes">most changes</option></select>
+  </label>
+  <label class="muted"><input type="checkbox" id="changedOnly"> only rows that changed</label>
+  <span class="muted" id="stat"></span>
+</header>
+<div class="wrap">
+<table>
+  <thead><tr><th>label</th><th>key</th><th>value</th><th>changes</th><th>last change</th><th>recent values</th><th>address</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+async function poll() {
+  try {
+    const r = await fetch("/values?q=" + encodeURIComponent($("q").value.trim()), { cache: "no-store" });
+    const d = await r.json();
+    $("title").textContent = d.title;
+    render(d.rows, d.total);
+  } catch (e) { $("stat").textContent = "server not reachable"; }
+  setTimeout(poll, 150);
+}
+function render(rows, total) {
+  const q = $("q").value.trim().toLowerCase();
+  let list = rows.filter((r) => !q || String(r.key).includes(q) || String(r.value).includes(q) || r.label.toLowerCase().includes(q));
+  if ($("changedOnly").checked) list = list.filter((r) => r.changes > 0);
+  const s = $("sort").value;
+  if (s === "recent") list.sort((a, b) => (a.ago ?? 1e9) - (b.ago ?? 1e9) || (a.key ?? 0) - (b.key ?? 0));
+  else if (s === "changes") list.sort((a, b) => b.changes - a.changes);
+  else list.sort((a, b) => (a.key ?? 0) - (b.key ?? 0));
+  $("stat").textContent = `${list.length} shown · ${total} watched (unchanged rows appear when you search for their key or value)`;
+  $("rows").innerHTML = list.slice(0, 400).map((r) => {
+    const hot = r.ago != null && r.ago < 1.5;
+    const cls = [hot ? "hot" : "", r.label ? "label" : ""].join(" ");
+    const ago = r.ago == null ? "–" : r.ago < 60 ? r.ago.toFixed(1) + " s ago" : Math.round(r.ago / 60) + " min ago";
+    return `<tr class="${cls}"><td class="l">${r.label || ""}</td><td>${r.key ?? ""}</td><td class="v">${r.value ?? "?"}</td><td>${r.changes}</td><td>${ago}</td><td class="h">${r.hist.join(" → ")}</td><td class="h">${r.addr}</td></tr>`;
+  }).join("");
+}
+poll();
+</script>
+</body>
+</html>

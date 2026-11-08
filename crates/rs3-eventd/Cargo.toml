@@ -1,0 +1,27 @@
+[package]
+name = "rs3-eventd"
+description = "WebSocket server streaming rs3events to local clients"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "rs3_eventd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rs3-eventd"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+crossbeam-channel.workspace = true
+futures-util.workspace = true
+rs3events.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

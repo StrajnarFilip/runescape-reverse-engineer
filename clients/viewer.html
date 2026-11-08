@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RS3 Event Viewer</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e6e8ee; --muted: #8a92a6;
+    --hp: #d9534f; --pray: #4fb3d9; --adren: #e0b341; --gcd: #9b7be0; --boss: #e07b39; --ok: #4caf7a; --warn: #e0b341; --bad: #d9534f;
+    font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); }
+  header { display: flex; gap: 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header input { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; }
+  .pill { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.ok { color: var(--ok); border-color: var(--ok); } .pill.warn { color: var(--warn); border-color: var(--warn); } .pill.bad { color: var(--bad); border-color: var(--bad); }
+  main { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); gap: 16px; padding: 16px; }
+  main > section { min-width: 0; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 16px; }
+  .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  .gauge { margin: 10px 0; }
+  .gauge .row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+  .bar { height: 10px; background: #0b0d11; border-radius: 99px; overflow: hidden; border: 1px solid var(--line); }
+  .bar > div { height: 100%; width: 0%; transition: width 80ms linear; }
+  .big { font-size: 22px; font-weight: 650; margin: 4px 0 2px; }
+  .muted { color: var(--muted); font-size: 12px; }
+  #log { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; height: calc(100vh - 140px); overflow: auto; white-space: pre; line-height: 1.45; }
+  #log .t { color: var(--muted); } #log .k { color: var(--pray); }
+  .actions { font-family: ui-monospace, Consolas, monospace; font-size: 12px; max-height: 160px; overflow: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>RS3 Event Viewer</h1>
+  <input id="url" value="ws://127.0.0.1:7878/events" size="30" aria-label="server URL">
+  <span id="conn" class="pill">disconnected</span>
+  <span id="state" class="pill">no source</span>
+  <span id="tick" class="pill">tick –</span>
+  <input id="filter" placeholder="filter log (e.g. boss|gcd)" size="24" aria-label="log filter">
+</header>
+<main>
+  <section>
+    <div class="card">
+      <h2>Player</h2>
+      <div class="gauge"><div class="row"><span>Lifepoints</span><span id="lpv">–</span></div><div class="bar"><div id="lpb" style="background:var(--hp)"></div></div></div>
+      <div class="gauge"><div class="row"><span>Prayer</span><span id="prv">–</span></div><div class="bar"><div id="prb" style="background:var(--pray)"></div></div></div>
+      <div class="gauge"><div class="row"><span>Adrenaline</span><span id="adv">–</span></div><div class="bar"><div id="adb" style="background:var(--adren)"></div></div></div>
+      <div class="gauge"><div class="row"><span>Global cooldown</span><span id="gcdv">ready</span></div><div class="bar"><div id="gcdb" style="background:var(--gcd)"></div></div></div>
+    </div>
+    <div class="card">
+      <h2>Boss</h2>
+      <div id="bossname" class="muted">no boss in view</div>
+      <div class="big" id="bossaction">–</div>
+      <div class="gauge"><div class="row"><span>HP</span><span id="bosshpv">–</span></div><div class="bar"><div id="bosshpb" style="background:var(--boss)"></div></div></div>
+      <div class="muted" style="margin-top:8px">Recent actions</div>
+      <div class="actions" id="bossactions"></div>
+    </div>
+  </section>
+  <section class="card"><h2>Events</h2><div id="log"></div></section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let ws = null, gcd = null, src = null, retry = null;
+const LOG_MAX = 400;
+const lines = [];
+
+function pill(el, text, cls) { el.textContent = text; el.className = "pill" + (cls ? " " + cls : ""); }
+function setBar(id, v, max) { const p = max > 0 ? Math.max(0, Math.min(100, (v / max) * 100)) : 0; $(id).style.width = p + "%"; }
+function fmt(n) { return n == null ? "–" : Number(n).toLocaleString(); }
+
+function log(ev) {
+  const t = new Date(ev.unix_us / 1000).toISOString().slice(11, 23);
+  const { seq, t_us, unix_us, tick, tick_phase_ms, src, type, ...rest } = ev;
+  lines.push(`<span class="t">${t} #${tick ?? "-"}</span> <span class="k">${type}</span> ${escape(JSON.stringify(rest))}`);
+  if (lines.length > LOG_MAX) lines.shift();
+  renderLog();
+}
+function escape(s) { return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+let renderPending = false;
+function renderLog() {
+  if (renderPending) return;
+  renderPending = true;
+  requestAnimationFrame(() => {
+    renderPending = false;
+    const f = $("filter").value.trim();
+    let re = null; try { re = f ? new RegExp(f, "i") : null; } catch { re = null; }
+    const el = $("log");
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
+    el.innerHTML = lines.filter((l) => !re || re.test(l)).join("\n");
+    if (atBottom) el.scrollTop = el.scrollHeight;
+  });
+}
+$("filter").addEventListener("input", renderLog);
+
+function applyPlayer(p) {
+  if (p.lifepoints != null) { $("lpv").textContent = `${fmt(p.lifepoints)} / ${fmt(p.lifepoints_max)}`; setBar("lpb", p.lifepoints, p.lifepoints_max); }
+  if (p.prayer != null) { $("prv").textContent = `${fmt(p.prayer)} / ${fmt(p.prayer_max)}`; setBar("prb", p.prayer, p.prayer_max); }
+  if (p.adrenaline != null) { const pct = p.adrenaline_pct; $("adv").textContent = pct != null ? `${pct.toFixed(1)}%` : fmt(p.adrenaline); setBar("adb", pct ?? 0, 100); }
+}
+
+function bossAction(ev) {
+  $("bossname").textContent = ev.boss;
+  $("bossaction").textContent = ev.action;
+  const el = $("bossactions");
+  const t = new Date(ev.unix_us / 1000).toISOString().slice(17, 23);
+  el.insertAdjacentHTML("afterbegin", `<div>${t}  #${ev.tick ?? "-"}  ${escape(ev.action)}</div>`);
+  while (el.children.length > 30) el.lastChild.remove();
+}
+
+function onEvent(ev) {
+  if (src != null && ev.src !== src) return;
+  switch (ev.type) {
+    case "status": pill($("state"), ev.state + (ev.label ? " · " + ev.label : ""), ev.state === "ok" ? "ok" : ev.state === "waiting" || ev.state === "attaching" ? "warn" : "bad"); break;
+    case "tick": $("tick").textContent = `tick ${ev.n} (${ev.basis})`; break;
+    case "player.lifepoints": applyPlayer({ lifepoints: ev.new, lifepoints_max: ev.max }); break;
+    case "player.prayer": applyPlayer({ prayer: ev.new, prayer_max: ev.max }); break;
+    case "player.adrenaline": applyPlayer({ adrenaline: ev.new, adrenaline_pct: ev.pct }); break;
+    case "player.gcd": gcd = { end: ev.ends_at_unix_us / 1000, dur: ev.duration_ms }; break;
+    case "player.gcd_ready": gcd = null; break;
+    case "boss.action": bossAction(ev); break;
+    case "boss.hp": $("bossname").textContent = ev.boss; $("bosshpv").textContent = `${fmt(ev.hp)}${ev.max ? " / " + fmt(ev.max) : ""}${ev.pct != null ? ` (${ev.pct.toFixed(1)}%)` : ""}`; setBar("bosshpb", ev.pct ?? 0, 100); break;
+  }
+  if (ev.type !== "tick") log(ev);
+}
+
+function onSnapshot(s) {
+  if (src == null) src = s.src;
+  if (s.src !== src) return;
+  pill($("state"), s.state + (s.label ? " · " + s.label : ""), s.state === "ok" ? "ok" : "warn");
+  applyPlayer(s.player);
+  if (s.player.gcd_ends_at_unix_us) gcd = { end: s.player.gcd_ends_at_unix_us / 1000, dur: 1800 };
+  const boss = s.npcs.find((n) => n.name);
+  if (boss) { $("bossname").textContent = boss.name; if (boss.hp_pct != null) setBar("bosshpb", boss.hp_pct, 100); }
+}
+
+function tickGcd() {
+  if (gcd) {
+    const left = Math.max(0, gcd.end - Date.now());
+    $("gcdv").textContent = left > 0 ? `${(left / 1000).toFixed(2)} s` : "ready";
+    setBar("gcdb", left, gcd.dur || 1800);
+  } else { $("gcdv").textContent = "ready"; setBar("gcdb", 0, 1); }
+  requestAnimationFrame(tickGcd);
+}
+requestAnimationFrame(tickGcd);
+
+function connect() {
+  clearTimeout(retry);
+  if (ws) { try { ws.close(); } catch {} }
+  pill($("conn"), "connecting", "warn");
+  ws = new WebSocket($("url").value);
+  ws.onopen = () => pill($("conn"), "connected", "ok");
+  ws.onclose = () => { pill($("conn"), "disconnected", "bad"); retry = setTimeout(connect, 1500); };
+  ws.onmessage = (m) => {
+    let msg; try { msg = JSON.parse(m.data); } catch { return; }
+    if (msg.seq != null) return onEvent(msg);
+    if (msg.type === "snapshot") return onSnapshot(msg.snapshot);
+    if (msg.type === "hello" && msg.sources.length) src = msg.sources[0];
+    if (msg.type === "resync") log({ type: "resync", unix_us: Date.now() * 1000, missed: msg.missed });
+  };
+}
+$("url").addEventListener("change", connect);
+if (location.protocol.startsWith("http")) $("url").value = `ws://${location.host}/events`;
+connect();
+</script>
+</body>
+</html>
