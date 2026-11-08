@@ -2,7 +2,7 @@
 import sys
 import time
 import os
-from winmem import ProcessMemory, processes, MemoryReadError
+from winmem import ProcessMemory, processes, visible_client_pid, MemoryReadError
 from rs3 import RS3, ProfileError
 
 class PythonTelemetry:
@@ -25,11 +25,22 @@ class PythonTelemetry:
             if self.memory is None:
                 if time.perf_counter() < self.retry_after:
                     return self.unavailable(self.last_error or "Waiting for a client")
-                pids = [p for p in processes(include_children=self.pid is not None)
-                        if self.pid is None or p == self.pid]
-                if len(pids) != 1:
-                    raise MemoryReadError("No RS3 client" if not pids else "Multiple clients: specify --pid")
-                self.memory = ProcessMemory(pids[0])
+                pids = set(processes())
+                if self.pid is not None:
+                    pids.intersection_update((self.pid,))
+                if not pids:
+                    raise MemoryReadError("No RS3 client")
+                if len(pids) == 1:
+                    pid = next(iter(pids))
+                else:
+                    pid = visible_client_pid(pids)
+                    if pid is None:
+                        # Preserve the headless fallback for Compatibility Mode helpers.
+                        roots = pids.intersection(processes(include_children=False))
+                        if len(roots) != 1:
+                            raise MemoryReadError("Multiple RS3 processes without a visible game window; specify --pid")
+                        pid = next(iter(roots))
+                self.memory = ProcessMemory(pid)
                 try:
                     self.decoder = RS3(self.memory)
                 except BaseException:

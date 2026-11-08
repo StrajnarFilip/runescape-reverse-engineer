@@ -44,7 +44,7 @@ endif()
 add_library(rs3_native SHARED)
 add_library(rs3::native ALIAS rs3_native)
 set_target_properties(rs3_native PROPERTIES EXPORT_NAME native PREFIX "")
-target_link_libraries(rs3_native PRIVATE rs3_objects bcrypt)
+target_link_libraries(rs3_native PRIVATE rs3_objects bcrypt user32)
 target_include_directories(rs3_native PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
@@ -63,7 +63,7 @@ if(BUILD_TESTING)
     if(MSVC)
         target_compile_definitions(test_native PRIVATE _CRT_SECURE_NO_WARNINGS)
     endif()
-    target_link_libraries(test_native PRIVATE rs3_objects bcrypt)
+    target_link_libraries(test_native PRIVATE rs3_objects bcrypt user32)
     add_test(NAME native COMMAND test_native)
     add_test(NAME python COMMAND "${CMAKE_COMMAND}" -E env
         "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/python/rs3_reader"

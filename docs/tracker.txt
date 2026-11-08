@@ -4,7 +4,8 @@ START
   Build the C library with CMake. See the repository README for commands.
   Double-click Start Tracker.cmd in the repository root or run the tracker from
   the command line. The launcher uses pythonw.exe from C:\Python39 or PATH and
-  forwards command-line options. Use --pid ID when several RS3 clients are open.
+  forwards command-line options. The tracker picks a visible RS3 window by
+  default. Use --pid ID to select a specific process.
   Close the window to stop its Python consumer and native worker.
   No pip packages, injected game agent, or network server are required.
 

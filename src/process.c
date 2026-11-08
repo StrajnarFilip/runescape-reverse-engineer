@@ -3,6 +3,7 @@
 
 #include <bcrypt.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <tlhelp32.h>
 #include <wchar.h>
 
@@ -76,24 +77,77 @@ void schedule_retry(rs3_context *c,uint64_t now) {
     snprintf(c->retry_error,sizeof c->retry_error,"%s",c->error);
     detach(c); c->retry_after=now+(uint64_t)c->retry_ms*1000000ull;
 }
+typedef struct client_windows {
+    const DWORD *pids;
+    size_t count;
+    DWORD foreground_pid, selected_pid;
+} client_windows;
+
+static BOOL CALLBACK consider_client_window(HWND window, LPARAM param) {
+    client_windows *selection = (client_windows *)param;
+    DWORD pid = 0;
+    if (!IsWindowVisible(window) || GetWindow(window, GW_OWNER)) return TRUE;
+    if (!GetWindowThreadProcessId(window, &pid)) return TRUE;
+    for (size_t i = 0; i < selection->count; i++) {
+        if (selection->pids[i] != pid) continue;
+        if (GetWindowTextLengthW(window) > 0 &&
+            (!selection->selected_pid || pid == selection->foreground_pid ||
+             (selection->selected_pid != selection->foreground_pid && pid < selection->selected_pid))) {
+            selection->selected_pid = pid;
+        }
+        break;
+    }
+    return TRUE;
+}
+
+static DWORD discover_client(rs3_context *c) {
+    HANDLE list = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (list == INVALID_HANDLE_VALUE) return fail(c, RS3_READ_FAILED, "Process discovery failed");
+    PROCESSENTRY32W entry = {0};
+    entry.dwSize = sizeof entry;
+    DWORD pid = 0, *pids = NULL;
+    size_t count = 0;
+    for (BOOL found = Process32FirstW(list, &entry); found; found = Process32NextW(list, &entry)) {
+        if (_wcsicmp(entry.szExeFile, L"rs2client.exe")) continue;
+        if (c->requested_pid) {
+            if (entry.th32ProcessID != c->requested_pid) continue;
+            pid = entry.th32ProcessID;
+            break;
+        }
+        DWORD *next = realloc(pids, (count + 1) * sizeof *pids);
+        if (!next) {
+            free(pids);
+            CloseHandle(list);
+            return fail(c, RS3_READ_FAILED, "Client discovery allocation failed");
+        }
+        pids = next;
+        pids[count++] = entry.th32ProcessID;
+    }
+    CloseHandle(list);
+    if (count == 1) {
+        pid = pids[0];
+    } else if (count > 1) {
+        client_windows selection = {pids, count, 0, 0};
+        HWND foreground = GetForegroundWindow();
+        if (foreground) GetWindowThreadProcessId(foreground, &selection.foreground_pid);
+        EnumWindows(consider_client_window, (LPARAM)&selection);
+        pid = selection.selected_pid;
+    }
+    free(pids);
+    if (!pid) fail(c, count > 1 ? RS3_MULTIPLE_CLIENTS : RS3_NO_CLIENT,
+                   count > 1 ? "Multiple RS3 processes without a visible game window; specify a PID" : "No RS3 client");
+    return pid;
+}
+
 /* Fingerprint the file and loaded entrypoints before following any offsets. */
 int attach(rs3_context *c) {
     c->pid=0; c->creation_time=0; c->actual_sha256[0]=0;
-    HANDLE list=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);
-    PROCESSENTRY32W pe={0}; pe.dwSize=sizeof pe; uint32_t pid=0,count=0;
-    if (list==INVALID_HANDLE_VALUE) return fail(c,RS3_READ_FAILED,"Process discovery failed");
-    if (Process32FirstW(list,&pe)) do {
-        if (!_wcsicmp(pe.szExeFile,L"rs2client.exe") && (!c->requested_pid || pe.th32ProcessID==c->requested_pid)) {
-            pid=pe.th32ProcessID; count++;
-        }
-    } while (Process32NextW(list,&pe));
-    CloseHandle(list);
-    if (count!=1) { c->pid=0; return fail(c,count?RS3_MULTIPLE_CLIENTS:RS3_NO_CLIENT,
-        count?"Multiple RS3 clients; select a PID":"No RS3 client"); }
+    DWORD pid = discover_client(c);
+    if (!pid) return 0;
     c->pid=pid;
     c->process=OpenProcess(PROCESS_QUERY_INFORMATION|PROCESS_VM_READ,FALSE,pid);
     if (!c->process) return fail(c,RS3_READ_FAILED,"Cannot open RS3 with read-only access");
-    list=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,pid);
+    HANDLE list=CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,pid);
     MODULEENTRY32W module={0}; module.dwSize=sizeof module;
     if (list==INVALID_HANDLE_VALUE) return fail(c,RS3_READ_FAILED,"Module discovery failed");
     int found=Module32FirstW(list,&module); CloseHandle(list);

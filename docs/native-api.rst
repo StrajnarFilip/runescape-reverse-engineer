@@ -90,9 +90,11 @@ Destroy them only with ``rs3_destroy`` / ``rs3_snapshot_destroy``. Array output
 buffers belong to the caller; no CRT allocator crosses the language boundary.
 Borrowed result/profile strings are immutable and valid while the DLL is loaded.
 
-* ``rs3_create(options, &context)``: defaults when options is NULL; PID 0 discovers
-  the unique client. Multiple clients need an explicit PID. ``struct_size`` must
-  equal ``sizeof(rs3_options)``; reserved must be zero. Retry 0 selects 1000 ms.
+* ``rs3_create(options, &context)``: NULL options use defaults. PID 0 selects the
+  sole client process or, with several processes, prefers the foreground game
+  window and then the visible game window with the lowest PID. A nonzero PID
+  selects that process directly. Set ``struct_size`` to ``sizeof(rs3_options)``
+  and reserved to zero. Retry 0 selects 1000 ms.
   No running/supported client is a sample availability condition, not a create error.
 * ``rs3_snapshot_create(&snapshot)``: one caller-owned snapshot per consumer.
 * ``rs3_sample(context, snapshot)``: synchronous acquisition. Mutually exclusive

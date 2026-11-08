@@ -10,6 +10,9 @@ if C.sizeof(C.c_void_p) != 8:
     raise RuntimeError("Use 64-bit Python")
 
 k32 = C.WinDLL("kernel32", use_last_error=True)
+user32 = C.WinDLL("user32")
+WindowCallback = C.WINFUNCTYPE(W.BOOL, W.HWND, W.LPARAM)
+GW_OWNER = 4
 
 class PROCESSENTRY32W(C.Structure):
     _fields_ = [("dwSize", W.DWORD), ("cntUsage", W.DWORD),
@@ -31,8 +34,8 @@ class MEMORY_BASIC_INFORMATION(C.Structure):
                 ("RegionSize", C.c_size_t), ("State", W.DWORD),
                 ("Protect", W.DWORD), ("Type", W.DWORD)]
 
-def _bind(name, args, result):
-    fn = getattr(k32, name)
+def _bind(name, args, result, dll=k32):
+    fn = getattr(dll, name)
     fn.argtypes, fn.restype = args, result
     return fn
 
@@ -47,6 +50,12 @@ _read = _bind("ReadProcessMemory", [W.HANDLE, C.c_void_p, C.c_void_p, C.c_size_t
 _query = _bind("VirtualQueryEx", [W.HANDLE, C.c_void_p, C.POINTER(MEMORY_BASIC_INFORMATION), C.c_size_t], C.c_size_t)
 _exitcode = _bind("GetExitCodeProcess", [W.HANDLE, C.POINTER(W.DWORD)], W.BOOL)
 _times = _bind("GetProcessTimes", [W.HANDLE] + [C.POINTER(W.FILETIME)] * 4, W.BOOL)
+_enum_windows = _bind("EnumWindows", [WindowCallback, W.LPARAM], W.BOOL, user32)
+_foreground_window = _bind("GetForegroundWindow", [], W.HWND, user32)
+_window_process = _bind("GetWindowThreadProcessId", [W.HWND, C.POINTER(W.DWORD)], W.DWORD, user32)
+_is_window_visible = _bind("IsWindowVisible", [W.HWND], W.BOOL, user32)
+_get_window = _bind("GetWindow", [W.HWND, W.UINT], W.HWND, user32)
+_window_title_length = _bind("GetWindowTextLengthW", [W.HWND], C.c_int, user32)
 
 INVALID_HANDLE = C.c_void_p(-1).value
 
@@ -72,6 +81,31 @@ def processes(name="rs2client.exe", include_children=True):
     for pid, parent in matches.items():
         if include_children or parent not in matches:
             yield pid
+
+
+def _window_pid(window):
+    pid = W.DWORD()
+    if window:
+        _window_process(window, C.byref(pid))
+    return pid.value
+
+
+def visible_client_pid(pids):
+    """Prefer the foreground game window, then the lowest PID with a game window."""
+    foreground_pid = _window_pid(_foreground_window())
+    visible = set()
+
+    @WindowCallback
+    def consider(window, _):
+        if _is_window_visible(window) and not _get_window(window, GW_OWNER):
+            pid = _window_pid(window)
+            if pid in pids and _window_title_length(window) > 0:
+                visible.add(pid)
+        return True
+
+    _enum_windows(consider, 0)
+    return min(visible, key=lambda pid: (pid != foreground_pid, pid), default=None)
+
 
 @dataclass(frozen=True)
 class Module:

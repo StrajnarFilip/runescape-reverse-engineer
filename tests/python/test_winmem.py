@@ -3,8 +3,33 @@ import ctypes
 import os
 import struct
 import unittest
+from unittest.mock import patch
 
-from winmem import ProcessMemory, MemoryReadError
+from winmem import ProcessMemory, MemoryReadError, visible_client_pid
+
+
+class ClientWindowTests(unittest.TestCase):
+    def test_foreground_preference_and_background_tie_break(self):
+        # Windows 1 through 3 are hidden, owned or untitled. Window 6 is
+        # visible but belongs to an unrelated process.
+        def enumerate_windows(callback, param):
+            for window in range(1, 7):
+                callback(window, param)
+            return True
+
+        with patch("winmem._enum_windows", side_effect=enumerate_windows), \
+                patch("winmem._is_window_visible", side_effect=lambda window: window != 1), \
+                patch("winmem._get_window", side_effect=lambda window, _: window == 2), \
+                patch("winmem._window_title_length", side_effect=lambda window: int(window != 3)), \
+                patch("winmem._window_pid", side_effect=lambda window: 100 + window), \
+                patch("winmem._foreground_window") as foreground:
+            pids = {101, 102, 103, 104, 105}
+            foreground.return_value = 5
+            self.assertEqual(visible_client_pid(pids), 105)
+            foreground.return_value = 6
+            self.assertEqual(visible_client_pid(pids), 104)
+            self.assertIsNone(visible_client_pid({101, 102, 103}))
+
 
 class ReadOnlyProcessTests(unittest.TestCase):
     def setUp(self):
