@@ -3,7 +3,8 @@ RS3 LIVE TRACKER - direct memory telemetry
 START
   Build the C library with CMake. See the repository README for commands.
   Double-click Start Tracker.cmd in the repository root or run the tracker from
-  the command line. The launcher uses pythonw.exe from C:\Python39 or PATH and forwards command-line options.
+  the command line. The launcher uses pythonw.exe from C:\Python39 or PATH and
+  forwards command-line options. Use --pid ID when several RS3 clients are open.
   Close the window to stop its Python consumer and native worker.
   No pip packages, injected game agent, or network server are required.
 

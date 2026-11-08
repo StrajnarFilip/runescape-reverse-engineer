@@ -74,6 +74,12 @@ Double-click ``Start Tracker.cmd`` or run the desktop UI and JSONL reader direct
     python python/rs3_reader/reader.py --native-hz 500 --hz 20 --duration 60 --raw --output capture.jsonl
     python python/rs3_reader/tracker.py --history capture.jsonl
 
+When several clients are open, find the desired process ID and pass it to the
+tracker. In PowerShell, replace ``12345`` with the ID from the game window's row::
+
+    Get-Process rs2client | Select-Object Id, MainWindowTitle
+    & ".\Start Tracker.cmd" --pid 12345
+
 The original Python decoder remains available explicitly for reference/comparison::
 
     python python/rs3_reader/tracker.py --backend python
