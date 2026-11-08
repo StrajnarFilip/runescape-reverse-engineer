@@ -78,7 +78,9 @@ and run with **JDK 25** against the live DLL::
     java --enable-native-access=ALL-UNNAMED -cp outputs/rs3_native/build Rs3Reader C:/absolute/path/rs3_native.dll 5
 
 Use a 64-bit Windows JVM. ``Rs3Reader.sample()`` returns Java-owned immutable
-records for player values, NPCs, hitmarks and newly observed events. Keep this
+records for player values, NPCs, hitmarks and newly observed events.
+``Rs3Reader.inventory()`` returns items, equipment, abilities and item changes,
+using its own independent item-event cursor. Keep this
 reader on its creating thread and use try-with-resources. ``close()`` destroys
 the native context (joining its worker) before unloading the library. The API
 also works through JNA/JNI on older Java versions, but no Java 17 bridge is
@@ -144,6 +146,10 @@ ID           Structure  Bytes
 4            npc        568
 5            hit        40
 6            event      608
+7            inventory  168
+8            item       192
+9            ability    192
+10           item_event 424
 ============ ========== =====
 
 Foreign bindings can use the header directly. The included Java example documents
@@ -216,11 +222,14 @@ Validation
 ----------
 
 ``tests/test_native.c`` uses private fake-memory fixtures by including the
-implementation, without exporting a testing/injection interface. Seven groups test
+implementation, without exporting a testing/injection interface. Eleven groups test
 decoding, sparse sentinels/int64, profile mismatch, cyclic chains, unknown/zero HP,
 expiry/scheduling/wrap, torn rings, world/list transitions, NPC reuse, deduplication,
 buffer errors, two consumer cursors, overflow, failed-frame invalidation, missing
 process and worker lifecycle.
+The inventory groups additionally cover moves, dose changes, quantity/replacement,
+duplicate ambiguity, gear switches/defenders, individual timers, catalog validation
+and item-event queue gaps. There are 28 Python tests in the combined suite.
 Assertions remain enabled in optimized test builds. Python tests verify the actual
 DLL ABI/lifecycle and preserve observation identity/time through UI coalescing.
 
@@ -229,3 +238,60 @@ Python reads to exclude changing scenes. The compact ``validation-summary.json``
 records actual timings, parity and achieved worker rates. The measured scene can
 change during rate tests; each rate reports its final loaded NPC count. These
 numbers are observations on this machine, not a guarantee for boss combat.
+
+Inventory and ability extension
+-------------------------------
+
+The additive ABI-v1 extension preserves all original struct layouts and exports.
+``rs3_snapshot_inventory_info`` reports separate inventory/catalog status and
+counts. ``rs3_snapshot_items`` selects both containers (0), backpack (93) or
+equipment (94). All 47 slots, including empty cells, are represented. Empty
+``item_id == -1`` is distinct from an unavailable container (count zero/status).
+``rs3_snapshot_abilities`` returns definitions and live timer observations;
+``flags & 1`` validates the live timer, ``flags & 2`` marks an ability-book entry,
+and ``flags & 4`` validates its base cooldown. Never interpret zeroed unavailable
+timer storage as ready. ``equipment_match`` checks weapon setup, not full castability.
+
+``rs3_item_events_since`` uses a separate caller cursor and a 1024-entry queue.
+Before/after records describe added, removed, moved, replaced, quantity-changed
+and dose-changed observations. A local inferred ``token`` follows unambiguous
+matches; ambiguity is flagged. No client-side unique serial number is assumed.
+Events retain their original process identity/time through slower consumer polls.
+
+The C context tries ``rs3_catalog.bin`` beside its loaded module. The standard
+build generates it from the local cache in SQLite read-only mode; use
+``--cache-root`` to select another installation and ``--skip-catalog`` to keep
+an existing catalog. ``rs3_load_catalog(context, utf8_path)`` loads a selected file
+while the worker is stopped. A failed reload retains an already valid catalog.
+Missing metadata does not prevent raw item IDs/quantities/slots from being read.
+Names/families/ability definitions remain explicitly unavailable. Generated
+catalogs and cache files stay local; the repository contains the decoder and
+compact definition bindings only.
+
+Our catalog interchange format uses little-endian words (not game cache bytes):
+
+* Header: 8-byte ``RS3CAT1\0``, uint32 format=1, item count, ability count,
+  string-table byte count, 32 raw bytes of executable SHA-256, 32 raw bytes of
+  the following body's SHA-256. Total 88 bytes.
+* Items: sorted by ID, 40 bytes each. Ten 32-bit words: item ID, name offset,
+  raw potion family ID, signed doses, signed next-dose item ID, signed equip
+  slot, combat style, equipment flags, effect flags, base flat heal. Unknown
+  doses/next/equip slot are -1. Family ID zero can be valid when doses are known.
+* Abilities: sorted by struct ID, 48 bytes each. Twelve 32-bit words: struct ID,
+  name offset, signed start/end VarClient IDs, base cooldown ms, requirements,
+  combat style, timer source (1=client pair), level, raw adrenaline requirement,
+  native ability ID, definition flags (ability-book=1, known base cooldown=2).
+* Body ends with UTF-8 NUL-terminated strings. Offsets are relative to that table.
+  Names copied into public item/ability structs use a 128-byte UTF-8 buffer.
+
+The loader bounds file size/counts/offsets, checks hashes and rejects invalid
+timer indices. A checksum verifies integrity, not trust in an externally supplied
+catalog. The public item struct is 192 bytes (name at 60); ability 192 (name at
+64); inventory info 168 (message at 40); item event 424 (before at 40, after at
+232). Python validates all layouts; the Java example reads the same fields.
+
+``../rs3_reader/inventory-and-abilities.rst`` documents the recovered paths,
+slot conventions, dose/effect semantics, Bone Shield limits and live evidence.
+``inventory-performance.json`` measures the expanded C workload, including the
+new inventory/equipment/ability sampling. The earlier ``validation-summary.json``
+describes the original smaller C port workload.

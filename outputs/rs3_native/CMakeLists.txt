@@ -31,3 +31,9 @@ add_executable(read_example examples/read.c)
 target_include_directories(read_example PRIVATE include)
 install(TARGETS rs3_native RUNTIME DESTINATION bin ARCHIVE DESTINATION lib)
 install(FILES include/rs3/rs3.h DESTINATION include/rs3)
+set(RS3_CACHE_ROOT "C:/ProgramData/Jagex/RuneScape" CACHE PATH "Installed read-only game cache")
+if(EXISTS "${RS3_CACHE_ROOT}/js5-19.jcache")
+    add_custom_command(TARGET rs3_native POST_BUILD
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/generate_catalog.py"
+                --cache-root "${RS3_CACHE_ROOT}" --output "$<TARGET_FILE_DIR:rs3_native>/rs3_catalog.bin" VERBATIM)
+endif()

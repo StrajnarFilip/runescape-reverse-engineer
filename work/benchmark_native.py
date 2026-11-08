@@ -88,6 +88,9 @@ def main():
                   "c_engine": stats(engine_c), "python_remote_reads": counters[0],
                   "python_remote_bytes": counters[1], "c_remote_reads": info.read_calls,
                   "c_remote_bytes": info.read_bytes, "worker_checks": []}
+        report["workloads"]={"python":"Player/NPC reference decoder",
+                             "c":"Player/NPC decoder plus inventory, equipment and %d ability definitions/timers" %
+                             len((current.get("abilities") or {}).get("entries",[]))}
     finally:
         python.close(); native.close()
     for hz in (100, 500, 1000):
@@ -112,7 +115,7 @@ def main():
             worker.close()
     report["library_sha256"] = hashlib.sha256((ROOT/"outputs"/"rs3_native"/"build"/"rs3_native.dll").read_bytes()).hexdigest()
     report["limitations"] = ["Current scene only; full Telos combat load not benchmarked",
-                             "No live combat hit during this port validation; hit parsing/deduplication covered by deterministic C fixtures",
+                             "This timing run does not establish complete combat hitmark coverage; dedicated live/fixture evidence is separate",
                              "Requested rate is not guaranteed under system load",
                              "Logout/world-hop/restart still need controlled live validation"]
     args.output.write_text(json.dumps(report, indent=2)+"\n", encoding="utf-8")

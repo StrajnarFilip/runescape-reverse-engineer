@@ -1,6 +1,7 @@
 """Convert C ABI observations to the existing tracker/JSONL schema."""
 import time
 from native import Reader, VARIABLES
+from inventory_telemetry import extend_record
 
 
 def text(value):
@@ -54,7 +55,7 @@ class NativeTelemetry:
             # Observations from earlier frames retain their own process/timestamp.
             result["hit_splats"] = {"status": "unavailable", "active": None,
                                    "newly_observed": new_events, "events_lost": lost}
-            return result
+            return extend_record(result, self.reader)
         raw = {name: player.raw_variables[i] if player.valid_variables & (1 << i) else None
                for i, name in enumerate(VARIABLES)}
 
@@ -118,4 +119,4 @@ class NativeTelemetry:
         }
         if include_raw:
             record["raw_variables"] = raw
-        return record
+        return extend_record(record, self.reader)

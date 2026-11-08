@@ -16,6 +16,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cc", help="C compiler executable (cl, clang, gcc or zig)")
     parser.add_argument("--test", action="store_true", help="Build and run deterministic native tests")
+    parser.add_argument("--cache-root", type=Path, default=Path(r"C:\ProgramData\Jagex\RuneScape"))
+    parser.add_argument("--skip-catalog", action="store_true", help="Build without regenerating local item/ability metadata")
     args = parser.parse_args()
     if sys.platform != "win32":
         parser.error("This collector targets Windows x64")
@@ -27,6 +29,11 @@ def main():
     build = ROOT/"build"
     build.mkdir(exist_ok=True)
     subprocess.run([sys.executable, str(ROOT/"generate_profile.py")], check=True)
+    if not args.skip_catalog:
+        if (args.cache_root/"js5-19.jcache").is_file():
+            subprocess.run([sys.executable, str(ROOT/"generate_catalog.py"), "--cache-root", str(args.cache_root)], check=True)
+        else:
+            print("Game cache not found; IDs remain readable, but metadata requires generate_catalog.py", file=sys.stderr)
     msvc = name in ("cl", "clang-cl")
 
     def compile_source(source, target, shared=False, extra=None):

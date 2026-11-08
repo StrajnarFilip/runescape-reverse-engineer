@@ -103,6 +103,9 @@ class Tracker:
         self.latest = self.received_at = None
         self.sequence = 0
         self.hit_history = HitHistory()
+        self.item_history = deque(maxlen=100)
+        self.ability_filter = tk.StringVar()
+        self.ability_book_only = tk.BooleanVar(value=True)
         self.history_path = history_path
         self.filter_text = tk.StringVar()
         self.only_hp = tk.BooleanVar(value=True)
@@ -151,6 +154,12 @@ class Tracker:
         proof = tk.Frame(tabs, bg=PANEL, padx=18, pady=12)
         tabs.add(npc_tab, text="NPCs and hit splats")
         tabs.add(proof, text="Raw values and source")
+        inventory_tab = tk.Frame(tabs, bg=PANEL, padx=12, pady=12)
+        ability_tab = tk.Frame(tabs, bg=PANEL, padx=12, pady=12)
+        tabs.add(inventory_tab, text="Inventory and equipment")
+        tabs.add(ability_tab, text="Abilities and cooldowns")
+        self.build_inventory_panel(inventory_tab)
+        self.build_ability_panel(ability_tab)
         self.build_npc_panel(npc_tab)
         tk.Label(proof, text="SOURCE AND RAW VALUES", fg=MUTED, bg=PANEL,
                  font=("Segoe UI", 10, "bold")).pack(anchor="w")
@@ -201,7 +210,9 @@ class Tracker:
                     line = json.dumps(record, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
                     log.emit(logging.makeLogRecord({"msg": line}))
                     self.hit_history.observe(record)
-                    self.publish(dict(record, recent_hit_splats=list(self.hit_history.events)))
+                    self.item_history.extend((record.get("inventory_changes") or {}).get("newly_observed", []))
+                    self.publish(dict(record, recent_hit_splats=list(self.hit_history.events),
+                                      recent_inventory_changes=list(self.item_history)))
                     deadline += .05
                     delay = deadline-time.perf_counter()
                     if delay < -.5:
@@ -257,6 +268,8 @@ class Tracker:
                            (s.get("pid", "—"), s.get("client_version", "—"), digest[:8], digest[-6:]) if available
                            else "Waiting for a supported client: "+s.get("reason", "unknown reason"))
         if not available or stalled:
+            self.render_inventory({})
+            self.render_abilities({})
             for meter in self.meters.values():
                 meter.set("—", 0, "Unavailable" if not available else "Client clock is not advancing")
             self.set_raw(s.get("reason", "Client clock is not advancing"))
@@ -284,6 +297,138 @@ class Tracker:
                       raw["prayer_packed"], fmt(prayer), raw["gcd_client_start"], raw["gcd_client_end"],
                       g["clock_raw"], fmt(remaining)))
         self.render_npcs(s)
+        self.render_inventory(s)
+        self.render_abilities(s)
+
+    def build_inventory_panel(self, parent):
+        self.inventory_status = tk.Label(parent, text="Waiting for inventory …", bg=PANEL, fg=MUTED,
+                                         font=("Segoe UI", 10), anchor="w")
+        self.inventory_status.pack(fill="x", pady=(0, 8))
+        body = tk.Frame(parent, bg=PANEL)
+        body.pack(fill="both", expand=True)
+        body.grid_columnconfigure(0, weight=3)
+        body.grid_columnconfigure(1, weight=2)
+        body.grid_rowconfigure(0, weight=1)
+        grid = tk.Frame(body, bg=PANEL)
+        grid.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        self.inventory_cells = []
+        for column in range(4):
+            grid.grid_columnconfigure(column, weight=1, uniform="inventory")
+        for slot in range(28):
+            cell = tk.Label(grid, text="%02d  —" % (slot+1), bg="#202e43", fg=MUTED,
+                            font=("Segoe UI", 9), justify="left", anchor="nw", padx=8, pady=6,
+                            height=3, wraplength=135)
+            cell.grid(row=slot//4, column=slot%4, sticky="nsew", padx=3, pady=3)
+            self.inventory_cells.append(cell)
+        side = tk.Frame(body, bg=PANEL)
+        side.grid(row=0, column=1, sticky="nsew")
+        self.loadout_status = tk.Label(side, text="Equipment unknown", bg=PANEL, fg=GOLD,
+                                       font=("Segoe UI", 10, "bold"), anchor="w")
+        self.loadout_status.pack(fill="x", pady=(0, 6))
+        equipment_frame = tk.Frame(side, bg=PANEL)
+        equipment_frame.pack(fill="x")
+        equipment_frame.grid_columnconfigure(0, weight=1)
+        equipment_frame.grid_rowconfigure(1, weight=1)
+        self.equipment_tree = self.table(equipment_frame, 0, [("slot", "Slot", 100), ("item", "Equipped item / ID", 260)])
+        self.equipment_tree.configure(height=7)
+        tk.Label(side, text="RECENT INVENTORY CHANGES", bg=PANEL, fg=MUTED,
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(10, 4))
+        self.inventory_history_text = tk.Text(side, bg="#202e43", fg=INK, relief="flat",
+                                             font=("Consolas", 9), height=8, wrap="word", state="disabled")
+        self.inventory_history_text.pack(fill="both", expand=True)
+        tk.Label(parent, text="Slots follow native inventory order (1–28). The grid uses four columns; it does not measure game pixels.\n"
+                 "Tracking identity is inferred; identical duplicates can be ambiguous. History reports observed changes.",
+                 bg=PANEL, fg=MUTED, justify="left", anchor="w", font=("Segoe UI", 9)).pack(fill="x", pady=(8, 0))
+
+    def build_ability_panel(self, parent):
+        controls = tk.Frame(parent, bg=PANEL)
+        controls.pack(fill="x", pady=(0, 8))
+        tk.Label(controls, text="Filter ability:", bg=PANEL, fg=MUTED, font=("Segoe UI", 10)).pack(side="left")
+        tk.Entry(controls, textvariable=self.ability_filter, bg="#26374e", fg=INK, insertbackground=INK,
+                 relief="flat", font=("Segoe UI", 11), width=25).pack(side="left", padx=8)
+        tk.Checkbutton(controls, text="Ability book entries", variable=self.ability_book_only, bg=PANEL, fg=INK,
+                       activebackground=PANEL, activeforeground=INK, selectcolor=BG).pack(side="left", padx=10)
+        self.ability_status = tk.Label(parent, text="Waiting for abilities …", bg=PANEL, fg=MUTED,
+                                       anchor="w", font=("Segoe UI", 10))
+        self.ability_status.pack(fill="x", pady=(0, 8))
+        frame = tk.Frame(parent, bg=PANEL)
+        frame.pack(fill="both", expand=True)
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_rowconfigure(1, weight=1)
+        self.ability_tree = self.table(frame, 0, [("name", "Ability", 210), ("id", "Struct ID", 75),
+            ("remaining", "Cooldown left", 110), ("base", "Base cooldown", 110),
+            ("requires", "Weapon requirements", 220), ("match", "Equipment match", 145)])
+        self.ability_tree.tag_configure("running", foreground=GOLD)
+        self.ability_tree.tag_configure("blocked", foreground=RED)
+        tk.Label(parent, text="Equipment match checks weapon requirements, not every cast condition. Levels, unlocks, adrenaline,\n"
+                 "targets, runes and ability-specific overrides may still prevent casting. Unknown timers are not shown as ready.",
+                 bg=PANEL, fg=MUTED, justify="left", anchor="w", font=("Segoe UI", 9)).pack(fill="x", pady=(8, 0))
+
+    def render_inventory(self, record):
+        inventory = record.get("inventory") or {}
+        slots = inventory.get("slots")
+        for i, cell in enumerate(self.inventory_cells):
+            item = slots[i] if slots and i<len(slots) else None
+            if item is None:
+                text, colour = "%02d  Unavailable" % (i+1), MUTED
+            elif item["empty"]:
+                text, colour = "%02d  Empty" % (i+1), MUTED
+            else:
+                suffix = " · %s doses" % item["doses"] if item["doses"] is not None else ""
+                text = "%02d  %s\nID %s · x%s%s" % (i+1, item["name"] or "Unknown item", item["item_id"], item["quantity"], suffix)
+                colour = GREEN if item["effects"]["heals"] else INK
+            if cell.cget("text") != text:
+                cell.config(text=text, fg=colour)
+        changes = record.get("inventory_changes") or {}
+        self.inventory_status.config(text=("Backpack: %d / 28 occupied · metadata %s · lost changes %s" %
+            (sum(not i["empty"] for i in slots), inventory.get("catalog_status"), changes.get("events_lost", 0)))
+            if slots else "Inventory unavailable: "+str(inventory.get("reason") or "waiting for a fresh C sample"),
+            fg=GREEN if slots else RED)
+        equipped = record.get("equipment") or {}
+        self.loadout_status.config(text="%s · Bone Shield: %s" %
+            (equipped.get("configuration", "unknown").replace("_", " "), equipped.get("bone_shield_tier", "unknown")))
+        names = {0:"Head", 1:"Cape", 2:"Neck", 3:"Main hand", 4:"Body", 5:"Off hand", 7:"Legs", 9:"Hands", 10:"Feet", 12:"Ring", 13:"Ammo"}
+        sync_rows(self.equipment_tree, [("equip_%d"%i["slot"], (names.get(i["slot"],str(i["slot"])),
+                   "%s / %s"%(i["name"] or "Unknown",i["item_id"])), ())
+                  for i in equipped.get("slots") or [] if not i["empty"]])
+        lines = []
+        for e in reversed(record.get("recent_inventory_changes", [])[-30:]):
+            before, after = e.get("before"), e.get("after")
+            def label(item):
+                if not item:
+                    return "empty"
+                return "%s #%s [%s:%s]" % (item.get("name") or "Item",item["item_id"],item["container_id"],item["slot_number"])
+            stamp = datetime.fromtimestamp(e["observed_at_ms"]/1000).strftime("%H:%M:%S")
+            lines.append("%s %s\n%s -> %s\n" % (stamp,e["kind"].replace("_"," "),label(before),label(after)))
+        text = "\n".join(lines) or "New moves, dose changes and equipment swaps will appear here."
+        if self.inventory_history_text.get("1.0","end-1c") != text:
+            self.inventory_history_text.config(state="normal")
+            self.inventory_history_text.delete("1.0","end")
+            self.inventory_history_text.insert("1.0",text)
+            self.inventory_history_text.config(state="disabled")
+
+    def render_abilities(self, record):
+        abilities = record.get("abilities") or {}
+        entries = abilities.get("entries") or []
+        needle = self.ability_filter.get().strip().casefold()
+        rows = []
+        for a in entries:
+            if (self.ability_book_only.get() and not a["in_ability_book"]) or (needle and needle not in a["name"].casefold()):
+                continue
+            cooldown, req = a["cooldown"], a["requirements"]
+            remaining = cooldown["remaining_ms"]
+            text = "Unknown" if remaining is None else ("Ready" if remaining==0 else "%.2f s"%(remaining/1000))
+            required = [label for key,label in (("dual_wield","Dual wield"),("two_handed","Two-handed"),("shield","Shield"),("weapon","Weapon")) if req[key]]
+            if req["style"]:
+                required.insert(0,req["style"].title())
+            tags = ("running",) if remaining else (("blocked",) if a["equipment_match"]=="blocked" else ())
+            rows.append(("ability_%d"%a["struct_id"], (a["name"].replace("<nbsp>"," "), a["struct_id"], text,
+                "Unknown" if cooldown["base_duration_ms"] is None else "%.1f s"%(cooldown["base_duration_ms"]/1000),
+                " · ".join(required) or "No specific weapon setup", a["equipment_match"].title()),tags))
+        sync_rows(self.ability_tree, rows)
+        self.ability_status.config(text="%d definitions · %d displayed · %d live timers known · cooldown and equipment are separate checks" %
+            (len(entries),len(rows),sum(a["cooldown"]["remaining_ms"] is not None for a in entries)) if entries else "Ability metadata unavailable",
+            fg=GREEN if entries else RED)
 
     def build_npc_panel(self, parent):
         controls = tk.Frame(parent, bg=PANEL)

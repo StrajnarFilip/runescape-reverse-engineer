@@ -1,0 +1,316 @@
+{
+  "captured_at_utc": "2026-11-08T19:35:17.474000+00:00",
+  "source": "Actual C collector, 100 Hz; Python consumer approximately 20 Hz",
+  "capture_sha256": "3471aed09effce37c64592ac39d8ff97844b9f99a820b730b656d479c483b16c",
+  "capture_rows": 37,
+  "manual_confirmation": "User confirmed Hurricane, Flurry, Resonance, Wicked hood movement and another restore dose",
+  "catalog": {
+    "format": 1,
+    "items": 64175,
+    "abilities": 169,
+    "potion_families": 189,
+    "empty_definitions_skipped": 0,
+    "ambiguous_potion_items": 14,
+    "decode_failures": 0,
+    "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+    "body_sha256": "da3873be0a81b7465178a65a52f71549d264781863942f138d1b891f127d30ab",
+    "item_reference_sha256": "92e5b903744ea710600671c9940b801ef86744d11ef187d00119592a235677eb",
+    "struct_reference_sha256": "312dafa35cacd6fbeed8d0f47ec80378d81c084091fc7782486cf23b682a3b62"
+  },
+  "ability_definitions": 169,
+  "client_timer_mappings": 140,
+  "inventory_examples": [
+    {
+      "observed_at_ms": 1794166558471,
+      "kind": "added",
+      "before": null,
+      "after": {
+        "container_id": 93,
+        "slot": 0,
+        "slot_number": 1,
+        "item_id": 22332,
+        "quantity": 1,
+        "name": "Wicked hood",
+        "family_id": null,
+        "doses": null,
+        "tracking_token": 8
+      }
+    },
+    {
+      "observed_at_ms": 1794166570520,
+      "kind": "added",
+      "before": null,
+      "after": {
+        "container_id": 93,
+        "slot": 4,
+        "slot_number": 5,
+        "item_id": 3028,
+        "quantity": 1,
+        "name": "Super restore (2)",
+        "family_id": 23,
+        "doses": 2,
+        "tracking_token": 12
+      }
+    },
+    {
+      "observed_at_ms": 1794166650292,
+      "kind": "moved",
+      "before": {
+        "container_id": 93,
+        "slot": 0,
+        "slot_number": 1,
+        "item_id": 22332,
+        "quantity": 1,
+        "name": "Wicked hood",
+        "family_id": null,
+        "doses": null,
+        "tracking_token": 8
+      },
+      "after": {
+        "container_id": 93,
+        "slot": 24,
+        "slot_number": 25,
+        "item_id": 22332,
+        "quantity": 1,
+        "name": "Wicked hood",
+        "family_id": null,
+        "doses": null,
+        "tracking_token": 8
+      }
+    },
+    {
+      "observed_at_ms": 1794166652082,
+      "kind": "moved",
+      "before": {
+        "container_id": 93,
+        "slot": 4,
+        "slot_number": 5,
+        "item_id": 3028,
+        "quantity": 1,
+        "name": "Super restore (2)",
+        "family_id": 23,
+        "doses": 2,
+        "tracking_token": 12
+      },
+      "after": {
+        "container_id": 93,
+        "slot": 10,
+        "slot_number": 11,
+        "item_id": 3028,
+        "quantity": 1,
+        "name": "Super restore (2)",
+        "family_id": 23,
+        "doses": 2,
+        "tracking_token": 12
+      }
+    },
+    {
+      "observed_at_ms": 1794166652702,
+      "kind": "doses_changed",
+      "before": {
+        "container_id": 93,
+        "slot": 10,
+        "slot_number": 11,
+        "item_id": 3028,
+        "quantity": 1,
+        "name": "Super restore (2)",
+        "family_id": 23,
+        "doses": 2,
+        "tracking_token": 12
+      },
+      "after": {
+        "container_id": 93,
+        "slot": 10,
+        "slot_number": 11,
+        "item_id": 3030,
+        "quantity": 1,
+        "name": "Super restore (1)",
+        "family_id": 23,
+        "doses": 1,
+        "tracking_token": 12
+      }
+    },
+    {
+      "observed_at_ms": 1794166692923,
+      "kind": "removed",
+      "before": {
+        "container_id": 93,
+        "slot": 10,
+        "slot_number": 11,
+        "item_id": 3030,
+        "quantity": 1,
+        "name": "Super restore (1)",
+        "family_id": 23,
+        "doses": 1,
+        "tracking_token": 12
+      },
+      "after": null
+    }
+  ],
+  "ability_examples": [
+    {
+      "observed_at_ms": 1794166623942,
+      "name": "Hurricane",
+      "struct_id": 14685,
+      "configuration": "two_handed",
+      "requirements": {
+        "dual_wield": false,
+        "two_handed": true,
+        "shield": false,
+        "weapon": false,
+        "style": "melee",
+        "level": 37,
+        "adrenaline_raw": 250
+      },
+      "cooldown": {
+        "remaining_ms": 20360,
+        "observed_duration_ms": 20400,
+        "base_duration_ms": 20400,
+        "reason": null,
+        "start_varc": 2109,
+        "end_varc": 2110,
+        "start_tick": 542940,
+        "end_tick": 543960
+      },
+      "equipped": [
+        {
+          "slot": 3,
+          "item_id": 1249,
+          "name": "Dragon spear"
+        }
+      ]
+    },
+    {
+      "observed_at_ms": 1794166627502,
+      "name": "Hurricane",
+      "struct_id": 14685,
+      "configuration": "two_handed",
+      "requirements": {
+        "dual_wield": false,
+        "two_handed": true,
+        "shield": false,
+        "weapon": false,
+        "style": "melee",
+        "level": 37,
+        "adrenaline_raw": 250
+      },
+      "cooldown": {
+        "remaining_ms": 4800,
+        "observed_duration_ms": 20400,
+        "base_duration_ms": 20400,
+        "reason": null,
+        "start_varc": 2109,
+        "end_varc": 2110,
+        "start_tick": 542340,
+        "end_tick": 543360
+      },
+      "equipped": [
+        {
+          "slot": 3,
+          "item_id": 1249,
+          "name": "Dragon spear"
+        }
+      ]
+    },
+    {
+      "observed_at_ms": 1794166641322,
+      "name": "Flurry",
+      "struct_id": 14684,
+      "configuration": "dual_wield",
+      "requirements": {
+        "dual_wield": true,
+        "two_handed": false,
+        "shield": false,
+        "weapon": false,
+        "style": "melee",
+        "level": 45,
+        "adrenaline_raw": 250
+      },
+      "cooldown": {
+        "remaining_ms": 20380,
+        "observed_duration_ms": 20400,
+        "base_duration_ms": 20400,
+        "reason": null,
+        "start_varc": 2107,
+        "end_varc": 2108,
+        "start_tick": 543810,
+        "end_tick": 544830
+      },
+      "equipped": [
+        {
+          "slot": 3,
+          "item_id": 15596,
+          "name": "Reese's sword"
+        },
+        {
+          "slot": 5,
+          "item_id": 30053,
+          "name": "Reese's off-hand sword"
+        }
+      ]
+    },
+    {
+      "observed_at_ms": 1794166647902,
+      "name": "Resonance",
+      "struct_id": 14713,
+      "configuration": "main_hand_and_shield",
+      "requirements": {
+        "dual_wield": false,
+        "two_handed": false,
+        "shield": true,
+        "weapon": false,
+        "style": null,
+        "level": 48,
+        "adrenaline_raw": 0
+      },
+      "cooldown": {
+        "remaining_ms": 30000,
+        "observed_duration_ms": 30000,
+        "base_duration_ms": 30000,
+        "reason": null,
+        "start_varc": 2147,
+        "end_varc": 2148,
+        "start_tick": 544140,
+        "end_tick": 545640
+      },
+      "equipped": [
+        {
+          "slot": 3,
+          "item_id": 15596,
+          "name": "Reese's sword"
+        },
+        {
+          "slot": 5,
+          "item_id": 1540,
+          "name": "Anti-dragon shield"
+        }
+      ]
+    }
+  ],
+  "observed_timer_adjustments": [
+    {
+      "name": "Hurricane",
+      "observed_at_ms": 1794166627502,
+      "before_start_end_ticks": [
+        542940,
+        543960
+      ],
+      "after_start_end_ticks": [
+        542340,
+        543360
+      ],
+      "remaining_ms": 4800,
+      "interpretation": "Client adjusted its cooldown pair; cause not identified"
+    }
+  ],
+  "inventory_events_lost": 0,
+  "final_library_sha256": "979f6ae58af76db043cfff03a86bbce97329a976f588e4da6130cc1b29d0a80c",
+  "validation_limits": [
+    "Only Hurricane, Flurry and Resonance were exercised in this live calibration",
+    "Other symbolic timer pairs are not individually combat-validated; missing/unmapped values remain null",
+    "Bone Shield substitution and full cast eligibility (runes, unlocks, target, level, adrenaline) remain unevaluated",
+    "Identical duplicate items have no exposed unique serial number; tracking identity is inferred",
+    "Logical inventory slots are exact; screen pixel positions are not measured",
+    "Visual UI inspection was not performed; window creation and logs checked"
+  ]
+}

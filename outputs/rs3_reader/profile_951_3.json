@@ -64,6 +64,14 @@
     {
       "rva": "0x72401e",
       "bytes": "448b84816c1100008b8c815011000045"
+    },
+    {
+      "rva": "0xc36ea0",
+      "bytes": "48895c24084c8b5910448d1412410fb6c0498bd34c8b4108"
+    },
+    {
+      "rva": "0x71b590",
+      "bytes": "48895c24084889742410574883ec208bbaa0100000488db2"
     }
   ],
   "variables": {
@@ -103,5 +111,20 @@
     "health_current_offset": "0x115c",
     "health_max_offset": "0x1178",
     "hitmarks_offset": "0xf18"
+  },
+  "inventory": {
+    "manager_offset": "0x199e0",
+    "entry_stride": 72,
+    "key_offset": 0,
+    "object_offset": 8,
+    "id_offset": 8,
+    "items_offset": 16,
+    "backpack_id": 93,
+    "backpack_slots": 28,
+    "equipment_id": 94,
+    "equipment_slots": 19,
+    "bone_shield_varp": 11212,
+    "bone_shield_lsb": 30,
+    "bone_shield_msb": 31
   }
 }

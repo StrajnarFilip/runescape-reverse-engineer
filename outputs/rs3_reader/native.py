@@ -56,6 +56,28 @@ class Event(C.Structure):
                 ("hit", Hit), ("name", C.c_char*520)])
 
 
+class InventoryInfo(C.Structure):
+    _fields_ = fields(U32, "status reason backpack_count equipment_count catalog_status ability_count bone_shield_tier flags") + [("change_sequence", U64), ("message", C.c_char*128)]
+
+
+class Item(C.Structure):
+    _fields_ = ([("token", U64)] + fields(U32, "container_id slot") + [("item_id", I32)] +
+                fields(U32, "quantity flags family_id") + fields(I32, "doses next_dose_item_id equip_slot") +
+                fields(U32, "combat_style equipment_flags effect_flags base_heal") + [("name", C.c_char*128)])
+
+
+class Ability(C.Structure):
+    _fields_ = (fields(U32, "struct_id flags") + fields(I32, "start_var end_var") + fields(U32, "start_tick end_tick") +
+                fields(I32, "remaining_ms duration_ms") +
+                fields(U32, "base_cooldown_ms requirements combat_style equipment_match reason timer_source level_requirement adrenaline_requirement_raw") +
+                [("name", C.c_char*128)])
+
+
+class ItemEvent(C.Structure):
+    _fields_ = (fields(U64, "sequence observed_at_ns process_creation_time") + fields(U32, "pid kind flags reserved") +
+                [("before", Item), ("after", Item)])
+
+
 def load_library(path=None):
     if C.sizeof(C.c_void_p) != 8:
         raise RuntimeError("rs3_native requires a 64-bit Python interpreter")
@@ -79,13 +101,18 @@ def load_library(path=None):
         "snapshot_hits": (I32, [pointer, C.POINTER(Hit), U32, C.POINTER(U32)]),
         "events_since": (I32, [pointer, U64, C.POINTER(Event), U32, C.POINTER(U32),
                                 C.POINTER(U64), C.POINTER(U64)]),
+        "snapshot_inventory_info": (I32, [pointer, C.POINTER(InventoryInfo), U32]),
+        "snapshot_items": (I32, [pointer, U32, C.POINTER(Item), U32, C.POINTER(U32)]),
+        "snapshot_abilities": (I32, [pointer, C.POINTER(Ability), U32, C.POINTER(U32)]),
+        "item_events_since": (I32, [pointer, U64, C.POINTER(ItemEvent), U32, C.POINTER(U32), C.POINTER(U64), C.POINTER(U64)]),
+        "load_catalog": (I32, [pointer, C.c_char_p]),
     }
     for name, (result, args) in signatures.items():
         function = getattr(lib, "rs3_"+name)
         function.restype, function.argtypes = result, args
     if lib.rs3_abi_version() != 1:
         raise RuntimeError("Unsupported rs3_native ABI version")
-    for kind, structure in enumerate((Options, Info, Player, NPC, Hit, Event), 1):
+    for kind, structure in enumerate((Options, Info, Player, NPC, Hit, Event, InventoryInfo, Item, Ability, ItemEvent), 1):
         if lib.rs3_sizeof(kind) != C.sizeof(structure):
             raise RuntimeError("C/Python layout mismatch for "+structure.__name__)
     profile = Path(__file__).with_name("profile_951_3.json").read_bytes()
@@ -111,6 +138,8 @@ class Reader:
         self.info, self.player = Info(), Player()
         self.npcs, self.hits = (NPC*1024)(), (Hit*65536)()
         self.events = (Event*256)()
+        self.inventory_info, self.items, self.abilities = InventoryInfo(), (Item*47)(), (Ability*2048)()
+        self.item_events, self.item_cursor = (ItemEvent*128)(), 0
         try:
             options = Options(C.sizeof(Options), pid or 0, 1000, 0)
             self.check(self.lib.rs3_create(C.byref(options), C.byref(self.context)))
@@ -137,6 +166,9 @@ class Reader:
         count = U32()
         self.check(self.lib.rs3_snapshot_npcs(self.snapshot, self.npcs, len(self.npcs), C.byref(count)))
         self.check(self.lib.rs3_snapshot_hits(self.snapshot, self.hits, len(self.hits), C.byref(count)))
+        self.check(self.lib.rs3_snapshot_inventory_info(self.snapshot, C.byref(self.inventory_info), C.sizeof(InventoryInfo)))
+        self.check(self.lib.rs3_snapshot_items(self.snapshot, 0, self.items, len(self.items), C.byref(count)))
+        self.check(self.lib.rs3_snapshot_abilities(self.snapshot, self.abilities, len(self.abilities), C.byref(count)))
         return self.info, self.player, self.npcs, self.hits
 
     def drain_events(self):
@@ -151,6 +183,19 @@ class Reader:
             # ctypes array views point into a reused buffer; copy before next call.
             result.extend(Event.from_buffer_copy(self.events[i]) for i in range(count.value))
             if count.value < len(self.events):
+                break
+        return result, lost_total
+
+    def drain_item_events(self):
+        result, lost_total = [], 0
+        for _ in range(8):
+            count, next_cursor, lost = U32(), U64(), U64()
+            self.check(self.lib.rs3_item_events_since(self.context, self.item_cursor, self.item_events,
+                       len(self.item_events), C.byref(count), C.byref(next_cursor), C.byref(lost)))
+            self.item_cursor = next_cursor.value
+            lost_total += lost.value
+            result.extend(ItemEvent.from_buffer_copy(self.item_events[i]) for i in range(count.value))
+            if count.value<len(self.item_events):
                 break
         return result, lost_total
 

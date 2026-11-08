@@ -15,6 +15,10 @@ Current capabilities
   and global cooldown using the client's 20 ms logic clock.
 * Loaded NPC names, config/type IDs, runtime IDs, exact transmitted current/max HP.
 * Native hitmark rings: recipient, amount, raw type, start/end ticks, local history.
+* All 28 inventory slots and 19 equipment slots, with item IDs, quantities, names,
+  dose families and observed move/replace/consume history.
+* 169 ability definitions, 140 client timer mappings, and live equipment checks
+  for dual wield, two-handed weapons and shields. Unknown values stay explicit.
 * Native collector: configurable **1..1000 Hz**, default **100 Hz**. Python UI and
   log refresh independently at 20 Hz. Actual throughput depends on system load.
 * Stable, documented C ABI with explicit ownership, validity flags and event gaps.
@@ -25,7 +29,10 @@ Previously verified in live combat: Goblin **550/550 HP**, Giant spider
 **224** hit. The same capture includes reported hits of 550 and 1000. The C port's
 parity/timing evidence is in ``outputs/rs3_native/validation-summary.json``; earlier
 combat evidence remains in ``outputs/rs3_reader/npc-validation-summary.json``.
-Telos animations/phases remain **unconfirmed**. Controlled logout, world-hop and
+Hurricane, Flurry and Resonance were also checked live with two-handed, dual-wield
+and shield setups. Item moves and a restore dose change retained their tracking
+tokens. See ``outputs/rs3_reader/inventory-and-abilities.rst`` and its compact
+validation report. Telos animations/phases remain **unconfirmed**. Controlled logout, world-hop and
 restart checks are still needed. Sampling frequency is not server update frequency.
 
 Build and run
@@ -46,6 +53,10 @@ The build script accepts MSVC, Clang, GCC or Zig. On this development machine::
 checks its SHA-256. It does not install a game agent or modify the game. Downloaded
 tools and build products remain local. Native build instructions, ABI contracts,
 C/Python/Java examples and field units: ``outputs/rs3_native/README.rst``.
+The build also extracts a local item/ability catalog from the installed cache in
+read-only mode. Missing metadata does not prevent raw inventory IDs/slots from
+being read. Generated catalogs are not committed; see the inventory guide for
+cache paths and explicit regeneration commands.
 
 Double-click ``outputs/rs3_reader/Start Tracker.cmd`` on this machine, or use::
 
@@ -73,6 +84,10 @@ Layout and verification
 * ``outputs/rs3_native/tests/``: deterministic C fixtures and lifecycle checks.
 * ``outputs/rs3_reader/native.py``: typed ctypes binding; no remote-memory decoder.
 * ``outputs/rs3_reader/native_telemetry.py``: C observations to tracker/JSON schema.
+* ``outputs/rs3_native/src/inventory.c``: native inventory, item events, gear and ability timers.
+* ``outputs/rs3_reader/cachedefs.py``: independent, read-only definition-cache parser.
+* ``outputs/rs3_reader/ability_bindings_951_3.json``: compact definition/timer bindings.
+* ``outputs/rs3_reader/inventory-and-abilities.rst``: new tabs, semantics, evidence and API details.
 * ``outputs/rs3_reader/profile_951_3.json``: single source for hash/signatures/offsets.
 * ``outputs/rs3_reader/winmem.py``, ``rs3.py``, ``entities.py``: Python reference backend.
 * ``outputs/rs3_reader/reader.py``, ``tracker.py``: JSONL CLI and desktop UI.

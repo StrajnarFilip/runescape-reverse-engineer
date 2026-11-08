@@ -32,6 +32,10 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
 - Optional live parity/performance report: `C:\Python39\python.exe work/benchmark_native.py`.
 - Build products and downloaded compilers stay local. Preserve the public C ABI,
   caller ownership and explicit event overflow reporting when extending the DLL.
+- Generated `rs3_catalog.bin` metadata stays local. Commit its independent decoder,
+  compact ability bindings and validation reports, not extracted cache catalogs.
+- Inventory/equipment/individual ability sampling runs in C. Use
+  `outputs/rs3_reader/inventory-and-abilities.rst` for layouts and known limits.
 - Reader access is read-only. Preserve executable-hash and signature checks.
 - Never report unmapped NPC HP, hitsplats, Telos animations or phases as confirmed.
 - Use English throughout source code, comments, UI labels, documentation and

@@ -16,7 +16,9 @@ public final class Rs3Reader implements AutoCloseable {
     private final Map<String, MethodHandle> functions = new HashMap<>();
     private MemorySegment context = MemorySegment.NULL, snapshot = MemorySegment.NULL;
     private MemorySegment info, player, npcs, hits, events, count, next, lost;
+    private MemorySegment inventoryInfo, itemData, abilityData, itemEventData;
     private long cursor;
+    private long itemCursor;
     private boolean closed;
 
     public record Hit(int slot, int typeId, int amount, int secondaryTypeId,
@@ -28,6 +30,16 @@ public final class Rs3Reader implements AutoCloseable {
     public record Sample(long sequence, int status, String message, long pid, Long hp, Long maxHp,
                          Double prayer, Integer maxPrayer, Double adrenaline, Integer gcdRemainingMs,
                          long timestampNs, double readMs, List<Npc> npcs, List<Event> events, long lostEvents) {}
+    public record Item(long token, int containerId, int slot, Integer itemId, long quantity, int flags,
+                       long familyId, Integer doses, Integer nextDoseItemId, int equipSlot, int combatStyle,
+                       int equipmentFlags, int effectFlags, int baseHeal, String name) {}
+    public record Ability(int structId, int flags, String name, Integer remainingMs, Integer observedDurationMs,
+                          Integer baseCooldownMs, int requirements, int combatStyle, int equipmentMatch,
+                          int timerReason, int startVarc, int endVarc) {}
+    public record ItemChange(long sequence, long observedAtNs, long processCreationTime, long pid,
+                             int kind, Item before, Item after) {}
+    public record Inventory(int status, String message, int catalogStatus, Integer boneShieldTier,
+                            List<Item> items, List<Ability> abilities, List<ItemChange> changes, long lostChanges) {}
 
     private void bind(SymbolLookup lookup, String name, FunctionDescriptor descriptor) {
         functions.put(name, Linker.nativeLinker().downcallHandle(lookup.findOrThrow("rs3_"+name), descriptor));
@@ -46,6 +58,12 @@ public final class Rs3Reader implements AutoCloseable {
     private static Hit hit(MemorySegment m, long o) {
         return new Hit(m.get(I,o), m.get(I,o+4), m.get(I,o+8), m.get(I,o+12), m.get(I,o+16),
                 unsigned(m,o+20), unsigned(m,o+24), unsigned(m,o+28), m.get(I,o+32));
+    }
+    private static Item item(MemorySegment m, long o) {
+        int id=m.get(I,o+16), doses=m.get(I,o+32), next=m.get(I,o+36);
+        return new Item(m.get(L,o),m.get(I,o+8),m.get(I,o+12),id<0?null:id,unsigned(m,o+20),m.get(I,o+24),
+            unsigned(m,o+28),doses<0?null:doses,next<0?null:next,m.get(I,o+40),m.get(I,o+44),
+            m.get(I,o+48),m.get(I,o+52),m.get(I,o+56),m.getString(o+60));
     }
 
     public Rs3Reader(Path library, int pid, int hz) throws Throwable {
@@ -66,8 +84,12 @@ public final class Rs3Reader implements AutoCloseable {
             bind(lookup,"snapshot_npcs",FunctionDescriptor.of(I,ADDRESS,ADDRESS,I,ADDRESS));
             bind(lookup,"snapshot_hits",FunctionDescriptor.of(I,ADDRESS,ADDRESS,I,ADDRESS));
             bind(lookup,"events_since",FunctionDescriptor.of(I,ADDRESS,L,ADDRESS,I,ADDRESS,ADDRESS,ADDRESS));
+            bind(lookup,"snapshot_inventory_info",FunctionDescriptor.of(I,ADDRESS,ADDRESS,I));
+            bind(lookup,"snapshot_items",FunctionDescriptor.of(I,ADDRESS,I,ADDRESS,I,ADDRESS));
+            bind(lookup,"snapshot_abilities",FunctionDescriptor.of(I,ADDRESS,ADDRESS,I,ADDRESS));
+            bind(lookup,"item_events_since",FunctionDescriptor.of(I,ADDRESS,L,ADDRESS,I,ADDRESS,ADDRESS,ADDRESS));
             if (call("abi_version")!=1) throw new IllegalStateException("Unsupported ABI");
-            int[] sizes={16,384,136,568,40,608};
+            int[] sizes={16,384,136,568,40,608,168,192,192,424};
             for (int i=0;i<sizes.length;i++)
                 if (call("sizeof",i+1)!=sizes[i]) throw new IllegalStateException("Struct layout mismatch: "+(i+1));
             MemorySegment options=arena.allocate(16,8), pointer=arena.allocate(ADDRESS);
@@ -78,11 +100,49 @@ public final class Rs3Reader implements AutoCloseable {
             npcs=arena.allocate(568L*1024,8); hits=arena.allocate(40L*65536,8);
             events=arena.allocate(608L*256,8); count=arena.allocate(I);
             next=arena.allocate(L); lost=arena.allocate(L);
+            inventoryInfo=arena.allocate(168,8);itemData=arena.allocate(192L*47,8);
+            abilityData=arena.allocate(192L*2048,8);itemEventData=arena.allocate(424L*128,8);
             call("start",context,hz);
         } catch (Throwable failure) {
             try { close(); } catch (Exception cleanup) { failure.addSuppressed(cleanup); }
             throw failure;
         }
+    }
+
+    /** Inventory/equipment and abilities from one coherent copied frame.
+     * slot is native zero-based; itemId=null is an empty cell. Timers without a
+     * valid flag are unknown. Equipment compatibility is not full castability.
+     * This call has its own item-event cursor, independent of hit observations.
+     */
+    public Inventory inventory() throws Throwable {
+        if(closed) throw new IllegalStateException("Reader is closed");
+        call("copy_latest",context,snapshot);
+        call("snapshot_inventory_info",snapshot,inventoryInfo,168);
+        call("snapshot_items",snapshot,0,itemData,47,count);
+        List<Item> items=new ArrayList<>();
+        for(int i=0;i<count.get(I,0);i++) items.add(item(itemData,i*192L));
+        call("snapshot_abilities",snapshot,abilityData,2048,count);
+        List<Ability> abilities=new ArrayList<>();
+        for(int i=0;i<count.get(I,0);i++) {
+            long o=i*192L;int flags=abilityData.get(I,o+4);
+            abilities.add(new Ability(abilityData.get(I,o),flags,abilityData.getString(o+64),
+                (flags&1)!=0?abilityData.get(I,o+24):null,(flags&1)!=0?abilityData.get(I,o+28):null,
+                (flags&4)!=0?abilityData.get(I,o+32):null,abilityData.get(I,o+36),abilityData.get(I,o+40),
+                abilityData.get(I,o+44),abilityData.get(I,o+48),abilityData.get(I,o+8),abilityData.get(I,o+12)));
+        }
+        List<ItemChange> changes=new ArrayList<>();long lostTotal=0;
+        for(int batch=0;batch<8;batch++) {
+            call("item_events_since",context,itemCursor,itemEventData,128,count,next,lost);
+            itemCursor=next.get(L,0);lostTotal+=lost.get(L,0);int n=count.get(I,0);
+            for(int i=0;i<n;i++) {
+                long o=i*424L;Item before=item(itemEventData,o+40),after=item(itemEventData,o+232);
+                changes.add(new ItemChange(itemEventData.get(L,o),itemEventData.get(L,o+8),itemEventData.get(L,o+16),
+                    unsigned(itemEventData,o+24),itemEventData.get(I,o+28),before.itemId==null?null:before,after.itemId==null?null:after));
+            }
+            if(n<128)break;
+        }
+        return new Inventory(inventoryInfo.get(I,0),inventoryInfo.getString(40),inventoryInfo.get(I,16),
+            (inventoryInfo.get(I,28)&16)!=0?inventoryInfo.get(I,24):null,List.copyOf(items),List.copyOf(abilities),List.copyOf(changes),lostTotal);
     }
 
     /** Copies the latest native frame and drains up to 4096 queued observations.
@@ -146,8 +206,9 @@ public final class Rs3Reader implements AutoCloseable {
             for(int i=0;i<seconds*20;i++) {
                 Thread.sleep(50);
                 Sample s=reader.sample();
-                System.out.printf(Locale.ROOT,"sample=%d status=%d HP=%s/%s prayer=%s adrenaline=%s NPCs=%d events=%d lost=%d read=%.3fms %s%n",
-                    s.sequence,s.status,s.hp,s.maxHp,s.prayer,s.adrenaline,s.npcs.size(),s.events.size(),s.lostEvents,s.readMs,s.message);
+                Inventory inv=reader.inventory();
+                System.out.printf(Locale.ROOT,"sample=%d status=%d HP=%s/%s prayer=%s adrenaline=%s NPCs=%d items=%d abilities=%d changes=%d read=%.3fms %s%n",
+                    s.sequence,s.status,s.hp,s.maxHp,s.prayer,s.adrenaline,s.npcs.size(),inv.items.size(),inv.abilities.size(),inv.changes.size(),s.readMs,s.message);
             }
         }
     }

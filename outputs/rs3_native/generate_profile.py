@@ -19,6 +19,7 @@ for key in ['registry_rva','registry_root_offset','tree_key_offset','tree_right_
 for domain,spec in p['domains'].items():
     for key,value in spec.items():lines.append('#define P_'+domain.upper()+'_'+key.upper()+' '+hex(num(value))+'u')
 for key,value in p['npcs'].items():lines.append('#define P_NPC_'+key.upper()+' '+hex(num(value))+'u')
+for key,value in p['inventory'].items():lines.append('#define P_INV_'+key.upper()+' '+hex(num(value))+'u')
 names=['health_current','health_max','prayer_packed','adrenaline','gcd_start','gcd_end','gcd_duration','gcd_client_start','gcd_client_end','telos_packed']
 lines.append('static const uint32_t p_variable_ids[10] = {'+','.join(str(p['variables'][k])+'u' for k in names)+'};')
 lines.append('typedef struct { uint32_t rva, length; unsigned char bytes[64]; } profile_signature;')

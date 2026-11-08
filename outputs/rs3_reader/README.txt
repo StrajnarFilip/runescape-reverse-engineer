@@ -30,6 +30,23 @@ VERIFIED FIELDS IN CLIENT 951-3
   Filters and history are available. Wounded NPCs appear before healthy ones.
   Telos phases and animations remain unconfirmed.
 
+INVENTORY, EQUIPMENT AND ABILITIES
+  New tabs show all 28 backpack slots, equipped gear and individual cooldowns.
+  Slots are 1..28 in the UI and zero-based in JSON/C; the four-column tracker
+  grid is a logical view and does not measure screen coordinates.
+  Item names/IDs/quantities, explicit potion families/doses, moves, replacements,
+  equipment transfers and dose changes come from the C collector. A token follows
+  unambiguous changes; identical duplicates can be ambiguous.
+  Saradomin brew flask (6) ID 23351 -> (5) ID 23353 retains its healing family.
+  Super restore ID 3028 -> 3030 was verified live with the same tracking token.
+  The 169 ability definitions include 140 client timer mappings. Hurricane,
+  Flurry and Resonance were checked live with two-handed, dual-wield and shield
+  setups. Unknown cooldowns remain unknown; gear match is not full castability.
+  Bone Shield substitution, runes, unlocks and other cast conditions are separate
+  checks. See inventory-and-abilities.rst and inventory-validation-summary.json.
+  The build generates rs3_catalog.bin beside the DLL from the installed cache.
+  Missing metadata leaves raw IDs/positions available, with explicit unknowns.
+
 AUDITABILITY
   Samples go to logs/capture-DATE-TIME-PID.jsonl at 20 Hz. Logs rotate at about
   25 MB with three backup parts. Each record contains acquisition time, sequence,

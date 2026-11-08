@@ -34,6 +34,8 @@ int main(int argc,char **argv) {
     FN(rs3_snapshot_info,int32_t,(const rs3_snapshot*,rs3_info*,uint32_t));
     FN(rs3_snapshot_player,int32_t,(const rs3_snapshot*,rs3_player*,uint32_t));
     FN(rs3_snapshot_npcs,int32_t,(const rs3_snapshot*,rs3_npc*,uint32_t,uint32_t*));
+    FN(rs3_snapshot_inventory_info,int32_t,(const rs3_snapshot*,rs3_inventory_info*,uint32_t));
+    FN(rs3_snapshot_items,int32_t,(const rs3_snapshot*,uint32_t,rs3_item*,uint32_t,uint32_t*));
     rs3_context *context=NULL; rs3_snapshot *snapshot=NULL;
     int result=1;
     if (rs3_abi_version()!=RS3_ABI_VERSION || rs3_create(NULL,&context) || rs3_snapshot_create(&snapshot)) goto done;
@@ -41,14 +43,17 @@ int main(int argc,char **argv) {
     unsigned seconds=argc>2?(unsigned)atoi(argv[2]):5;
     for (unsigned i=0;i<seconds*10;i++) {
         rs3_info info; rs3_player player; rs3_npc npcs[RS3_MAX_NPCS]; uint32_t count=0;
+        rs3_inventory_info inventory;rs3_item backpack[28];uint32_t slots=0;
         Sleep(100);
         if (rs3_copy_latest(context,snapshot) || rs3_snapshot_info(snapshot,&info,sizeof info) ||
             rs3_snapshot_player(snapshot,&player,sizeof player) ||
-            rs3_snapshot_npcs(snapshot,npcs,RS3_MAX_NPCS,&count)) goto done;
+            rs3_snapshot_npcs(snapshot,npcs,RS3_MAX_NPCS,&count) ||
+            rs3_snapshot_inventory_info(snapshot,&inventory,sizeof inventory) ||
+            rs3_snapshot_items(snapshot,93,backpack,28,&slots)) goto done;
         printf("sample=%llu status=%u PID=%u NPCs=%u ", (unsigned long long)info.sequence,info.status,info.pid,count);
         if (player.valid_variables&(1ull<<RS3_HEALTH)) printf("HP=%lld ",(long long)player.raw_variables[RS3_HEALTH]);
         else printf("HP=unknown ");
-        printf("read=%.3fms %s\n",info.sample_duration_ns/1e6,info.message);
+        printf("backpack_slots=%u abilities=%u read=%.3fms %s\n",slots,inventory.ability_count,info.sample_duration_ns/1e6,info.message);
     }
     result=0;
 done:

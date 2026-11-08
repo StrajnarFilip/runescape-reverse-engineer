@@ -32,14 +32,60 @@ enum rs3_result { RS3_OK=0, RS3_E_ARGUMENT=-1, RS3_E_MEMORY=-2,
 enum rs3_status { RS3_NO_SAMPLE=0, RS3_AVAILABLE=1, RS3_PARTIAL=2, RS3_UNAVAILABLE=3 };
 enum rs3_reason { RS3_REASON_NONE=0, RS3_NOT_SET=1, RS3_READ_FAILED=2,
     RS3_UNSUPPORTED_CLIENT=3, RS3_NO_CLIENT=4, RS3_MULTIPLE_CLIENTS=5,
-    RS3_INCONSISTENT_CLOCK=6, RS3_NOT_TRANSMITTED=7, RS3_INVALID_STATS=8 };
+    RS3_INCONSISTENT_CLOCK=6, RS3_NOT_TRANSMITTED=7, RS3_INVALID_STATS=8,
+    RS3_CATALOG_UNAVAILABLE=9, RS3_REQUIREMENT_BLOCKED=10,
+    RS3_BONE_SHIELD_UNCHECKED=11, RS3_UNMAPPED_TIMER=12 };
 enum rs3_variable { RS3_HEALTH=0, RS3_MAX_HEALTH, RS3_PRAYER_PACKED, RS3_ADRENALINE,
     RS3_GCD_START, RS3_GCD_END, RS3_GCD_DURATION, RS3_GCD_CLIENT_START,
     RS3_GCD_CLIENT_END, RS3_TELOS_PACKED };
 enum rs3_npc_flags { RS3_NPC_NAME=1, RS3_NPC_CONFIG=2, RS3_NPC_HEALTH=4 };
 enum rs3_hit_state { RS3_HIT_ACTIVE=1, RS3_HIT_SCHEDULED=2 };
 enum rs3_structure { RS3_SIZE_OPTIONS=1, RS3_SIZE_INFO, RS3_SIZE_PLAYER,
-    RS3_SIZE_NPC, RS3_SIZE_HIT, RS3_SIZE_EVENT };
+    RS3_SIZE_NPC, RS3_SIZE_HIT, RS3_SIZE_EVENT, RS3_SIZE_INVENTORY_INFO,
+    RS3_SIZE_ITEM, RS3_SIZE_ABILITY, RS3_SIZE_ITEM_EVENT };
+
+#define RS3_MAX_ITEMS 47u /* 28 backpack slots + 19 equipment slots, including empties. */
+#define RS3_MAX_ABILITIES 2048u
+enum rs3_item_flags { RS3_ITEM_METADATA=1, RS3_ITEM_AMBIGUOUS_IDENTITY=2 };
+enum rs3_equipment_flags { RS3_WEAPON=1, RS3_TWO_HANDED=2, RS3_SHIELD=4, RS3_DEFENDER=8 };
+enum rs3_effect_flags { RS3_HEALS=1, RS3_RESTORES_PRAYER=2, RS3_RESTORES_STATS=4 };
+enum rs3_requirements { RS3_REQ_DUAL_WIELD=1, RS3_REQ_TWO_HANDED=2, RS3_REQ_SHIELD=4, RS3_REQ_WEAPON=8 };
+enum rs3_equipment_match { RS3_EQUIPMENT_UNKNOWN=0, RS3_EQUIPMENT_ALLOWED=1, RS3_EQUIPMENT_BLOCKED=2 };
+enum rs3_item_change { RS3_ITEM_ADDED=1, RS3_ITEM_REMOVED=2, RS3_ITEM_MOVED=3,
+    RS3_ITEM_CHANGED=4, RS3_ITEM_QUANTITY_CHANGED=5, RS3_ITEM_DOSES_CHANGED=6 };
+
+typedef struct rs3_inventory_info {
+    uint32_t status, reason, backpack_count, equipment_count;
+    uint32_t catalog_status, ability_count, bone_shield_tier, flags;
+    uint64_t change_sequence;
+    char message[128];
+} rs3_inventory_info;
+
+typedef struct rs3_item {
+    uint64_t token; /**< Local inferred identity; identical duplicates can be ambiguous. */
+    uint32_t container_id, slot; /**< Native zero-based slot; -1 item_id means empty. */
+    int32_t item_id;
+    uint32_t quantity, flags, family_id;
+    int32_t doses, next_dose_item_id, equip_slot;
+    uint32_t combat_style, equipment_flags, effect_flags, base_heal;
+    char name[128];
+} rs3_item;
+
+typedef struct rs3_ability {
+    uint32_t struct_id, flags; /**< flags: timer valid=1, ability-book=2, base cooldown known=4. */
+    int32_t start_var, end_var;
+    uint32_t start_tick, end_tick;
+    int32_t remaining_ms, duration_ms;
+    uint32_t base_cooldown_ms, requirements, combat_style, equipment_match;
+    uint32_t reason, timer_source, level_requirement, adrenaline_requirement_raw;
+    char name[128];
+} rs3_ability;
+
+typedef struct rs3_item_event {
+    uint64_t sequence, observed_at_ns, process_creation_time;
+    uint32_t pid, kind, flags, reserved;
+    rs3_item before, after;
+} rs3_item_event;
 
 typedef struct rs3_options {
     uint32_t struct_size, pid, retry_ms, reserved;
@@ -129,6 +175,23 @@ RS3_API int32_t rs3_snapshot_hits(const rs3_snapshot *, rs3_hit *out, uint32_t c
  */
 RS3_API int32_t rs3_events_since(rs3_context *, uint64_t after, rs3_event *out,
     uint32_t capacity, uint32_t *written, uint64_t *next, uint64_t *lost);
+
+/** Additive ABI-v1 inventory/ability extension; old struct layouts are unchanged.
+ * Item slots include empty cells; logical indices are independent of UI pixels.
+ * Unknown metadata, cooldowns and equipment compatibility remain explicit.
+ */
+RS3_API int32_t rs3_snapshot_inventory_info(const rs3_snapshot *, rs3_inventory_info *, uint32_t out_size);
+/** container_id: 0 = both containers, 93 = backpack, 94 = equipped items. */
+RS3_API int32_t rs3_snapshot_items(const rs3_snapshot *, uint32_t container_id, rs3_item *, uint32_t capacity, uint32_t *required);
+RS3_API int32_t rs3_snapshot_abilities(const rs3_snapshot *, rs3_ability *, uint32_t capacity, uint32_t *required);
+/** Independent cursor over 1024 retained inventory observations; not game hooks. */
+RS3_API int32_t rs3_item_events_since(rs3_context *, uint64_t after, rs3_item_event *, uint32_t capacity,
+    uint32_t *written, uint64_t *next, uint64_t *lost);
+/** Optional explicit metadata path (UTF-8). Worker must be stopped. By default,
+ * create tries rs3_catalog.bin beside the DLL. Catalogs are hash-checked and
+ * pinned to the executable profile; missing metadata never invents item names.
+ */
+RS3_API int32_t rs3_load_catalog(rs3_context *, const char *path);
 
 #ifdef __cplusplus
 }

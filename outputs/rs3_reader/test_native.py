@@ -4,7 +4,7 @@ from pathlib import Path
 import time
 import unittest
 
-from native import Reader, Info, Player, Options, NPC, Hit, Event, load_library
+from native import Reader, Info, Player, Options, NPC, Hit, Event, InventoryInfo, Item, Ability, ItemEvent, load_library
 from native_telemetry import NativeTelemetry
 from tracker import HitHistory
 
@@ -16,13 +16,17 @@ LIBRARY = Path(__file__).resolve().parent.parent/"rs3_native"/"build"/"rs3_nativ
 class NativeTests(unittest.TestCase):
     def test_struct_sizes_and_offsets(self):
         lib = load_library()
-        for i, structure in enumerate((Options, Info, Player, NPC, Hit, Event), 1):
+        for i, structure in enumerate((Options, Info, Player, NPC, Hit, Event, InventoryInfo, Item, Ability, ItemEvent), 1):
             self.assertEqual(lib.rs3_sizeof(i), C.sizeof(structure))
         self.assertEqual(Info.message.offset, 192)
         self.assertEqual(Player.gcd_reason.offset, 132)
         self.assertEqual(NPC.name.offset, 48)
         self.assertEqual(Event.hit.offset, 48)
         self.assertEqual(Event.name.offset, 88)
+        self.assertEqual(Item.name.offset,60)
+        self.assertEqual(Ability.name.offset,64)
+        self.assertEqual(ItemEvent.before.offset,40)
+        self.assertEqual(ItemEvent.after.offset,232)
 
     def test_missing_process_produces_null_values_and_closes(self):
         telemetry = NativeTelemetry(pid=0xffffffff, worker_hz=100)
@@ -33,6 +37,10 @@ class NativeTests(unittest.TestCase):
             self.assertIsNone(record["health"])
             self.assertIsNone(record["adrenaline_percent"])
             self.assertIsNone(record["npcs"])
+            self.assertIsNone(record["inventory"]["slots"])
+            self.assertEqual(record["equipment"]["configuration"],"unknown")
+            self.assertEqual(record["abilities"]["entries"],[])
+            self.assertEqual(telemetry.reader.drain_item_events(),([],0))
             self.assertGreater(record["native"]["sample_sequence"], 0)
             self.assertGreaterEqual(record["native"]["snapshot_age_ms"], 0)
             self.assertLess(record["native"]["snapshot_age_ms"], 1000)

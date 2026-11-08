@@ -28,11 +28,19 @@ _Static_assert(sizeof(rs3_player)==136, "ABI player layout");
 _Static_assert(sizeof(rs3_npc)==568, "ABI NPC layout");
 _Static_assert(sizeof(rs3_hit)==40, "ABI hit layout");
 _Static_assert(sizeof(rs3_event)==608, "ABI event layout");
+_Static_assert(sizeof(rs3_inventory_info)==168, "ABI inventory info layout");
+_Static_assert(sizeof(rs3_item)==192, "ABI item layout");
+_Static_assert(sizeof(rs3_ability)==192, "ABI ability layout");
+_Static_assert(sizeof(rs3_item_event)==424, "ABI item event layout");
 #define EVENT_CAPACITY 4096u
 #define ACTOR_BYTES (P_NPC_HEALTH_MAX_OFFSET+4u)
 
 struct rs3_snapshot { rs3_info info; rs3_player player;
-    rs3_npc npcs[RS3_MAX_NPCS]; rs3_hit hits[RS3_MAX_HITS]; };
+    rs3_npc npcs[RS3_MAX_NPCS]; rs3_hit hits[RS3_MAX_HITS];
+    rs3_inventory_info inventory_info; rs3_item items[RS3_MAX_ITEMS];
+    rs3_ability abilities[RS3_MAX_ABILITIES]; };
+typedef struct inventory_state inventory_state;
+static void inventory_reset(inventory_state *);
 typedef struct npc_identity { uint64_t actor, instance; uint32_t uid, used;
     uint64_t valid_hits; rs3_hit previous[64]; } npc_identity;
 typedef int (*read_callback)(void*, uint64_t, void*, size_t);
@@ -52,6 +60,7 @@ struct rs3_context {
     uint16_t identity_index[65536];
     uint64_t *buckets; size_t bucket_capacity;
     uint64_t npc_context, npc_state, actors[RS3_MAX_NPCS];
+    inventory_state *inventory;
 };
 
 static uint64_t monotonic_ns(void) {
@@ -124,6 +133,7 @@ static void detach(rs3_context *c) {
     if (c->process) CloseHandle(c->process);
     c->process=NULL; c->attached=0; c->previous_valid=0; c->clock_context=0;
     reset_identities(c);
+    inventory_reset(c->inventory);
 }
 static void schedule_retry(rs3_context *c,uint64_t now) {
     c->retry_reason=c->reason;
@@ -381,6 +391,8 @@ static int npcs_once(rs3_context *c,rs3_snapshot *s,uint64_t state,uint32_t *ids
         return fail(c,RS3_READ_FAILED,"NPC list changed during read");
     *out_n=n; *out_manager=manager; return 1;
 }
+#include "inventory.c"
+
 static int decode(rs3_context *c,rs3_snapshot *s) {
     /* Stage fields first. Only the final context check permits event commits. */
     uint64_t player,client,state,vtable,manager,entries,after; rs3_player *p=&s->player;
@@ -419,10 +431,12 @@ static int decode(rs3_context *c,rs3_snapshot *s) {
         s->info.status=RS3_PARTIAL; s->info.reason=RS3_READ_FAILED;
         snprintf(s->info.message,sizeof s->info.message,"NPCs: %s",c->error);
     } else if (s->info.skipped_npcs) s->info.status=RS3_PARTIAL;
+    inventory_stage(c,s,client,state);
     if (!capture(c,0,&after) || after!=player || !capture(c,1,&after) || after!=client ||
         !ptr(c,client+P_STATE_POINTER_OFFSET,&after) || after!=state)
         return fail(c,RS3_READ_FAILED,"World context changed during read");
     if (npc_ok) commit_npcs(c,s,ids,npc_count,npc_manager,state);
+    inventory_commit(c,s,state);
     uint64_t now=s->info.monotonic_ns;
     if (c->clock_context!=state || c->last_clock!=s->info.logic_tick) {
         c->clock_context=state; c->last_clock=s->info.logic_tick; c->clock_changed=now;
@@ -442,10 +456,14 @@ static void copy_frame(rs3_snapshot *to,const rs3_snapshot *from) {
     to->info=from->info; to->player=from->player;
     memcpy(to->npcs,from->npcs,from->info.npc_count*sizeof(rs3_npc));
     memcpy(to->hits,from->hits,from->info.hit_count*sizeof(rs3_hit));
+    to->inventory_info=from->inventory_info;
+    memcpy(to->items,from->items,(from->inventory_info.backpack_count+from->inventory_info.equipment_count)*sizeof(rs3_item));
+    memcpy(to->abilities,from->abilities,from->inventory_info.ability_count*sizeof(rs3_ability));
 }
 static void poll_and_publish(rs3_context *c,rs3_snapshot *s) {
     uint64_t begin=monotonic_ns(); DWORD exit_code=0;
     memset(&s->info,0,sizeof s->info); memset(&s->player,0,sizeof s->player);
+    memset(&s->inventory_info,0,sizeof s->inventory_info);
     s->info.abi_version=RS3_ABI_VERSION; s->info.sequence=++c->sequence;
     s->info.timestamp_ns=unix_ns(); s->info.monotonic_ns=begin;
     c->calls=c->bytes=0; c->reason=RS3_REASON_NONE; c->error[0]=0;
@@ -462,6 +480,8 @@ static void poll_and_publish(rs3_context *c,rs3_snapshot *s) {
         s->info.status=RS3_UNAVAILABLE; s->info.reason=c->reason;
         s->info.npc_count=s->info.hit_count=s->info.loaded_npcs=s->info.skipped_npcs=0;
         memset(&s->player,0,sizeof s->player);
+        memset(&s->inventory_info,0,sizeof s->inventory_info);
+        s->inventory_info.status=RS3_UNAVAILABLE; s->inventory_info.reason=c->reason;
         c->previous_valid=0; c->clock_context=0;
         snprintf(s->info.message,sizeof s->info.message,"%s",c->error);
         if (c->reason==RS3_UNSUPPORTED_CLIENT && c->attached) schedule_retry(c,begin);
@@ -492,7 +512,9 @@ uint64_t rs3_monotonic_ns(void) { return monotonic_ns(); }
 uint32_t rs3_sizeof(uint32_t which) {
     switch (which) { case RS3_SIZE_OPTIONS:return sizeof(rs3_options); case RS3_SIZE_INFO:return sizeof(rs3_info);
     case RS3_SIZE_PLAYER:return sizeof(rs3_player); case RS3_SIZE_NPC:return sizeof(rs3_npc);
-    case RS3_SIZE_HIT:return sizeof(rs3_hit); case RS3_SIZE_EVENT:return sizeof(rs3_event); default:return 0; }
+    case RS3_SIZE_HIT:return sizeof(rs3_hit); case RS3_SIZE_EVENT:return sizeof(rs3_event);
+    case RS3_SIZE_INVENTORY_INFO:return sizeof(rs3_inventory_info); case RS3_SIZE_ITEM:return sizeof(rs3_item);
+    case RS3_SIZE_ABILITY:return sizeof(rs3_ability); case RS3_SIZE_ITEM_EVENT:return sizeof(rs3_item_event); default:return 0; }
 }
 const char *rs3_profile_sha256(void) { return P_PROFILE_SHA256; }
 const char *rs3_result_string(int32_t r) {
@@ -514,7 +536,9 @@ int32_t rs3_create(const rs3_options *o,rs3_context **out) {
     c->read=windows_read; c->read_user=c;
     c->events=calloc(EVENT_CAPACITY,sizeof(rs3_event)); c->identities=calloc(RS3_MAX_NPCS,sizeof(npc_identity));
     c->working=calloc(1,sizeof(rs3_snapshot)); c->latest=calloc(1,sizeof(rs3_snapshot));
-    if (!c->events || !c->identities || !c->working || !c->latest) { rs3_destroy(c); return RS3_E_MEMORY; }
+    c->inventory=calloc(1,sizeof(inventory_state));
+    if (!c->events || !c->identities || !c->working || !c->latest || !c->inventory) { rs3_destroy(c); return RS3_E_MEMORY; }
+    inventory_default_catalog(c);
     *out=c; return RS3_OK;
 }
 int32_t rs3_start(rs3_context *c,uint32_t hz) {
@@ -543,7 +567,8 @@ int32_t rs3_stop(rs3_context *c) {
 void rs3_destroy(rs3_context *c) {
     if (!c) return;
     rs3_stop(c); if(c->process)CloseHandle(c->process);
-    free(c->events); free(c->identities); free(c->working); free(c->latest); free(c->buckets); free(c);
+    free(c->events); free(c->identities); free(c->working); free(c->latest); free(c->buckets);
+    inventory_free(c->inventory); free(c);
 }
 int32_t rs3_sample(rs3_context *c,rs3_snapshot *s) {
     if (!c || !s) return RS3_E_ARGUMENT;
