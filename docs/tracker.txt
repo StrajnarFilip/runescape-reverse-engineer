@@ -16,13 +16,12 @@ COLLECTION
   game's server update rate. Raw/source tab shows engine timing and event gaps.
   RS3_NATIVE_LIBRARY can select an alternative DLL.
 
-LIVE PLAYER TILE IN CLIENT 6ada3f59-1a86000
-  Start the tracker normally to see Player Tile at 20 Hz on this build.
-  Combat telemetry uses the 951-3 profile.
+COMPATIBILITY MODE CLIENT 6ada3f59-1a86000
+  This profile displays the live player tile alongside combat and inventory data.
   The JSONL position field gives x (east), y (north) and plane (0–3).
   A null position indicates the tile is unavailable.
 
-VERIFIED FIELDS IN CLIENT 951-3
+VERIFIED FIELDS IN THE PINNED 951-3 BUILDS
   HP/max HP: direct VARP 13537/13538.
   Prayer: VARP 3274 bits 0..14 / 10; UI displays the integer part.
   Max prayer: base prayer skill level * 10 (derived, not a separate max variable).

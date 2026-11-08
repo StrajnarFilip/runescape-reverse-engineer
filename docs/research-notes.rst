@@ -15,6 +15,27 @@ and checked with read-only memory access. The C collector uses the same profile;
 ``tools/generate_profile.py`` produces constants and a source-profile hash. The Python
 binding refuses a DLL built from a different profile.
 
+Compatibility Mode build
+------------------------
+
+Executable ``7a60c69fcf11eda42a328732721f5e89e1c85a6bc919038ff3451d4643e42dbf``
+also reports file version 951-3. Its registry is at RVA ``0x16bef20``.
+The VarPlayer and VarClient handlers are at ``0x4818f0`` and ``0x4819e0``.
+Its client, NPC manager and NPC actor vtables are at ``0x150d8a8``,
+``0x1511f78`` and ``0x15b3a88``. The variable, clock, skill, NPC and inventory
+layouts below also apply. The profile pins the loaded registry, lookup, NPC
+and inventory instructions in addition to the player position instructions.
+The scene global at ``0x18df2c8`` is distinct from the VarClient capture.
+Its state field at ``+0x19fc0`` must be 30 before and after combat sampling.
+
+The local item and struct definition indexes and generated catalog body matched
+the original 951-3 validation report. Live reads on the Compatibility Mode
+build returned player stats, an advancing logic clock, loaded NPC names and HP,
+equipment and mapped ability timer pairs. The backpack was present with a
+zero-length slot vector. The game's inventory getters return item ID -1 and
+quantity 0 beyond the stored vector, so the tracker pads those logical slots.
+Active hitsplat observations and Telos mechanics were outside this live check.
+
 Domain registry and variable tables
 -----------------------------------
 

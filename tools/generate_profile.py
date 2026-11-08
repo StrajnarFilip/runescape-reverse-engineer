@@ -33,6 +33,20 @@ def signatures(profile, array):
     return [*lines, "};"]
 
 
+def client_layout(name, prefix, patterns, rvas, has_position):
+    return [
+        f"static const client_profile {name} = {{",
+        f"    .sha256 = {prefix}_SHA256,",
+        f"    .version = {prefix}_VERSION,",
+        f"    .short_version = {prefix + '_SHORT' if has_position else prefix}_VERSION,",
+        f"    .signatures = {patterns},",
+        f"    .signature_count = sizeof {patterns} / sizeof {patterns}[0],",
+        *(f"    .{key} = {number(value):#x}u," for key, value in rvas.items()),
+        f"    .has_position = {int(has_position)},",
+        "};",
+    ]
+
+
 def generate(data, position_data):
     profile = json.loads(data)
     position_profile = json.loads(position_data)
@@ -59,9 +73,22 @@ def generate(data, position_data):
 
     ids = ", ".join(f"{profile['variables'][key]}u" for key in VARIABLES)
     lines.append(f"static const uint32_t p_variable_ids[] = {{{ids}}};")
-    lines.append("typedef struct { uint32_t rva, length; unsigned char bytes[64]; } profile_signature;")
     lines.extend(signatures(profile, "p_signatures"))
     lines.extend(signatures(position_profile, "pos_signatures"))
+    combat_rvas = {
+        "registry_rva": profile["registry_rva"],
+        "player_handler_rva": profile["domains"]["player"]["handler_rva"],
+        "client_handler_rva": profile["domains"]["client"]["handler_rva"],
+        "client_vtable_rva": profile["client_vtable_rva"],
+        "npc_manager_vtable_rva": profile["npcs"]["manager_vtable_rva"],
+        "npc_entity_vtable_rva": profile["npcs"]["entity_vtable_rva"],
+    }
+    compatibility = position_profile["combat_layout"]
+    if compatibility["version"] != profile["version"]:
+        raise ValueError("Incompatible combat layout version")
+    lines.extend(client_layout("p_profile", "P", "p_signatures", combat_rvas, False))
+    lines.extend(client_layout("pos_profile", "POS", "pos_signatures",
+                               {key: compatibility[key] for key in combat_rvas}, True))
     lines.extend(("#endif", ""))
     return "\n".join(lines).encode("ascii")
 

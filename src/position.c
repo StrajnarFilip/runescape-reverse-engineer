@@ -1,13 +1,18 @@
-/* Read the local player tile from the pinned position profile. */
+/* Read the local player tile from the Compatibility Mode client. */
 #include "internal.h"
 
 #include "profile_generated.h"
 
+int player_scene(rs3_context *c, uint64_t *client) {
+    int32_t state;
+    return ptr(c, c->module_base + POS_CLIENT_PTR_RVA, client) && *client &&
+           rd(c, *client + POS_STATE, &state, sizeof state) && state == (int32_t)POS_IN_GAME_STATE;
+}
+
 static uint64_t local_player(rs3_context *c) {
     uint64_t client, context, owner, player, table, range[2], slot;
-    int32_t state, index;
-    if (!ptr(c, c->module_base + POS_CLIENT_PTR_RVA, &client) || !client ||
-        !rd(c, client + POS_STATE, &state, sizeof state) || state != (int32_t)POS_IN_GAME_STATE ||
+    int32_t index;
+    if (!player_scene(c, &client) ||
         !ptr(c, client + POS_PLAYER_CONTEXT, &context) || !context ||
         !ptr(c, context, &owner) || owner != client ||
         !ptr(c, context + POS_PLAYER_OVERRIDE, &player)) return 0;
@@ -40,7 +45,7 @@ static uint64_t read_tile(rs3_context *c, rs3_position *tile) {
     return player;
 }
 
-int decode_position(rs3_context *c, rs3_snapshot *s) {
+int decode_position(rs3_context *c, rs3_position *position) {
     uint64_t previous_player = 0;
     rs3_position previous = {0};
     for (unsigned attempt = 0; attempt < 4; attempt++) {
@@ -48,15 +53,11 @@ int decode_position(rs3_context *c, rs3_snapshot *s) {
         uint64_t player = read_tile(c, &tile);
         if (player && player == previous_player &&
             tile.x == previous.x && tile.y == previous.y && tile.plane == previous.plane) {
-            s->position = tile;
-            s->info.status = RS3_PARTIAL;
-            s->player.gcd_reason = RS3_NOT_SET;
-            s->inventory_info.status = RS3_UNAVAILABLE;
-            s->inventory_info.reason = RS3_NOT_SET;
+            *position = tile;
             return 1;
         }
         previous_player = player;
         previous = tile;
     }
-    return fail(c, RS3_NOT_SET, "Player tile unavailable");
+    return 0;
 }

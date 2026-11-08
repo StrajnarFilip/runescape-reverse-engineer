@@ -9,9 +9,10 @@ Python. All project source, comments, interface text and documentation use Engli
 Current capabilities
 --------------------
 
-* Version-pinned Windows x64 client **951-3**, executable SHA-256 and loaded-code
-  signatures checked before using offsets.
-* Live player tiles on client **6ada3f59-1a86000**, using its own pinned native profile.
+* Version-pinned Windows x64 **951-3** builds, including **6ada3f59-1a86000**
+  in Compatibility Mode. The reader checks the executable SHA-256 and loaded-code
+  signatures before using offsets.
+* Live player tiles alongside combat telemetry on **6ada3f59-1a86000**.
 * Player current/max HP, prayer (maximum derived from base level), adrenaline,
   and global cooldown using the client's 20 ms logic clock.
 * Loaded NPC names, config/type IDs, runtime IDs, exact transmitted current/max HP.
@@ -89,8 +90,7 @@ the log directory or copy the latest JSON. The collector requests only
 ``PROCESS_QUERY_INFORMATION | PROCESS_VM_READ``. No game calls, writes or inputs.
 
 On client build **6ada3f59-1a86000**, the desktop tracker shows **Player Tile**
-at 20 Hz and leaves combat fields unavailable. Combat telemetry uses the
-separate **951-3** profile.
+alongside life points, prayer, adrenaline, cooldowns, nearby NPCs and inventory.
 
 JSONL records carry ``position`` with integer ``x`` (east), ``y`` (north), and
 ``plane`` (0–3). The tile is ``null`` when unavailable. For repeatable boss
@@ -111,7 +111,8 @@ Layout and verification
 * ``work/`` contains research scripts and opt-in live validation tools.
 
 See `the native API guide <docs/native-api.rst>`_ for CMake installation and C, Python and Java usage.
-The live combat benchmark in ``work/benchmark_native.py`` needs client **951-3**.
+The live combat benchmark in ``work/benchmark_native.py`` uses the original
+``profile_951_3.json`` executable.
 
 Limits
 ------

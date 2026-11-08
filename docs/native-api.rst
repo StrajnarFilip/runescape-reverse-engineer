@@ -47,8 +47,8 @@ thread. ctypes CDLL calls release the GIL; the native worker does not acquire it
 The adapter in ``native_telemetry.py`` preserves the previous JSON/tracker schema
 and adds ``backend: c``, native read metrics, sample sequence, age and event gaps.
 Existing profile and executable hashes are checked before returning game data.
-The ``6ada3f59-1a86000`` profile provides player tiles. The ``951-3`` profile
-provides combat, inventory and ability telemetry.
+Both pinned executable profiles provide combat, inventory and ability telemetry.
+The ``6ada3f59-1a86000`` profile also provides player tiles.
 
 C example from the Visual Studio build::
 
@@ -106,8 +106,9 @@ Borrowed result/profile strings are immutable and valid while the DLL is loaded.
 * ``rs3_copy_latest(context, snapshot)``: copies the latest frame without sampling.
   Before the first worker result, status is ``RS3_NO_SAMPLE``.
 * ``rs3_snapshot_position(snapshot, &position, sizeof position)`` copies the
-  tile. Read the coordinates only when ``position.valid`` is 1. A tile-only
-  snapshot has ``RS3_PARTIAL`` status and no valid combat fields.
+  tile. Read the coordinates only when ``position.valid`` is 1. If a verified
+  tile is available during a combat read failure, the snapshot is partial and
+  the combat fields are unavailable.
 * ``rs3_snapshot_client_version(snapshot)`` returns the full version label as a
   borrowed string. ``rs3_info.client_version`` holds a short label.
 * ``rs3_snapshot_info/player``: supply an output struct and its size. Too-small

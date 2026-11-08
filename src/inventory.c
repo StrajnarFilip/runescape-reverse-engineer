@@ -110,13 +110,17 @@ static int inventory_slots(rs3_context *c,rs3_snapshot *s,uint64_t state) {
         if(key!=186 && key!=188)continue;
         uint32_t id=key/2,expected=id==93?28:19;
         uint64_t data=u64(r+24),stop=u64(r+32),capacity=u64(r+40);
-        if(u32(r+16)!=id || stop<data || capacity<stop || stop-data!=expected*8)
+        if(u32(r+16)!=id || stop<data || capacity<stop || (stop-data)%8 || stop-data>expected*8 ||
+           (data ? !pointer_valid(data) : capacity != 0))
             return fail(c,RS3_READ_FAILED,"Invalid inventory slot vector");
+        size_t bytes = (size_t)(stop - data);
         unsigned char slots[28*8],check[28*8];
-        if(!rd(c,data,slots,expected*8) || !rd(c,data,check,expected*8) || memcmp(slots,check,expected*8))
+        if(bytes && (!rd(c,data,slots,bytes) || !rd(c,data,check,bytes) || memcmp(slots,check,bytes)))
             return fail(c,RS3_READ_FAILED,"Inventory slots changed during read");
+        /* The client's slot getters return empty for indices past the vector end. */
         for(uint32_t j=0;j<expected;j++) {
-            rs3_item item={0};item.container_id=id;item.slot=j;item.item_id=i32(slots+j*8);item.quantity=u32(slots+j*8+4);
+            rs3_item item={0};item.container_id=id;item.slot=j;item.item_id=-1;
+            if(j<bytes/8){item.item_id=i32(slots+j*8);item.quantity=u32(slots+j*8+4);}
             if(item.item_id<-1 || item.item_id>1000000 || (item.item_id==-1 && item.quantity))
                 return fail(c,RS3_READ_FAILED,"Invalid inventory item record");
             describe_item(v,&item);s->items[item_count++]=item;

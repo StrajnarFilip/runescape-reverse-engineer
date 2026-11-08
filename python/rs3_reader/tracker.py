@@ -201,13 +201,18 @@ class Tracker:
         try:
             telemetry = NativeTelemetry(pid=self.pid, worker_hz=self.native_hz)
             if self.history_path:
+                profiles = Path(__file__).resolve().parents[2] / "profiles"
+                supported_hashes = {
+                    json.loads((profiles / name).read_text(encoding="utf-8"))["sha256"]
+                    for name in ("profile_951_3.json", "profile_6ada3f59.json")
+                }
                 with Path(self.history_path).open(encoding="utf-8") as source:
                     for line in source:
                         try:
                             record = json.loads(line)
                         except json.JSONDecodeError:
                             continue
-                        if record.get("executable_sha256") == "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45":
+                        if record.get("executable_sha256") in supported_hashes:
                             self.hit_history.observe(record)
             with closing(RotatingFileHandler(self.log_path, maxBytes=25*1024*1024,
                                             backupCount=3, encoding="utf-8")) as log:

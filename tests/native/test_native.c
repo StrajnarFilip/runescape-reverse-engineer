@@ -10,7 +10,7 @@
 
 typedef struct block { uint64_t base; size_t size; unsigned char *data; } block;
 typedef struct fixture {
-    block blocks[40]; unsigned count;
+    block blocks[64]; unsigned count;
     uint64_t trigger, target; unsigned trigger_count, mutate_on; uint32_t replacement;
     rs3_context *c; rs3_snapshot *s;
 } fixture;
@@ -35,7 +35,7 @@ typedef struct fixture {
 #define VTABLES 0x820000ull
 
 static void add(fixture *f,uint64_t base,size_t size) {
-    assert(f->count<40); block *b=f->blocks+f->count++;
+    assert(f->count < sizeof f->blocks / sizeof f->blocks[0]); block *b=f->blocks+f->count++;
     b->base=base; b->size=size; b->data=calloc(1,size); assert(b->data);
 }
 static unsigned char *at(fixture *f,uint64_t a,size_t size) {
@@ -58,21 +58,22 @@ static fixture *empty_fixture(void) {
     f->c->read=fake_read; f->c->read_user=f; f->c->module_base=BASE; f->c->pid=123; f->c->creation_time=456;
     return f;
 }
-static fixture *make_fixture(void) {
+static fixture *make_profile_fixture(const client_profile *profile) {
     fixture *f = empty_fixture();
-    add(f,BASE+P_REGISTRY_RVA+P_REGISTRY_ROOT_OFFSET,8); add(f,DOMAINS,512);
+    f->c->profile = profile;
+    add(f,BASE+profile->registry_rva+P_REGISTRY_ROOT_OFFSET,8); add(f,DOMAINS,512);
     add(f,FUNCTIONS,512); add(f,VTABLES,512);
-    put64(f,BASE+P_REGISTRY_RVA+P_REGISTRY_ROOT_OFFSET,DOMAINS);
+    put64(f,BASE+profile->registry_rva+P_REGISTRY_ROOT_OFFSET,DOMAINS);
     for(unsigned i=0;i<2;i++) {
         uint64_t node=DOMAINS+i*256,fun=FUNCTIONS+i*256,vt=VTABLES+i*256;
         put32(f,node+P_TREE_KEY_OFFSET,i?P_CLIENT_ID:P_PLAYER_ID);
         put64(f,node+P_FUNCTION_POINTER_OFFSET,fun); put64(f,fun,vt);
-        put64(f,vt+16,BASE+(i?P_CLIENT_HANDLER_RVA:P_PLAYER_HANDLER_RVA));
+        put64(f,vt+16,BASE+(i?profile->client_handler_rva:profile->player_handler_rva));
         put64(f,fun+P_FUNCTION_CAPTURE_OFFSET,i?CLIENT:PLAYER);
     }
     put64(f,DOMAINS+P_TREE_LEFT_OFFSET,DOMAINS+256);
     add(f,PLAYER,P_PLAYER_COUNT_OFFSET+8); add(f,CLIENT,0x7400); add(f,WORLD,P_NPC_MANAGER_OFFSET+8);
-    put64(f,CLIENT,BASE+P_CLIENT_VTABLE_RVA); put64(f,CLIENT+P_STATE_POINTER_OFFSET,WORLD);
+    put64(f,CLIENT,BASE+profile->client_vtable_rva); put64(f,CLIENT+P_STATE_POINTER_OFFSET,WORLD);
     put32(f,WORLD+P_LOGIC_CLOCK_OFFSET,1005);
     add(f,SKILLS,32); add(f,ENTRIES,6*P_SKILL_STRIDE);
     put64(f,CLIENT+P_SKILLS_MANAGER_OFFSET,SKILLS); put64(f,SKILLS+P_SKILLS_ENTRIES_OFFSET,ENTRIES);
@@ -89,13 +90,13 @@ static fixture *make_fixture(void) {
         put32(f,node,p_variable_ids[i]); put64(f,node+8,(uint64_t)values[i]);
     }
     add(f,MANAGER,P_NPC_COUNT_OFFSET+4); add(f,NPC_TABLE,98*8); add(f,NPC_NODE,32);
-    put64(f,WORLD+P_NPC_MANAGER_OFFSET,MANAGER); put64(f,MANAGER,BASE+P_NPC_MANAGER_VTABLE_RVA);
+    put64(f,WORLD+P_NPC_MANAGER_OFFSET,MANAGER); put64(f,MANAGER,BASE+profile->npc_manager_vtable_rva);
     put64(f,MANAGER+16,NPC_TABLE); put64(f,MANAGER+24,97);
     put32(f,MANAGER+P_NPC_COUNT_OFFSET,1); put32(f,MANAGER+P_NPC_INDICES_OFFSET,42);
     put64(f,NPC_TABLE+42*8,NPC_NODE); put64(f,NPC_TABLE+97*8,UINT64_MAX);
     put32(f,NPC_NODE,42); put64(f,NPC_NODE+16,ACTOR);
     add(f,ACTOR,P_NPC_HEALTH_MAX_OFFSET+4u); add(f,CONFIG,16); add(f,RING,40); add(f,RECORD,24);
-    put64(f,ACTOR,BASE+P_NPC_ENTITY_VTABLE_RVA); put32(f,ACTOR+0x88,42);
+    put64(f,ACTOR,BASE+profile->npc_entity_vtable_rva); put32(f,ACTOR+0x88,42);
     unsigned char *name=at(f,ACTOR+P_NPC_NAME_OFFSET,24); memcpy(name,"Goblin",6); name[23]=17;
     put64(f,ACTOR+P_NPC_CONFIG_OFFSET,CONFIG); put32(f,CONFIG+8,12357);
     put32(f,ACTOR+P_NPC_HEALTH_CURRENT_OFFSET,326); put32(f,ACTOR+P_NPC_HEALTH_MAX_OFFSET,550);
@@ -103,6 +104,9 @@ static fixture *make_fixture(void) {
     put64(f,RING+24,1); put64(f,RING+32,RECORD);
     int32_t hit[6]={133,224,1060,-1,-1,60}; memcpy(at(f,RECORD,24),hit,24);
     return f;
+}
+static fixture *make_fixture(void) {
+    return make_profile_fixture(&p_profile);
 }
 static int read_fixture(fixture *f) {
     memset(f->s,0,sizeof *f->s); f->s->info.timestamp_ns=1000000000;
@@ -203,7 +207,6 @@ static void failed_sample_clears_fields(void) {
     fixture *f=make_fixture();
     f->c->process=OpenProcess(PROCESS_QUERY_INFORMATION|PROCESS_VM_READ,FALSE,GetCurrentProcessId());
     assert(f->c->process); f->c->attached=1;
-    f->c->profile = PROFILE_COMBAT;
     assert(rs3_sample(f->c,f->s)==0 && f->s->player.valid_variables);
     put64(f,CLIENT+P_STATE_POINTER_OFFSET,0);
     assert(rs3_sample(f->c,f->s)==0 && f->s->info.status==RS3_UNAVAILABLE);
@@ -212,7 +215,7 @@ static void failed_sample_clears_fields(void) {
     assert(f->c->event_sequence==1); dispose(f);
 }
 static void position_profile(void) {
-    fixture *f = empty_fixture();
+    fixture *f = make_profile_fixture(&pos_profile);
     for (size_t i = 0; i < sizeof pos_signatures / sizeof pos_signatures[0]; i++) {
         const profile_signature *signature = &pos_signatures[i];
         uint64_t address = BASE + signature->rva;
@@ -221,55 +224,62 @@ static void position_profile(void) {
     }
     unsigned char *first = at(f, BASE + pos_signatures[0].rva, 1);
     *first ^= 1;
-    assert(!signatures(f->c, POS_SHA256) && f->c->profile == PROFILE_NONE);
+    assert(!signatures(f->c, POS_SHA256) && !f->c->profile);
     *first ^= 1;
-    assert(signatures(f->c, POS_SHA256) && f->c->profile == PROFILE_POSITION);
+    assert(signatures(f->c, POS_SHA256) && f->c->profile->has_position);
 
+    uint64_t scene = 0x900000, context = 0xa00000, table = 0xb00000;
+    uint64_t slots = 0xc00000, slot = 0xd00000, actor = 0xe00000;
     add(f, BASE + POS_CLIENT_PTR_RVA, 8);
-    add(f, CLIENT, POS_PLAYER_CONTEXT + 8);
-    add(f, PLAYER, POS_PLAYER_OVERRIDE + 8);
-    add(f, MANAGER, POS_TABLE_RANGE + 16);
-    add(f, ENTRIES, 16);
-    add(f, CONFIG, POS_SLOT_ENTITY + 8);
-    add(f, ACTOR, POS_FINE_POSITION + 12);
-    put64(f, BASE + POS_CLIENT_PTR_RVA, CLIENT);
-    put32(f, CLIENT + POS_STATE, POS_IN_GAME_STATE);
-    put64(f, CLIENT + POS_PLAYER_CONTEXT, PLAYER);
-    put64(f, PLAYER, CLIENT);
-    put64(f, CLIENT + POS_PLAYER_TABLE, MANAGER);
-    put64(f, MANAGER + POS_TABLE_RANGE, ENTRIES);
-    put64(f, MANAGER + POS_TABLE_RANGE + 8, ENTRIES + 16);
-    put32(f, PLAYER + POS_PLAYER_INDEX, 1);
-    put64(f, ENTRIES + 8, CONFIG);
-    put64(f, CONFIG + POS_SLOT_ENTITY, ACTOR);
-    put32(f, ACTOR + POS_PLANE, 2);
-    put32(f, ACTOR + POS_SIZE, 2);
+    add(f, scene, POS_PLAYER_CONTEXT + 8);
+    add(f, context, POS_PLAYER_OVERRIDE + 8);
+    add(f, table, POS_TABLE_RANGE + 16);
+    add(f, slots, 16);
+    add(f, slot, POS_SLOT_ENTITY + 8);
+    add(f, actor, POS_FINE_POSITION + 12);
+    put64(f, BASE + POS_CLIENT_PTR_RVA, scene);
+    put32(f, scene + POS_STATE, POS_IN_GAME_STATE);
+    put64(f, scene + POS_PLAYER_CONTEXT, context);
+    put64(f, context, scene);
+    put64(f, scene + POS_PLAYER_TABLE, table);
+    put64(f, table + POS_TABLE_RANGE, slots);
+    put64(f, table + POS_TABLE_RANGE + 8, slots + 16);
+    put32(f, context + POS_PLAYER_INDEX, 1);
+    put64(f, slots + 8, slot);
+    put64(f, slot + POS_SLOT_ENTITY, actor);
+    put32(f, actor + POS_PLANE, 2);
+    put32(f, actor + POS_SIZE, 2);
     float fine[3] = {3166.5f * 512, 1234, 3483.5f * 512};
-    memcpy(at(f, ACTOR + POS_FINE_POSITION, sizeof fine), fine, sizeof fine);
+    memcpy(at(f, actor + POS_FINE_POSITION, sizeof fine), fine, sizeof fine);
     f->c->process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, GetCurrentProcessId());
     assert(f->c->process);
     f->c->attached = 1;
 
     rs3_position position;
-    assert(rs3_sample(f->c, f->s) == RS3_OK && f->s->info.status == RS3_PARTIAL);
+    assert(rs3_sample(f->c, f->s) == RS3_OK && f->s->info.status == RS3_AVAILABLE);
     assert(rs3_copy_latest(f->c, f->s) == RS3_OK);
     assert(!strcmp(f->s->info.client_version, POS_SHORT_VERSION));
     assert(!strcmp(rs3_snapshot_client_version(f->s), POS_VERSION));
-    assert(!f->s->player.valid_variables && f->s->player.gcd_reason == RS3_NOT_SET);
+    assert(f->s->player.raw_variables[RS3_HEALTH] == 8700 && f->s->player.prayer_base_level == 84);
+    assert(f->s->info.npc_count == 1 && f->s->npcs[0].health_current == 326);
     assert(rs3_snapshot_position(f->s, &position, 4) == RS3_E_ABI);
     assert(rs3_snapshot_position(f->s, &position, sizeof position) == RS3_OK);
     assert(position.valid && position.x == 3165 && position.y == 3482 && position.plane == 2);
 
-    put32(f, PLAYER + POS_PLAYER_INDEX, 2);
-    assert(rs3_sample(f->c, f->s) == RS3_OK && f->s->info.status == RS3_UNAVAILABLE);
-    assert(!f->s->position.valid);
-    put64(f, PLAYER + POS_PLAYER_OVERRIDE, ACTOR);
+    put32(f, context + POS_PLAYER_INDEX, 2);
+    assert(rs3_sample(f->c, f->s) == RS3_OK && f->s->info.status == RS3_AVAILABLE);
+    assert(!f->s->position.valid && f->s->player.valid_variables);
+    put64(f, context + POS_PLAYER_OVERRIDE, actor);
+    put64(f, BASE + pos_profile.registry_rva + P_REGISTRY_ROOT_OFFSET, 0);
     fine[0] += 512;
-    memcpy(at(f, ACTOR + POS_FINE_POSITION, sizeof fine), fine, sizeof fine);
-    assert(rs3_sample(f->c, f->s) == RS3_OK && f->s->position.valid && f->s->position.x == 3166);
-    put32(f, CLIENT + POS_STATE, 20);
+    memcpy(at(f, actor + POS_FINE_POSITION, sizeof fine), fine, sizeof fine);
+    assert(rs3_sample(f->c, f->s) == RS3_OK && f->s->info.status == RS3_PARTIAL);
+    assert(f->s->position.valid && f->s->position.x == 3166 && !f->s->player.valid_variables);
+    put32(f, scene + POS_STATE, 20);
+    put64(f, BASE + pos_profile.registry_rva + P_REGISTRY_ROOT_OFFSET, DOMAINS);
     assert(rs3_sample(f->c, f->s) == RS3_OK);
-    assert(rs3_copy_latest(f->c, f->s) == RS3_OK && !f->s->position.valid);
+    assert(rs3_copy_latest(f->c, f->s) == RS3_OK && f->s->info.status == RS3_UNAVAILABLE);
+    assert(!f->s->position.valid && !f->s->player.valid_variables && !f->s->info.npc_count);
     dispose(f);
 }
 static void worker_lifecycle(void) {
@@ -357,6 +367,21 @@ static void inventory_identity_and_doses(void) {
     assert(rs3_snapshot_items(f->s,94,NULL,0,&count)==RS3_E_BUFFER && count==19);
     dispose(f);
 }
+static void sparse_inventory_slots(void) {
+    fixture *f = inventory_fixture();
+    put64(f, INV_ENTRIES + 32, BAG + 8);
+    assert(read_fixture(f) && f->s->inventory_info.backpack_count == 28);
+    assert(f->s->items[0].item_id == 200 && f->s->items[1].item_id == -1);
+
+    put64(f, INV_ENTRIES + 24, 0);
+    put64(f, INV_ENTRIES + 32, 0);
+    put64(f, INV_ENTRIES + 40, 0);
+    assert(read_fixture(f) && f->s->inventory_info.backpack_count == 28);
+    for (unsigned i = 0; i < 28; i++)
+        assert(f->s->items[i].item_id == -1 && f->s->items[i].quantity == 0);
+    assert(f->s->inventory_info.equipment_count == 19 && f->s->items[31].item_id == 100);
+    dispose(f);
+}
 static void ability_cooldowns_and_equipment(void) {
     fixture *f=inventory_fixture();assert(read_fixture(f));
     rs3_ability *flurry=f->s->abilities,*resonance=flurry+1;
@@ -427,6 +452,7 @@ int main(void) {
     inventory_identity_and_doses();ability_cooldowns_and_equipment();inventory_races_and_duplicates();
     catalog_validation_and_item_queue_gaps();
     position_profile();
-    puts("PASS: 12 native test groups (including the player tile profile)");
+    sparse_inventory_slots();
+    puts("PASS: 13 native test groups (including Compatibility Mode and sparse inventory)");
     return 0;
 }

@@ -71,7 +71,7 @@ static int npc_one(rs3_context *c,rs3_snapshot *s,uint64_t table,uint64_t count,
     if (!npc_node(c,table,count,sentinel,uid,&address,node)) return 0;
     object=u64(node+16);
     if (!rd(c,object,actor,sizeof actor)) return 0;
-    if (u64(actor)!=c->module_base+P_NPC_ENTITY_VTABLE_RVA || (u32(actor+0x88)&65535)!=uid)
+    if (u64(actor)!=c->module_base+c->profile->npc_entity_vtable_rva || (u32(actor+0x88)&65535)!=uid)
         return fail(c,RS3_READ_FAILED,"NPC identity mismatch");
     config=u64(actor+P_NPC_CONFIG_OVERRIDE_OFFSET);
     if (!config) config=u64(actor+P_NPC_CONFIG_OFFSET);
@@ -149,7 +149,7 @@ int npcs_once(rs3_context *c,rs3_snapshot *s,uint64_t state,uint32_t *ids,uint32
     if (!ptr(c,state+P_NPC_MANAGER_OFFSET,&manager)) return 0;
     if (!manager) return fail(c,RS3_READ_FAILED,"NPC manager unavailable");
     if (!rd(c,manager,b,8)) return 0;
-    if (u64(b)!=c->module_base+P_NPC_MANAGER_VTABLE_RVA) return fail(c,RS3_READ_FAILED,"NPC manager profile mismatch");
+    if (u64(b)!=c->module_base+c->profile->npc_manager_vtable_rva) return fail(c,RS3_READ_FAILED,"NPC manager profile mismatch");
     if (!rd(c,manager+P_NPC_COUNT_OFFSET,&n,4) || n>1024) return fail(c,RS3_READ_FAILED,"Invalid NPC count");
     if (n && !rd(c,manager+P_NPC_INDICES_OFFSET,ids,n*4)) return 0;
     for (uint32_t i=0;i<n;i++) {

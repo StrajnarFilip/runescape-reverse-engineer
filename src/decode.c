@@ -8,8 +8,8 @@
 int capture(rs3_context *c,int client,uint64_t *out) {
     uint64_t node,visited[64]; unsigned n=0;
     uint32_t id=client?P_CLIENT_ID:P_PLAYER_ID;
-    uint64_t handler=client?P_CLIENT_HANDLER_RVA:P_PLAYER_HANDLER_RVA;
-    if (!ptr(c,c->module_base+P_REGISTRY_RVA+P_REGISTRY_ROOT_OFFSET,&node)) return 0;
+    uint64_t handler=client?c->profile->client_handler_rva:c->profile->player_handler_rva;
+    if (!ptr(c,c->module_base+c->profile->registry_rva+P_REGISTRY_ROOT_OFFSET,&node)) return 0;
     while (node && n<64) {
         for (unsigned j=0;j<n;j++) if (visited[j]==node) return fail(c,RS3_READ_FAILED,"Domain registry cycle");
         visited[n++]=node; unsigned char b[104];
@@ -64,9 +64,11 @@ static int variable_tables(rs3_context *c,rs3_player *p,uint64_t player,uint64_t
 }
 int decode(rs3_context *c,rs3_snapshot *s) {
     /* Stage fields first. Only the final context check permits event commits. */
-    uint64_t player,client,state,vtable,manager,entries,after; rs3_player *p=&s->player;
+    uint64_t player,client,state,vtable,manager,entries,after,scene=0; rs3_player *p=&s->player;
+    if (c->profile->has_position && !player_scene(c, &scene))
+        return fail(c, RS3_NOT_SET, "Player is outside the active game scene");
     if (!capture(c,0,&player) || !capture(c,1,&client) || !ptr(c,client,&vtable)) return 0;
-    if (vtable!=c->module_base+P_CLIENT_VTABLE_RVA) return fail(c,RS3_UNSUPPORTED_CLIENT,"Client context profile mismatch");
+    if (vtable!=c->module_base+c->profile->client_vtable_rva) return fail(c,RS3_UNSUPPORTED_CLIENT,"Client context profile mismatch");
     if (!ptr(c,client+P_SKILLS_MANAGER_OFFSET,&manager)) return 0;
     if (!manager) return fail(c,RS3_READ_FAILED,"Player statistics unavailable");
     if (!ptr(c,manager+P_SKILLS_ENTRIES_OFFSET,&entries)) return 0;
@@ -102,7 +104,8 @@ int decode(rs3_context *c,rs3_snapshot *s) {
     } else if (s->info.skipped_npcs) s->info.status=RS3_PARTIAL;
     inventory_stage(c,s,client,state);
     if (!capture(c,0,&after) || after!=player || !capture(c,1,&after) || after!=client ||
-        !ptr(c,client+P_STATE_POINTER_OFFSET,&after) || after!=state)
+        !ptr(c,client+P_STATE_POINTER_OFFSET,&after) || after!=state ||
+        (scene && (!player_scene(c, &after) || after != scene)))
         return fail(c,RS3_READ_FAILED,"World context changed during read");
     if (npc_ok) commit_npcs(c,s,ids,npc_count,npc_manager,state);
     inventory_commit(c,s,state);

@@ -55,24 +55,25 @@ static void poll_and_publish(rs3_context *c,rs3_snapshot *s) {
     } else if (!ready && c->retry_reason) {
         fail(c,c->retry_reason,c->retry_error);
     }
-    int decoded = ready && (c->profile == PROFILE_POSITION ? decode_position(c, s)
-                           : c->profile == PROFILE_COMBAT && decode(c, s));
+    int decoded = ready && decode(c, s);
     if (!decoded) {
         if (!c->reason) fail(c,RS3_NO_CLIENT,"Waiting to reconnect to RS3");
         s->info.status=RS3_UNAVAILABLE; s->info.reason=c->reason;
         s->info.npc_count=s->info.hit_count=s->info.loaded_npcs=s->info.skipped_npcs=0;
         memset(&s->player,0,sizeof s->player);
+        s->player.gcd_reason = RS3_NOT_SET;
         memset(&s->inventory_info,0,sizeof s->inventory_info);
         s->inventory_info.status=RS3_UNAVAILABLE; s->inventory_info.reason=c->reason;
         c->previous_valid=0; c->clock_context=0;
         snprintf(s->info.message,sizeof s->info.message,"%s",c->error);
         if (c->reason==RS3_UNSUPPORTED_CLIENT && c->attached) schedule_retry(c,begin);
     }
+    if (c->profile && c->profile->has_position && decode_position(c, &s->position) && !decoded)
+        s->info.status = RS3_PARTIAL;
     s->info.pid=c->pid; s->info.process_creation_time=c->creation_time;
     snprintf(s->info.executable_sha256,sizeof s->info.executable_sha256,"%s",c->actual_sha256);
     s->profile = c->profile;
-    const char *version = c->profile == PROFILE_POSITION ? POS_SHORT_VERSION
-                        : c->profile == PROFILE_COMBAT ? P_VERSION : "";
+    const char *version = c->profile ? c->profile->short_version : "";
     snprintf(s->info.client_version, sizeof s->info.client_version, "%s", version);
     s->info.event_sequence=c->event_sequence; s->info.read_calls=c->calls; s->info.read_bytes=c->bytes;
     s->info.sample_duration_ns=monotonic_ns()-begin;
@@ -177,12 +178,7 @@ int32_t rs3_snapshot_info(const rs3_snapshot *s,rs3_info *out,uint32_t size) {
     return RS3_OK;
 }
 const char *rs3_snapshot_client_version(const rs3_snapshot *s) {
-    if (!s) return "";
-    switch (s->profile) {
-    case PROFILE_COMBAT: return P_VERSION;
-    case PROFILE_POSITION: return POS_VERSION;
-    default: return "";
-    }
+    return s && s->profile ? s->profile->version : "";
 }
 int32_t rs3_snapshot_player(const rs3_snapshot *s,rs3_player *out,uint32_t size) {
     if (!s || !out) return RS3_E_ARGUMENT;
