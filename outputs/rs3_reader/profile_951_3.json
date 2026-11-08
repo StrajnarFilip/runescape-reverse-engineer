@@ -1,0 +1,45 @@
+{
+  "version": "951-3",
+  "sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+  "registry_rva": "0x1721ee0",
+  "registry_root_offset": 16,
+  "tree_key_offset": 32,
+  "tree_right_offset": 0,
+  "tree_left_offset": 8,
+  "function_pointer_offset": 96,
+  "function_capture_offset": 8,
+  "domains": {
+    "player": {"id": 61, "handler_rva": "0x4819d0", "table_offset": "0x1c0c0", "count_offset": "0x1c0c8"},
+    "client": {"id": 57, "handler_rva": "0x481ac0", "table_offset": "0x7308", "count_offset": "0x7310"}
+  },
+  "node": {"key_offset": 0, "value_offset": 8, "type_offset": 32, "next_offset": 40},
+  "client_vtable_rva": "0x15367c0",
+  "state_pointer_offset": 8,
+  "logic_clock_offset": "0x528",
+  "logic_tick_ms": 20,
+  "skills_manager_offset": "0x72e8",
+  "skills_entries_offset": 16,
+  "skill_stride": 24,
+  "skill_base_level_offset": 16,
+  "signatures": [
+    {"rva": "0x466d60", "bytes": "48894c24084883ec38488b0580b12b014c8d0569"},
+    {"rva": "0xc08610", "bytes": "40534883ec30488b5a084c8bd1448b81c8c00100"},
+    {"rva": "0xc08db0", "bytes": "40534883ec30488b5a084c8bd1448b411833d24c"}
+  ],
+  "variables": {
+    "health_current": 13537,
+    "health_max": 13538,
+    "prayer_packed": 3274,
+    "adrenaline": 679,
+    "gcd_start": 4501,
+    "gcd_end": 4502,
+    "gcd_duration": 9847,
+    "gcd_client_start": 2091,
+    "gcd_client_end": 2092,
+    "telos_packed": 6363
+  },
+  "bitfields": {
+    "prayer": {"varp": 3274, "lsb": 0, "msb": 14, "divisor": 10},
+    "telos_stage": {"varp": 6363, "lsb": 21, "msb": 23}
+  }
+}

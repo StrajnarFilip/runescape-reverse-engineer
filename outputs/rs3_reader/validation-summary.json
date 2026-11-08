@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "source": "actual_local_read_only_memory_captures",
+  "client_version": "951-3",
+  "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+  "limitations": [
+    "Raw captures remain local and are not included in this repository.",
+    "Overlapping captures must not be summed as independent time periods.",
+    "NPCs, hitsplats and Telos phase/animation decoding are not validated.",
+    "Logout, world-hop and client restart remain to be tested."
+  ],
+  "captures": [
+    {
+      "local_capture_name": "combat_capture.jsonl",
+      "sha256": "0c1c88c703a8d01bd672c0ac4590b8da42c164de0165780e0f22c7386b080952",
+      "sample_count": 6000,
+      "health_range": [
+        8069,
+        8700
+      ],
+      "adrenaline_percent_range": [
+        0.0,
+        100.0
+      ],
+      "first_observed_at_ms": 1794158843507,
+      "last_observed_at_ms": 1794159143426
+    },
+    {
+      "local_capture_name": "combat_clocks.jsonl",
+      "sha256": "7a8748d1a8db0f1763839042a84757b05a41e3fe9c5c7a94eea76de02b74ce42",
+      "sample_count": 2884,
+      "health_range": [
+        8026,
+        8700
+      ],
+      "adrenaline_percent_range": [
+        0.0,
+        100.0
+      ],
+      "first_observed_at_ms": 1794158977277,
+      "last_observed_at_ms": 1794159157247
+    },
+    {
+      "local_capture_name": "combat_clocks2.jsonl",
+      "sha256": "249702475825b3e438055cb07c6cd8c68fdbf2ab18ad57b03a640326aa65b03a",
+      "sample_count": 6135,
+      "health_range": [
+        7894,
+        8310
+      ],
+      "adrenaline_percent_range": [
+        0.0,
+        18.0
+      ],
+      "first_observed_at_ms": 1794159114746,
+      "last_observed_at_ms": 1794159497487
+    }
+  ],
+  "gcd_starts_observed": [
+    {
+      "start_client_tick": 167667,
+      "end_client_tick": 167757,
+      "clock_at_observation": 167668,
+      "duration_ticks": 90,
+      "duration_ms_at_20ms_per_tick": 1800,
+      "adrenaline_percent": 9.0,
+      "health": 8173
+    },
+    {
+      "start_client_tick": 167907,
+      "end_client_tick": 167997,
+      "clock_at_observation": 167907,
+      "duration_ticks": 90,
+      "duration_ms_at_20ms_per_tick": 1800,
+      "adrenaline_percent": 9.0,
+      "health": 8130
+    },
+    {
+      "start_client_tick": 168266,
+      "end_client_tick": 168356,
+      "clock_at_observation": 168268,
+      "duration_ticks": 90,
+      "duration_ms_at_20ms_per_tick": 1800,
+      "adrenaline_percent": 18.0,
+      "health": 8174
+    },
+    {
+      "start_client_tick": 181797,
+      "end_client_tick": 181887,
+      "clock_at_observation": 181797,
+      "duration_ticks": 90,
+      "duration_ms_at_20ms_per_tick": 1800,
+      "adrenaline_percent": 0.0,
+      "health": 8182
+    },
+    {
+      "start_client_tick": 181978,
+      "end_client_tick": 182068,
+      "clock_at_observation": 181978,
+      "duration_ticks": 90,
+      "duration_ms_at_20ms_per_tick": 1800,
+      "adrenaline_percent": 18.0,
+      "health": 8182
+    }
+  ]
+}

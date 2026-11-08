@@ -1,0 +1,503 @@
+{
+  "scope": "Read-only static PE metadata and ASCII string triage; no decompilation or live telemetry",
+  "client_path": "C:\\ProgramData\\Jagex\\launcher\\rs2client.exe",
+  "size": 25536624,
+  "sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+  "architecture": "0x8664",
+  "pe_magic": "0x20b",
+  "sections": [
+    {
+      "name": ".text",
+      "rva": 4096,
+      "virtual_size": 18391200,
+      "raw_offset": 1024,
+      "raw_size": 18391552
+    },
+    {
+      "name": ".rdata",
+      "rva": 18399232,
+      "virtual_size": 5834542,
+      "raw_offset": 18392576,
+      "raw_size": 5834752
+    },
+    {
+      "name": ".data",
+      "rva": 24236032,
+      "virtual_size": 2843052,
+      "raw_offset": 24227328,
+      "raw_size": 143360
+    },
+    {
+      "name": ".pdata",
+      "rva": 27082752,
+      "virtual_size": 895596,
+      "raw_offset": 24370688,
+      "raw_size": 896000
+    },
+    {
+      "name": "_RDATA",
+      "rva": 27979776,
+      "virtual_size": 1536,
+      "raw_offset": 25266688,
+      "raw_size": 1536
+    },
+    {
+      "name": ".rsrc",
+      "rva": 27983872,
+      "virtual_size": 208032,
+      "raw_offset": 25268224,
+      "raw_size": 208384
+    },
+    {
+      "name": ".reloc",
+      "rva": 28192768,
+      "virtual_size": 49372,
+      "raw_offset": 25476608,
+      "raw_size": 49664
+    }
+  ],
+  "imported_libraries": [
+    "WINMM.dll",
+    "KERNEL32.dll",
+    "dbghelp.dll",
+    "OPENGL32.dll",
+    "IPHLPAPI.DLL",
+    "dxgi.dll",
+    "d3d9.dll",
+    "CRYPT32.dll",
+    "WS2_32.dll",
+    "bcrypt.dll",
+    "USER32.dll",
+    "GDI32.dll",
+    "SHELL32.dll",
+    "ole32.dll",
+    "ADVAPI32.dll",
+    "IMM32.dll"
+  ],
+  "string_match_counts": {
+    "combat_candidates": 2,
+    "plugin_api_candidates": 121
+  },
+  "string_candidates": {
+    "combat_candidates": [
+      {
+        "file_offset": "0x14f0d68",
+        "text": "HITPOINTS"
+      },
+      {
+        "file_offset": "0x14f0d84",
+        "text": "PRAYER"
+      }
+    ],
+    "plugin_api_candidates": [
+      {
+        "file_offset": "0x14eefe8",
+        "text": "VarTransmit"
+      },
+      {
+        "file_offset": "0x14ef058",
+        "text": "NPCEntityRemoved"
+      },
+      {
+        "file_offset": "0x14ef070",
+        "text": "NPCEntityAdded"
+      },
+      {
+        "file_offset": "0x14ef1a8",
+        "text": "ServerLogic"
+      },
+      {
+        "file_offset": "0x14efa60",
+        "text": "NPCEntityProxyEvent"
+      },
+      {
+        "file_offset": "0x14efa78",
+        "text": "npcEntity"
+      },
+      {
+        "file_offset": "0x14efb60",
+        "text": "VarTransmitEvent"
+      },
+      {
+        "file_offset": "0x14f0ed8",
+        "text": "GetLevelGameplay"
+      },
+      {
+        "file_offset": "0x14f6e30",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<class jag::EntityProxyEvent<class jag::EntityProxy<class jag::NPCEntity>,1>>(void)"
+      },
+      {
+        "file_offset": "0x14f7190",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<class jag::VarTransmitEvent>(void)"
+      },
+      {
+        "file_offset": "0x14fc390",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::d::u<class jag::VarTransmitEvent>>(void)"
+      },
+      {
+        "file_offset": "0x14fc500",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<const class jag::VarTransmitEvent*>(void)"
+      },
+      {
+        "file_offset": "0x14fc5b0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<class jag::VarTransmitEvent*>(void)"
+      },
+      {
+        "file_offset": "0x14fc720",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<const class jag::VarTransmitEvent>(void)"
+      },
+      {
+        "file_offset": "0x14fcfc0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::d::u<class jag::EntityProxyEvent<class jag::EntityProxy<class jag::NPCEntity>,1> >>(void)"
+      },
+      {
+        "file_offset": "0x14fd190",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<const class jag::EntityProxyEvent<class jag::EntityProxy<class jag::NPCEntity>,1>*>(void)"
+      },
+      {
+        "file_offset": "0x14fd270",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<class jag::EntityProxyEvent<class jag::EntityProxy<class jag::NPCEntity>,1>*>(void)"
+      },
+      {
+        "file_offset": "0x14fd440",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<const class jag::EntityProxyEvent<class jag::EntityProxy<class jag::NPCEntity>,1>>(void)"
+      },
+      {
+        "file_offset": "0x14fec60",
+        "text": "sol: 'self' argument is lua_nil (pass 'self' as first argument)"
+      },
+      {
+        "file_offset": "0x14feca0",
+        "text": "sol: 'self' argument is lua_nil (bad '.' access?)"
+      },
+      {
+        "file_offset": "0x14ff160",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::as_container_t<class jag::EntityProxyEvent<class jag::EntityProxy<class jag::NPCEntity>,1> >>(void)"
+      },
+      {
+        "file_offset": "0x14ff4b0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::as_container_t<class jag::VarTransmitEvent>>(void)"
+      },
+      {
+        "file_offset": "0x15043a0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::u_detail::usertype_storage<class jag::VarTransmitEvent>>(void)"
+      },
+      {
+        "file_offset": "0x1504760",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::u_detail::usertype_storage<class jag::EntityProxyEvent<class jag::EntityProxy<class jag::NPCEntity>,1> >>(void)"
+      },
+      {
+        "file_offset": "0x1509b70",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::functor_function<class std::function<struct sol::lua_value __cdecl(int const &)>,0,1>>(void)"
+      },
+      {
+        "file_offset": "0x150b690",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::AchievementType,89>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x150ba00",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::AchievementType,89>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x15125f0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::detail::tagged<class jag::VarTransmitEvent,struct sol::no_construction const &>>(void)"
+      },
+      {
+        "file_offset": "0x1512a20",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::detail::tagged<class jag::EntityProxyEvent<class jag::EntityProxy<class jag::NPCEntity>,1>,struct sol::no_construction const &>>(void)"
+      },
+      {
+        "file_offset": "0x1513ba0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::VarTransmitEvent::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x1513f00",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,class jag::VarProxy const & (__cdecl jag::VarTransmitEvent::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x1514ca0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,class jag::EntityProxy<class jag::NPCEntity> const & (__cdecl jag::EntityProxyEvent<class jag::EntityProxy<class jag::NPCEntity>,1>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x15150e0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,int const (__cdecl jag::EntityProxyEvent<class jag::EntityProxy<class jag::NPCEntity>,1>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x1518fa0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::as_container_t<struct sol::detail::tagged<class jag::EntityProxyEvent<class jag::EntityProxy<class jag::NPCEntity>,1>,struct sol::no_construction const &> >>(void)"
+      },
+      {
+        "file_offset": "0x15193f0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::as_container_t<struct sol::detail::tagged<class jag::VarTransmitEvent,struct sol::no_construction const &> >>(void)"
+      },
+      {
+        "file_offset": "0x151b140",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<class jag::EntityProxy<class jag::NPCEntity>*>(void)"
+      },
+      {
+        "file_offset": "0x151b5e0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::lua_value>(void)"
+      },
+      {
+        "file_offset": "0x151b680",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<class jag::EntityProxy<class jag::NPCEntity>>(void)"
+      },
+      {
+        "file_offset": "0x151cd60",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::as_container_t<class jag::EntityProxy<class jag::NPCEntity> >>(void)"
+      },
+      {
+        "file_offset": "0x1527740",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::detail::tagged<class jag::VarTransmitEvent,struct sol::no_construction const &>*>(void)"
+      },
+      {
+        "file_offset": "0x1527830",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::d::u<struct sol::detail::tagged<class jag::VarTransmitEvent,struct sol::no_construction const &> >>(void)"
+      },
+      {
+        "file_offset": "0x1527f80",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::detail::tagged<class jag::EntityProxyEvent<class jag::EntityProxy<class jag::NPCEntity>,1>,struct sol::no_construction const &>*>(void)"
+      },
+      {
+        "file_offset": "0x15280a0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::d::u<struct sol::detail::tagged<class jag::EntityProxyEvent<class jag::EntityProxy<class jag::NPCEntity>,1>,struct sol::no_construction const &> >>(void)"
+      },
+      {
+        "file_offset": "0x1529140",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::d::u<class jag::EntityProxy<class jag::NPCEntity> >>(void)"
+      },
+      {
+        "file_offset": "0x152ad70",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<class sol::optional<class std::tuple<int,struct sol::lua_value> >>(void)"
+      },
+      {
+        "file_offset": "0x153b0e8",
+        "text": "NPCEntityProxy"
+      },
+      {
+        "file_offset": "0x153d550",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<const class jag::EntityProxy<class jag::NPCEntity>>(void)"
+      },
+      {
+        "file_offset": "0x153d610",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<const class jag::EntityProxy<class jag::NPCEntity>*>(void)"
+      },
+      {
+        "file_offset": "0x1541e30",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::u_detail::usertype_storage<class jag::EntityProxy<class jag::NPCEntity> >>(void)"
+      },
+      {
+        "file_offset": "0x1543b70",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::detail::tagged<class jag::EntityProxy<class jag::NPCEntity>,struct sol::no_construction const &>>(void)"
+      },
+      {
+        "file_offset": "0x154f1d0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::StructType,50>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x154f320",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::StructType,50>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x154f680",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::VarProxy::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x154f7b0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::VarProxy::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x1550040",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::EffectAnimType,48>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x15501a0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::EffectAnimType,48>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x15503f0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::SeqType,44>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x1550540",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::SeqType,44>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x1551de0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::QuestType,41>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x1551f30",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::QuestType,41>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x15528f0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::ParamType,37>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x1552a40",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::ParamType,37>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x1553980",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::ObjType,36>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x1553ad0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::ObjType,36>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x1557130",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::NPCType,35>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x1557280",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::NPCType,35>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x15586e0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::MapElementType,29>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x1558840",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::MapElementType,29>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x1559fd0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::LocType,28>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x155b020",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::LocType,28>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x155b280",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::HitmarkType,21>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x155b3d0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::HitmarkType,21>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x155b620",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::InvType,25>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x155b770",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::InvType,25>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x155c130",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::HeadbarType,20>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x155c280",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::HeadbarType,20>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x155c4d0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::EnumType,16>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x155c620",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::EnumType,16>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x155ced0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::DBRowType,14>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x155d020",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::DBRowType,14>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x155d380",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::DBTableType,15>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x155d4d0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::DBTableType,15>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x155d7f0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::BASType,5>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x155d940",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::BASType,5>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x155db90",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::CursorType,12>::*)(struct sol::this_state)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x155dce0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::function_detail::overloaded_function<0,struct sol::lua_value (__cdecl jag::ConfigTypeProxy<class jag::game::CursorType,12>::*)(void)const ,struct sol::detail::no_prop>>(void)"
+      },
+      {
+        "file_offset": "0x1562f40",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::as_container_t<struct sol::detail::tagged<class jag::EntityProxy<class jag::NPCEntity>,struct sol::no_construction const &> >>(void)"
+      },
+      {
+        "file_offset": "0x1567d10",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::detail::tagged<class jag::EntityProxy<class jag::NPCEntity>,struct sol::no_construction const &>*>(void)"
+      },
+      {
+        "file_offset": "0x1567e10",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::d::u<struct sol::detail::tagged<class jag::EntityProxy<class jag::NPCEntity>,struct sol::no_construction const &> >>(void)"
+      },
+      {
+        "file_offset": "0x1571650",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<const class jag::EntityProxy<class jag::NPCEntity>&>(void)"
+      },
+      {
+        "file_offset": "0x15c4e10",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct jag::scripting::LuaPluginMetadata::URL>(void)"
+      },
+      {
+        "file_offset": "0x15cab40",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::d::u<struct jag::scripting::LuaPluginMetadata::URL>>(void)"
+      },
+      {
+        "file_offset": "0x15cac10",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct jag::scripting::LuaPluginMetadata::URL*>(void)"
+      },
+      {
+        "file_offset": "0x15cad80",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::as_container_t<struct jag::scripting::LuaPluginMetadata::URL>>(void)"
+      },
+      {
+        "file_offset": "0x15caf30",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<const struct jag::scripting::LuaPluginMetadata::URL&>(void)"
+      },
+      {
+        "file_offset": "0x15cfec0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<class jag::scripting::LuaEngine>(void)"
+      },
+      {
+        "file_offset": "0x15cff70",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<class jag::scripting::LuaPlugin>(void)"
+      },
+      {
+        "file_offset": "0x15d0110",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::d::u<class jag::scripting::LuaEngine>>(void)"
+      },
+      {
+        "file_offset": "0x15d03b0",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::d::u<class jag::scripting::LuaPlugin>>(void)"
+      },
+      {
+        "file_offset": "0x15d0470",
+        "text": "class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> > __cdecl sol::detail::ctti_get_type_name<struct sol::as_container_t<class jag::scripting::LuaEngine>>(void)"
+      }
+    ]
+  },
+  "caution": "String matches are leads only. They do not confirm callable APIs, variable IDs, offsets, units or live values.",
+  "runtime_values": {
+    "telos_action": null,
+    "global_cooldown": null,
+    "adrenaline": null,
+    "prayer_points": null,
+    "health": null
+  }
+}
