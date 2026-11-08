@@ -48,7 +48,8 @@ class RS3:
         self.identity = memory.identity()
         if profile is None:
             for filename in ("profile_951_3.json", "profile_6ada3f59.json"):
-                candidate = json.loads(Path(__file__).with_name(filename).read_text())
+                path = Path(__file__).resolve().parents[2] / "profiles" / filename
+                candidate = json.loads(path.read_text(encoding="utf-8"))
                 if self.identity["sha256"] == candidate["sha256"]:
                     profile = candidate
                     break

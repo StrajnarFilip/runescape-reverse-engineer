@@ -5,7 +5,7 @@ import struct
 import sys
 import time
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"outputs"/"rs3_reader"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python" / "rs3_reader"))
 from winmem import ProcessMemory, processes
 from rs3 import RS3
 

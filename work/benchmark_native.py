@@ -13,8 +13,9 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT/"outputs"/"rs3_reader"))
+sys.path.insert(0, str(ROOT / "python" / "rs3_reader"))
 from telemetry import PythonTelemetry
+from native import library_path
 from native_telemetry import NativeTelemetry
 
 
@@ -38,7 +39,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pairs", type=int, default=200)
     parser.add_argument("--seconds", type=float, default=3)
-    parser.add_argument("--output", type=Path, default=ROOT/"outputs"/"rs3_native"/"validation-summary.json")
+    parser.add_argument("--output", type=Path, default=ROOT / "docs" / "validation" / "native-validation.json")
     args = parser.parse_args()
     if args.pairs<1 or args.seconds<=0:
         parser.error("Use positive pairs and seconds")
@@ -113,7 +114,7 @@ def main():
                 "events_lost": lost, "loaded_npcs": last["npcs"]["loaded_count"]})
         finally:
             worker.close()
-    report["library_sha256"] = hashlib.sha256((ROOT/"outputs"/"rs3_native"/"build"/"rs3_native.dll").read_bytes()).hexdigest()
+    report["library_sha256"] = hashlib.sha256(library_path().read_bytes()).hexdigest()
     report["limitations"] = ["Current scene only; full Telos combat load not benchmarked",
                              "This timing run does not establish complete combat hitmark coverage; dedicated live/fixture evidence is separate",
                              "Requested rate is not guaranteed under system load",

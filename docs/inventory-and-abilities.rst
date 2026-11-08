@@ -25,7 +25,7 @@ Flurry and Resonance with different equipment. The C calibration recorded:
 The client adjusted Hurricane's start and end by -600 client ticks during the
 capture. The collector reflected the changed remaining cooldown. The reason for
 the adjustment was not identified; it is not replaced with a static countdown.
-See ``inventory-validation-summary.json`` for actual IDs, slots, tokens, timer
+See ``validation/inventory-validation-summary.json`` for actual IDs, slots, tokens, timer
 pairs, equipped items, timestamps and the raw local capture's SHA-256. The earlier
 research capture independently showed hood slot 2 -> 13 and restore slot 6
 changing 3028 -> 3030. These were separate actions, not conflicting slot readings.
@@ -62,26 +62,22 @@ unmapped cooldown logic. They remain unknown until their timing is mapped.
 Three mapped pairs were exercised live in this change; others were recovered
 from revision-951 gameval names and have not each been combat-tested.
 
-The compact ``ability_bindings_951_3.json`` records timer IDs, names, requirements,
+The compact ``../profiles/ability_bindings_951_3.json`` records timer IDs, names, requirements,
 base intervals and reference hashes. It excludes full descriptions and cache
 blobs. ``work/build_ability_bindings.py`` rebuilds it using local cache data and
 the pinned reference JSON under ``work/references/``. Those reference downloads
 are research inputs, not runtime dependencies.
 
-The normal build regenerates the local catalog when the cache exists::
+Build the optional local catalog from the repository root after configuring
+CMake::
 
-    python outputs/rs3_native/build.py --cc path/to/zig.exe --test
+    cmake --build build --config Release --target rs3_catalog
 
-To select another installed cache or explicitly regenerate metadata::
-
-    python outputs/rs3_native/generate_catalog.py --cache-root C:/path/to/cache
-    python outputs/rs3_native/build.py --cache-root C:/path/to/cache --test
-
-``--skip-catalog`` leaves an existing catalog unchanged. Without a valid catalog,
-raw inventory IDs/quantities/positions still work; names, families and ability
-definitions are unavailable. Catalog format, body SHA-256 and executable hash
-are checked before records are accepted. A checksum provides integrity checking,
-not authentication of metadata supplied by an untrusted party.
+The target writes ``rs3_catalog.bin`` and its manifest beside the DLL. Set
+``-DRS3_CACHE_ROOT=C:/path/to/cache`` during configuration to use a different
+cache. Raw inventory IDs, quantities and slots remain available without a valid
+catalog. The loader verifies the format, body SHA-256 and client fingerprint
+before it accepts metadata.
 
 Potions and item identity
 -------------------------
@@ -147,7 +143,7 @@ API and validation
 The extension adds C exports without changing existing ABI-v1 struct layouts:
 ``rs3_snapshot_inventory_info``, ``rs3_snapshot_items``,
 ``rs3_snapshot_abilities``, ``rs3_item_events_since`` and ``rs3_load_catalog``.
-See ``../rs3_native/include/rs3/rs3.h`` and the native README for ownership and
+See ``../include/rs3/rs3.h`` and ``native-api.rst`` for ownership and
 record layouts. Python Reader exposes typed buffers and a separate item cursor.
 The Java FFM example exposes ``inventory()`` returning Java-owned item, ability
 and change records. It checks all ten ABI structure sizes.
@@ -160,7 +156,7 @@ item queue gaps, parser failure and actual read-only SQLite access. C/Python/Jav
 live consumers work. The tracker window and error-free live logging were checked;
 no visual layout inspection is claimed.
 
-``../rs3_native/inventory-performance.json`` records the expanded workload's
+``validation/inventory-performance.json`` records the expanded workload's
 timings/rates. Its C timings include inventory and 169 ability definitions/timers;
 the Python reference decoder does not, so they are not equivalent workloads.
 The 100/500/1000 Hz settings are requests, not guaranteed achieved rates. The

@@ -6,7 +6,7 @@ import sys
 import time
 
 ROOT=Path(__file__).resolve().parents[1]
-sys.path.insert(0,str(ROOT/"outputs"/"rs3_reader"))
+sys.path.insert(0,str(ROOT / "python" / "rs3_reader"))
 from native_telemetry import NativeTelemetry
 
 parser=argparse.ArgumentParser(description=__doc__)

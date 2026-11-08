@@ -9,6 +9,7 @@ import hashlib
 import os
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[2]
 U32, I32, U64, I64 = C.c_uint32, C.c_int32, C.c_uint64, C.c_int64
 VARIABLES = ("health_current", "health_max", "prayer_packed", "adrenaline",
              "gcd_start", "gcd_end", "gcd_duration", "gcd_client_start",
@@ -78,14 +79,25 @@ class ItemEvent(C.Structure):
                 [("before", Item), ("after", Item)])
 
 
+def library_path(path=None):
+    override = path or os.environ.get("RS3_NATIVE_LIBRARY")
+    if override:
+        return Path(override).resolve()
+    binary_dir = ROOT / "build" / "bin"
+    release = binary_dir / "Release" / "rs3_native.dll"
+    if release.is_file():
+        return release
+    return binary_dir / "rs3_native.dll"
+
+
 def load_library(path=None):
     if C.sizeof(C.c_void_p) != 8:
         raise RuntimeError("rs3_native requires a 64-bit Python interpreter")
-    path = Path(path or os.environ.get("RS3_NATIVE_LIBRARY") or
-                Path(__file__).resolve().parent.parent/"rs3_native"/"build"/"rs3_native.dll")
+    path = library_path(path)
     if not path.is_file():
-        raise RuntimeError("Native library missing: %s. Build rs3_native first or select --backend python." % path)
-    lib = C.CDLL(str(path.resolve()))
+        raise RuntimeError(f"Native library missing at {path}. Build with CMake, set RS3_NATIVE_LIBRARY, "
+                           "or select --backend python.")
+    lib = C.CDLL(str(path))
     pointer = C.c_void_p
     signatures = {
         "abi_version": (U32, []), "sizeof": (U32, [U32]), "monotonic_ns": (U64, []),
@@ -115,7 +127,7 @@ def load_library(path=None):
     for kind, structure in enumerate((Options, Info, Player, NPC, Hit, Event, InventoryInfo, Item, Ability, ItemEvent), 1):
         if lib.rs3_sizeof(kind) != C.sizeof(structure):
             raise RuntimeError("C/Python layout mismatch for "+structure.__name__)
-    profile = Path(__file__).with_name("profile_951_3.json").read_bytes()
+    profile = (ROOT / "profiles" / "profile_951_3.json").read_bytes()
     if lib.rs3_profile_sha256().decode() != hashlib.sha256(profile).hexdigest():
         raise RuntimeError("C library profile differs from Python profile; rebuild rs3_native")
     return lib

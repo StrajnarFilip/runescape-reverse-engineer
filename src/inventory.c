@@ -1,35 +1,34 @@
-/* Included by rs3_native.c: shares its bounded read helpers and publication locks.
- * Catalog format: 88-byte header, sorted 40-byte items, 48-byte abilities, UTF-8
- * strings. All words are little endian. This file performs no game writes.
+/* Catalog format: 88-byte header, sorted 40-byte items, 48-byte abilities,
+ * and UTF-8 strings. All words are little endian.
  */
-#define ITEM_QUEUE_CAPACITY 1024u
-struct inventory_state {
-    unsigned char *catalog; size_t catalog_size;
-    uint32_t item_count, ability_count, strings_size, catalog_status;
-    const unsigned char *item_defs, *ability_defs; const char *strings;
-    char catalog_error[128];
-    rs3_item previous[RS3_MAX_ITEMS]; uint32_t previous_valid;
-    uint64_t world, manager, staged_manager, token, sequence;
-    rs3_item_event events[ITEM_QUEUE_CAPACITY];
-    unsigned char entries[4096*72], checked_entries[4096*72];
-    unsigned char wanted[65536], present[65536]; int64_t values[65536];
-    uint64_t page_bases[128], selected_addresses[4096];
-    uint32_t selected_ids[4096];unsigned char selected_types[4096],pages[128][4096];
-};
+#include "inventory.h"
 
-static void inventory_reset(inventory_state *v) { if(v) { v->previous_valid=0; v->world=v->manager=0; } }
-static void inventory_free(inventory_state *v) { if(v) { free(v->catalog); free(v); } }
+#include <bcrypt.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <wchar.h>
+
+#include "profile_generated.h"
+
+inventory_state *inventory_create(void) {
+    return calloc(1, sizeof(inventory_state));
+}
+
+void inventory_reset(inventory_state *v) { if(v) { v->previous_valid=0; v->world=v->manager=0; } }
+void inventory_free(inventory_state *v) { if(v) { free(v->catalog); free(v); } }
 static int catalog_error(inventory_state *v,const char *message) {
     snprintf(v->catalog_error,sizeof v->catalog_error,"%s",message); return RS3_E_ABI;
 }
-static int digest_bytes(const unsigned char *data,uint32_t size,unsigned char digest[32]) {
+int digest_bytes(const unsigned char *data,uint32_t size,unsigned char digest[32]) {
     BCRYPT_ALG_HANDLE a=NULL; BCRYPT_HASH_HANDLE h=NULL; int ok=0;
     if(BCryptOpenAlgorithmProvider(&a,BCRYPT_SHA256_ALGORITHM,NULL,0)<0 || BCryptCreateHash(a,&h,NULL,0,NULL,0,0)<0) goto done;
     if(BCryptHashData(h,(PUCHAR)data,size,0)>=0 && BCryptFinishHash(h,digest,32,0)>=0)ok=1;
 done:
-    if(h)BCryptDestroyHash(h); if(a)BCryptCloseAlgorithmProvider(a,0); return ok;
+    if (h) BCryptDestroyHash(h);
+    if (a) BCryptCloseAlgorithmProvider(a, 0);
+    return ok;
 }
-static int catalog_load_wide(inventory_state *v,const wchar_t *path) {
+int catalog_load_wide(inventory_state *v,const wchar_t *path) {
     HANDLE f=CreateFileW(path,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,0,NULL);
     if(f==INVALID_HANDLE_VALUE)return catalog_error(v,"Metadata file unavailable; generate rs3_catalog.bin");
     LARGE_INTEGER size; unsigned char *data=NULL; int result=RS3_E_ABI; DWORD got=0;
@@ -68,7 +67,7 @@ done:
     if(result && !v->catalog_error[0])catalog_error(v,"Invalid metadata format, checksum or client fingerprint");
     return result;
 }
-static void inventory_default_catalog(rs3_context *c) {
+void inventory_default_catalog(rs3_context *c) {
     wchar_t path[32768]; HMODULE module=NULL;
     if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
         (LPCWSTR)(uintptr_t)&rs3_create,&module) || !GetModuleFileNameW(module,path,32768))return;
@@ -106,7 +105,8 @@ static int inventory_slots(rs3_context *c,rs3_snapshot *s,uint64_t state) {
     if(size && !rd(c,begin,v->entries,size))return 0;
     for(size_t offset=0;offset<size;offset+=72) {
         const unsigned char *r=v->entries+offset;uint32_t key=u32(r);
-        if(offset && key<=last_key)return fail(c,RS3_READ_FAILED,"Unsorted inventory registry");last_key=key;
+        if (offset && key <= last_key) return fail(c, RS3_READ_FAILED, "Unsorted inventory registry");
+        last_key = key;
         if(key!=186 && key!=188)continue;
         uint32_t id=key/2,expected=id==93?28:19;
         uint64_t data=u64(r+24),stop=u64(r+32),capacity=u64(r+40);
@@ -193,7 +193,8 @@ static uint32_t equipment_match(const rs3_snapshot *s,const rs3_ability *a) {
     if((s->inventory_info.flags&3)!=3)return RS3_EQUIPMENT_UNKNOWN;
     const rs3_item *main=NULL,*off=NULL;
     for(uint32_t i=0;i<RS3_MAX_ITEMS;i++)if(s->items[i].container_id==94) {
-        if(s->items[i].slot==3)main=s->items+i;if(s->items[i].slot==5)off=s->items+i;
+        if (s->items[i].slot == 3) main = s->items + i;
+        if (s->items[i].slot == 5) off = s->items + i;
     }
     if(!main || !off)return RS3_EQUIPMENT_UNKNOWN;
     uint32_t req=a->requirements;
@@ -213,7 +214,7 @@ static uint32_t equipment_match(const rs3_snapshot *s,const rs3_ability *a) {
     }
     return RS3_EQUIPMENT_ALLOWED;
 }
-static void inventory_stage(rs3_context *c,rs3_snapshot *s,uint64_t client,uint64_t state) {
+void inventory_stage(rs3_context *c,rs3_snapshot *s,uint64_t client,uint64_t state) {
     inventory_state *v=c->inventory;rs3_inventory_info *info=&s->inventory_info;
     info->catalog_status=v->catalog_status;info->status=RS3_AVAILABLE;
     if(v->catalog_status!=RS3_AVAILABLE){info->reason=RS3_CATALOG_UNAVAILABLE;snprintf(info->message,sizeof info->message,"%s",v->catalog_error);}
@@ -247,19 +248,19 @@ static void inventory_stage(rs3_context *c,rs3_snapshot *s,uint64_t client,uint6
         a.equipment_match=equipment_match(s,&a);s->abilities[info->ability_count++]=a;
     }
 }
-static int same_item(const rs3_item *a,const rs3_item *b,int dose_change) {
+int same_item(const rs3_item *a,const rs3_item *b,int dose_change) {
     return a->item_id>=0 && b->item_id>=0 && a->quantity==b->quantity &&
         (a->item_id==b->item_id || (dose_change && a->family_id==b->family_id &&
                                    a->doses>0 && b->doses==a->doses-1 && a->next_dose_item_id==b->item_id));
 }
-static void inventory_event(rs3_context *c,rs3_snapshot *s,uint32_t kind,const rs3_item *before,const rs3_item *after) {
+void inventory_event(rs3_context *c,rs3_snapshot *s,uint32_t kind,const rs3_item *before,const rs3_item *after) {
     inventory_state *v=c->inventory;rs3_item_event *e=v->events+v->sequence%ITEM_QUEUE_CAPACITY;
     memset(e,0,sizeof *e);e->before.item_id=e->after.item_id=-1;e->before.doses=e->after.doses=-1;
     e->sequence=++v->sequence;e->observed_at_ns=s->info.timestamp_ns;e->process_creation_time=c->creation_time;
     e->pid=c->pid;e->kind=kind;if(before)e->before=*before;if(after)e->after=*after;
     e->flags=(before?before->flags:0)|(after?after->flags:0);
 }
-static void inventory_commit(rs3_context *c,rs3_snapshot *s,uint64_t world) {
+void inventory_commit(rs3_context *c,rs3_snapshot *s,uint64_t world) {
     inventory_state *v=c->inventory;
     if((s->inventory_info.flags&3)!=3)return;
     if(v->world!=world || v->manager!=v->staged_manager){inventory_reset(v);v->world=world;v->manager=v->staged_manager;}
@@ -299,26 +300,39 @@ static void inventory_commit(rs3_context *c,rs3_snapshot *s,uint64_t world) {
 }
 
 int32_t rs3_load_catalog(rs3_context *c,const char *path) {
-    if(!c || !path)return RS3_E_ARGUMENT;int n=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,path,-1,NULL,0);
-    if(n<1 || n>32768)return RS3_E_ARGUMENT;wchar_t *wide=malloc((size_t)n*sizeof *wide);if(!wide)return RS3_E_MEMORY;
-    MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,path,-1,wide,n);AcquireSRWLockExclusive(&c->control);
-    int result=c->worker?RS3_E_STATE:catalog_load_wide(c->inventory,wide);
-    ReleaseSRWLockExclusive(&c->control);free(wide);return result;
+    if (!c || !path) return RS3_E_ARGUMENT;
+    int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, NULL, 0);
+    if (n < 1 || n > 32768) return RS3_E_ARGUMENT;
+    wchar_t *wide = malloc((size_t)n * sizeof *wide);
+    if (!wide) return RS3_E_MEMORY;
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, n);
+    AcquireSRWLockExclusive(&c->control);
+    int result = c->worker ? RS3_E_STATE : catalog_load_wide(c->inventory, wide);
+    ReleaseSRWLockExclusive(&c->control);
+    free(wide);
+    return result;
 }
 int32_t rs3_snapshot_inventory_info(const rs3_snapshot *s,rs3_inventory_info *out,uint32_t size) {
-    if(!s || !out)return RS3_E_ARGUMENT;if(size<sizeof *out)return RS3_E_ABI;*out=s->inventory_info;return RS3_OK;
+    if (!s || !out) return RS3_E_ARGUMENT;
+    if (size < sizeof *out) return RS3_E_ABI;
+    *out = s->inventory_info;
+    return RS3_OK;
 }
 int32_t rs3_snapshot_items(const rs3_snapshot *s,uint32_t container,rs3_item *out,uint32_t capacity,uint32_t *required) {
     if(!s || !required || (container && container!=93 && container!=94))return RS3_E_ARGUMENT;
     uint32_t count=s->inventory_info.backpack_count+s->inventory_info.equipment_count;*required=0;
     for(uint32_t i=0;i<count;i++)if(!container || s->items[i].container_id==container)(*required)++;
-    if(capacity<*required)return RS3_E_BUFFER;if(*required && !out)return RS3_E_ARGUMENT;
+    if (capacity < *required) return RS3_E_BUFFER;
+    if (*required && !out) return RS3_E_ARGUMENT;
     uint32_t at=0;for(uint32_t i=0;i<count;i++)if(!container || s->items[i].container_id==container)out[at++]=s->items[i];return RS3_OK;
 }
 int32_t rs3_snapshot_abilities(const rs3_snapshot *s,rs3_ability *out,uint32_t capacity,uint32_t *required) {
-    if(!s || !required)return RS3_E_ARGUMENT;*required=s->inventory_info.ability_count;
-    if(capacity<*required)return RS3_E_BUFFER;if(*required && !out)return RS3_E_ARGUMENT;
-    if(*required)memcpy(out,s->abilities,*required*sizeof *out);return RS3_OK;
+    if (!s || !required) return RS3_E_ARGUMENT;
+    *required = s->inventory_info.ability_count;
+    if (capacity < *required) return RS3_E_BUFFER;
+    if (*required && !out) return RS3_E_ARGUMENT;
+    if (*required) memcpy(out, s->abilities, *required * sizeof *out);
+    return RS3_OK;
 }
 int32_t rs3_item_events_since(rs3_context *c,uint64_t after,rs3_item_event *out,uint32_t capacity,uint32_t *written,uint64_t *next,uint64_t *lost) {
     if(!c || !written || !next || !lost || (capacity && !out))return RS3_E_ARGUMENT;

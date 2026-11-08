@@ -66,6 +66,6 @@ report = dict(
     runtime_values={"telos_action": None, "global_cooldown": None,
                     "adrenaline": None, "prayer_points": None, "health": None},
 )
-destination = Path(__file__).resolve().parent.parent / "outputs" / "rs3-static-inspection.json"
+destination = Path(__file__).resolve().parent.parent / "docs" / "validation" / "static-inspection.json"
 destination.write_text(json.dumps(report, indent=2), encoding="utf-8")
 print(json.dumps(report, indent=2))

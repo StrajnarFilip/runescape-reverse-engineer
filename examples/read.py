@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 import time
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]/"rs3_reader"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python" / "rs3_reader"))
 from native import Reader
 
 with Reader(worker_hz=100) as reader:

@@ -28,51 +28,59 @@ Current capabilities
 Previously verified in live combat: Goblin **550/550 HP**, Giant spider
 **1000/1000 HP**, and Goblin **550 -> 326 HP** alongside the independently reported
 **224** hit. The same capture includes reported hits of 550 and 1000. The C port's
-parity/timing evidence is in ``outputs/rs3_native/validation-summary.json``; earlier
-combat evidence remains in ``outputs/rs3_reader/npc-validation-summary.json``.
+parity/timing evidence is in ``docs/validation/native-validation.json``; earlier
+combat evidence remains in ``docs/validation/npc-validation-summary.json``.
 Hurricane, Flurry and Resonance were also checked live with two-handed, dual-wield
 and shield setups. Item moves and a restore dose change retained their tracking
-tokens. See ``outputs/rs3_reader/inventory-and-abilities.rst`` and its compact
+tokens. See ``docs/inventory-and-abilities.rst`` and its compact
 validation report. Telos animations/phases remain **unconfirmed**. Controlled logout, world-hop and
 restart checks are still needed. Sampling frequency is not server update frequency.
 
 Build and run
 -------------
 
-Use Windows x64, a C compiler, and 64-bit Python with Tkinter (no pip packages).
-From the repository root, with a compiler on PATH::
+Use Windows x64, CMake 3.20 or newer, a C11 compiler and 64-bit Python 3.9+
+with Tkinter. With Visual Studio and the Desktop development with C++ workload
+installed, run these commands from the repository root::
 
-    python outputs/rs3_native/build.py --test
-    python outputs/rs3_reader/tracker.py
-    python outputs/rs3_reader/reader.py --once --raw
+    cmake -S . -B build -A x64
+    cmake --build build --config Release
+    ctest --test-dir build -C Release --output-on-failure
 
-The build script accepts MSVC, Clang, GCC or Zig. On this development machine::
+For a single-config generator such as Ninja, configure from a shell with your
+Windows x64 compiler on PATH::
 
-    C:\Python39\python.exe outputs/rs3_native/build.py --cc work/tools/zig-x86_64-windows-0.15.2/zig.exe --test
+    cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+    cmake --build build
+    ctest --test-dir build --output-on-failure
 
-``work/bootstrap_native_tools.py`` downloads the official pinned Zig release and
-checks its SHA-256. It does not install a game agent or modify the game. Downloaded
-tools and build products remain local. Native build instructions, ABI contracts,
-C/Python/Java examples and field units: ``outputs/rs3_native/README.rst``.
-The build also extracts a local item/ability catalog from the installed cache in
-read-only mode. Missing metadata does not prevent raw inventory IDs/slots from
-being read. Generated catalogs are not committed; see the inventory guide for
-cache paths and explicit regeneration commands.
+Use a separate build directory when switching generators or compilers. The
+tracker finds the DLL in ``build/bin/Release/`` for Visual Studio or
+``build/bin/`` for Ninja. Set ``RS3_NATIVE_LIBRARY`` to the DLL's absolute path
+when using a different directory or configuration.
 
-Double-click ``outputs/rs3_reader/Start Tracker.cmd`` on this machine, or use::
+With the game cache installed, generate optional item and ability metadata
+beside the DLL::
 
-    python outputs/rs3_reader/tracker.py --native-hz 500
-    python outputs/rs3_reader/reader.py --native-hz 500 --hz 20 --duration 60 --raw --output capture.jsonl
-    python outputs/rs3_reader/tracker.py --history capture.jsonl
+    cmake --build build --config Release --target rs3_catalog
+
+Set ``-DRS3_CACHE_ROOT=C:/path/to/cache`` at configure time to use a different
+cache. The generator reads the cache locally. Raw inventory IDs and slots are
+available without metadata.
+
+Double-click ``Start Tracker.cmd`` or run the desktop UI and JSONL reader directly::
+
+    python python/rs3_reader/tracker.py --native-hz 500
+    python python/rs3_reader/reader.py --native-hz 500 --hz 20 --duration 60 --raw --output capture.jsonl
+    python python/rs3_reader/tracker.py --history capture.jsonl
 
 The original Python decoder remains available explicitly for reference/comparison::
 
-    python outputs/rs3_reader/tracker.py --backend python
-    python outputs/rs3_reader/reader.py --backend python --once --raw
+    python python/rs3_reader/tracker.py --backend python
+    python python/rs3_reader/reader.py --backend python --once --raw
 
 Alternatively set ``RS3_BACKEND=python``. A missing or mismatched native library
 produces an explicit error rather than silently selecting a different engine.
-``RS3_NATIVE_LIBRARY`` can select a DLL at a different absolute path.
 The tracker rotates logs at about 25 MB, with three backups per run; buttons open
 the log directory or copy the latest JSON. Both implementations request only
 ``PROCESS_QUERY_INFORMATION | PROCESS_VM_READ``. No game calls, writes or inputs.
@@ -91,35 +99,18 @@ locate that landmark each run.
 Layout and verification
 -----------------------
 
-* ``outputs/rs3_native/include/rs3/rs3.h``: public C ABI.
-* ``outputs/rs3_native/src/rs3_native.c``: process lifecycle, decoder, worker, events.
-* ``outputs/rs3_native/tests/``: deterministic C fixtures and lifecycle checks.
-* ``outputs/rs3_reader/native.py``: typed ctypes binding; no remote-memory decoder.
-* ``outputs/rs3_reader/native_telemetry.py``: C observations to tracker/JSON schema.
-* ``outputs/rs3_native/src/inventory.c``: native inventory, item events, gear and ability timers.
-* ``outputs/rs3_reader/cachedefs.py``: independent, read-only definition-cache parser.
-* ``outputs/rs3_reader/ability_bindings_951_3.json``: compact definition/timer bindings.
-* ``outputs/rs3_reader/inventory-and-abilities.rst``: new tabs, semantics, evidence and API details.
-* ``outputs/rs3_reader/profile_951_3.json``: hash, signatures and offsets for combat telemetry.
-* ``outputs/rs3_reader/profile_6ada3f59.json``: hash, signatures and offsets for player tiles.
-* ``outputs/rs3_reader/winmem.py``, ``rs3.py``, ``entities.py``: Python reference backend.
-* ``outputs/rs3_reader/reader.py``, ``tracker.py``: JSONL CLI and desktop UI.
-* ``outputs/rs3_reader/research-notes.rst``: recovered structures and open questions.
-* ``outputs/rs3_reader/*validation-summary.json``: earlier actual live measurements.
-* ``work/*.py`` and ``work/ghidra_scripts/``: our research tools.
+* ``include/rs3/rs3.h`` defines the public C ABI.
+* ``src/`` contains the collector, process verification, and gameplay decoders.
+* ``python/rs3_reader/`` contains the ctypes binding, reference decoder, CLI and tracker.
+* ``profiles/`` contains pinned client hashes, signatures, offsets and ability bindings.
+* ``tests/`` contains deterministic C fixtures and Python tests, including DLL ABI checks.
+* ``examples/`` contains C, Python and Java consumers.
+* ``tools/`` contains the build-time profile and optional catalog generators.
+* ``docs/`` contains the API contract, research notes and compact validation reports.
+* ``work/`` contains research scripts and opt-in live validation tools.
 
-Checks::
-
-    python outputs/rs3_native/build.py --test
-    python -m unittest discover -s outputs/rs3_reader -v
-    python work/benchmark_native.py
-
-The last command is an opt-in live parity/timing check; it needs the supported
-client and records only a compact report. C tests cover sparse tables, signed
-variants, profile refusal, clock wrap, NPC stats, torn rings, world/list transitions,
-identity reuse, deduplication, independent cursors, overflow and worker lifecycle.
-The Python suite additionally checks the actual DLL ABI and UI history handling.
-A clean checkout without a built DLL skips binding tests until after the C build.
+See `the native API guide <docs/native-api.rst>`_ for CMake installation and C, Python and Java usage.
+The live benchmark in ``work/benchmark_native.py`` needs a supported game client.
 
 Limits
 ------

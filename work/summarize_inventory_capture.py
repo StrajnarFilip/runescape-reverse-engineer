@@ -3,8 +3,12 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import sys
 
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "python" / "rs3_reader"))
+from native import library_path
+
 source=ROOT/"work"/"inventory_native_validation.jsonl"
 data=source.read_bytes()
 rows=[json.loads(line) for line in data.decode().splitlines() if line]
@@ -35,8 +39,8 @@ for row in rows:
                                 "after_start_end_ticks":pair,"remaining_ms":cd["remaining_ms"],
                                 "interpretation":"Client adjusted its cooldown pair; cause not identified"})
         pairs[a["name"]]=(pair,running)
-manifest=json.loads((ROOT/"outputs"/"rs3_native"/"build"/"rs3_catalog.manifest.json").read_text())
-bindings=json.loads((ROOT/"outputs"/"rs3_reader"/"ability_bindings_951_3.json").read_text())
+manifest=json.loads(library_path().with_name("rs3_catalog.manifest.json").read_text())
+bindings=json.loads((ROOT / "profiles" / "ability_bindings_951_3.json").read_text())
 report={"captured_at_utc":datetime.fromtimestamp(rows[0]["timestamp_ms"]/1000,timezone.utc).isoformat(),
         "source":"Actual C collector, 100 Hz; Python consumer approximately 20 Hz",
         "capture_sha256":hashlib.sha256(data).hexdigest(),"capture_rows":len(rows),
@@ -45,14 +49,14 @@ report={"captured_at_utc":datetime.fromtimestamp(rows[0]["timestamp_ms"]/1000,ti
         "client_timer_mappings":sum((a["timer_source"] or '').startswith('client_symbol_pair') for a in bindings["abilities"]),
         "inventory_examples":items,"ability_examples":timers,"observed_timer_adjustments":adjustments,
         "inventory_events_lost":sum(row["inventory_changes"]["events_lost"] for row in rows),
-        "final_library_sha256":hashlib.sha256((ROOT/"outputs"/"rs3_native"/"build"/"rs3_native.dll").read_bytes()).hexdigest(),
+        "final_library_sha256":hashlib.sha256(library_path().read_bytes()).hexdigest(),
         "validation_limits":["Only Hurricane, Flurry and Resonance were exercised in this live calibration",
             "Other symbolic timer pairs are not individually combat-validated; missing/unmapped values remain null",
             "Bone Shield substitution and full cast eligibility (runes, unlocks, target, level, adrenaline) remain unevaluated",
             "Identical duplicate items have no exposed unique serial number; tracking identity is inferred",
             "Logical inventory slots are exact; screen pixel positions are not measured",
             "Visual UI inspection was not performed; window creation and logs checked"]}
-out=ROOT/"outputs"/"rs3_reader"/"inventory-validation-summary.json"
+out=ROOT / "docs" / "validation" / "inventory-validation-summary.json"
 out.write_bytes((json.dumps(report,indent=2)+"\n").encode())
 assert any(e["kind"]=="doses_changed" and e["before"]["tracking_token"]==e["after"]["tracking_token"] for e in items)
 assert {e["name"] for e in timers}=={"Hurricane","Flurry","Resonance"}

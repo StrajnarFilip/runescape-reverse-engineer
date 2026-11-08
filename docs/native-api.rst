@@ -11,45 +11,33 @@ Java are needed on the collector thread.
 Build
 -----
 
-Requires a Windows x64 C11 compiler and Python 3.9+ for profile generation.
-From the repository root, in a compiler-enabled shell::
+See the repository README for the CMake configure, build and test commands.
+Python 3.9+ generates the private profile header from the pinned JSON at build
+time. The DLL links Windows system libraries, including BCrypt. C and Java
+consumers can load it directly without a Python runtime.
 
-    python outputs/rs3_native/build.py --test
+Install the DLL, import library, header and CMake package to a local prefix::
 
-Use ``--cc path/to/compiler`` for MSVC cl, clang, gcc or Zig. The implementation
-and examples were built and tested here using official Zig **0.15.2**, targeting
-``x86_64-windows-gnu``, with ``-O2 -Wall -Wextra -Werror``::
+    cmake --install build --config Release --prefix build/install
 
-    python work/bootstrap_native_tools.py
-    python outputs/rs3_native/build.py --cc work/tools/zig-x86_64-windows-0.15.2/zig.exe --test
+A separate CMake project can set ``CMAKE_PREFIX_PATH`` to that prefix and use::
 
-The bootstrap verifies the official archive's pinned SHA-256 and extracts only
-under ``work/tools/``. It does not change PATH or install a game agent. Standard
-MSVC/Clang/GCC build paths are provided but were not exercised on this machine.
-Build output (ignored by Git): ``outputs/rs3_native/build/``. Windows will prevent
-replacing a DLL while a consumer has it loaded; close consumers before rebuilding.
+    find_package(rs3_native 1 CONFIG REQUIRED)
+    target_link_libraries(my_app PRIVATE rs3::native)
 
-CMake is an alternative with an installed compiler/SDK::
-
-    cmake -S outputs/rs3_native -B outputs/rs3_native/build/cmake -A x64
-    cmake --build outputs/rs3_native/build/cmake --config Release
-    ctest --test-dir outputs/rs3_native/build/cmake -C Release --output-on-failure
-
-For that build, pass the actual DLL path to consumers or set
-``RS3_NATIVE_LIBRARY``; CMake's configuration directory differs from build.py.
-The C implementation links only Windows system libraries (including BCrypt).
-It does not depend on a Python/Java runtime or any third-party game agent.
+Include ``<rs3/rs3.h>`` and put the DLL beside the consuming executable or on
+its runtime PATH. Use a matching Windows x64 compiler and import library.
 
 Consumers
 ---------
 
 Python (standard library only)::
 
-    python outputs/rs3_native/examples/read.py
-    python outputs/rs3_reader/reader.py --native-hz 500 --hz 20 --duration 10 --raw
-    python outputs/rs3_reader/tracker.py
+    python examples/read.py
+    python python/rs3_reader/reader.py --native-hz 500 --hz 20 --duration 10 --raw
+    python python/rs3_reader/tracker.py
 
-``outputs/rs3_reader/native.py`` is the reusable typed ctypes binding.
+``python/rs3_reader/native.py`` is the reusable typed ctypes binding.
 ``Reader(worker_hz=100)`` starts the native collector; ``worker_hz=0`` samples
 synchronously. ``reader.sample()`` returns typed info/player/NPC/hit buffers.
 They are views of reusable storage: copy values that must survive another sample.
@@ -60,9 +48,9 @@ The adapter in ``native_telemetry.py`` preserves the previous JSON/tracker schem
 and adds ``backend: c``, native read metrics, sample sequence, age and event gaps.
 Existing profile and executable hashes are checked before returning game data.
 
-C example (built by build.py)::
+C example from the Visual Studio build::
 
-    outputs\rs3_native\build\read.exe
+    build\bin\Release\read_example.exe
 
 It loads the DLL from the executable directory, resolves the public exports,
 starts a 100 Hz collector and reads snapshots at 10 Hz. Optionally pass an
@@ -74,8 +62,8 @@ Java **22+** uses the stable Foreign Function & Memory API, with no JNI bridge
 or JNA dependency. The included AutoCloseable ``Rs3Reader`` class was compiled
 and run with **JDK 25** against the live DLL::
 
-    javac -d outputs/rs3_native/build outputs/rs3_native/examples/Rs3Reader.java
-    java --enable-native-access=ALL-UNNAMED -cp outputs/rs3_native/build Rs3Reader C:/absolute/path/rs3_native.dll 5
+    javac -d build/java examples/Rs3Reader.java
+    java --enable-native-access=ALL-UNNAMED -cp build/java Rs3Reader build/bin/Release/rs3_native.dll 5
 
 Use a 64-bit Windows JVM. ``Rs3Reader.sample()`` returns Java-owned immutable
 records for player values, NPCs, hitmarks and newly observed events.
@@ -91,7 +79,7 @@ and https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/forei
 ABI, ownership and concurrency
 ------------------------------
 
-The public contract is ``include/rs3/rs3.h``. ABI version **1**, Windows x64 C
+The public contract is ``../include/rs3/rs3.h``. ABI version **1**, Windows x64 C
 calling convention; fixed-width integer fields, default 8-byte alignment and
 UTF-8, NUL-terminated strings. Do not apply packed struct layout. ABI-v1 struct
 layouts are fixed. Validate ``rs3_abi_version()`` and ``rs3_sizeof()`` before
@@ -235,7 +223,7 @@ Assertions remain enabled in optimized test builds. Python tests verify the actu
 DLL ABI/lifecycle and preserve observation identity/time through UI coalescing.
 
 ``work/benchmark_native.py`` compares the C adapter to Python, bracketed by two
-Python reads to exclude changing scenes. The compact ``validation-summary.json``
+Python reads to exclude changing scenes. The compact ``validation/native-validation.json``
 records actual timings, parity and achieved worker rates. The measured scene can
 change during rate tests; each rate reports its final loaded NPC count. These
 numbers are observations on this machine, not a guarantee for boss combat.
@@ -291,8 +279,8 @@ catalog. The public item struct is 192 bytes (name at 60); ability 192 (name at
 64); inventory info 168 (message at 40); item event 424 (before at 40, after at
 232). Python validates all layouts; the Java example reads the same fields.
 
-``../rs3_reader/inventory-and-abilities.rst`` documents the recovered paths,
+``inventory-and-abilities.rst`` documents the recovered paths,
 slot conventions, dose/effect semantics, Bone Shield limits and live evidence.
-``inventory-performance.json`` measures the expanded C workload, including the
-new inventory/equipment/ability sampling. The earlier ``validation-summary.json``
+``validation/inventory-performance.json`` measures the expanded C workload, including the
+new inventory/equipment/ability sampling. The earlier ``validation/native-validation.json``
 describes the original smaller C port workload.

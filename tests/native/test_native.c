@@ -2,7 +2,11 @@
 /* Assertions must run even when the toolchain defines NDEBUG for -O2. */
 #undef NDEBUG
 #include <assert.h>
-#include "../src/rs3_native.c"
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "inventory.h"
+#include "profile_generated.h"
 
 typedef struct block { uint64_t base; size_t size; unsigned char *data; } block;
 typedef struct fixture {
@@ -86,7 +90,7 @@ static fixture *make_fixture(void) {
     put32(f,MANAGER+P_NPC_COUNT_OFFSET,1); put32(f,MANAGER+P_NPC_INDICES_OFFSET,42);
     put64(f,NPC_TABLE+42*8,NPC_NODE); put64(f,NPC_TABLE+97*8,UINT64_MAX);
     put32(f,NPC_NODE,42); put64(f,NPC_NODE+16,ACTOR);
-    add(f,ACTOR,ACTOR_BYTES); add(f,CONFIG,16); add(f,RING,40); add(f,RECORD,24);
+    add(f,ACTOR,P_NPC_HEALTH_MAX_OFFSET+4u); add(f,CONFIG,16); add(f,RING,40); add(f,RECORD,24);
     put64(f,ACTOR,BASE+P_NPC_ENTITY_VTABLE_RVA); put32(f,ACTOR+0x88,42);
     unsigned char *name=at(f,ACTOR+P_NPC_NAME_OFFSET,24); memcpy(name,"Goblin",6); name[23]=17;
     put64(f,ACTOR+P_NPC_CONFIG_OFFSET,CONFIG); put32(f,CONFIG+8,12357);

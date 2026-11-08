@@ -47,5 +47,5 @@ report={'schema_version':1,'source':'actual_local_native_memory_capture','local_
                       'The ring identifies the recipient, not the attacker.',
                       'Polling can miss overwritten or removed records.',
                       'Raw captures remain local. Telos phase and animation classification are not validated.']}
-(root/'outputs'/'rs3_reader'/'npc-validation-summary.json').write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
+(root / "docs" / "validation" / "npc-validation-summary.json").write_text(json.dumps(report,indent=2)+'\n',encoding='utf-8')
 print('Samples',samples,'matching amounts',sorted(examples),'matching HP transitions',len(transitions))

@@ -10,6 +10,9 @@ from rs3 import ProfileError, RS3
 from tracker import HitHistory
 from winmem import MemoryReadError
 
+PROFILES = Path(__file__).resolve().parents[2] / "profiles"
+
+
 class FakeMemory:
     def __init__(self):
         self.base = 0x100000
@@ -39,7 +42,7 @@ class FakeMemory:
 
 class EntityTests(unittest.TestCase):
     def setUp(self):
-        self.profile = json.loads(Path(__file__).with_name("profile_951_3.json").read_text())
+        self.profile = json.loads((PROFILES / "profile_951_3.json").read_text(encoding="utf-8"))
         self.m = m = FakeMemory()
         self.state, self.manager, self.table, self.node, self.actor = 0x100000, 0x130000, 0x140000, 0x143000, 0x150000
         self.config, self.ring, self.data = 0x160000, 0x161000, 0x162000
@@ -162,7 +165,7 @@ class EntityTests(unittest.TestCase):
 
 class PositionTests(unittest.TestCase):
     def setUp(self):
-        self.profile = json.loads(Path(__file__).with_name("profile_6ada3f59.json").read_text())
+        self.profile = json.loads((PROFILES / "profile_6ada3f59.json").read_text(encoding="utf-8"))
         self.profile["player_position"]["client_ptr_rva"] = "0x100"
         self.profile["signatures"] = [{"rva": "0x108", "bytes": "488b"}]
         self.m = m = FakeMemory()

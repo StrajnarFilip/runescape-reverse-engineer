@@ -4,7 +4,7 @@ from pathlib import Path
 import struct
 import bisect
 import time
-sys.path[:0] = [str(Path(__file__).parent / "vendor"), str(Path(__file__).parent.parent / "outputs" / "rs3_reader")]
+sys.path[:0] = [str(Path(__file__).parent / "vendor"), str(Path(__file__).parent.parent / "python" / "rs3_reader")]
 import pefile
 from winmem import ProcessMemory, processes, MemoryReadError
 

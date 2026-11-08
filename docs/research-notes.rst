@@ -12,7 +12,7 @@ Static PE image base: ``0x140000000``. Profile offsets are relative to the loade
 module or a verified object. Dynamic addresses/PIDs are not stored in the profile.
 Game functions are not executed: their data paths were reconstructed in Ghidra
 and checked with read-only memory access. The C collector uses the same profile;
-``generate_profile.py`` produces constants and a source-profile hash. The Python
+``tools/generate_profile.py`` produces constants and a source-profile hash. The Python
 binding refuses a DLL built from a different profile.
 
 Domain registry and variable tables
@@ -90,7 +90,7 @@ this is polling, not a server-event hook. The ring does not identify the attacke
 Raw type IDs are retained: an amount is not automatically damage.
 
 The earlier combat capture contains user-reported 224, 550 and 1000 hits. Examples
-and its hash are in ``npc-validation-summary.json``. Both decoders recheck ring
+and its hash are in ``validation/npc-validation-summary.json``. Both decoders recheck ring
 contents, entity identity and the index list. A list transition retries once.
 Transient individual NPC errors do not reset other NPCs' deduplication. Despawned
 NPCs disappear from live display. The C port also checks the enclosing world

@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT/"outputs"/"rs3_reader"))
+sys.path.insert(0, str(ROOT / "python" / "rs3_reader"))
 from cachedefs import Archive, decode_struct, decode_enum
 
 refs = ROOT/"work"/"references"
@@ -70,6 +70,6 @@ report={"version":"951-3","source":"Local JS5 definitions and revision-951 symbo
         "struct_reference_sha256":hashlib.sha256(cache.index_bytes).hexdigest(),
         "binding_validation":"Flurry, Hurricane and Resonance live timers checked; other symbolic pairs not individually exercised",
         "abilities":bindings}
-out=ROOT/"outputs"/"rs3_reader"/"ability_bindings_951_3.json"
+out=ROOT / "profiles" / "ability_bindings_951_3.json"
 out.write_bytes((json.dumps(report,indent=2,ensure_ascii=True)+"\n").encode())
 print("Bindings:",len(bindings),"ability book:",len(book),"client pairs:",sum((b["timer_source"] or '').startswith("client_symbol_pair") for b in bindings))

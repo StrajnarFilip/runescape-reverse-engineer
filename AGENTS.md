@@ -20,22 +20,22 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
 
 ## Project layout and checks
 
-- Runtime source and user-facing deliverables: `outputs/rs3_reader/` and
-  `outputs/rs3_native/`.
+- Native library: `src/` and `include/rs3/`. Python tracker and bindings:
+  `python/rs3_reader/`. Shared client profiles: `profiles/`.
 - Our research scripts: `work/*.py`, `work/decompile.ps1`,
   `work/ghidra_scripts/ExportFunctions.java`. Generated research output is ignored.
 - The default acquisition engine is a Windows x64 C11 DLL. The Python UI uses
   only the standard library; the original Python decoder is an explicit backend.
-- Build and C tests: `C:\Python39\python.exe outputs/rs3_native/build.py --cc
-  work/tools/zig-x86_64-windows-0.15.2/zig.exe --test` (or an installed C compiler).
-- Tests: `C:\Python39\python.exe -m unittest discover -s outputs/rs3_reader -v`.
-- Optional live parity/performance report: `C:\Python39\python.exe work/benchmark_native.py`.
+- Configure and build: `cmake -S . -B build -A x64` and
+  `cmake --build build --config Release`.
+- C and Python tests: `ctest --test-dir build -C Release --output-on-failure`.
+- Optional live parity/performance report: `python work/benchmark_native.py`.
 - Build products and downloaded compilers stay local. Preserve the public C ABI,
   caller ownership and explicit event overflow reporting when extending the DLL.
 - Generated `rs3_catalog.bin` metadata stays local. Commit its independent decoder,
   compact ability bindings and validation reports, not extracted cache catalogs.
 - Inventory/equipment/individual ability sampling runs in C. Use
-  `outputs/rs3_reader/inventory-and-abilities.rst` for layouts and known limits.
+  `docs/inventory-and-abilities.rst` for layouts and known limits.
 - Reader access is read-only. Preserve executable-hash and signature checks.
 - Never report unmapped NPC HP, hitsplats, Telos animations or phases as confirmed.
 - Use English throughout source code, comments, UI labels, documentation and

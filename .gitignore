@@ -32,7 +32,13 @@ venv/
 .idea/
 
 # Native build products and compiler caches
-/outputs/rs3_native/build/
+/build/
+/outputs/
+/.rsscan*/
+/target/
+CMakeUserPresets.json
+rs3_catalog.bin
+rs3_catalog.manifest.json
 .zig-cache/
 *.dll
 *.obj

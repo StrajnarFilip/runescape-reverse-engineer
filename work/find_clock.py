@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 import struct
 import time
-sys.path[:0] = [str(Path(__file__).parent / "vendor"), str(Path(__file__).parent.parent / "outputs" / "rs3_reader")]
+sys.path[:0] = [str(Path(__file__).parent / "vendor"), str(Path(__file__).parent.parent / "python" / "rs3_reader")]
 from winmem import ProcessMemory, processes
 from rs3 import RS3
 import pefile

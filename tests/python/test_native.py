@@ -1,18 +1,14 @@
 """Public ABI/binding checks without requiring a running RS3 client."""
 import ctypes as C
-from pathlib import Path
 import time
 import unittest
 
-from native import Reader, Info, Player, Options, NPC, Hit, Event, InventoryInfo, Item, Ability, ItemEvent, load_library
+from native import Reader, Info, Player, Options, NPC, Hit, Event, InventoryInfo, Item, Ability, ItemEvent, library_path, load_library
 from native_telemetry import NativeTelemetry
 from tracker import HitHistory
 
 
-LIBRARY = Path(__file__).resolve().parent.parent/"rs3_native"/"build"/"rs3_native.dll"
-
-
-@unittest.skipUnless(LIBRARY.is_file(), "Build rs3_native to run ABI tests")
+@unittest.skipUnless(library_path().is_file(), "Build rs3_native to run ABI tests")
 class NativeTests(unittest.TestCase):
     def test_struct_sizes_and_offsets(self):
         lib = load_library()

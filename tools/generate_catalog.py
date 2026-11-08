@@ -10,8 +10,8 @@ from pathlib import Path
 import struct
 import sys
 
-ROOT = Path(__file__).resolve().parent
-sys.path.insert(0,str(ROOT.parent/"rs3_reader"))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "python" / "rs3_reader"))
 from cachedefs import Archive, DecodeError, decode_item, decode_struct
 
 # Catalog item flags: weapon, two-handed, shield, defender; effect bits separate.
@@ -21,7 +21,7 @@ WEAPON, TWO_HANDED, SHIELD, DEFENDER = 1, 2, 4, 8
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache-root",default=r"C:\ProgramData\Jagex\RuneScape")
-    parser.add_argument("--output",type=Path,default=ROOT/"build"/"rs3_catalog.bin")
+    parser.add_argument("--output", type=Path, required=True, help="Output catalog path beside the DLL")
     args=parser.parse_args()
     items,structs=Archive(19,args.cache_root),Archive(22,args.cache_root)
     definitions={}
@@ -88,7 +88,7 @@ def main():
             # equipment flags,effect flags,base flat heal. Ten LE 32-bit words.
             item_records.append(struct.pack("<IIIiiiIIII",iid,string(d["name"]),family,doses,next_id,d["equip_slot"],style,flags,effects,heal))
     if failures:raise DecodeError("Item decode failures: "+repr(failures[:10]))
-    bindings=json.loads((ROOT.parent/"rs3_reader"/"ability_bindings_951_3.json").read_text())
+    bindings=json.loads((ROOT/"profiles"/"ability_bindings_951_3.json").read_text(encoding="utf-8"))
     ability_records=[]
     for d in bindings["abilities"]:
         requirements=int(d["requires_dual_wield"])|int(d["requires_two_handed"])<<1|int(d["requires_shield"])<<2|int(d["requires_weapon"])<<3
@@ -101,7 +101,7 @@ def main():
             d["end_var"] if source else -1,d["base_cooldown_ms"],requirements,style,source,
             d["level_requirement"],d["adrenaline_requirement_raw"],d["ability_id"]&0xffffffff,
             int(d["in_ability_book"])|int(d.get("base_cooldown_known",False))<<1))
-    profile=json.loads((ROOT.parent/"rs3_reader"/"profile_951_3.json").read_text())
+    profile=json.loads((ROOT/"profiles"/"profile_951_3.json").read_text(encoding="utf-8"))
     body=b"".join(item_records)+b"".join(ability_records)+strings
     header=struct.pack("<8sIIII32s32s",b"RS3CAT1\0",1,len(item_records),len(ability_records),len(strings),bytes.fromhex(profile["sha256"]),hashlib.sha256(body).digest())
     args.output.parent.mkdir(parents=True,exist_ok=True)

@@ -49,6 +49,6 @@ report = {"schema_version": 1, "source": "actual_local_read_only_memory_captures
                           "NPCs, hitsplats and Telos phase/animation decoding are not validated.",
                           "Logout, world-hop and client restart remain to be tested."],
           "captures": sources, "gcd_starts_observed": sorted(starts.values(), key=lambda x:x["start_client_tick"])}
-destination = root / "outputs" / "rs3_reader" / "validation-summary.json"
+destination = root / "docs" / "validation" / "player-validation.json"
 destination.write_text(json.dumps(report, indent=2)+"\n", encoding="utf-8")
 print("Wrote", destination.name, "from", len(sources), "captures and", len(starts), "GCD starts")
