@@ -1,0 +1,169 @@
+"""ctypes binding for the public rs3_native C ABI (no remote-memory decoding).
+
+The CDLL calls release Python's GIL. The native worker owns process discovery,
+fingerprinting, sampling and event deduplication. Each Reader owns its snapshot
+and event cursor and must be closed. Use a separate Reader per Python thread.
+"""
+import ctypes as C
+import hashlib
+import os
+from pathlib import Path
+
+U32, I32, U64, I64 = C.c_uint32, C.c_int32, C.c_uint64, C.c_int64
+VARIABLES = ("health_current", "health_max", "prayer_packed", "adrenaline",
+             "gcd_start", "gcd_end", "gcd_duration", "gcd_client_start",
+             "gcd_client_end", "telos_packed")
+
+
+def fields(kind, names):
+    return [(name, kind) for name in names.split()]
+
+
+class Options(C.Structure):
+    _fields_ = fields(U32, "struct_size pid retry_ms reserved")
+
+
+class Info(C.Structure):
+    _fields_ = (fields(U32, "abi_version status reason pid") +
+                fields(U64, "sequence timestamp_ns monotonic_ns sample_duration_ns "
+                       "process_creation_time event_sequence read_calls read_bytes") +
+                fields(U32, "logic_tick loaded_npcs npc_count skipped_npcs hit_count reserved") +
+                [("executable_sha256", C.c_char*72), ("client_version", C.c_char*16),
+                 ("message", C.c_char*192)])
+
+
+class Player(C.Structure):
+    _fields_ = ([("valid_variables", U64), ("raw_variables", I64*10)] +
+                fields(U64, "hp_changed_ns prayer_changed_ns adrenaline_changed_ns clock_stalled_ns") +
+                fields(I32, "prayer_base_level gcd_remaining_ms gcd_duration_ms") +
+                [("gcd_reason", U32)])
+
+
+class NPC(C.Structure):
+    _fields_ = ([("instance_id", U64), ("runtime_id", U32), ("config_id", I32)] +
+                fields(U32, "flags health_reason") + fields(I32, "health_current health_max") +
+                fields(U32, "hit_offset hit_count name_length reserved") + [("name", C.c_char*520)])
+
+
+class Hit(C.Structure):
+    _fields_ = ([("slot", U32)] + fields(I32, "type_id amount secondary_type_id secondary_amount") +
+                fields(U32, "start_tick end_tick duration_ticks state reserved"))
+
+
+class Event(C.Structure):
+    _fields_ = (fields(U64, "sequence observed_at_ns process_creation_time instance_id") +
+                fields(U32, "pid runtime_id") + [("config_id", I32), ("name_length", U32),
+                ("hit", Hit), ("name", C.c_char*520)])
+
+
+def load_library(path=None):
+    if C.sizeof(C.c_void_p) != 8:
+        raise RuntimeError("rs3_native requires a 64-bit Python interpreter")
+    path = Path(path or os.environ.get("RS3_NATIVE_LIBRARY") or
+                Path(__file__).resolve().parent.parent/"rs3_native"/"build"/"rs3_native.dll")
+    if not path.is_file():
+        raise RuntimeError("Native library missing: %s. Build rs3_native first or select --backend python." % path)
+    lib = C.CDLL(str(path.resolve()))
+    pointer = C.c_void_p
+    signatures = {
+        "abi_version": (U32, []), "sizeof": (U32, [U32]), "monotonic_ns": (U64, []),
+        "profile_sha256": (C.c_char_p, []), "result_string": (C.c_char_p, [I32]),
+        "create": (I32, [C.POINTER(Options), C.POINTER(pointer)]),
+        "destroy": (None, [pointer]), "snapshot_create": (I32, [C.POINTER(pointer)]),
+        "snapshot_destroy": (None, [pointer]), "sample": (I32, [pointer, pointer]),
+        "start": (I32, [pointer, U32]), "stop": (I32, [pointer]),
+        "copy_latest": (I32, [pointer, pointer]),
+        "snapshot_info": (I32, [pointer, C.POINTER(Info), U32]),
+        "snapshot_player": (I32, [pointer, C.POINTER(Player), U32]),
+        "snapshot_npcs": (I32, [pointer, C.POINTER(NPC), U32, C.POINTER(U32)]),
+        "snapshot_hits": (I32, [pointer, C.POINTER(Hit), U32, C.POINTER(U32)]),
+        "events_since": (I32, [pointer, U64, C.POINTER(Event), U32, C.POINTER(U32),
+                                C.POINTER(U64), C.POINTER(U64)]),
+    }
+    for name, (result, args) in signatures.items():
+        function = getattr(lib, "rs3_"+name)
+        function.restype, function.argtypes = result, args
+    if lib.rs3_abi_version() != 1:
+        raise RuntimeError("Unsupported rs3_native ABI version")
+    for kind, structure in enumerate((Options, Info, Player, NPC, Hit, Event), 1):
+        if lib.rs3_sizeof(kind) != C.sizeof(structure):
+            raise RuntimeError("C/Python layout mismatch for "+structure.__name__)
+    profile = Path(__file__).with_name("profile_951_3.json").read_bytes()
+    if lib.rs3_profile_sha256().decode() != hashlib.sha256(profile).hexdigest():
+        raise RuntimeError("C library profile differs from Python profile; rebuild rs3_native")
+    return lib
+
+
+class Reader:
+    """Typed C snapshots. worker_hz=0 selects synchronous sampling.
+
+    Native events use an independent cursor and report explicit overflow counts.
+    Drain once per consumer refresh; the queue holds 4096 observations.
+    """
+    def __init__(self, pid=None, worker_hz=100, library=None):
+        if not 0 <= worker_hz <= 1000:
+            raise ValueError("worker_hz must be 0..1000")
+        if pid is not None and not 0 < pid <= 0xffffffff:
+            raise ValueError("pid must be an unsigned nonzero 32-bit integer")
+        self.lib = load_library(library)
+        self.context, self.snapshot = C.c_void_p(), C.c_void_p()
+        self.worker_hz, self.cursor = worker_hz, 0
+        self.info, self.player = Info(), Player()
+        self.npcs, self.hits = (NPC*1024)(), (Hit*65536)()
+        self.events = (Event*256)()
+        try:
+            options = Options(C.sizeof(Options), pid or 0, 1000, 0)
+            self.check(self.lib.rs3_create(C.byref(options), C.byref(self.context)))
+            self.check(self.lib.rs3_snapshot_create(C.byref(self.snapshot)))
+            # The first consumer gets a real observation rather than NO_SAMPLE.
+            self.check(self.lib.rs3_sample(self.context, self.snapshot))
+            if worker_hz:
+                self.check(self.lib.rs3_start(self.context, worker_hz))
+        except BaseException:
+            self.close()
+            raise
+
+    def check(self, result):
+        if result:
+            raise RuntimeError(self.lib.rs3_result_string(result).decode())
+
+    def sample(self):
+        if not self.context:
+            raise RuntimeError("Reader is closed")
+        function = self.lib.rs3_copy_latest if self.worker_hz else self.lib.rs3_sample
+        self.check(function(self.context, self.snapshot))
+        self.check(self.lib.rs3_snapshot_info(self.snapshot, C.byref(self.info), C.sizeof(Info)))
+        self.check(self.lib.rs3_snapshot_player(self.snapshot, C.byref(self.player), C.sizeof(Player)))
+        count = U32()
+        self.check(self.lib.rs3_snapshot_npcs(self.snapshot, self.npcs, len(self.npcs), C.byref(count)))
+        self.check(self.lib.rs3_snapshot_hits(self.snapshot, self.hits, len(self.hits), C.byref(count)))
+        return self.info, self.player, self.npcs, self.hits
+
+    def drain_events(self):
+        result, lost_total = [], 0
+        # Bound the drain to the queue size so a busy producer cannot starve UI.
+        for _ in range(16):
+            count, next_cursor, lost = U32(), U64(), U64()
+            self.check(self.lib.rs3_events_since(self.context, self.cursor, self.events, len(self.events),
+                       C.byref(count), C.byref(next_cursor), C.byref(lost)))
+            self.cursor = next_cursor.value
+            lost_total += lost.value
+            # ctypes array views point into a reused buffer; copy before next call.
+            result.extend(Event.from_buffer_copy(self.events[i]) for i in range(count.value))
+            if count.value < len(self.events):
+                break
+        return result, lost_total
+
+    def close(self):
+        if self.context:
+            self.lib.rs3_destroy(self.context)
+            self.context = C.c_void_p()
+        if self.snapshot:
+            self.lib.rs3_snapshot_destroy(self.snapshot)
+            self.snapshot = C.c_void_p()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()

@@ -1,69 +1,70 @@
-RS3 LIVE TRACKER — lokalni bralnik pomnilnika
+RS3 LIVE TRACKER - direct memory telemetry
 
-ZAGON
-  Dvoklikni Start Tracker.cmd. Uporabi obstoječi Python C:\Python39.
-  Okno že teče. Za izhod zapri okno; s tem ustaviš njegov zajem.
-  Ni potrebnih dodatnih Python paketov ali native agenta.
+START
+  Build the C library first; see ../rs3_native/README.rst.
+  Double-click Start Tracker.cmd on this machine (C:\Python39\pythonw.exe),
+  or run: python tracker.py
+  Close the window to stop its Python consumer and native worker.
+  No pip packages, injected game agent, or network server are required.
 
-POTRJENI PODATKI V RAZLIČICI 951-3
-  HP in max HP: neposredni VARP 13537 in 13538.
-  Prayer: VARP 3274, biti 0..14 / 10. UI prikazuje celoštevilski del.
-  Max prayer: osnovni prayer level iz igralčeve tabele spretnosti * 10;
-    to je izpeljana vrednost, ne ločeno prebran maksimum prayerja.
-  Adrenalin: VARP 679 / 10, v živem boju opažen razpon 0..100 %.
-  GCD: VARC 2091 in 2092, primerjana z odjemalčevim logic clockom.
-    V živih zajemih pet začetkov potrdilo trajanje 90 tickov * 20 ms.
+COLLECTION
+  Default: C worker at 100 Hz; Python UI/log output at 20 Hz.
+  python tracker.py --native-hz 500
+  Requested rates depend on system load. A faster reader does not increase the
+  game's server update rate. Raw/source tab shows engine timing and event gaps.
+  Use --backend python to select the original Python decoder explicitly.
+  RS3_BACKEND=python selects it through the environment. RS3_NATIVE_LIBRARY can
+  select an alternative DLL. Missing/mismatched DLLs fail explicitly.
 
-  NPC-ji: ime, config ID (tip), runtime ID (primerek), current/max HP.
-  HP prihaja iz številčne statistike NPC-ja, ne iz približka healthbara.
-  Preverjeno: Goblin 550/550, Giant spider 1000/1000 in Goblin 550 -> 326
-    ob uporabnikovem zadetku 224. Ujeti tudi uporabnikovi zadetki 550 in 1000.
-  Hit splati: surov tip ID, znesek, prejemnik, začetek/konec client tickov.
-  Tracker ima filter in zgodovino; ranjeni NPC-ji so prikazani pred zdravimi.
-  Telosove faze in animacije še niso potrjene.
+VERIFIED FIELDS IN CLIENT 951-3
+  HP/max HP: direct VARP 13537/13538.
+  Prayer: VARP 3274 bits 0..14 / 10; UI displays the integer part.
+  Max prayer: base prayer skill level * 10 (derived, not a separate max variable).
+  Adrenaline: VARP 679 / 10; previously observed changing from 0 to 100% in combat.
+  GCD: VARC 2091/2092 against the client logic clock; five live starts previously
+    confirmed 90 ticks * 20 ms = 1.8 s.
+  NPCs: name, config ID/type, runtime ID/instance, current and maximum HP from
+    numeric statistics. Goblin 550/550, Giant spider 1000/1000, Goblin 550 -> 326
+    alongside the user's independently reported 224 hit. Also captured 550/1000.
+  Hit splats: raw type ID, amount, recipient, start/end client ticks, duration.
+  Filters and history are available. Wounded NPCs appear before healthy ones.
+  Telos phases and animations remain unconfirmed.
 
-PREVERLJIVOST
-  Meritve gredo v logs/capture-DATUM-CAS-PID.jsonl pri 20 Hz.
-  Tracker rotira dnevnik pri približno 25 MB in ohrani tri dodatne dele.
-  Vsaka vrstica ima čas, zaporedno številko, PID, hash izvršne datoteke,
-  dekodirane in surove vrednosti ter trajanje branja.
-  Gumba v oknu odpreta mapo z dnevniki oziroma kopirata zadnji JSON.
-  Koda je v tej mapi. OpenProcess zahteva le QUERY_INFORMATION | VM_READ.
-  Nobene funkcije v igri ne kličemo, vanjo ne pišemo in ne pošiljamo tipk.
-  Podatki ne prihajajo iz slik. Program nima omrežnega strežnika.
+AUDITABILITY
+  Samples go to logs/capture-DATE-TIME-PID.jsonl at 20 Hz. Logs rotate at about
+  25 MB with three backup parts. Each record contains acquisition time, sequence,
+  PID, executable hash, raw/decoded values, read duration and native diagnostics.
+  Buttons open the log folder and copy current JSON. Data is read directly from
+  memory. Only QUERY_INFORMATION | VM_READ access is requested. No game functions
+  are called, no game memory is written, and no keys/clicks are sent.
+  All source, comments, UI and documentation use English.
 
-OMEJITVE
-  Preverjen je le SHA-256:
+LIMITATIONS
+  Supported executable SHA-256:
     fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45
-  Ob drugem hashu ali drugačnih preverjenih podpisih se branje zavrne.
-  Ob napaki branja, izgubi procesa ali ustavljenem zajemu so polja neznana.
-  Menjava sveta in odjava še potrebujeta namensko preverjanje. Sam obstoj
-  procesa in premikanje odjemalčevega števca ne dokazujeta prijave v svet.
-  20 Hz pomeni pogostost branja, ne pogostosti posodobitev s strežnika.
-  Čas zadnje strežniške posodobitve ni znan. last_change_age_ms pomeni
-  čas od zadnje opažene spremembe vrednosti, ne starosti strežniških podatkov.
-  Trenutni bralnik ni atomski posnetek celotnega procesa.
-  NPC seznam pomeni naloženo okolico; tabela ne meri razdalje do igralca.
-  NPC-ji brez poslane HP statistike imajo null / not_transmitted, ne nič HP.
-  Znesek hit splata je lahko tudi zdravljenje ali ničelni/text mark.
-  Napadalec iz tega zapisa ni znan; prikazan NPC je prejemnik zadetka.
-  Polling lahko izpusti zapis, če je prepisan ali odstranjen med meritvama.
-  newly_observed pomeni prvič opaženo, ne zagotovljen tok vseh zadetkov.
+  Different hashes or loaded signatures are refused before offsets are used.
+  Failed reads/process loss produce unavailable fields. Stale samples are hidden
+  in the UI. Logout and world changes still need controlled live validation;
+  process existence and an advancing client clock do not prove logged-in state.
+  last_change_age_ms is time since the last observed value change, not the age
+  of server data. The latest server update time is unknown.
+  A snapshot is not atomic. NPCs cover the loaded scene, without a distance check.
+  Untransmitted NPC HP is null/not_transmitted, not zero HP.
+  Hitmark amounts may be healing, zero or text marks; the attacker is unknown.
+  newly_observed means first observed (including active marks at attachment).
+  The native queue holds 4096 observations and reports events_lost on overwrite.
+  Polling can miss records overwritten/removed between native samples.
 
-UKAZNA VRSTICA
-  C:\Python39\python.exe reader.py --once --raw
-  C:\Python39\python.exe reader.py --hz 20 --duration 60 --raw --output capture.jsonl
+CLI AND TESTS
+  python reader.py --once --raw
+  python reader.py --native-hz 500 --hz 20 --duration 60 --raw --output capture.jsonl
+  python tracker.py --history PATH_TO_EARLIER_CAPTURE.jsonl
+  python -m unittest discover -s . -v
 
-PREVERJANJE
-  C:\Python39\python.exe -m unittest discover -s . -v
-  Dvajset avtomatskih preverjanj: Windows read-only pomnilnik, meje branja,
-  GCD in overflow, prayer bitfield, ponovna povezava, NPC identiteta/izginotje,
-  spremenjen seznam, bucket cikli, trgan hitmark zapis, deduplikacija in zgodovina.
-  Živi preizkusi so zajeli spremembe HP-ja, adrenalina in pet sprožitev GCD-ja.
-  NPC živ preizkus je v npc-validation-summary.json z dejanskimi primeri.
-
-  Za prikaz že zajetih zadetkov poleg novih živih meritev:
-    python tracker.py --history POT_DO_PREJSNJEGA_ZAJEMA.jsonl
-
-  Samodejni pregled dovoljenj je zavrnil vizualni pregled okna pythonw.
-  Okno se je ustvarilo in dejanski zajem ter dnevniki so bili preverjeni.
+  Deterministic C tests: run ../rs3_native/build.py --test from a compiler-enabled
+  shell. Python tests include the original decoder and native ABI/binding checks.
+  See validation-summary.json, npc-validation-summary.json and the native
+  validation report for actual live results and their limits. The C port was
+  checked against the Python reader; full Telos combat remains untested.
+  Visual inspection through Computer Use was previously denied. Window creation
+  and real capture logs were verified; no visual inspection is claimed.

@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 from rs3 import decode_gcd, extract_bits
-from telemetry import Telemetry
+from telemetry import PythonTelemetry as Telemetry
 
 class DecodingTests(unittest.TestCase):
     def test_prayer_packed(self):

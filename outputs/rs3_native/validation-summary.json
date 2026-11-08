@@ -1,0 +1,74 @@
+{
+  "captured_at_utc": "2026-11-08T19:01:08.902322+00:00",
+  "client_version": "951-3",
+  "executable_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+  "abi_version": 1,
+  "pairs": 200,
+  "stable_pairs": 199,
+  "matched_stable_pairs": 199,
+  "unstable_pairs_excluded": 1,
+  "mismatches": [],
+  "loaded_npcs": 80,
+  "comparison": "All 10 raw variables and NPC runtime/config/name/current/max HP, bracketed by Python reads",
+  "python_end_to_end": {
+    "median_ms": 4.7888,
+    "p95_ms": 6.7138,
+    "max_ms": 10.5587
+  },
+  "c_with_python_adapter": {
+    "median_ms": 0.9326,
+    "p95_ms": 1.3407,
+    "max_ms": 2.0205
+  },
+  "c_engine": {
+    "median_ms": 0.681,
+    "p95_ms": 0.927,
+    "max_ms": 1.38
+  },
+  "python_remote_reads": 1325,
+  "python_remote_bytes": 10013,
+  "c_remote_reads": 634,
+  "c_remote_bytes": 374932,
+  "worker_checks": [
+    {
+      "requested_hz": 100,
+      "elapsed_seconds": 3.059,
+      "samples": 306,
+      "observed_hz": 100.0,
+      "consumer_refreshes": 49,
+      "last_read_ms": 0.843,
+      "last_age_ms": 8.045,
+      "events_lost": 0,
+      "loaded_npcs": 81
+    },
+    {
+      "requested_hz": 500,
+      "elapsed_seconds": 3.003,
+      "samples": 1500,
+      "observed_hz": 499.5,
+      "consumer_refreshes": 48,
+      "last_read_ms": 0.591,
+      "last_age_ms": 1.277,
+      "events_lost": 0,
+      "loaded_npcs": 68
+    },
+    {
+      "requested_hz": 1000,
+      "elapsed_seconds": 3.038,
+      "samples": 2892,
+      "observed_hz": 951.8,
+      "consumer_refreshes": 49,
+      "last_read_ms": 0.107,
+      "last_age_ms": 1.475,
+      "events_lost": 0,
+      "loaded_npcs": 3
+    }
+  ],
+  "library_sha256": "c1421fbfe19c20f83e4422ebb5e94fac4ab77b6f4f70e26e46b421a082898bf5",
+  "limitations": [
+    "Current scene only; full Telos combat load not benchmarked",
+    "No live combat hit during this port validation; hit parsing/deduplication covered by deterministic C fixtures",
+    "Requested rate is not guaranteed under system load",
+    "Logout/world-hop/restart still need controlled live validation"
+  ]
+}

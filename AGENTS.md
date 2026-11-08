@@ -20,12 +20,20 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
 
 ## Project layout and checks
 
-- Runtime source and user-facing deliverables: `outputs/rs3_reader/`.
+- Runtime source and user-facing deliverables: `outputs/rs3_reader/` and
+  `outputs/rs3_native/`.
 - Our research scripts: `work/*.py`, `work/decompile.ps1`,
   `work/ghidra_scripts/ExportFunctions.java`. Generated research output is ignored.
-- Current runtime uses only 64-bit Windows Python's standard library.
+- The default acquisition engine is a Windows x64 C11 DLL. The Python UI uses
+  only the standard library; the original Python decoder is an explicit backend.
+- Build and C tests: `C:\Python39\python.exe outputs/rs3_native/build.py --cc
+  work/tools/zig-x86_64-windows-0.15.2/zig.exe --test` (or an installed C compiler).
 - Tests: `C:\Python39\python.exe -m unittest discover -s outputs/rs3_reader -v`.
+- Optional live parity/performance report: `C:\Python39\python.exe work/benchmark_native.py`.
+- Build products and downloaded compilers stay local. Preserve the public C ABI,
+  caller ownership and explicit event overflow reporting when extending the DLL.
 - Reader access is read-only. Preserve executable-hash and signature checks.
 - Never report unmapped NPC HP, hitsplats, Telos animations or phases as confirmed.
-- User prefers Slovenian and autonomous progress, with questions only when their
-  input is needed for controlled in-game validation.
+- Use English throughout source code, comments, UI labels, documentation and
+  examples. The user explicitly requested this project-wide language change.
+- Work autonomously; ask only when input is needed for controlled in-game validation.

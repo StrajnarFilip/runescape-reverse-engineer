@@ -30,3 +30,14 @@ __pycache__/
 venv/
 .vscode/
 .idea/
+
+# Native build products and compiler caches
+/outputs/rs3_native/build/
+.zig-cache/
+*.dll
+*.obj
+*.o
+*.lib
+*.a
+*.pdb
+*.class

@@ -35,7 +35,7 @@ class Meter:
         self.value.pack(anchor="w", pady=(4, 3))
         self.bar = tk.Canvas(self.frame, height=7, bg=PANEL, highlightthickness=0)
         self.bar.pack(fill="x", pady=(0, 8))
-        self.detail = tk.Label(self.frame, text="Čakam na branje …", fg=MUTED,
+        self.detail = tk.Label(self.frame, text="Waiting for a sample …", fg=MUTED,
                                bg=PANEL, font=("Segoe UI", 9), anchor="w")
         self.detail.pack(anchor="w")
         self.fraction = 0
@@ -55,7 +55,9 @@ class Meter:
         self.paint()
 
 def event_key(event):
-    return tuple(event.get(k) for k in ("pid", "runtime_id", "config_id", "slot", "type_id", "amount",
+    # Native sequence numbers restart with a new context; raw hit identity also
+    # works when importing history from a previous collector in the same client.
+    return tuple(event.get(k) for k in ("pid", "process_creation_time", "runtime_id", "instance_id", "config_id", "slot", "type_id", "amount",
                                         "end_client_tick", "secondary_type_id", "secondary_amount"))
 
 class HitHistory:
@@ -65,7 +67,9 @@ class HitHistory:
 
     def observe(self, record):
         for hit in ((record.get("hit_splats") or {}).get("newly_observed") or []):
-            event = dict(hit, observed_at_ms=record["timestamp_ms"], pid=record.get("pid"))
+            event = dict(hit)
+            event.setdefault("observed_at_ms", record["timestamp_ms"])
+            event.setdefault("pid", record.get("pid"))
             key = event_key(event)
             if key not in self.keys:
                 if len(self.events) == self.events.maxlen:
@@ -87,9 +91,10 @@ def sync_rows(tree, rows):
         tree.delete(key)
 
 class Tracker:
-    def __init__(self, root, history_path=None):
+    def __init__(self, root, history_path=None, backend=None, native_hz=100):
         self.root = root
-        root.title("RS3 Live Tracker · neposredno branje pomnilnika")
+        root.title("RS3 Live Tracker · direct memory reader")
+        self.backend, self.native_hz = backend, native_hz
         root.geometry("1240x880")
         root.minsize(1060, 760)
         root.configure(bg=BG)
@@ -109,10 +114,10 @@ class Tracker:
         header.pack(fill="x", padx=24, pady=(20, 12))
         tk.Label(header, text="RS3  /  LIVE TRACKER", fg=INK, bg=BG,
                  font=("Segoe UI", 20, "bold")).pack(side="left")
-        self.status = tk.Label(header, text="POVEZOVANJE", fg=GOLD, bg=PANEL,
+        self.status = tk.Label(header, text="CONNECTING", fg=GOLD, bg=PANEL,
                                padx=12, pady=6, font=("Segoe UI", 10, "bold"))
         self.status.pack(side="right")
-        self.source = tk.Label(root, text="Preverjam različico odjemalca …", bg=BG,
+        self.source = tk.Label(root, text="Verifying the client version …", bg=BG,
                                fg=MUTED, font=("Segoe UI", 10), anchor="w")
         self.source.pack(fill="x", padx=24, pady=(0, 12))
 
@@ -122,7 +127,7 @@ class Tracker:
         self.meters = {}
         for i, (key, title, colour) in enumerate([
             ("hp", "HEALTH / LIFE POINTS", RED), ("prayer", "PRAYER", BLUE),
-            ("adren", "ADRENALIN", GOLD), ("gcd", "GLOBAL COOLDOWN", GREEN)]):
+            ("adren", "ADRENALINE", GOLD), ("gcd", "GLOBAL COOLDOWN", GREEN)]):
             meter = self.meters[key] = Meter(grid, title, colour)
             meter.value.config(font=("Segoe UI", 23, "bold"))
             meter.detail.config(wraplength=235, height=2, justify="left")
@@ -144,10 +149,10 @@ class Tracker:
         tabs.pack(fill="both", expand=True, padx=24, pady=(14, 0))
         npc_tab = tk.Frame(tabs, bg=PANEL, padx=12, pady=12)
         proof = tk.Frame(tabs, bg=PANEL, padx=18, pady=12)
-        tabs.add(npc_tab, text="Pošasti in hit splati")
-        tabs.add(proof, text="Surove vrednosti in izvor")
+        tabs.add(npc_tab, text="NPCs and hit splats")
+        tabs.add(proof, text="Raw values and source")
         self.build_npc_panel(npc_tab)
-        tk.Label(proof, text="IZVOR IN SUROVE VREDNOSTI", fg=MUTED, bg=PANEL,
+        tk.Label(proof, text="SOURCE AND RAW VALUES", fg=MUTED, bg=PANEL,
                  font=("Segoe UI", 10, "bold")).pack(anchor="w")
         self.timing = tk.Label(proof, text="—", fg=GREEN, bg=PANEL,
                                font=("Consolas", 10), anchor="w")
@@ -156,17 +161,17 @@ class Tracker:
                                 font=("Consolas", 10), wrap="none", padx=0, pady=0,
                                 highlightthickness=0, state="disabled")
         self.raw_text.pack(fill="both", expand=True)
-        self.pending = tk.Label(root, text="NPC HP: številčna statistika odjemalca · hit splati: opaženi zapisi, napadalec ni znan · Telos še nepreverjen.",
+        self.pending = tk.Label(root, text="NPC HP: client statistics · hit splats: observed records, attacker unknown · Telos remains unverified.",
                                 bg=BG, fg=GOLD, font=("Segoe UI", 10), anchor="w")
         self.pending.pack(fill="x", padx=24, pady=(10, 4))
         footer = tk.Frame(root, bg=BG)
         footer.pack(fill="x", padx=24, pady=(6, 18))
-        for text, command in [("Odpri mapo z dnevniki", lambda: os.startfile(str(logs))),
-                              ("Kopiraj trenutni JSON", self.copy_json)]:
+        for text, command in [("Open log folder", lambda: os.startfile(str(logs))),
+                              ("Copy current JSON", self.copy_json)]:
             tk.Button(footer, text=text, command=command, bg="#26374e", fg=INK,
                       activebackground="#344b68", activeforeground=INK, relief="flat",
                       padx=12, pady=8, font=("Segoe UI", 9)).pack(side="left", padx=(0, 10))
-        tk.Label(footer, text="20 Hz · samo branje", fg=MUTED, bg=BG,
+        tk.Label(footer, text="20 Hz display · read only", fg=MUTED, bg=BG,
                  font=("Segoe UI", 9)).pack(side="right")
         root.protocol("WM_DELETE_WINDOW", self.close)
         self.worker = threading.Thread(target=self.collect, daemon=True)
@@ -174,8 +179,9 @@ class Tracker:
         root.after(50, self.refresh)
 
     def collect(self):
-        telemetry = Telemetry()
+        telemetry = None
         try:
+            telemetry = Telemetry(backend=self.backend, worker_hz=self.native_hz)
             if self.history_path:
                 with Path(self.history_path).open(encoding="utf-8") as source:
                     for line in source:
@@ -202,9 +208,11 @@ class Tracker:
                         deadline = time.perf_counter()
                     self.stop.wait(max(0, delay))
         except Exception as error:
-            self.publish(telemetry.unavailable("Tracker: "+str(error)))
+            from native_telemetry import NativeTelemetry
+            self.publish(NativeTelemetry.unavailable("Tracker: "+str(error)))
         finally:
-            telemetry.close()
+            if telemetry is not None:
+                telemetry.close()
 
     def publish(self, record):
         try:
@@ -221,51 +229,57 @@ class Tracker:
         except queue.Empty:
             pass
         if self.latest:
-            age = (time.perf_counter()-self.received_at)*1000
+            age = ((time.perf_counter()-self.received_at)*1000 +
+                   self.latest.get("native", {}).get("snapshot_age_ms", 0))
             stamp = datetime.fromtimestamp(self.latest["timestamp_ms"]/1000).strftime("%H:%M:%S.%f")[:-3]
-            self.timing.config(text="Branje %s  |  starost %.0f ms  |  vzorec #%s  |  %.2f ms/bralni cikel" %
-                               (stamp, age, self.latest.get("sample_sequence", "—"), self.latest.get("read_duration_ms", 0)))
+            native = self.latest.get("native", {})
+            self.timing.config(text="Sample %s  |  age %.0f ms  |  #%s  |  %.2f ms/read  |  %s" %
+                               (stamp, age, native.get("sample_sequence", self.latest.get("sample_sequence", "—")),
+                                self.latest.get("read_duration_ms", 0),
+                                "C collector %s Hz · %s reads · lost events %s" %
+                                (native.get("worker_hz"), native.get("read_calls"), native.get("events_lost"))
+                                if native else "Python collector"))
             if age > 1500:
-                self.status.config(text="ZASTARELO", fg=RED)
+                self.status.config(text="STALE", fg=RED)
                 for meter in self.meters.values():
-                    meter.set("—", 0, "Zajem se ne osvežuje")
+                    meter.set("—", 0, "Samples are not updating")
                 sync_rows(self.npc_tree, [])
-                self.npc_status.config(text="NPC podatki so zastareli; čakam na novo branje.", fg=RED)
+                self.npc_status.config(text="NPC data is stale; waiting for a fresh sample.", fg=RED)
         self.root.after(50, self.refresh)
 
     def render(self, s):
         available = s["status"] != "unavailable"
         stalled = s.get("freshness", {}).get("clock_stalled_ms", 0) > 2000
-        self.status.config(text="ŽIVO · POMNILNIK" if available and not stalled else "NI SVEŽIH PODATKOV",
+        self.status.config(text="LIVE · MEMORY" if available and not stalled else "NO FRESH DATA",
                            fg=GREEN if available and not stalled else RED)
         digest = s.get("executable_sha256", "")
         self.source.config(text="rs2client.exe  |  PID %s  |  build %s  |  SHA-256 %s…%s" %
                            (s.get("pid", "—"), s.get("client_version", "—"), digest[:8], digest[-6:]) if available
-                           else "Čakam na podprt odjemalec: "+s.get("reason", "neznan razlog"))
+                           else "Waiting for a supported client: "+s.get("reason", "unknown reason"))
         if not available or stalled:
             for meter in self.meters.values():
-                meter.set("—", 0, "Nedostopno" if not available else "Odjemalčev števec se ne premika")
-            self.set_raw(s.get("reason", "Odjemalčev števec se ne premika"))
+                meter.set("—", 0, "Unavailable" if not available else "Client clock is not advancing")
+            self.set_raw(s.get("reason", "Client clock is not advancing"))
             sync_rows(self.npc_tree, [])
-            self.npc_status.config(text="NPC podatki niso dostopni.", fg=RED)
+            self.npc_status.config(text="NPC data is unavailable.", fg=RED)
             return
         h, p, a, g = s["health"], s["prayer"], s["adrenaline_percent"]["value"], s["gcd"]
         hp, prayer = h["current"]["value"], p["current"]["value"]
-        self.meters["hp"].set(fmt(hp)+" / "+fmt(h["max"]), (hp or 0)/(h["max"] or 1), "VARP 13537 / 13538 · neposredni vrednosti")
+        self.meters["hp"].set(fmt(hp)+" / "+fmt(h["max"]), (hp or 0)/(h["max"] or 1), "VARP 13537 / 13538 · direct values")
         self.meters["prayer"].set(fmt(p["display_current"])+" / "+fmt(p["max"]), (prayer or 0)/(p["max"] or 1),
-                                  "Natančno %s · maksimum iz prayer levela" % fmt(prayer))
-        self.meters["adren"].set(fmt(a)+" %", (a or 0)/100, "VARP 679 ÷ 10 · neposredna vrednost")
+                                  "Exact %s · max derived from prayer level" % fmt(prayer))
+        self.meters["adren"].set(fmt(a)+" %", (a or 0)/100, "VARP 679 ÷ 10 · direct value")
         remaining = g["remaining_ms"]
-        self.meters["gcd"].set("—" if remaining is None else ("PRIPRAVLJEN" if remaining == 0 else "%.2f s" % (remaining/1000)),
+        self.meters["gcd"].set("—" if remaining is None else ("READY" if remaining == 0 else "%.2f s" % (remaining/1000)),
                                 (remaining or 0)/(g["duration_ms"] or 1),
                                 "VARC 2091 / 2092 · tick 20 ms" if remaining is not None else g["reason"])
         raw = s["raw_variables"]
         self.set_raw("VARP 13537 HP       = %-8s  VARP 13538 max HP = %s\n"
-                     "VARP 679 adrenalin  = %-8s  / 10 = %s %%\n"
+                     "VARP 679 adrenaline = %-8s  / 10 = %s %%\n"
                      "VARP 3274 prayer    = %-8s  bits 0..14 / 10 = %s\n"
                      "VARC 2091 GCD start = %-8s  VARC 2092 end = %s\n"
-                     "Client logic clock = %-8s  GCD preostanek = %s ms\n"
-                     "Svežina: neposredno branje; čas zadnje strežniške posodobitve ni znan." %
+                     "Client logic clock = %-8s  GCD remaining = %s ms\n"
+                     "Freshness: direct memory sampling; last server update time is unknown." %
                      (raw["health_current"], raw["health_max"], raw["adrenaline"], fmt(a),
                       raw["prayer_packed"], fmt(prayer), raw["gcd_client_start"], raw["gcd_client_end"],
                       g["clock_raw"], fmt(remaining)))
@@ -274,14 +288,14 @@ class Tracker:
     def build_npc_panel(self, parent):
         controls = tk.Frame(parent, bg=PANEL)
         controls.pack(fill="x", pady=(0, 10))
-        tk.Label(controls, text="Filter imena ali ID-ja:", bg=PANEL, fg=MUTED,
+        tk.Label(controls, text="Filter name or ID:", bg=PANEL, fg=MUTED,
                  font=("Segoe UI", 10)).pack(side="left")
         tk.Entry(controls, textvariable=self.filter_text, bg="#26374e", fg=INK,
                  insertbackground=INK, relief="flat", font=("Segoe UI", 11), width=22).pack(side="left", padx=8)
-        tk.Checkbutton(controls, text="Samo NPC-ji z znanim HP", variable=self.only_hp,
+        tk.Checkbutton(controls, text="Only NPCs with known HP", variable=self.only_hp,
                        bg=PANEL, fg=INK, activebackground=PANEL, activeforeground=INK,
                        selectcolor=BG, font=("Segoe UI", 9)).pack(side="left", padx=10)
-        self.npc_status = tk.Label(parent, text="Čakam na NPC-je …", bg=PANEL, fg=MUTED,
+        self.npc_status = tk.Label(parent, text="Waiting for NPCs …", bg=PANEL, fg=MUTED,
                                    font=("Segoe UI", 10), anchor="w")
         self.npc_status.pack(fill="x", pady=(0, 8))
         tables = tk.Frame(parent, bg=PANEL)
@@ -289,19 +303,19 @@ class Tracker:
         tables.grid_columnconfigure(0, weight=3)
         tables.grid_columnconfigure(1, weight=2)
         tables.grid_rowconfigure(1, weight=1)
-        for col, text in [(0, "NPC-JI V NALOŽENI OKOLICI"), (1, "ZADNJI OPAŽENI HIT SPLATI")]:
+        for col, text in [(0, "NPCS IN THE LOADED SCENE"), (1, "RECENTLY OBSERVED HIT SPLATS")]:
             tk.Label(tables, text=text, bg=PANEL, fg=MUTED, font=("Segoe UI", 9, "bold")).grid(
                 row=0, column=col, sticky="w", pady=(0, 7), padx=(0, 12))
-        self.npc_tree = self.table(tables, 0, [("name", "Ime", 170), ("config", "Tip ID", 75),
+        self.npc_tree = self.table(tables, 0, [("name", "Name", 170), ("config", "Type ID", 75),
                                    ("runtime", "Runtime ID", 85), ("health", "HP / max", 120), ("pct", "%", 65)])
         self.npc_tree.tag_configure("wounded", foreground=GOLD)
         self.npc_tree.tag_configure("dead", foreground=RED)
-        self.hit_tree = self.table(tables, 1, [("time", "Opaženo", 100), ("npc", "Prejemnik", 140),
-                                  ("amount", "Znesek", 70), ("type", "Tip ID", 65)])
+        self.hit_tree = self.table(tables, 1, [("time", "Observed", 100), ("npc", "Recipient", 140),
+                                  ("amount", "Amount", 70), ("type", "Type ID", 65)])
         self.hit_tree.tag_configure("hit", foreground=GOLD)
         self.history_note = tk.Label(parent,
-            text="Zgodovina vključuje prejšnji lokalni zajem in nove meritve." if self.history_path else
-                 "Zgodovina se polni ob novih opaženih zadetkih. Čas v tabeli je čas opažanja.",
+            text="History includes an earlier local capture and new live observations." if self.history_path else
+                 "History fills with newly observed hits. The table shows observation times.",
             bg=PANEL, fg=MUTED, font=("Segoe UI", 9), anchor="w")
         self.history_note.pack(fill="x", pady=(8, 0))
 
@@ -324,7 +338,7 @@ class Tracker:
         entities = npcs.get("entities")
         if entities is None:
             sync_rows(self.npc_tree, [])
-            self.npc_status.config(text="NPC: "+npcs.get("reason", "nedostopno"), fg=RED)
+            self.npc_status.config(text="NPC: "+npcs.get("reason", "unavailable"), fg=RED)
         else:
             needle = self.filter_text.get().strip().casefold()
             visible = [e for e in entities if (not self.only_hp.get() or e["health"]["max"] is not None)
@@ -336,10 +350,10 @@ class Tracker:
                 h = e["health"]
                 tag = ("dead",) if h["current"] == 0 else (("wounded",) if h["percent"] is not None and h["percent"] < 100 else ())
                 rows.append(("npc_%d_%d" % (e["runtime_id"], e["instance_id"]),
-                             (e["name"] or "(brez imena)", fmt(e["config_id"]), str(e["runtime_id"]),
+                             (e["name"] or "(unnamed)", fmt(e["config_id"]), str(e["runtime_id"]),
                               fmt(h["current"])+" / "+fmt(h["max"]), fmt(h["percent"])), tag))
             sync_rows(self.npc_tree, rows)
-            self.npc_status.config(text="Naloženih %s · prebranih %s · prikazanih %d · nedostopnih %s" %
+            self.npc_status.config(text="Loaded %s · read %s · displayed %d · skipped %s" %
                                    (npcs.get("loaded_count", "—"), npcs.get("read_count", "—"), len(visible), npcs.get("skipped_count", 0)),
                                    fg=GOLD if npcs.get("skipped_count") else GREEN)
         events = record.get("recent_hit_splats", [])
@@ -370,7 +384,11 @@ class Tracker:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--history", type=Path, help="Import observed hits from an earlier local JSONL capture")
+    parser.add_argument("--backend", choices=("c", "python"), help="Default: C collector (RS3_BACKEND overrides)")
+    parser.add_argument("--native-hz", type=int, default=100, help="Native collector frequency, 1..1000 Hz")
     args = parser.parse_args()
+    if not 1 <= args.native_hz <= 1000:
+        parser.error("native-hz must be 1..1000")
     root = tk.Tk()
-    Tracker(root, args.history)
+    Tracker(root, args.history, args.backend, args.native_hz)
     root.mainloop()

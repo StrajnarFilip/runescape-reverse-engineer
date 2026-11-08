@@ -1,122 +1,128 @@
-RS3 native-memory reader in live tracker
-======================================
+RS3 native memory reader and live tracker
+========================================
 
-Lokalni projekt za razumevanje podatkov odjemalca RuneScape 3.
-Samostojen Python program bere pomnilnik ``rs2client.exe`` in prikazuje
-HP, prayer, adrenalin in global cooldown. Podatki prihajajo iz pomnilnika;
-bralnik uporablja Windows ``ctypes`` in standardno knjižnico Pythona.
+A local, read-only RuneScape 3 telemetry project. A C11 DLL discovers and verifies
+``rs2client.exe``, reads player variables and NPC structures, and publishes typed
+snapshots and hit observations. The Tkinter UI and JSON Lines output remain in
+Python. All project source, comments, interface text and documentation use English.
 
-Trenutno stanje
----------------
+Current capabilities
+--------------------
 
-* Preverjen odjemalec: 64-bitni RS3 **951-3**, pripet na SHA-256 izvršne datoteke.
-* HP in max HP: neposredni igralčevi spremenljivki.
-* Prayer: dekodirano trenutno stanje; maksimum je izpeljan iz osnovnega levela.
-* Adrenalin: v živem boju opažene spremembe v razponu 0–100 %.
-* GCD: začetek/konec in odjemalčev števec; opaženo trajanje 90 tickov = 1,8 s.
-* Tkinter tracker in JSON Lines izhod, privzeto 20 meritev na sekundo.
-* NPC ime, tip ID in runtime ID ter trenutni in maksimalni HP iz številčnih statistik.
-* Native hitmark ring: prejemnik, znesek, surov tip ID in čas; tracker ima zgodovino.
-* 20 avtomatskih preverjanj uspešnih na lokalnem Windows sistemu.
+* Version-pinned Windows x64 client **951-3**, executable SHA-256 and loaded-code
+  signatures checked before using offsets.
+* Player current/max HP, prayer (maximum derived from base level), adrenaline,
+  and global cooldown using the client's 20 ms logic clock.
+* Loaded NPC names, config/type IDs, runtime IDs, exact transmitted current/max HP.
+* Native hitmark rings: recipient, amount, raw type, start/end ticks, local history.
+* Native collector: configurable **1..1000 Hz**, default **100 Hz**. Python UI and
+  log refresh independently at 20 Hz. Actual throughput depends on system load.
+* Stable, documented C ABI with explicit ownership, validity flags and event gaps.
+  Working Python ctypes and Java FFM consumers; no language-specific game agent.
 
-Živo preverjeno: Goblin **550/550 HP**, Giant spider **1000/1000 HP** ter Goblin
-**550 -> 326 HP** ob zadetku **224**, ki ga je uporabnik neodvisno navedel.
-Zajem se ujema tudi z uporabnikovima zadetkoma 550 in 1000.
-Telosove animacije in faze **še niso potrjene**.
-Odjava, menjava sveta in ponovni zagon odjemalca potrebujejo dodatno namensko
-preverjanje. Frekvenca branja 20 Hz ne pomeni 20 strežniških posodobitev na sekundo.
+Previously verified in live combat: Goblin **550/550 HP**, Giant spider
+**1000/1000 HP**, and Goblin **550 -> 326 HP** alongside the independently reported
+**224** hit. The same capture includes reported hits of 550 and 1000. The C port's
+parity/timing evidence is in ``outputs/rs3_native/validation-summary.json``; earlier
+combat evidence remains in ``outputs/rs3_reader/npc-validation-summary.json``.
+Telos animations/phases remain **unconfirmed**. Controlled logout, world-hop and
+restart checks are still needed. Sampling frequency is not server update frequency.
 
-Zagon
------
+Build and run
+-------------
 
-Potrebuješ 64-bitni Windows Python s Tkinterjem in podprti odjemalec igre.
-Runtime ne potrebuje zunanjih Python paketov.
+Use Windows x64, a C compiler, and 64-bit Python with Tkinter (no pip packages).
+From the repository root, with a compiler on PATH::
 
-V korenu repozitorija::
-
+    python outputs/rs3_native/build.py --test
     python outputs/rs3_reader/tracker.py
-
-Na trenutnem razvojnem računalniku deluje tudi dvoklik na
-``outputs/rs3_reader/Start Tracker.cmd``; ta zaganjalnik uporablja
-``C:\Python39\pythonw.exe``.
-
-Ukazna vrstica::
-
     python outputs/rs3_reader/reader.py --once --raw
-    python outputs/rs3_reader/reader.py --hz 20 --duration 60 --raw --output capture.jsonl
 
-Tracker beleži vzorce v ``outputs/rs3_reader/logs/``. V oknu lahko odpreš mapo
-z dnevniki ali kopiraš zadnji JSON. Dnevnik se rotira pri približno 25 MB s tremi
-dodatnimi deli na posamezen zagon. Program zahteva samo
-``PROCESS_QUERY_INFORMATION | PROCESS_VM_READ``; v igro ne piše in ne pošilja tipk.
+The build script accepts MSVC, Clang, GCC or Zig. On this development machine::
 
-Datoteke
---------
+    C:\Python39\python.exe outputs/rs3_native/build.py --cc work/tools/zig-x86_64-windows-0.15.2/zig.exe --test
 
-* ``outputs/rs3_reader/winmem.py``: Windows branje pomnilnika in identiteta procesa.
-* ``outputs/rs3_reader/rs3.py``: prepoznavanje struktur in dekodiranje.
-* ``outputs/rs3_reader/entities.py``: NPC identiteta, številčni HP in hitmark ringi.
-* ``outputs/rs3_reader/profile_951_3.json``: hash, preverjeni podpisi, relativni odmiki in ID-ji.
-* ``outputs/rs3_reader/telemetry.py``: povezava, izguba procesa in ponovno povezovanje.
-* ``outputs/rs3_reader/reader.py``: CLI z JSONL izhodom.
-* ``outputs/rs3_reader/tracker.py``: lokalni živi prikaz.
-* ``outputs/rs3_reader/README.txt``: podrobna navodila in omejitve.
-* ``outputs/rs3_reader/research-notes.rst``: potrjene strukture in odprta vprašanja.
-* ``outputs/rs3_reader/validation-summary.json``: povzetek dejansko zajetih meritev.
-* ``outputs/rs3_reader/npc-validation-summary.json``: NPC/HP/zadetki in ujemanje z uporabnikovim preizkusom.
-* ``outputs/rs3-static-inspection.json``: začetni statični pregled, pred živim bralnikom.
-* ``work/*.py`` in ``work/ghidra_scripts/``: naše pomožne raziskovalne skripte.
+``work/bootstrap_native_tools.py`` downloads the official pinned Zig release and
+checks its SHA-256. It does not install a game agent or modify the game. Downloaded
+tools and build products remain local. Native build instructions, ABI contracts,
+C/Python/Java examples and field units: ``outputs/rs3_native/README.rst``.
 
-Preverjanje
------------
+Double-click ``outputs/rs3_reader/Start Tracker.cmd`` on this machine, or use::
 
-::
-
-    python -m unittest discover -s outputs/rs3_reader -v
-
-Testi preverjajo dejansko read-only branje lastnega procesa, napake in meje branja,
-prayer bitfield, GCD pred in po izteku, preliv števca ter zamik ponovne povezave.
-NPC testi pokrivajo ponovno branje istega zadetka, izginotje NPC-ja, spremembo
-seznama med branjem, bucket cikel, trgan zapis ringa, manjkajoč in ničelni HP,
-čas zadetka ob prelivu števca ter zgodovino ob združevanju UI osvežitev.
-Živi preizkusi so ločeni od avtomatskih testov; povzetek ima izvorne hashe lokalnih
-datotek zajema in izbrane dejanske vrednosti. Celotni dnevniki so lokalni.
-Vizualni pregled okna prek Computer Use je bil zavrnjen z dovoljenji; ustvaritev
-okna in zapisovanje živih vzorcev sta bila preverjena.
-
-NPC tabela zajema naloženo okolico in omogoča filter imena/ID-ja; razdalje do
-igralca ne izračunava. Manjkajoče HP statistike ostanejo neznane. Znesek hitmarka
-je lahko tudi zdravljenje ali text mark; napadalec iz ringa ni znan. Polling
-lahko izpusti zapise, ki se prepišejo ali izginejo med meritvama. Tabela zgodovine
-kaže čas prvega opažanja in ne predstavlja zagotovljenega toka vseh zadetkov.
-Za uvoz že opaženih zadetkov ob hkratnem živem branju::
-
+    python outputs/rs3_reader/tracker.py --native-hz 500
+    python outputs/rs3_reader/reader.py --native-hz 500 --hz 20 --duration 60 --raw --output capture.jsonl
     python outputs/rs3_reader/tracker.py --history capture.jsonl
 
-Raziskovalna orodja
-------------------
+The original Python decoder remains available explicitly for reference/comparison::
 
-``work/bootstrap_tools.py`` prenese uradno Ghidro in JDK v ``work/tools/`` ter
-preveri pripete SHA-256 hashe. Prenesena orodja niso del repozitorija.
-``work/xrefs.py``, ``work/find_clock.py`` in ``work/discover_context.py`` za statično
-PE analizo potrebujejo ``pefile==2024.8.26`` in ``capstone==5.0.6`` v ``work/vendor/``::
+    python outputs/rs3_reader/tracker.py --backend python
+    python outputs/rs3_reader/reader.py --backend python --once --raw
+
+Alternatively set ``RS3_BACKEND=python``. A missing or mismatched native library
+produces an explicit error rather than silently selecting a different engine.
+``RS3_NATIVE_LIBRARY`` can select a DLL at a different absolute path.
+The tracker rotates logs at about 25 MB, with three backups per run; buttons open
+the log directory or copy the latest JSON. Both implementations request only
+``PROCESS_QUERY_INFORMATION | PROCESS_VM_READ``. No game calls, writes or inputs.
+
+Layout and verification
+-----------------------
+
+* ``outputs/rs3_native/include/rs3/rs3.h``: public C ABI.
+* ``outputs/rs3_native/src/rs3_native.c``: process lifecycle, decoder, worker, events.
+* ``outputs/rs3_native/tests/``: deterministic C fixtures and lifecycle checks.
+* ``outputs/rs3_reader/native.py``: typed ctypes binding; no remote-memory decoder.
+* ``outputs/rs3_reader/native_telemetry.py``: C observations to tracker/JSON schema.
+* ``outputs/rs3_reader/profile_951_3.json``: single source for hash/signatures/offsets.
+* ``outputs/rs3_reader/winmem.py``, ``rs3.py``, ``entities.py``: Python reference backend.
+* ``outputs/rs3_reader/reader.py``, ``tracker.py``: JSONL CLI and desktop UI.
+* ``outputs/rs3_reader/research-notes.rst``: recovered structures and open questions.
+* ``outputs/rs3_reader/*validation-summary.json``: earlier actual live measurements.
+* ``work/*.py`` and ``work/ghidra_scripts/``: our research tools.
+
+Checks::
+
+    python outputs/rs3_native/build.py --test
+    python -m unittest discover -s outputs/rs3_reader -v
+    python work/benchmark_native.py
+
+The last command is an opt-in live parity/timing check; it needs the supported
+client and records only a compact report. C tests cover sparse tables, signed
+variants, profile refusal, clock wrap, NPC stats, torn rings, world/list transitions,
+identity reuse, deduplication, independent cursors, overflow and worker lifecycle.
+The Python suite additionally checks the actual DLL ABI and UI history handling.
+A clean checkout without a built DLL skips binding tests until after the C build.
+
+Limits
+------
+
+A snapshot is a guarded sequence of reads, not an atomic process dump. A running
+client/advancing clock does not establish logged-in state. Unknown values remain
+null with reasons. NPCs represent the loaded scene, not a measured distance.
+Hitmarks can include healing, zero amounts and text marks; their raw type IDs are
+retained. The recipient is known; the attacker is not. Polling can miss records
+removed between samples. The 4096-entry native event queue reports overwritten
+observations explicitly; it cannot recover records the collector never observed.
+The UI shows observation time, not a guaranteed stream of all server hits.
+Visual window inspection through Computer Use was denied previously; window
+creation and actual log output were checked. This change does not claim visual QA.
+
+Research tools and synchronization
+----------------------------------
+
+``work/bootstrap_tools.py`` fetches pinned official Ghidra/JDK tools with hash
+checks. Static PE research scripts use ``pefile==2024.8.26`` and
+``capstone==5.0.6`` under ``work/vendor/``::
 
     python -m pip install --target work/vendor pefile==2024.8.26 capstone==5.0.6
 
-``work/read_cache.py`` je samostojen read-only dekoder lokalnega SQLite predpomnilnika.
-``work/decompile.ps1`` pričakuje lokalni Ghidra projekt ``work/ghidra_projects/RS3_Targeted``
-z uvoženim ``rs2client.exe``. Naslove podaj kot nize, npr.::
+``work/read_cache.py`` is an independent read-only local SQLite cache decoder.
+``work/decompile.ps1`` expects the local Ghidra project
+``work/ghidra_projects/RS3_Targeted`` with an imported client::
 
     .\work\decompile.ps1 -Name native_vars -Addresses '140c08610','140c08db0'
 
-Ghidra projekt, generirani C-izpisi, odjemalec igre in predpomnilnik ostanejo lokalno.
-Pomožne iskalne skripte so raziskovalni prototipi; njihov rezultat je kandidat,
-ne samodejno potrjen odmik za produkcijski profil.
-
-Nadaljnje spremembe
-------------------
-
-Uporabnik je zahteval objavo dosedanjega in prihodnjega dela v tem repozitoriju.
-``AGENTS.md`` ohranja ta dogovor: preverjene projektne spremembe se po končanem
-delu shranijo v commit in pošljejo v ``origin``. Sprotni lokalni dnevniki in
-zunanji binarni paketi so izključeni z ``.gitignore``.
+Generated decompilation, game binaries/cache, tools and raw gameplay logs stay
+local. Research scripts produce candidates, not automatically verified offsets.
+The user requested publishing completed project changes to this GitHub repository;
+``AGENTS.md`` preserves that workflow. No background uploader is installed.
