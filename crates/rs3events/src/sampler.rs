@@ -143,6 +143,8 @@ struct Keyed {
     /// For vtable-object locators: the expected qword at +0 (validated every read).
     vtable: Option<u64>,
     is_vtable: bool,
+    /// Other live copies (hash nodes) to fail over to before rescanning.
+    alternates: Vec<u64>,
 }
 
 struct Locators {
@@ -150,7 +152,7 @@ struct Locators {
     rx: crossbeam_channel::Receiver<crate::locate::LocateResult>,
     pending: std::collections::HashSet<String>,
     last_request: HashMap<String, Instant>,
-    tables: HashMap<String, (u64, u64)>,
+    tables: HashMap<String, (u64, u64, bool)>,
     errors: HashMap<String, String>,
 }
 
@@ -234,6 +236,7 @@ impl Sampler {
                     entry: None,
                     vtable: None,
                     is_vtable,
+                    alternates: Vec::new(),
                 })
             })
             .collect();
@@ -347,14 +350,22 @@ impl Sampler {
             match r.result {
                 Ok(found) => {
                     let mut vt = None;
+                    let mut alts: HashMap<i64, Vec<u64>> = HashMap::new();
                     let entries = match found {
-                        crate::locate::Located::Table { start, count, entries } => {
-                            tracing::info!("[{pid}] {} located in {:.1}s: table {start:#x} x {count}", r.locator, r.secs);
-                            self.loc.tables.insert(r.locator.clone(), (start, count));
+                        crate::locate::Located::Table { start, count, desc, entries } => {
+                            tracing::info!(
+                                "[{pid}] {} located in {:.1}s: table {start:#x} x {count} ({})",
+                                r.locator,
+                                r.secs,
+                                if desc { "descending" } else { "ascending" }
+                            );
+                            self.loc.tables.insert(r.locator.clone(), (start, count, desc));
                             entries
                         }
-                        crate::locate::Located::Nodes { entries } => {
-                            tracing::info!("[{pid}] {} located in {:.1}s: {} nodes", r.locator, r.secs, entries.len());
+                        crate::locate::Located::Nodes { entries, alternates } => {
+                            let copies: Vec<String> = alternates.iter().map(|(k, v)| format!("{k}x{}", v.len())).collect();
+                            tracing::info!("[{pid}] {} located in {:.1}s: live copies {}", r.locator, r.secs, copies.join(", "));
+                            alts = alternates;
                             entries
                         }
                         crate::locate::Located::Objects { vtable, entries, count } => {
@@ -367,6 +378,7 @@ impl Sampler {
                     for k in self.keyed.iter_mut().filter(|k| k.locator == r.locator) {
                         k.entry = entries.get(&k.key).copied();
                         k.vtable = vt;
+                        k.alternates = alts.get(&k.key).cloned().unwrap_or_default();
                     }
                 }
                 Err(e) => {
@@ -423,10 +435,24 @@ impl Sampler {
             // Entry missing or moved: cheap re-lookup in a known sorted table, else rescan.
             let (locator, key, key_off) = (k.locator.clone(), k.key, k.key_off);
             let mut fixed = None;
-            if let (Some(&(start, count)), Some(rsoffsets::LocatorDef::SortedTable { stride, .. })) =
+            if let (Some(&(start, count, desc)), Some(rsoffsets::LocatorDef::SortedTable { stride, .. })) =
                 (self.loc.tables.get(&locator), self.cfg.offsets.locators.get(&locator))
             {
-                fixed = crate::locate::table_lookup(&self.proc, start, count, *stride, key_off, key);
+                fixed = crate::locate::table_lookup(&self.proc, start, count, desc, *stride, key_off, key);
+            }
+            if fixed.is_none() {
+                // Fail over to another live copy whose key still matches.
+                let cur = self.keyed[i].entry;
+                fixed = self.keyed[i]
+                    .alternates
+                    .iter()
+                    .copied()
+                    .filter(|a| Some(*a) != cur)
+                    .find(|a| self.proc.read::<i32>(a + key_off as u64).is_ok_and(|k| k as i64 == key));
+                if let Some(a) = fixed {
+                    tracing::info!("[{}] {locator} key {key}: entry moved, failing over to copy {a:#x}", self.proc.pid());
+                    self.keyed[i].alternates.retain(|x| Some(*x) != cur);
+                }
             }
             match fixed {
                 Some(e) => self.keyed[i].entry = Some(e),

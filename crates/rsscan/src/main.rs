@@ -241,6 +241,9 @@ enum Cmd {
         /// Only print entries with these keys (comma-separated); walks up to 100k entries each way.
         #[arg(long)]
         keys: Option<String>,
+        /// Ignore key order: print exactly --before/--after slots in memory order.
+        #[arg(long)]
+        raw: bool,
     },
     /// Who points at (or just before) an address: qwords in [addr - max_offset, addr].
     Refs {
@@ -786,10 +789,20 @@ fn main() -> Result<()> {
                 println!("  {:<40} {}", fmt_addr(*a, &c.modules), encs.iter().take(3).cloned().collect::<Vec<_>>().join("; "));
             }
         }
-        Cmd::Table { addr, stride, key_off, val_off, before, after, keys } => {
+        Cmd::Table { addr, stride, key_off, val_off, before, after, keys, raw } => {
             let start = parse_addr(&addr, &c.proc, &c.modules)?;
             let stride = rsscan::addr::parse_num(&stride)? as u64;
             let (ko, vo) = (rsscan::addr::parse_num(&key_off)? as u64, rsscan::addr::parse_num(&val_off)? as u64);
+            if raw {
+                for i in -(before as i64)..=(after as i64) {
+                    let e = (start as i64 + i * stride as i64) as u64;
+                    let k = c.proc.read::<i32>(e + ko).map(|k| k.to_string()).unwrap_or_else(|_| "?".into());
+                    let v = c.proc.read::<u32>(e + vo).map(|v| format!("{v:#010x}")).unwrap_or_else(|_| "?".into());
+                    let q: Vec<String> = (0..stride / 8).map(|j| c.proc.read::<u64>(e + j * 8).map(|x| format!("{x:016x}")).unwrap_or_else(|_| "?".into())).collect();
+                    println!("{:>4} {e:#x} key {k:>7} val {v}  | {}", i, q.join(" "));
+                }
+                return Ok(());
+            }
             let want: Option<Vec<i32>> = keys.map(|k| k.split(',').map(|x| x.trim().parse::<i32>()).collect()).transpose()?;
             let (b, a) = if want.is_some() { (100_000, 100_000) } else { (before, after) };
             let mut rows: Vec<(u64, i32, u32)> = Vec::new();

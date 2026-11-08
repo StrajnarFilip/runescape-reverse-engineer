@@ -245,12 +245,15 @@ pub enum LocatorDef {
     /// Hash-table nodes recognised by a self-link (`[node + self_off] == node + link_off`),
     /// a tag qword at +0 and an i32 key.
     HashNodes {
-        #[serde(default = "d_node_tag")]
-        tag: u64,
+        /// Optional qword at +0 (not reliable for RS3 var nodes: it's leftover allocator data).
+        tag: Option<u64>,
         key_off: u32,
         value_off: u32,
         link_off: u32,
         self_off: u32,
+        /// Only accept nodes that some other memory points to at `+key_off` (live, not freed).
+        #[serde(default = "d_true")]
+        require_ref: bool,
     },
     /// Heap objects whose first qword is a vtable at `module + vtable_rva`.
     /// Signals use `key = 0` and read at the signal's `offset` inside the object.
@@ -265,9 +268,6 @@ pub enum LocatorDef {
 
 fn d_min_entries() -> u32 {
     256
-}
-fn d_node_tag() -> u64 {
-    7
 }
 
 impl LocatorDef {

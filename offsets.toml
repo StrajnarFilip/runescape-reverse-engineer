@@ -29,20 +29,25 @@ probe_keys = [3274, 679]
 min_entries = 512
 max_entries = 4096   # an 11k-entry varp *definition* table also matches; values there are id+1
 
-# Hash-table var nodes: 0x50-byte nodes, tag 7 @+0, link @+0x28, self-link @+0x30 -> +0x28,
-# i32 key @+0x38, value @+0x40.
+# Hash-table var nodes: 0x50-byte nodes, link @+0x28, self-link @+0x30 -> +0x28,
+# i32 key @+0x38, value @+0x40. The qword at +0 is leftover allocator data (not a tag), and
+# nodes get freed/reallocated: freed copies keep stale key+value, so only nodes that some
+# container points to at +0x38 are accepted (require_ref). Several live copies exist; the
+# reader fails over between them before rescanning.
 [locators.var_nodes]
 kind = "hash_nodes"
-tag = 7
 key_off = 0x38
 value_off = 0x40
 link_off = 0x28
 self_off = 0x30
+require_ref = true
 
-[signals.lifepoints]
-locator = "var_nodes"
-key = 13537
-note = "current lifepoints (max not found yet)"
+# DISABLED: var node 13537 holds lifepoints, but the client keeps ~20 referenced copies
+# (most stale, e.g. 0) and reallocates them over time, so "first live copy" can be wrong.
+# Re-enable once the owning container (or a copy-selection rule) is understood.
+# [signals.lifepoints]
+# locator = "var_nodes"
+# key = 13537
 
 # varp 3274: bits 0..14 = prayer points x10, bit 15 = flag, bits 16..23 = prayer level.
 [signals.prayer]
@@ -97,7 +102,3 @@ signal = "adrenaline"
 min = 0
 max = 1200
 
-[[checks]]
-signal = "lifepoints"
-min = 0
-max = 200000
