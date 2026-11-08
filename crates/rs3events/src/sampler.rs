@@ -368,9 +368,15 @@ impl Sampler {
                             alts = alternates;
                             entries
                         }
-                        crate::locate::Located::Objects { vtable, entries, count } => {
-                            tracing::info!("[{pid}] {} located in {:.1}s: {count} objects with vtable {vtable:#x}", r.locator, r.secs);
+                        crate::locate::Located::Objects { vtable, entries, count, alternates } => {
+                            tracing::info!(
+                                "[{pid}] {} located in {:.1}s: {count} objects with vtable {vtable:#x}, {} agreeing copies",
+                                r.locator,
+                                r.secs,
+                                alternates.len()
+                            );
                             vt = Some(vtable);
+                            alts = HashMap::from([(0, alternates)]);
                             entries
                         }
                     };
@@ -409,7 +415,18 @@ impl Sampler {
                         }
                     }
                 }
-                let l = k.locator.clone();
+                // Fail over to another object that still carries the vtable.
+                let (cur, vt) = (k.entry, k.vtable);
+                let alt = vt.and_then(|vt| {
+                    self.keyed[i].alternates.iter().copied().filter(|a| Some(*a) != cur).find(|a| self.proc.read::<u64>(*a).is_ok_and(|q| q == vt))
+                });
+                if let Some(a) = alt {
+                    tracing::info!("[{}] {}: object freed, failing over to copy {a:#x}", self.proc.pid(), self.keyed[i].locator);
+                    self.keyed[i].alternates.retain(|x| Some(*x) != cur);
+                    self.keyed[i].entry = Some(a);
+                    continue;
+                }
+                let l = self.keyed[i].locator.clone();
                 if self.keyed[i].entry.is_some() || !self.loc.pending.contains(&l) {
                     self.keyed[i].entry = None;
                     need.push(l);

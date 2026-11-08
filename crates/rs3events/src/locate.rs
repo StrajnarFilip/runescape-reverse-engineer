@@ -15,8 +15,9 @@ pub enum Located {
     Table { start: u64, count: u64, desc: bool, entries: HashMap<i64, u64> },
     /// Node addresses for the requested keys (first live copy), plus every live copy as fallback.
     Nodes { entries: HashMap<i64, u64>, alternates: HashMap<i64, Vec<u64>> },
-    /// Objects carrying `vtable` at +0 (key 0 = first object found).
-    Objects { vtable: u64, entries: HashMap<i64, u64>, count: usize },
+    /// Objects carrying `vtable` at +0 (key 0 = chosen object); `alternates` are other objects
+    /// that agreed with it (fail-over candidates).
+    Objects { vtable: u64, entries: HashMap<i64, u64>, count: usize, alternates: Vec<u64> },
 }
 
 pub fn locate_vtable_objects<M: MemRead>(mem: &M, regions: &[RegionInfo], vtable: u64, pick_by_mode_at: Option<u32>) -> Result<Located, String> {
@@ -37,8 +38,8 @@ pub fn locate_vtable_objects<M: MemRead>(mem: &M, regions: &[RegionInfo], vtable
     if objs.is_empty() {
         return Err(format!("no object with vtable {vtable:#x}"));
     }
-    let chosen = match pick_by_mode_at {
-        None => objs[0],
+    let agreeing: Vec<u64> = match pick_by_mode_at {
+        None => objs.clone(),
         Some(off) => {
             let vals: Vec<(u64, u32)> = objs.iter().filter_map(|o| mem.read::<u32>(o + off as u64).ok().map(|v| (*o, v))).collect();
             let mut counts: HashMap<u32, usize> = HashMap::new();
@@ -51,10 +52,11 @@ pub fn locate_vtable_objects<M: MemRead>(mem: &M, regions: &[RegionInfo], vtable
             if n < 2 {
                 return Err(format!("{} objects but no shared non-zero value at +{off:#x}", objs.len()));
             }
-            vals.into_iter().find(|(_, v)| *v == mode).map(|(o, _)| o).unwrap()
+            vals.into_iter().filter(|(_, v)| *v == mode).map(|(o, _)| o).collect()
         }
     };
-    Ok(Located::Objects { vtable, entries: HashMap::from([(0, chosen)]), count: objs.len() })
+    let chosen = agreeing[0];
+    Ok(Located::Objects { vtable, entries: HashMap::from([(0, chosen)]), count: objs.len(), alternates: agreeing })
 }
 
 #[derive(Debug)]

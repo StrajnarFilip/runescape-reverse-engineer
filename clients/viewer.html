@@ -41,6 +41,7 @@
   <span id="state" class="pill">no source</span>
   <span id="tick" class="pill">tick –</span>
   <input id="filter" placeholder="filter log (e.g. boss|gcd)" size="24" aria-label="log filter">
+  <span id="detail" class="muted"></span>
 </header>
 <main>
   <section>
@@ -114,7 +115,12 @@ function bossAction(ev) {
 function onEvent(ev) {
   if (src != null && ev.src !== src) return;
   switch (ev.type) {
-    case "status": pill($("state"), ev.state + (ev.label ? " · " + ev.label : ""), ev.state === "ok" ? "ok" : ev.state === "waiting" || ev.state === "attaching" ? "warn" : "bad"); break;
+    case "status": {
+      pill($("state"), ev.state + (ev.label ? " · " + ev.label : ""), ev.state === "ok" ? "ok" : ev.state === "waiting" || ev.state === "attaching" ? "warn" : "bad");
+      const why = (ev.failing || []).join("; ") || (ev.state === "detached" ? "client closed; waiting for RuneScape to start again" : "");
+      $("detail").textContent = ev.state === "ok" ? "" : why;
+      break;
+    }
     case "tick": $("tick").textContent = `tick ${ev.n} (${ev.basis})`; break;
     case "player.lifepoints": applyPlayer({ lifepoints: ev.new, lifepoints_max: ev.max }); break;
     case "player.prayer": applyPlayer({ prayer: ev.new, prayer_max: ev.max }); break;
@@ -131,6 +137,8 @@ function onSnapshot(s) {
   if (src == null) src = s.src;
   if (s.src !== src) return;
   pill($("state"), s.state + (s.label ? " · " + s.label : ""), s.state === "ok" ? "ok" : "warn");
+  if (s.state === "ok") $("detail").textContent = "";
+  else if (s.state === "waiting" || s.state === "attaching") $("detail").textContent = "finding game values in memory (~20-60 s)…";
   applyPlayer(s.player);
   if (s.player.gcd_ends_at_unix_us) gcd = { end: s.player.gcd_ends_at_unix_us / 1000, dur: 1800 };
   const boss = s.npcs.find((n) => n.name);
@@ -147,18 +155,35 @@ function tickGcd() {
 }
 requestAnimationFrame(tickGcd);
 
+let connectTimer = null;
 function connect() {
   clearTimeout(retry);
-  if (ws) { try { ws.close(); } catch {} }
+  clearTimeout(connectTimer);
+  if (ws) {
+    // Detach the old socket first so its close can't schedule another reconnect.
+    const old = ws;
+    old.onopen = old.onclose = old.onmessage = old.onerror = null;
+    try { old.close(); } catch {}
+  }
   pill($("conn"), "connecting", "warn");
-  ws = new WebSocket($("url").value);
-  ws.onopen = () => pill($("conn"), "connected", "ok");
-  ws.onclose = () => { pill($("conn"), "disconnected", "bad"); retry = setTimeout(connect, 1500); };
-  ws.onmessage = (m) => {
+  const sock = new WebSocket($("url").value);
+  ws = sock;
+  connectTimer = setTimeout(() => { if (ws === sock && sock.readyState === WebSocket.CONNECTING) sock.close(); }, 5000);
+  sock.onopen = () => { clearTimeout(connectTimer); pill($("conn"), "connected", "ok"); };
+  sock.onclose = () => {
+    if (ws !== sock) return;
+    clearTimeout(connectTimer);
+    pill($("conn"), "disconnected", "bad");
+    retry = setTimeout(connect, 1500);
+  };
+  sock.onmessage = (m) => {
     let msg; try { msg = JSON.parse(m.data); } catch { return; }
     if (msg.seq != null) return onEvent(msg);
     if (msg.type === "snapshot") return onSnapshot(msg.snapshot);
-    if (msg.type === "hello" && msg.sources.length) src = msg.sources[0];
+    if (msg.type === "hello") {
+      if (msg.sources.length) src = msg.sources[0];
+      else { pill($("state"), "no client", "warn"); $("detail").textContent = "Start RuneScape; the server attaches automatically."; }
+    }
     if (msg.type === "resync") log({ type: "resync", unix_us: Date.now() * 1000, missed: msg.missed });
   };
 }

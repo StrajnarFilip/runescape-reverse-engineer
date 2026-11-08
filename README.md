@@ -37,11 +37,22 @@ The end-to-end test (`crates/mocktarget/tests/e2e.rs`) runs everything against t
 
 ## Run
 
+Double-click **`run.bat`** in the repo root, or run it from a terminal. It builds the server if needed, starts it and opens the viewer. One port serves both:
+
+| URL | What |
+|---|---|
+| http://127.0.0.1:7878/ | Live viewer: player gauges, GCD bar, boss panel, event log |
+| ws://127.0.0.1:7878/events | WebSocket with the same data as JSON (protocol below) |
+
+The server attaches to the RuneScape client on its own, including after you restart the game, and finds the values in memory within 20–60 seconds. Until then the page shows what it's waiting for. Press Ctrl+C in the window to stop it. Running `run.bat` again while the server is up just reopens the page.
+
+Extra arguments go to the server, e.g. `run.bat --record session.jsonl`. Set `RS3_NO_OPEN=1` to skip opening the browser. You can also run it directly:
+
 ```bash
-cargo run --release -p rs3-eventd -- --record session.jsonl
+cargo run --release -p rs3-eventd -- --open
 ```
 
-Open `clients/viewer.html`, or connect any WebSocket client:
+Any WebSocket client can connect:
 
 ```text
 -> {"type":"hello","protocol":1,"sources":[20392]}
@@ -51,7 +62,7 @@ Open `clients/viewer.html`, or connect any WebSocket client:
 <- {"type":"source","src":20392}
 ```
 
-Flags: `--pid`, `--all` (one source per client), `--period-us 500`, `--offsets`, `--bosses`, `--bind`.
+Flags: `--open`, `--record <file.jsonl>`, `--pid`, `--all` (one source per client), `--period-us 500`, `--offsets`, `--bosses`, `--bind`. Relative `--offsets`/`--bosses` paths are also searched next to the executable, so the server finds the repo's files from any working directory.
 
 ## What's mapped (client build 6ada3f59-1a86000)
 
