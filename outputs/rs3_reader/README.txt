@@ -14,11 +14,17 @@ POTRJENI PODATKI V RAZLIČICI 951-3
   GCD: VARC 2091 in 2092, primerjana z odjemalčevim logic clockom.
     V živih zajemih pet začetkov potrdilo trajanje 90 tickov * 20 ms.
 
-  NPC ID, NPC HP, hit splati in Telosove animacije še niso vključeni.
-  Njihov prikaz je izrecno označen kot nepotrjen.
+  NPC-ji: ime, config ID (tip), runtime ID (primerek), current/max HP.
+  HP prihaja iz številčne statistike NPC-ja, ne iz približka healthbara.
+  Preverjeno: Goblin 550/550, Giant spider 1000/1000 in Goblin 550 -> 326
+    ob uporabnikovem zadetku 224. Ujeti tudi uporabnikovi zadetki 550 in 1000.
+  Hit splati: surov tip ID, znesek, prejemnik, začetek/konec client tickov.
+  Tracker ima filter in zgodovino; ranjeni NPC-ji so prikazani pred zdravimi.
+  Telosove faze in animacije še niso potrjene.
 
 PREVERLJIVOST
   Meritve gredo v logs/capture-DATUM-CAS-PID.jsonl pri 20 Hz.
+  Tracker rotira dnevnik pri približno 25 MB in ohrani tri dodatne dele.
   Vsaka vrstica ima čas, zaporedno številko, PID, hash izvršne datoteke,
   dekodirane in surove vrednosti ter trajanje branja.
   Gumba v oknu odpreta mapo z dnevniki oziroma kopirata zadnji JSON.
@@ -37,6 +43,12 @@ OMEJITVE
   Čas zadnje strežniške posodobitve ni znan. last_change_age_ms pomeni
   čas od zadnje opažene spremembe vrednosti, ne starosti strežniških podatkov.
   Trenutni bralnik ni atomski posnetek celotnega procesa.
+  NPC seznam pomeni naloženo okolico; tabela ne meri razdalje do igralca.
+  NPC-ji brez poslane HP statistike imajo null / not_transmitted, ne nič HP.
+  Znesek hit splata je lahko tudi zdravljenje ali ničelni/text mark.
+  Napadalec iz tega zapisa ni znan; prikazan NPC je prejemnik zadetka.
+  Polling lahko izpusti zapis, če je prepisan ali odstranjen med meritvama.
+  newly_observed pomeni prvič opaženo, ne zagotovljen tok vseh zadetkov.
 
 UKAZNA VRSTICA
   C:\Python39\python.exe reader.py --once --raw
@@ -44,9 +56,14 @@ UKAZNA VRSTICA
 
 PREVERJANJE
   C:\Python39\python.exe -m unittest discover -s . -v
-  Deset avtomatskih preverjanj: Windows read-only pomnilnik, meje branja,
-  GCD pred/med/po izteku in overflow števca, prayer bitfield, ponovna povezava.
+  Dvajset avtomatskih preverjanj: Windows read-only pomnilnik, meje branja,
+  GCD in overflow, prayer bitfield, ponovna povezava, NPC identiteta/izginotje,
+  spremenjen seznam, bucket cikli, trgan hitmark zapis, deduplikacija in zgodovina.
   Živi preizkusi so zajeli spremembe HP-ja, adrenalina in pet sprožitev GCD-ja.
+  NPC živ preizkus je v npc-validation-summary.json z dejanskimi primeri.
+
+  Za prikaz že zajetih zadetkov poleg novih živih meritev:
+    python tracker.py --history POT_DO_PREJSNJEGA_ZAJEMA.jsonl
 
   Samodejni pregled dovoljenj je zavrnil vizualni pregled okna pythonw.
   Okno se je ustvarilo in dejanski zajem ter dnevniki so bili preverjeni.

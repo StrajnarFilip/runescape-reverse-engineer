@@ -51,4 +51,4 @@ class Telemetry:
         return {"schema_version": 1, "timestamp_ms": time.time_ns()//1000000,
                 "pid": None if self.memory is None else self.memory.pid,
                 "status": "unavailable", "reason": message, "health": None, "prayer": None,
-                "adrenaline_percent": None, "gcd": None, "telos": None, "npcs": None}
+                "adrenaline_percent": None, "gcd": None, "telos": None, "npcs": None, "hit_splats": None}

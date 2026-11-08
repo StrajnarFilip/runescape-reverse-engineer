@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "source": "actual_local_native_memory_capture",
+  "local_capture_name": "npc_combat_capture.jsonl",
+  "capture_sha256": "c565a8e1e668cf162fa67652bf7077435ddeba1d6fd57346f467ccf3b0f6ffd0",
+  "client_version": "951-3",
+  "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+  "sample_count": 9943,
+  "first_observed_at_ms": 1794161422088,
+  "last_observed_at_ms": 1794161919141,
+  "user_reported_hit_amounts": [
+    224,
+    550,
+    1000
+  ],
+  "full_health_examples": {
+    "Giant spider": {
+      "config_id": 20499,
+      "current_hp": 1000,
+      "max_hp": 1000
+    },
+    "Goblin": {
+      "config_id": 11238,
+      "current_hp": 550,
+      "max_hp": 550
+    }
+  },
+  "matching_observed_hits": [
+    {
+      "name": "Goblin",
+      "runtime_id": 22749,
+      "config_id": 12357,
+      "amount": 224,
+      "type_id": 133,
+      "start_client_tick": 286967,
+      "end_client_tick": 287027,
+      "observed_at_ms": 1794161504560,
+      "health_in_same_sample": {
+        "current": 326,
+        "max": 550,
+        "percent": 59.27,
+        "source": "npc_stats",
+        "reason": null
+      }
+    },
+    {
+      "name": "Goblin",
+      "runtime_id": 22746,
+      "config_id": 11234,
+      "amount": 550,
+      "type_id": 133,
+      "start_client_tick": 285227,
+      "end_client_tick": 285287,
+      "observed_at_ms": 1794161469704,
+      "health_in_same_sample": {
+        "current": 0,
+        "max": 550,
+        "percent": 0.0,
+        "source": "npc_stats",
+        "reason": null
+      }
+    },
+    {
+      "name": "Giant spider",
+      "runtime_id": 22745,
+      "config_id": 20499,
+      "amount": 1000,
+      "type_id": 133,
+      "start_client_tick": 286157,
+      "end_client_tick": 286217,
+      "observed_at_ms": 1794161488316,
+      "health_in_same_sample": {
+        "current": 0,
+        "max": 1000,
+        "percent": 0.0,
+        "source": "npc_stats",
+        "reason": null
+      }
+    }
+  ],
+  "observed_hp_transitions_matching_224": [
+    {
+      "name": "Goblin",
+      "runtime_id": 22749,
+      "config_id": 12357,
+      "before_hp": 550,
+      "after_hp": 326,
+      "difference": 224,
+      "observed_at_ms": 1794161504560
+    }
+  ],
+  "limitations": [
+    "Amounts are raw hitmark values; some types represent healing or text marks.",
+    "The ring identifies the recipient, not the attacker.",
+    "Polling can miss overwritten or removed records.",
+    "Raw captures remain local. Telos phase and animation classification are not validated."
+  ]
+}

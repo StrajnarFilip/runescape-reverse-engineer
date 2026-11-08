@@ -8,11 +8,12 @@ with ProcessMemory(list(processes())[0]) as m:
     r=RS3(m); client=r.domain_capture('client'); state=m.pointer(client+8)
     print('client',hex(client),'state',hex(state))
     roots=[('state',state,0x56000),('client',client,0x40000)]
-    data=m.read(client,0x8000)
-    for off in range(0,len(data),8):
-        p=struct.unpack_from('<Q',data,off)[0]
-        if 0x10000<=p<0x7fffffffffff:
-            roots.append(('child+'+hex(off),p,0xb0a8))
+    for label, parent, size in list(roots):
+        data=m.read(parent,size)
+        for off in range(0,len(data),8):
+            p=struct.unpack_from('<Q',data,off)[0]
+            if 0x10000<=p<0x7fffffffffff:
+                roots.append((label+' child+'+hex(off),p,0xb0a8))
     seen=set()
     for name,base,size in roots:
         if base in seen: continue

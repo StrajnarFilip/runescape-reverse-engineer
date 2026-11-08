@@ -1,12 +1,18 @@
 """Local desktop display for the read-only RS3 memory reader (no dependencies)."""
 from datetime import datetime
+from collections import deque
+from contextlib import closing
+import argparse
 import json
+import logging
+from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
 import queue
 import threading
 import time
 import tkinter as tk
+from tkinter import ttk
 
 from telemetry import Telemetry
 
@@ -48,17 +54,53 @@ class Meter:
         self.fraction = max(0, min(1, fraction or 0))
         self.paint()
 
+def event_key(event):
+    return tuple(event.get(k) for k in ("pid", "runtime_id", "config_id", "slot", "type_id", "amount",
+                                        "end_client_tick", "secondary_type_id", "secondary_amount"))
+
+class HitHistory:
+    def __init__(self, capacity=150):
+        self.events = deque(maxlen=capacity)
+        self.keys = set()
+
+    def observe(self, record):
+        for hit in ((record.get("hit_splats") or {}).get("newly_observed") or []):
+            event = dict(hit, observed_at_ms=record["timestamp_ms"], pid=record.get("pid"))
+            key = event_key(event)
+            if key not in self.keys:
+                if len(self.events) == self.events.maxlen:
+                    self.keys.discard(event_key(self.events[0]))
+                self.events.append(event)
+                self.keys.add(key)
+
+def sync_rows(tree, rows):
+    old = set(tree.get_children())
+    for position, (key, values, tags) in enumerate(rows):
+        if key in old:
+            old.remove(key)
+            if tuple(tree.item(key, "values")) != tuple(str(v) for v in values):
+                tree.item(key, values=values, tags=tags)
+        else:
+            tree.insert("", "end", iid=key, values=values, tags=tags)
+        tree.move(key, "", position)
+    for key in old:
+        tree.delete(key)
+
 class Tracker:
-    def __init__(self, root):
+    def __init__(self, root, history_path=None):
         self.root = root
         root.title("RS3 Live Tracker · neposredno branje pomnilnika")
-        root.geometry("980x790")
-        root.minsize(880, 740)
+        root.geometry("1240x880")
+        root.minsize(1060, 760)
         root.configure(bg=BG)
         self.stop = threading.Event()
         self.queue = queue.Queue(maxsize=1)
         self.latest = self.received_at = None
         self.sequence = 0
+        self.hit_history = HitHistory()
+        self.history_path = history_path
+        self.filter_text = tk.StringVar()
+        self.only_hp = tk.BooleanVar(value=True)
         logs = Path(__file__).resolve().parent / "logs"
         logs.mkdir(exist_ok=True)
         self.log_path = logs / (datetime.now().strftime("capture-%Y%m%d-%H%M%S-")+str(os.getpid())+".jsonl")
@@ -76,16 +118,35 @@ class Tracker:
 
         grid = tk.Frame(root, bg=BG)
         grid.pack(fill="x", padx=18)
-        grid.grid_columnconfigure((0, 1), weight=1, uniform="meters")
+        grid.grid_columnconfigure((0, 1, 2, 3), weight=1, uniform="meters")
         self.meters = {}
         for i, (key, title, colour) in enumerate([
             ("hp", "HEALTH / LIFE POINTS", RED), ("prayer", "PRAYER", BLUE),
             ("adren", "ADRENALIN", GOLD), ("gcd", "GLOBAL COOLDOWN", GREEN)]):
             meter = self.meters[key] = Meter(grid, title, colour)
-            meter.frame.grid(row=i//2, column=i%2, padx=6, pady=6, sticky="nsew")
+            meter.value.config(font=("Segoe UI", 23, "bold"))
+            meter.detail.config(wraplength=235, height=2, justify="left")
+            meter.frame.grid(row=0, column=i, padx=6, pady=6, sticky="nsew")
 
-        proof = tk.Frame(root, bg=PANEL, padx=18, pady=12)
-        proof.pack(fill="both", expand=True, padx=24, pady=(14, 0))
+        style = ttk.Style(root)
+        style.theme_use("clam")
+        style.configure("Tracker.TNotebook", background=BG, borderwidth=0)
+        style.configure("Tracker.TNotebook.Tab", background=PANEL, foreground=MUTED,
+                        padding=(16, 9), font=("Segoe UI", 10))
+        style.map("Tracker.TNotebook.Tab", background=[("selected", "#26374e")],
+                  foreground=[("selected", INK)])
+        style.configure("Tracker.Treeview", background=PANEL, fieldbackground=PANEL, foreground=INK,
+                        rowheight=27, font=("Segoe UI", 10), borderwidth=0)
+        style.configure("Tracker.Treeview.Heading", background="#26374e", foreground=INK,
+                        font=("Segoe UI", 9, "bold"), relief="flat")
+        style.map("Tracker.Treeview", background=[("selected", "#345371")], foreground=[("selected", "white")])
+        tabs = ttk.Notebook(root, style="Tracker.TNotebook")
+        tabs.pack(fill="both", expand=True, padx=24, pady=(14, 0))
+        npc_tab = tk.Frame(tabs, bg=PANEL, padx=12, pady=12)
+        proof = tk.Frame(tabs, bg=PANEL, padx=18, pady=12)
+        tabs.add(npc_tab, text="Pošasti in hit splati")
+        tabs.add(proof, text="Surove vrednosti in izvor")
+        self.build_npc_panel(npc_tab)
         tk.Label(proof, text="IZVOR IN SUROVE VREDNOSTI", fg=MUTED, bg=PANEL,
                  font=("Segoe UI", 10, "bold")).pack(anchor="w")
         self.timing = tk.Label(proof, text="—", fg=GREEN, bg=PANEL,
@@ -95,7 +156,7 @@ class Tracker:
                                 font=("Consolas", 10), wrap="none", padx=0, pady=0,
                                 highlightthickness=0, state="disabled")
         self.raw_text.pack(fill="both", expand=True)
-        self.pending = tk.Label(root, text="NPC ID / NPC HP / hit splati / Telos: branje še ni potrjeno.",
+        self.pending = tk.Label(root, text="NPC HP: številčna statistika odjemalca · hit splati: opaženi zapisi, napadalec ni znan · Telos še nepreverjen.",
                                 bg=BG, fg=GOLD, font=("Segoe UI", 10), anchor="w")
         self.pending.pack(fill="x", padx=24, pady=(10, 4))
         footer = tk.Frame(root, bg=BG)
@@ -115,14 +176,26 @@ class Tracker:
     def collect(self):
         telemetry = Telemetry()
         try:
-            with self.log_path.open("w", encoding="utf-8", buffering=1) as log:
+            if self.history_path:
+                with Path(self.history_path).open(encoding="utf-8") as source:
+                    for line in source:
+                        try:
+                            record = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if record.get("executable_sha256") == "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45":
+                            self.hit_history.observe(record)
+            with closing(RotatingFileHandler(self.log_path, maxBytes=25*1024*1024,
+                                            backupCount=3, encoding="utf-8")) as log:
                 deadline = time.perf_counter()
                 while not self.stop.is_set():
                     record = telemetry.sample(True)
                     self.sequence += 1
                     record["sample_sequence"] = self.sequence
-                    log.write(json.dumps(record, ensure_ascii=False, separators=(",", ":"), allow_nan=False)+"\n")
-                    self.publish(record)
+                    line = json.dumps(record, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+                    log.emit(logging.makeLogRecord({"msg": line}))
+                    self.hit_history.observe(record)
+                    self.publish(dict(record, recent_hit_splats=list(self.hit_history.events)))
                     deadline += .05
                     delay = deadline-time.perf_counter()
                     if delay < -.5:
@@ -156,6 +229,8 @@ class Tracker:
                 self.status.config(text="ZASTARELO", fg=RED)
                 for meter in self.meters.values():
                     meter.set("—", 0, "Zajem se ne osvežuje")
+                sync_rows(self.npc_tree, [])
+                self.npc_status.config(text="NPC podatki so zastareli; čakam na novo branje.", fg=RED)
         self.root.after(50, self.refresh)
 
     def render(self, s):
@@ -171,6 +246,8 @@ class Tracker:
             for meter in self.meters.values():
                 meter.set("—", 0, "Nedostopno" if not available else "Odjemalčev števec se ne premika")
             self.set_raw(s.get("reason", "Odjemalčev števec se ne premika"))
+            sync_rows(self.npc_tree, [])
+            self.npc_status.config(text="NPC podatki niso dostopni.", fg=RED)
             return
         h, p, a, g = s["health"], s["prayer"], s["adrenaline_percent"]["value"], s["gcd"]
         hp, prayer = h["current"]["value"], p["current"]["value"]
@@ -192,6 +269,87 @@ class Tracker:
                      (raw["health_current"], raw["health_max"], raw["adrenaline"], fmt(a),
                       raw["prayer_packed"], fmt(prayer), raw["gcd_client_start"], raw["gcd_client_end"],
                       g["clock_raw"], fmt(remaining)))
+        self.render_npcs(s)
+
+    def build_npc_panel(self, parent):
+        controls = tk.Frame(parent, bg=PANEL)
+        controls.pack(fill="x", pady=(0, 10))
+        tk.Label(controls, text="Filter imena ali ID-ja:", bg=PANEL, fg=MUTED,
+                 font=("Segoe UI", 10)).pack(side="left")
+        tk.Entry(controls, textvariable=self.filter_text, bg="#26374e", fg=INK,
+                 insertbackground=INK, relief="flat", font=("Segoe UI", 11), width=22).pack(side="left", padx=8)
+        tk.Checkbutton(controls, text="Samo NPC-ji z znanim HP", variable=self.only_hp,
+                       bg=PANEL, fg=INK, activebackground=PANEL, activeforeground=INK,
+                       selectcolor=BG, font=("Segoe UI", 9)).pack(side="left", padx=10)
+        self.npc_status = tk.Label(parent, text="Čakam na NPC-je …", bg=PANEL, fg=MUTED,
+                                   font=("Segoe UI", 10), anchor="w")
+        self.npc_status.pack(fill="x", pady=(0, 8))
+        tables = tk.Frame(parent, bg=PANEL)
+        tables.pack(fill="both", expand=True)
+        tables.grid_columnconfigure(0, weight=3)
+        tables.grid_columnconfigure(1, weight=2)
+        tables.grid_rowconfigure(1, weight=1)
+        for col, text in [(0, "NPC-JI V NALOŽENI OKOLICI"), (1, "ZADNJI OPAŽENI HIT SPLATI")]:
+            tk.Label(tables, text=text, bg=PANEL, fg=MUTED, font=("Segoe UI", 9, "bold")).grid(
+                row=0, column=col, sticky="w", pady=(0, 7), padx=(0, 12))
+        self.npc_tree = self.table(tables, 0, [("name", "Ime", 170), ("config", "Tip ID", 75),
+                                   ("runtime", "Runtime ID", 85), ("health", "HP / max", 120), ("pct", "%", 65)])
+        self.npc_tree.tag_configure("wounded", foreground=GOLD)
+        self.npc_tree.tag_configure("dead", foreground=RED)
+        self.hit_tree = self.table(tables, 1, [("time", "Opaženo", 100), ("npc", "Prejemnik", 140),
+                                  ("amount", "Znesek", 70), ("type", "Tip ID", 65)])
+        self.hit_tree.tag_configure("hit", foreground=GOLD)
+        self.history_note = tk.Label(parent,
+            text="Zgodovina vključuje prejšnji lokalni zajem in nove meritve." if self.history_path else
+                 "Zgodovina se polni ob novih opaženih zadetkih. Čas v tabeli je čas opažanja.",
+            bg=PANEL, fg=MUTED, font=("Segoe UI", 9), anchor="w")
+        self.history_note.pack(fill="x", pady=(8, 0))
+
+    def table(self, parent, column, columns):
+        frame = tk.Frame(parent, bg=PANEL)
+        frame.grid(row=1, column=column, sticky="nsew", padx=(0, 12) if column == 0 else (0, 0))
+        tree = ttk.Treeview(frame, columns=[c[0] for c in columns], show="headings",
+                            style="Tracker.Treeview", selectmode="browse")
+        scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        tree.pack(fill="both", expand=True)
+        for key, title, width in columns:
+            tree.heading(key, text=title)
+            tree.column(key, width=width, minwidth=55, stretch=key in ("name", "npc"), anchor="w" if key in ("name", "npc") else "center")
+        return tree
+
+    def render_npcs(self, record):
+        npcs = record.get("npcs") or {}
+        entities = npcs.get("entities")
+        if entities is None:
+            sync_rows(self.npc_tree, [])
+            self.npc_status.config(text="NPC: "+npcs.get("reason", "nedostopno"), fg=RED)
+        else:
+            needle = self.filter_text.get().strip().casefold()
+            visible = [e for e in entities if (not self.only_hp.get() or e["health"]["max"] is not None)
+                       and (not needle or needle in "%s %s %s" % ((e["name"] or "").casefold(), e["config_id"], e["runtime_id"]))]
+            visible.sort(key=lambda e:(e["health"]["percent"] is None, e["health"]["percent"] if e["health"]["percent"] is not None else 100,
+                                       (e["name"] or "").casefold(), e["runtime_id"]))
+            rows = []
+            for e in visible:
+                h = e["health"]
+                tag = ("dead",) if h["current"] == 0 else (("wounded",) if h["percent"] is not None and h["percent"] < 100 else ())
+                rows.append(("npc_%d_%d" % (e["runtime_id"], e["instance_id"]),
+                             (e["name"] or "(brez imena)", fmt(e["config_id"]), str(e["runtime_id"]),
+                              fmt(h["current"])+" / "+fmt(h["max"]), fmt(h["percent"])), tag))
+            sync_rows(self.npc_tree, rows)
+            self.npc_status.config(text="Naloženih %s · prebranih %s · prikazanih %d · nedostopnih %s" %
+                                   (npcs.get("loaded_count", "—"), npcs.get("read_count", "—"), len(visible), npcs.get("skipped_count", 0)),
+                                   fg=GOLD if npcs.get("skipped_count") else GREEN)
+        events = record.get("recent_hit_splats", [])
+        rows = []
+        for i, event in enumerate(reversed(events)):
+            stamp = datetime.fromtimestamp(event["observed_at_ms"]/1000).strftime("%H:%M:%S.%f")[:-3]
+            rows.append(("hit_"+"_".join(str(v) for v in event_key(event)),
+                         (stamp, "%s #%s" % (event.get("name") or "NPC", event["runtime_id"]),
+                          fmt(event["amount"]), str(event["type_id"])), ("hit",)))
+        sync_rows(self.hit_tree, rows)
 
     def set_raw(self, value):
         self.raw_text.config(state="normal")
@@ -210,6 +368,9 @@ class Tracker:
         self.root.destroy()
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--history", type=Path, help="Import observed hits from an earlier local JSONL capture")
+    args = parser.parse_args()
     root = tk.Tk()
-    Tracker(root)
+    Tracker(root, args.history)
     root.mainloop()

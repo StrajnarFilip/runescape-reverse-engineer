@@ -9,6 +9,7 @@ from pathlib import Path
 import time
 
 from winmem import MemoryReadError
+from entities import NPCReader
 
 def number(value):
     return int(value, 0) if isinstance(value, str) else value
@@ -58,6 +59,7 @@ class RS3:
         self._last_values = {}
         self._last_changed = {}
         self._last_clock = self._clock_changed_at = None
+        self.npc_reader = NPCReader(memory, profile)
 
     def domain_capture(self, name):
         spec = self.profile["domains"][name]
@@ -168,12 +170,18 @@ class RS3:
         gcd.update({"clock_raw": logic_clock, "start_raw": raw["gcd_start"], "end_raw": raw["gcd_end"],
                     "duration_raw": raw["gcd_duration"], "client_start_raw": raw["gcd_client_start"],
                     "client_end_raw": raw["gcd_client_end"]})
+        try:
+            npcs, hits = self.npc_reader.read(state, logic_clock)
+        except OSError as error:
+            npcs = {"status": "unavailable", "entities": None, "reason": str(error)}
+            hits = {"status": "unavailable", "active": None, "newly_observed": [], "reason": str(error)}
+        finished = time.perf_counter()
         snapshot = {
             "schema_version": 1, "timestamp_ms": time.time_ns()//1000000,
             "monotonic_ms": round(time.monotonic()*1000, 3), "pid": self.memory.pid,
             "executable_sha256": self.identity["sha256"],
             "client_version": self.profile["version"], "source": "native_memory",
-            "status": "partial", "read_duration_ms": round((now-started)*1000, 3),
+            "status": "partial", "read_duration_ms": round((finished-started)*1000, 3),
             "freshness": {"observed_at_ms": time.time_ns()//1000000,
                           "client_logic_tick": logic_clock, "clock_stalled_ms": clock_stalled,
                           "server_update_age_ms": None},
@@ -182,6 +190,7 @@ class RS3:
                        "display_current": None if prayer is None else int(prayer), "max": prayer_level*10},
             "adrenaline_percent": self._field("adrenaline", adrenaline, now),
             "gcd": gcd,
+            "npcs": npcs, "hit_splats": hits,
             "telos": {"present": None, "animation_id": None, "action": None,
                       "phase": None, "stage_raw": None if raw["telos_packed"] is None else extract_bits(raw["telos_packed"],21,23),
                       "reason": "entity_mapping_pending"},

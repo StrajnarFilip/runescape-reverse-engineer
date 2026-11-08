@@ -9,10 +9,25 @@
   "function_pointer_offset": 96,
   "function_capture_offset": 8,
   "domains": {
-    "player": {"id": 61, "handler_rva": "0x4819d0", "table_offset": "0x1c0c0", "count_offset": "0x1c0c8"},
-    "client": {"id": 57, "handler_rva": "0x481ac0", "table_offset": "0x7308", "count_offset": "0x7310"}
+    "player": {
+      "id": 61,
+      "handler_rva": "0x4819d0",
+      "table_offset": "0x1c0c0",
+      "count_offset": "0x1c0c8"
+    },
+    "client": {
+      "id": 57,
+      "handler_rva": "0x481ac0",
+      "table_offset": "0x7308",
+      "count_offset": "0x7310"
+    }
   },
-  "node": {"key_offset": 0, "value_offset": 8, "type_offset": 32, "next_offset": 40},
+  "node": {
+    "key_offset": 0,
+    "value_offset": 8,
+    "type_offset": 32,
+    "next_offset": 40
+  },
   "client_vtable_rva": "0x15367c0",
   "state_pointer_offset": 8,
   "logic_clock_offset": "0x528",
@@ -22,9 +37,34 @@
   "skill_stride": 24,
   "skill_base_level_offset": 16,
   "signatures": [
-    {"rva": "0x466d60", "bytes": "48894c24084883ec38488b0580b12b014c8d0569"},
-    {"rva": "0xc08610", "bytes": "40534883ec30488b5a084c8bd1448b81c8c00100"},
-    {"rva": "0xc08db0", "bytes": "40534883ec30488b5a084c8bd1448b411833d24c"}
+    {
+      "rva": "0x466d60",
+      "bytes": "48894c24084883ec38488b0580b12b014c8d0569"
+    },
+    {
+      "rva": "0xc08610",
+      "bytes": "40534883ec30488b5a084c8bd1448b81c8c00100"
+    },
+    {
+      "rva": "0xc08db0",
+      "bytes": "40534883ec30488b5a084c8bd1448b411833d24c"
+    },
+    {
+      "rva": "0xc50b70",
+      "bytes": "0fb78188000000668902488bc266c742"
+    },
+    {
+      "rva": "0xc42f80",
+      "bytes": "4883ec488b842480000000894424388b"
+    },
+    {
+      "rva": "0xcd0870",
+      "bytes": "48895c240844894c2420448944241855"
+    },
+    {
+      "rva": "0x72401e",
+      "bytes": "448b84816c1100008b8c815011000045"
+    }
   ],
   "variables": {
     "health_current": 13537,
@@ -39,7 +79,29 @@
     "telos_packed": 6363
   },
   "bitfields": {
-    "prayer": {"varp": 3274, "lsb": 0, "msb": 14, "divisor": 10},
-    "telos_stage": {"varp": 6363, "lsb": 21, "msb": 23}
+    "prayer": {
+      "varp": 3274,
+      "lsb": 0,
+      "msb": 14,
+      "divisor": 10
+    },
+    "telos_stage": {
+      "varp": 6363,
+      "lsb": 21,
+      "msb": 23
+    }
+  },
+  "npcs": {
+    "manager_offset": "0x19940",
+    "manager_vtable_rva": "0x153ae88",
+    "count_offset": "0xb0a0",
+    "indices_offset": "0xa0a0",
+    "entity_vtable_rva": "0x15dc938",
+    "name_offset": "0x90",
+    "config_offset": "0x10a8",
+    "config_override_offset": "0x10b8",
+    "health_current_offset": "0x115c",
+    "health_max_offset": "0x1178",
+    "hitmarks_offset": "0xf18"
   }
 }

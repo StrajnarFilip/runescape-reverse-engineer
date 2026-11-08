@@ -60,3 +60,12 @@ elif mode == "function":
     start,size = function(address)
     print(hex(start),hex(size))
     disasm(start, min(size, 1600))
+elif mode == "refs":
+    target = int(sys.argv[2], 16) - base
+    for match in re.finditer(rb"[\x48\x4c]\x8d[\x05\x0d\x15\x1d\x25\x2d\x35\x3d]", code):
+        offset = match.start()
+        if section.VirtualAddress + offset + 7 + struct.unpack_from("<i", code, offset+3)[0] == target:
+            address = base + section.VirtualAddress + offset
+            print("REF", hex(address), "FUNCTION", hex(function(address)[0]))
+            if "--context" in sys.argv:
+                disasm(address, 100)

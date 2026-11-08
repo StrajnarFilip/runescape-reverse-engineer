@@ -15,9 +15,14 @@ Trenutno stanje
 * Adrenalin: v živem boju opažene spremembe v razponu 0–100 %.
 * GCD: začetek/konec in odjemalčev števec; opaženo trajanje 90 tickov = 1,8 s.
 * Tkinter tracker in JSON Lines izhod, privzeto 20 meritev na sekundo.
-* 10 avtomatskih preverjanj uspešnih na lokalnem Windows sistemu.
+* NPC ime, tip ID in runtime ID ter trenutni in maksimalni HP iz številčnih statistik.
+* Native hitmark ring: prejemnik, znesek, surov tip ID in čas; tracker ima zgodovino.
+* 20 avtomatskih preverjanj uspešnih na lokalnem Windows sistemu.
 
-NPC ID-ji, NPC HP, hit splati ter Telosove animacije in faze **še niso potrjeni**.
+Živo preverjeno: Goblin **550/550 HP**, Giant spider **1000/1000 HP** ter Goblin
+**550 -> 326 HP** ob zadetku **224**, ki ga je uporabnik neodvisno navedel.
+Zajem se ujema tudi z uporabnikovima zadetkoma 550 in 1000.
+Telosove animacije in faze **še niso potrjene**.
 Odjava, menjava sveta in ponovni zagon odjemalca potrebujejo dodatno namensko
 preverjanje. Frekvenca branja 20 Hz ne pomeni 20 strežniških posodobitev na sekundo.
 
@@ -41,7 +46,8 @@ Ukazna vrstica::
     python outputs/rs3_reader/reader.py --hz 20 --duration 60 --raw --output capture.jsonl
 
 Tracker beleži vzorce v ``outputs/rs3_reader/logs/``. V oknu lahko odpreš mapo
-z dnevniki ali kopiraš zadnji JSON. Program zahteva samo
+z dnevniki ali kopiraš zadnji JSON. Dnevnik se rotira pri približno 25 MB s tremi
+dodatnimi deli na posamezen zagon. Program zahteva samo
 ``PROCESS_QUERY_INFORMATION | PROCESS_VM_READ``; v igro ne piše in ne pošilja tipk.
 
 Datoteke
@@ -49,6 +55,7 @@ Datoteke
 
 * ``outputs/rs3_reader/winmem.py``: Windows branje pomnilnika in identiteta procesa.
 * ``outputs/rs3_reader/rs3.py``: prepoznavanje struktur in dekodiranje.
+* ``outputs/rs3_reader/entities.py``: NPC identiteta, številčni HP in hitmark ringi.
 * ``outputs/rs3_reader/profile_951_3.json``: hash, preverjeni podpisi, relativni odmiki in ID-ji.
 * ``outputs/rs3_reader/telemetry.py``: povezava, izguba procesa in ponovno povezovanje.
 * ``outputs/rs3_reader/reader.py``: CLI z JSONL izhodom.
@@ -56,6 +63,7 @@ Datoteke
 * ``outputs/rs3_reader/README.txt``: podrobna navodila in omejitve.
 * ``outputs/rs3_reader/research-notes.rst``: potrjene strukture in odprta vprašanja.
 * ``outputs/rs3_reader/validation-summary.json``: povzetek dejansko zajetih meritev.
+* ``outputs/rs3_reader/npc-validation-summary.json``: NPC/HP/zadetki in ujemanje z uporabnikovim preizkusom.
 * ``outputs/rs3-static-inspection.json``: začetni statični pregled, pred živim bralnikom.
 * ``work/*.py`` in ``work/ghidra_scripts/``: naše pomožne raziskovalne skripte.
 
@@ -68,10 +76,22 @@ Preverjanje
 
 Testi preverjajo dejansko read-only branje lastnega procesa, napake in meje branja,
 prayer bitfield, GCD pred in po izteku, preliv števca ter zamik ponovne povezave.
+NPC testi pokrivajo ponovno branje istega zadetka, izginotje NPC-ja, spremembo
+seznama med branjem, bucket cikel, trgan zapis ringa, manjkajoč in ničelni HP,
+čas zadetka ob prelivu števca ter zgodovino ob združevanju UI osvežitev.
 Živi preizkusi so ločeni od avtomatskih testov; povzetek ima izvorne hashe lokalnih
 datotek zajema in izbrane dejanske vrednosti. Celotni dnevniki so lokalni.
 Vizualni pregled okna prek Computer Use je bil zavrnjen z dovoljenji; ustvaritev
 okna in zapisovanje živih vzorcev sta bila preverjena.
+
+NPC tabela zajema naloženo okolico in omogoča filter imena/ID-ja; razdalje do
+igralca ne izračunava. Manjkajoče HP statistike ostanejo neznane. Znesek hitmarka
+je lahko tudi zdravljenje ali text mark; napadalec iz ringa ni znan. Polling
+lahko izpusti zapise, ki se prepišejo ali izginejo med meritvama. Tabela zgodovine
+kaže čas prvega opažanja in ne predstavlja zagotovljenega toka vseh zadetkov.
+Za uvoz že opaženih zadetkov ob hkratnem živem branju::
+
+    python outputs/rs3_reader/tracker.py --history capture.jsonl
 
 Raziskovalna orodja
 ------------------
