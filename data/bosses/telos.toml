@@ -1,10 +1,10 @@
-# Telos, the Warden. Fill npc_ids and the anim/spotanim tables from recordings:
+# Telos, the Warden. Fill the anim/spotanim tables from recordings:
 #   rs3-eventd --record telos-kill1.jsonl
 # then look for "npc.animation" / "npc.spotanim" events on the Telos uid and
 # label each id once with what he visibly did at that moment.
 name = "telos"
 display_name = "Telos, the Warden"
-npc_ids = []            # every NPC config id Telos uses across phases
+npc_ids = [22891, 22892, 22908]
 idle_anims = [-1, 65535]
 # phase_signal = "telos_phase"   # optional: a signal whose value is the phase
 

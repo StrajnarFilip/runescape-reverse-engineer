@@ -15,7 +15,7 @@ build = "6ada3f59-1a86000"
 
 [sampler]
 period_us = 1000
-npc_period_us = 5000
+npc_period_us = 1000
 torn_read_retries = 3
 check_grace_ms = 500
 
@@ -96,6 +96,37 @@ locator = "tick_obj"
 key = 0
 offset = 0x180
 type = "u32"
+
+# Client singleton -> NPC manager. The manager lists server indices for nearby
+# NPCs and maps those indices to entity pointers. This layout is build-specific.
+[bases.npc_client]
+module_offset = 0x18df2c8
+
+[npcs]
+build = "6ada3f59-1a86000"
+base = "npc_client"
+chain = [0x19940, 0]
+layout = "chained_hash"
+capacity = 1024
+entry_offset = 0x1094
+struct_size = 0xe8
+
+[npcs.index]
+vtable_rva = 0x1511f78
+buckets_offset = 0x10
+max_buckets = 8192
+active_ids_offset = 0xa0a0
+active_count_offset = 0xb0a0
+cycle_offset = 0xc0e4
+node_entity_offset = 0x10
+node_next_offset = 0x18
+
+# Offsets relative to entry_offset. HP is stat 3 in the current/max stat
+# arrays at entity +0x1150/+0x116c, read by get_npc_stat.
+[npcs.fields]
+id = { offset = 0x00 }
+hp = { offset = 0xc8 }
+hp_max = { offset = 0xe4 }
 
 [gcd]
 ticks = 3

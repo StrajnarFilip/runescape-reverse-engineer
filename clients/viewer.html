@@ -31,6 +31,10 @@
   #log { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; height: calc(100vh - 140px); overflow: auto; white-space: pre; line-height: 1.45; }
   #log .t { color: var(--muted); } #log .k { color: var(--pray); }
   .actions { font-family: ui-monospace, Consolas, monospace; font-size: 12px; max-height: 160px; overflow: auto; }
+  .npc-list { max-height: 240px; overflow: auto; font-size: 13px; }
+  .npc-list table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  .npc-list th, .npc-list td { padding: 5px 0; border-bottom: 1px solid var(--line); text-align: left; }
+  .npc-list th:last-child, .npc-list td:last-child { text-align: right; }
 </style>
 </head>
 <body>
@@ -60,12 +64,21 @@
       <div class="muted" style="margin-top:8px">Recent actions</div>
       <div class="actions" id="bossactions"></div>
     </div>
+    <div class="card">
+      <h2>Nearby NPCs</h2>
+      <div id="npc-empty" class="muted">No NPC HP data</div>
+      <div class="npc-list" id="npc-list" hidden>
+        <table aria-label="Nearby NPC lifepoints"><thead><tr><th>NPC</th><th>HP / Max</th></tr></thead><tbody id="npc-rows"></tbody></table>
+      </div>
+    </div>
   </section>
   <section class="card"><h2>Events</h2><div id="log"></div></section>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
 let ws = null, gcd = null, src = null, retry = null;
+let bossUid = null;
+const npcs = new Map();
 const LOG_MAX = 400;
 const lines = [];
 
@@ -103,6 +116,45 @@ function applyPlayer(p) {
   if (p.adrenaline != null) { const pct = p.adrenaline_pct; $("adv").textContent = pct != null ? `${pct.toFixed(1)}%` : fmt(p.adrenaline); setBar("adb", pct ?? 0, 100); }
 }
 
+let npcRenderPending = false;
+function renderNpcs() {
+  if (npcRenderPending) return;
+  npcRenderPending = true;
+  requestAnimationFrame(() => {
+    npcRenderPending = false;
+    const visible = [...npcs.values()].filter((n) => n.hp != null);
+    visible.sort((a, b) => (b.hp_max ?? b.hp) - (a.hp_max ?? a.hp) || a.uid - b.uid);
+    const rows = visible.map((n) => {
+      const row = document.createElement("tr");
+      const name = row.insertCell();
+      name.textContent = n.name ?? `NPC ${n.npc_id ?? "?"}`;
+      name.title = `Entity ${n.uid}`;
+      row.insertCell().textContent = `${fmt(n.hp)} / ${fmt(n.hp_max)}`;
+      return row;
+    });
+    $("npc-rows").replaceChildren(...rows);
+    $("npc-list").hidden = !rows.length;
+    $("npc-empty").hidden = !!rows.length;
+  });
+}
+
+function applyBossHp(uid, name, hp, max, pct) {
+  if (bossUid !== uid) {
+    $("bossaction").textContent = "–";
+    $("bossactions").replaceChildren();
+  }
+  bossUid = uid;
+  $("bossname").textContent = name;
+  $("bosshpv").textContent = hp == null ? "–" : `${fmt(hp)} / ${fmt(max)}${pct == null ? "" : ` (${pct.toFixed(1)}%)`}`;
+  setBar("bosshpb", pct ?? 0, 100);
+}
+
+function clearNpcs() {
+  npcs.clear();
+  applyBossHp(null, "no boss in view", null, null, null);
+  renderNpcs();
+}
+
 function bossAction(ev) {
   $("bossname").textContent = ev.boss;
   $("bossaction").textContent = ev.action;
@@ -119,6 +171,8 @@ function onEvent(ev) {
       pill($("state"), ev.state + (ev.label ? " · " + ev.label : ""), ev.state === "ok" ? "ok" : ev.state === "waiting" || ev.state === "attaching" ? "warn" : "bad");
       const why = (ev.failing || []).join("; ") || (ev.state === "detached" ? "client closed; waiting for RuneScape to start again" : "");
       $("detail").textContent = ev.state === "ok" ? "" : why;
+      if (ev.state !== "ok") clearNpcs();
+      if (ev.state === "detached") src = null;
       break;
     }
     case "tick": $("tick").textContent = `tick ${ev.n} (${ev.basis})`; break;
@@ -127,8 +181,20 @@ function onEvent(ev) {
     case "player.adrenaline": applyPlayer({ adrenaline: ev.new, adrenaline_pct: ev.pct }); break;
     case "player.gcd": gcd = { end: ev.ends_at_unix_us / 1000, dur: ev.duration_ms }; break;
     case "player.gcd_ready": gcd = null; break;
+    case "npc.spawn": npcs.set(ev.npc.uid, ev.npc); renderNpcs(); break;
+    case "npc.despawn":
+      npcs.delete(ev.uid);
+      if (ev.uid === bossUid) applyBossHp(null, "no boss in view", null, null, null);
+      renderNpcs();
+      break;
+    case "npc.health": {
+      const npc = npcs.get(ev.uid);
+      npcs.set(ev.uid, { ...npc, uid: ev.uid, npc_id: ev.npc_id, hp: ev.new, hp_max: ev.max });
+      renderNpcs();
+      break;
+    }
     case "boss.action": bossAction(ev); break;
-    case "boss.hp": $("bossname").textContent = ev.boss; $("bosshpv").textContent = `${fmt(ev.hp)}${ev.max ? " / " + fmt(ev.max) : ""}${ev.pct != null ? ` (${ev.pct.toFixed(1)}%)` : ""}`; setBar("bosshpb", ev.pct ?? 0, 100); break;
+    case "boss.hp": applyBossHp(ev.uid, npcs.get(ev.uid)?.name ?? ev.boss, ev.hp, ev.max, ev.pct); break;
   }
   if (ev.type !== "tick") log(ev);
 }
@@ -141,8 +207,12 @@ function onSnapshot(s) {
   else if (s.state === "waiting" || s.state === "attaching") $("detail").textContent = "finding game values in memory (~20-60 s)…";
   applyPlayer(s.player);
   if (s.player.gcd_ends_at_unix_us) gcd = { end: s.player.gcd_ends_at_unix_us / 1000, dur: 1800 };
+  npcs.clear();
+  for (const npc of s.npcs) npcs.set(npc.uid, npc);
+  renderNpcs();
   const boss = s.npcs.find((n) => n.name);
-  if (boss) { $("bossname").textContent = boss.name; if (boss.hp_pct != null) setBar("bosshpb", boss.hp_pct, 100); }
+  if (boss) applyBossHp(boss.uid, boss.name, boss.hp, boss.hp_max, boss.hp_pct);
+  else applyBossHp(null, "no boss in view", null, null, null);
 }
 
 function tickGcd() {
@@ -165,6 +235,8 @@ function connect() {
     old.onopen = old.onclose = old.onmessage = old.onerror = null;
     try { old.close(); } catch {}
   }
+  src = null;
+  clearNpcs();
   pill($("conn"), "connecting", "warn");
   const sock = new WebSocket($("url").value);
   ws = sock;
@@ -174,6 +246,7 @@ function connect() {
     if (ws !== sock) return;
     clearTimeout(connectTimer);
     pill($("conn"), "disconnected", "bad");
+    clearNpcs();
     retry = setTimeout(connect, 1500);
   };
   sock.onmessage = (m) => {

@@ -19,6 +19,7 @@
 mod emit;
 mod gcd;
 pub mod locate;
+mod npc;
 mod sampler;
 mod tick;
 

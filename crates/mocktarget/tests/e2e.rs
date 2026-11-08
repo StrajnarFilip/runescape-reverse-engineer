@@ -232,10 +232,16 @@ fn end_to_end_against_mock() {
     println!("statuses: {statuses:?}");
     assert!(statuses.iter().any(|s| s.starts_with("Ok")), "never reached ok: {statuses:?}");
 
-    // Every lifepoints/prayer/adrenaline write after the stream started must arrive, in order.
+    // Every player or enemy HP change after the stream starts must arrive promptly.
     let first_ok = received.iter().find(|(_, e)| matches!(e.ev, Event::Lifepoints { .. })).map(|(_, e)| e.unix_us).unwrap();
     let mut latencies = Vec::new();
-    for (key, pick) in [("lp", "player.lifepoints"), ("prayer", "player.prayer"), ("adren", "player.adrenaline")] {
+    for (key, pick) in [
+        ("lp", "player.lifepoints"),
+        ("prayer", "player.prayer"),
+        ("adren", "player.adrenaline"),
+        ("hp", "npc.health"),
+        ("hp", "boss.hp"),
+    ] {
         // Only writes that actually change the value are observable.
         let mut prev: Option<i64> = None;
         let ws_vals: Vec<(u64, i64)> = writes
@@ -254,18 +260,25 @@ fn end_to_end_against_mock() {
             .filter(|(_, e)| e.ev.kind() == pick)
             .map(|(at, e)| {
                 let v = match &e.ev {
-                    Event::Lifepoints { new, .. } | Event::Prayer { new, .. } | Event::Adrenaline { new, .. } => *new,
+                    Event::Lifepoints { new, .. } | Event::Prayer { new, .. } | Event::Adrenaline { new, .. }
+                    | Event::NpcHealth { new, .. } => *new,
+                    Event::BossHp { hp, .. } => *hp,
                     _ => unreachable!(),
                 };
                 (*at, v)
             })
             .collect();
+        let mut topic_latencies = Vec::new();
         for (t, v) in &ws_vals {
             let hit = evs.iter().find(|(at, ev)| ev == v && *at + 200 >= *t);
             let (at, _) = hit.unwrap_or_else(|| panic!("{key}={v} written at {t} never received"));
-            latencies.push(at.saturating_sub(*t));
+            topic_latencies.push(at.saturating_sub(*t));
         }
         assert!(!ws_vals.is_empty(), "no {key} writes observed");
+        let p99 = pct(&mut topic_latencies, 0.99);
+        println!("{pick} write->websocket latency: p50 {} us, p99 {p99} us", pct(&mut topic_latencies, 0.5));
+        assert!(p99 < 5_000, "{pick} p99 latency {p99} us too high");
+        latencies.extend(topic_latencies);
     }
     let n = latencies.len();
     let (p50, p99, max) = (pct(&mut latencies, 0.5), pct(&mut latencies, 0.99), *latencies.iter().max().unwrap());

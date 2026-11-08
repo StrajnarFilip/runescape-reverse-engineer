@@ -41,7 +41,7 @@ Double-click **`run.bat`** in the repo root, or run it from a terminal. It build
 
 | URL | What |
 |---|---|
-| http://127.0.0.1:7878/ | Live viewer: player gauges, GCD bar, boss panel, event log |
+| http://127.0.0.1:7878/ | Live viewer: player gauges, GCD bar, nearby NPC HP, boss panel, event log |
 | ws://127.0.0.1:7878/events | WebSocket with the same data as JSON (protocol below) |
 
 The server attaches to the RuneScape client on its own, including after you restart the game, and finds the values in memory within 20–60 seconds. Until then the page shows what it's waiting for. Press Ctrl+C in the window to stop it. Running `run.bat` again while the server is up just reopens the page.
@@ -58,11 +58,13 @@ Any WebSocket client can connect:
 -> {"type":"hello","protocol":1,"sources":[20392]}
 -> {"type":"snapshot","snapshot":{...}}
 -> {"seq":812,"unix_us":...,"tick":4411,"tick_phase_ms":2.1,"src":20392,"type":"player.adrenaline","old":40,"new":48,"pct":48.0}
-<- {"type":"subscribe","topics":["player.*","boss.telos.*","tick"]}
+<- {"type":"subscribe","topics":["player.*","npc.*","boss.telos.*","tick"]}
 <- {"type":"source","src":20392}
 ```
 
 Flags: `--open`, `--record <file.jsonl>`, `--pid`, `--all` (one source per client), `--period-us 500`, `--offsets`, `--bosses`, `--bind`. Relative `--offsets`/`--bosses` paths are also searched next to the executable, so the server finds the repo's files from any working directory.
+
+Read `snapshot.npcs` or `npc.spawn` for initial HP. Follow `npc.health` for current HP (`new`), maximum HP (`max`) and percentage (`pct`), and remove an entity on `npc.despawn`. Key the list by `src` and `uid` because multiple nearby NPCs can share a config ID. The client supplies the active NPC list and its stats, including bosses. A configured boss also emits `boss.<name>.hp` on the subscription topic (the JSON event type is `boss.hp`).
 
 ## What's mapped (client build 6ada3f59-1a86000)
 
@@ -73,8 +75,9 @@ Flags: `--open`, `--record <file.jsonl>`, `--pid`, `--all` (one source per clien
 | Server tick | `+0x180` in objects with vtable `rs2client.exe+0x15b3a88` | u32, +1 every 600 ms, counts from login |
 | Lifepoints | var **13537** through the var index | plain integer |
 | Lifepoints max (candidate) | var **13538** through the var index | reads 9900 = orb max; not yet confirmed to follow gear changes |
+| Nearby NPC HP | client singleton → active NPC manager → entity | i32 current and maximum HP at entity `+0x115c` and `+0x1178` |
 
-Every signal is found by **locators** at attach, so no pointer paths are needed. Locators scan memory for a container's *structure*, then read values by key. That takes 15–60 seconds after `rs3-eventd` starts or a client appears; the status is `waiting` until it finishes:
+The player signals are found by **locators** at attach. Locators scan memory for a container's *structure*, then read values by key. That takes 15–60 seconds after `rs3-eventd` starts or a client appears. The status is `waiting` until it finishes:
 
 - `sorted_table`: the varp table is 2048 entries of 0x30 bytes, `{i32 id @+0, value @+8}`, sorted by id. It was ascending in one session and **descending after a restart**; both are handled. An 11k-entry definition table also matches; `max_entries` and an "id+1 values" check reject it.
 - `var_index`: the client's chained hash table over **all** vars. It has 8783 slots; slot `id % 8783` points at the first entry of its chain. Every entry, whether a varp table row or a separately allocated var node, is a 0x30-byte record `{i32 id @0, value @8, next @0x28}`. Lookup walks the chain. To find the index, every pointer into the varp table "votes" for `slot address − (id % 8783) × 8`. The most-voted start that resolves the probe vars wins. Because the client keeps this index current when it reallocates nodes, reads through it are never stale.
@@ -98,7 +101,9 @@ Every signal is found by **locators** at attach, so no pointer paths are needed.
   - run 3 (client restart, index at a new address): 3365 ✓
   - Regeneration streamed as events on tick boundaries (+9 every 10 ticks).
 
-Still to map: GCD and ability cooldowns (needs a combat session), NPCs and Telos.
+The live NPC layout is enabled for build `6ada3f59-1a86000`. It follows the client singleton to the manager on each poll, resolves active NPC indices through its hash table, and reads the two HP fields together. It samples on the same 1 ms loop as the player stats with the bundled configuration. A newer client build requires checking the layout before re-enabling NPC sampling.
+
+Still to map are GCD and ability cooldowns, and Telos's animations and phase signal.
 
 Not verified yet: the next weekly client update (the build id will change; the vtable offset likely moves).
 

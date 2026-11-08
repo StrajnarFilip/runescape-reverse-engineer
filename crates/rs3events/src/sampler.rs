@@ -167,6 +167,11 @@ struct Locators {
 
 struct NpcBufs {
     table: Vec<u8>,
+    buckets: Vec<u8>,
+    entities: Vec<(u32, u64)>,
+    /// Remote allocations and server indices can both be reused.
+    live_uids: HashMap<(u32, u64), u64>,
+    next_uid: u64,
     a: Vec<u8>,
     b: Vec<u8>,
 }
@@ -198,6 +203,7 @@ pub(crate) struct Sampler {
     gcd: GcdTracker,
     npcs: BTreeMap<u64, NpcInfo>,
     last_npc_poll: Option<Instant>,
+    npc_read_failed_since: Option<Instant>,
     npc_bufs: Option<NpcBufs>,
     dirty: bool,
 }
@@ -261,8 +267,19 @@ impl Sampler {
             errors: Default::default(),
         };
         let n = defs.len();
-        let npc_bufs = o.npcs.as_ref().map(|d| NpcBufs {
-            table: vec![0; (d.capacity as usize) * (d.stride as usize)],
+        let npc_def = o.npcs.as_ref().filter(|d| {
+            if d.build.is_some() && d.build != build {
+                tracing::warn!("[{pid}] NPC layout requires build {:?}; attached to {:?}", d.build, build);
+                return false;
+            }
+            true
+        });
+        let npc_bufs = npc_def.map(|d| NpcBufs {
+            table: vec![0; (d.capacity as usize) * if d.index.is_some() { 4 } else { d.stride as usize }],
+            buckets: d.index.as_ref().map_or_else(Vec::new, |i| vec![0; i.max_buckets as usize * 8]),
+            entities: Vec::new(),
+            live_uids: HashMap::new(),
+            next_uid: 1,
             a: vec![0; d.struct_size as usize],
             b: vec![0; d.struct_size as usize],
         });
@@ -292,6 +309,7 @@ impl Sampler {
             gcd: GcdTracker::new(cfg.offsets.gcd.ticks),
             npcs: BTreeMap::new(),
             last_npc_poll: None,
+            npc_read_failed_since: None,
             npc_bufs,
             dirty: true,
             cfg,
@@ -660,6 +678,10 @@ impl Sampler {
     }
 
     fn leave_ok(&mut self, now: Instant) {
+        self.npc_read_failed_since = None;
+        if let Some(bufs) = &mut self.npc_bufs {
+            bufs.live_uids.clear();
+        }
         let gone: Vec<NpcInfo> = std::mem::take(&mut self.npcs).into_values().collect();
         for n in gone {
             self.emit(Event::NpcDespawn { uid: n.uid, npc_id: n.npc_id }, now);
@@ -791,10 +813,25 @@ impl Sampler {
         let o = &self.cfg.offsets;
         let base = base_addr(&self.proc, o, &self.anchors, &def.base).ok()?;
         let table = self.proc.follow_chain(base, &def.chain).ok()?;
-        self.proc.read_into(table, &mut bufs.table).ok()?;
+        let index_stamp = if let Some(index) = &def.index {
+            Some(crate::npc::read_index(
+                &self.proc,
+                table,
+                index,
+                self.main.base + index.vtable_rva,
+                &mut bufs.table,
+                &mut bufs.buckets,
+                &mut bufs.entities,
+            )?)
+        } else {
+            self.proc.read_into(table, &mut bufs.table).ok()?;
+            None
+        };
         let retries = o.sampler.torn_read_retries;
+        let has_uid_field = def.fields.contains_key("uid");
         let mut out = BTreeMap::new();
-        for i in 0..def.capacity as usize {
+        let count = index_stamp.map_or(def.capacity as usize, |_| bufs.entities.len());
+        for i in 0..count {
             let (addr, default_uid) = match def.layout {
                 NpcLayout::PtrArray => {
                     let off = i * def.stride as usize;
@@ -805,10 +842,27 @@ impl Sampler {
                     (p.wrapping_add(def.entry_offset as u64), p)
                 }
                 NpcLayout::Inline => (table + (i as u64) * def.stride as u64, i as u64),
+                NpcLayout::ChainedHash => {
+                    let entity = bufs.entities[i];
+                    let uid = if has_uid_field {
+                        entity.1
+                    } else {
+                        *bufs.live_uids.entry(entity).or_insert_with(|| {
+                            let uid = bufs.next_uid;
+                            bufs.next_uid += 1;
+                            uid
+                        })
+                    };
+                    (entity.1.wrapping_add(def.entry_offset as u64), uid)
+                }
             };
             if self.proc.read_into(addr, &mut bufs.a).is_err() {
+                if index_stamp.is_some() {
+                    return None;
+                }
                 continue;
             }
+            let mut stable = false;
             for _ in 0..=retries {
                 if self.proc.read_into(addr, &mut bufs.b).is_err() {
                     break;
@@ -819,8 +873,12 @@ impl Sampler {
                 });
                 std::mem::swap(&mut bufs.a, &mut bufs.b);
                 if same {
+                    stable = true;
                     break;
                 }
+            }
+            if index_stamp.is_some() && !stable {
+                return None;
             }
             let mut vals: BTreeMap<&str, Num> = BTreeMap::new();
             for (name, f) in &def.fields {
@@ -840,8 +898,11 @@ impl Sampler {
             }
             let uid = vals.get("uid").map(|v| v.as_i64() as u64).unwrap_or(default_uid);
             let geti = |k: &str| vals.get(k).map(|v| v.as_i64());
-            let hp = geti("hp");
-            let hp_max = geti("hp_max");
+            let (mut hp, mut hp_max) = (geti("hp"), geti("hp_max"));
+            if index_stamp.is_some() && !matches!((hp, hp_max), (Some(h), Some(m)) if (0..=m).contains(&h) && m > 0) {
+                hp = None;
+                hp_max = None;
+            }
             let headbar = geti("headbar");
             let hp_pct = match (hp, hp_max, headbar, def.headbar_max) {
                 (Some(h), Some(m), _, _) if m > 0 => Some(pct1(h as f64, m as f64)),
@@ -873,6 +934,16 @@ impl Sampler {
                 },
             );
         }
+        if let (Some(index), Some((cycle, count))) = (&def.index, index_stamp) {
+            // Reject a poll that crossed an NPC update or manager replacement.
+            if self.proc.read::<u32>(table + u64::from(index.cycle_offset)).ok()? != cycle
+                || self.proc.read::<u32>(table + u64::from(index.active_count_offset)).ok()? != count
+                || self.proc.follow_chain(base, &def.chain).ok()? != table
+            {
+                return None;
+            }
+            bufs.live_uids.retain(|_, uid| out.contains_key(uid));
+        }
         for n in out.values_mut() {
             n.name = self.cfg.bosses.iter().find(|b| n.npc_id.is_some_and(|id| b.matches(id))).map(|b| b.display().to_string());
         }
@@ -880,14 +951,35 @@ impl Sampler {
     }
 
     fn process_npcs(&mut self, now: Instant) {
-        let Some(period) = self.o().npcs.as_ref().map(|_| Duration::from_micros(self.o().sampler.npc_period_us)) else {
+        if self.npc_bufs.is_none() {
             return;
-        };
-        if self.last_npc_poll.is_some_and(|t| now.duration_since(t) < period) {
+        }
+        let sampler = &self.o().sampler;
+        let period = Duration::from_micros(sampler.npc_period_us);
+        if sampler.npc_period_us > sampler.period_us.max(100) && self.last_npc_poll.is_some_and(|t| now.duration_since(t) < period) {
             return;
         }
         self.last_npc_poll = Some(now);
-        let Some(seen) = self.read_npcs() else { return };
+        let seen = match self.read_npcs() {
+            Some(seen) => {
+                self.npc_read_failed_since = None;
+                seen
+            }
+            None => {
+                if self.o().npcs.as_ref().is_none_or(|def| def.index.is_none()) {
+                    return;
+                }
+                let grace = Duration::from_millis(self.o().sampler.check_grace_ms);
+                let since = *self.npc_read_failed_since.get_or_insert(now);
+                if now.duration_since(since) < grace {
+                    return;
+                }
+                if let Some(bufs) = &mut self.npc_bufs {
+                    bufs.live_uids.clear();
+                }
+                BTreeMap::new()
+            }
+        };
         let old = std::mem::take(&mut self.npcs);
         for (uid, o) in &old {
             if !seen.contains_key(uid) {
@@ -920,7 +1012,7 @@ impl Sampler {
                 self.emit(Event::NpcField { uid, npc_id, name: "id".into(), old: o.npc_id.map(|v| Num::I(v as i64)), new: Num::I(id as i64) }, now);
             }
         }
-        if o.hp != n.hp {
+        if o.hp != n.hp || o.hp_max != n.hp_max || o.hp_pct != n.hp_pct {
             if let Some(h) = n.hp {
                 self.emit(Event::NpcHealth { uid, npc_id, old: o.hp, new: h, max: n.hp_max, pct: n.hp_pct }, now);
             }
@@ -947,7 +1039,7 @@ impl Sampler {
     fn boss_events(&self, o: Option<&NpcInfo>, n: &NpcInfo, now: Instant) {
         let Some(boss) = self.boss_for(n.npc_id) else { return };
         let uid = n.uid;
-        if o.map(|o| o.hp) != Some(n.hp) {
+        if o.is_none_or(|o| o.hp != n.hp || o.hp_max != n.hp_max || o.hp_pct != n.hp_pct) {
             if let Some(hp) = n.hp {
                 self.emit(Event::BossHp { boss: boss.name.clone(), uid, hp, max: n.hp_max, pct: n.hp_pct }, now);
             }

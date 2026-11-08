@@ -109,6 +109,17 @@ impl OffsetsFile {
             if !self.bases.contains_key(&n.base) {
                 anyhow::bail!("npcs: unknown base {:?}", n.base);
             }
+            if (n.layout == NpcLayout::ChainedHash) != n.index.is_some() {
+                anyhow::bail!("npcs: `chained_hash` requires `npcs.index`");
+            }
+            if let Some(index) = &n.index {
+                if n.capacity == 0 || n.capacity > 65536 || index.max_buckets == 0 || index.max_buckets > 65536 {
+                    anyhow::bail!("npcs: invalid active-list or bucket capacity");
+                }
+                if n.fields.values().any(|f| f.offset as usize + f.ty.size() > n.struct_size as usize) {
+                    anyhow::bail!("npcs: field outside the entity read window");
+                }
+            }
         }
         for (name, b) in &self.bases {
             if b.module_offset.is_none() && b.pattern.is_none() {
@@ -357,6 +368,25 @@ pub enum NpcLayout {
     PtrArray,
     /// Array of NPC structs stored inline.
     Inline,
+    /// Active server indices backed by a chained hash table of NPC pointers.
+    ChainedHash,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NpcIndexDef {
+    /// Manager vtable RVA, checked before following its pointers.
+    pub vtable_rva: u64,
+    /// Manager offset of the bucket pointer, followed by its u64 bucket count.
+    pub buckets_offset: u32,
+    pub max_buckets: u32,
+    /// Manager offsets of the packed u32 active keys and their u32 count.
+    pub active_ids_offset: u32,
+    pub active_count_offset: u32,
+    /// Manager offset of the u32 update cycle, checked before and after the poll.
+    pub cycle_offset: u32,
+    /// Each node has a u32 key at offset zero.
+    pub node_entity_offset: u32,
+    pub node_next_offset: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -377,15 +407,19 @@ fn d_true() -> bool {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NpcTableDef {
     pub base: String,
+    /// Only use this layout on the specified executable build, if set.
+    pub build: Option<String>,
     #[serde(default)]
     pub chain: Vec<i64>,
     #[serde(default)]
     pub layout: NpcLayout,
+    pub index: Option<NpcIndexDef>,
+    /// Number of array slots, or maximum number of active keys for a chained hash.
     pub capacity: u32,
     /// Bytes between entries (8 for a pointer array).
     #[serde(default = "d_ptr_stride")]
     pub stride: u32,
-    /// Added to each entry pointer before reading the struct (ptr_array).
+    /// Added to each entity pointer before reading the struct (pointer layouts).
     #[serde(default)]
     pub entry_offset: i64,
     /// Bytes to read per NPC struct.
