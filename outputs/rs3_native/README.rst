@@ -229,7 +229,8 @@ buffer errors, two consumer cursors, overflow, failed-frame invalidation, missin
 process and worker lifecycle.
 The inventory groups additionally cover moves, dose changes, quantity/replacement,
 duplicate ambiguity, gear switches/defenders, individual timers, catalog validation
-and item-event queue gaps. There are 28 Python tests in the combined suite.
+and item-event queue gaps. There are 30 Python tests in the combined suite,
+including the independently added player-tile tests.
 Assertions remain enabled in optimized test builds. Python tests verify the actual
 DLL ABI/lifecycle and preserve observation identity/time through UI coalescing.
 

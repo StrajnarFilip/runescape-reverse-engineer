@@ -124,6 +124,14 @@ class Tracker:
                                fg=MUTED, font=("Segoe UI", 10), anchor="w")
         self.source.pack(fill="x", padx=24, pady=(0, 12))
 
+        tile = tk.Frame(root, bg=PANEL, padx=16, pady=8)
+        tile.pack(fill="x", padx=24, pady=(0, 6))
+        tk.Label(tile, text="PLAYER TILE", fg=MUTED, bg=PANEL,
+                 font=("Segoe UI", 10, "bold")).pack(side="left")
+        self.tile = tk.Label(tile, text="Waiting for tile …", fg=INK, bg=PANEL,
+                             font=("Consolas", 13, "bold"))
+        self.tile.pack(side="right")
+
         grid = tk.Frame(root, bg=BG)
         grid.pack(fill="x", padx=18)
         grid.grid_columnconfigure((0, 1, 2, 3), weight=1, uniform="meters")
@@ -252,6 +260,7 @@ class Tracker:
                                 if native else "Python collector"))
             if age > 1500:
                 self.status.config(text="STALE", fg=RED)
+                self.tile.config(text="Waiting for a fresh tile")
                 for meter in self.meters.values():
                     meter.set("—", 0, "Samples are not updating")
                 sync_rows(self.npc_tree, [])
@@ -261,6 +270,9 @@ class Tracker:
     def render(self, s):
         available = s["status"] != "unavailable"
         stalled = s.get("freshness", {}).get("clock_stalled_ms", 0) > 2000
+        position = s.get("position") if available and not stalled else None
+        self.tile.config(text="{x}, {y} · plane {plane}".format(**position)
+                         if position is not None else "Tile unavailable")
         self.status.config(text="LIVE · MEMORY" if available and not stalled else "NO FRESH DATA",
                            fg=GREEN if available and not stalled else RED)
         digest = s.get("executable_sha256", "")
@@ -275,6 +287,14 @@ class Tracker:
             self.set_raw(s.get("reason", "Client clock is not advancing"))
             sync_rows(self.npc_tree, [])
             self.npc_status.config(text="NPC data is unavailable.", fg=RED)
+            return
+        if s["health"] is None:
+            for meter in self.meters.values():
+                meter.set("—", 0, "Unavailable on this build")
+            self.set_raw("Player tile (x, y, plane) · direct memory read")
+            self.render_npcs(s)
+            self.render_inventory(s)
+            self.render_abilities(s)
             return
         h, p, a, g = s["health"], s["prayer"], s["adrenaline_percent"]["value"], s["gcd"]
         hp, prayer = h["current"]["value"], p["current"]["value"]
@@ -309,8 +329,17 @@ class Tracker:
         body.grid_columnconfigure(0, weight=3)
         body.grid_columnconfigure(1, weight=2)
         body.grid_rowconfigure(0, weight=1)
-        grid = tk.Frame(body, bg=PANEL)
-        grid.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        inventory_frame = tk.Frame(body, bg=PANEL)
+        inventory_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        canvas = tk.Canvas(inventory_frame, bg=PANEL, highlightthickness=0, width=1, height=1)
+        scroll = ttk.Scrollbar(inventory_frame, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        canvas.pack(fill="both", expand=True)
+        grid = tk.Frame(canvas, bg=PANEL)
+        window = canvas.create_window(0, 0, anchor="nw", window=grid)
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window, width=event.width))
+        grid.bind("<Configure>", lambda _: canvas.configure(scrollregion=canvas.bbox("all")))
         self.inventory_cells = []
         for column in range(4):
             grid.grid_columnconfigure(column, weight=1, uniform="inventory")

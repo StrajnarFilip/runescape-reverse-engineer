@@ -152,7 +152,7 @@ record layouts. Python Reader exposes typed buffers and a separate item cursor.
 The Java FFM example exposes ``inventory()`` returning Java-owned item, ability
 and change records. It checks all ten ABI structure sizes.
 
-Eleven C test groups and 28 Python tests passed. New tests cover movement, dose
+Eleven C test groups and 30 Python tests passed (including the merged player-tile tests). New tests cover movement, dose
 changes (including a valid family ID zero), simultaneous move/consume, quantity
 changes, replacement, duplicate ambiguity, failed reads, world baselines, gear
 switches/defenders, cooldown wrap/expiry/missing values, catalog bounds/checksums,

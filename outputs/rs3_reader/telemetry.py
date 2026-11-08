@@ -25,7 +25,8 @@ class PythonTelemetry:
             if self.memory is None:
                 if time.perf_counter() < self.retry_after:
                     return self.unavailable(self.last_error or "Waiting for a client")
-                pids = [p for p in processes() if self.pid is None or p == self.pid]
+                pids = [p for p in processes(include_children=self.pid is not None)
+                        if self.pid is None or p == self.pid]
                 if len(pids) != 1:
                     raise MemoryReadError("No RS3 client" if not pids else "Multiple clients: specify --pid")
                 self.memory = ProcessMemory(pids[0])
@@ -52,7 +53,8 @@ class PythonTelemetry:
         return {"schema_version": 1, "timestamp_ms": time.time_ns()//1000000,
                 "pid": None if self.memory is None else self.memory.pid,
                 "status": "unavailable", "reason": message, "health": None, "prayer": None,
-                "adrenaline_percent": None, "gcd": None, "telos": None, "npcs": None, "hit_splats": None}
+                "adrenaline_percent": None, "gcd": None, "telos": None, "npcs": None, "hit_splats": None,
+                "position": None}
 
 
 def Telemetry(pid=None, backend=None, worker_hz=100):

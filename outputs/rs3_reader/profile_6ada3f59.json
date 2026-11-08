@@ -1,0 +1,24 @@
+{
+  "version": "6ada3f59-1a86000",
+  "sha256": "7a60c69fcf11eda42a328732721f5e89e1c85a6bc919038ff3451d4643e42dbf",
+  "signatures": [
+    {"rva": "0x3ab75", "bytes": "488b054c478a01"},
+    {"rva": "0x30514c", "bytes": "4863484883f9ff7420488b00488bd1488b8868990100488b4110488b04d0"},
+    {"rva": "0x44cd4f", "bytes": "ff90b00000008b4f504c8bc08b878c010000"},
+    {"rva": "0x6ee110", "bytes": "488d8180020000c3"}
+  ],
+  "player_position": {
+    "client_ptr_rva": "0x18df2c8",
+    "state": "0x19fc0",
+    "in_game_state": 30,
+    "player_context": "0x19fc8",
+    "player_index": "0x48",
+    "player_override": "0x58",
+    "player_table": "0x19968",
+    "table_range": "0x10",
+    "slot_entity": "0x38",
+    "plane": "0x50",
+    "size": "0x18c",
+    "fine_position": "0x280"
+  }
+}
