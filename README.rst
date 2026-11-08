@@ -11,6 +11,7 @@ Current capabilities
 
 * Version-pinned Windows x64 client **951-3**, executable SHA-256 and loaded-code
   signatures checked before using offsets.
+* Live player tiles on client **6ada3f59-1a86000** with the Python backend.
 * Player current/max HP, prayer (maximum derived from base level), adrenaline,
   and global cooldown using the client's 20 ms logic clock.
 * Loaded NPC names, config/type IDs, runtime IDs, exact transmitted current/max HP.
@@ -65,6 +66,17 @@ The tracker rotates logs at about 25 MB, with three backups per run; buttons ope
 the log directory or copy the latest JSON. Both implementations request only
 ``PROCESS_QUERY_INFORMATION | PROCESS_VM_READ``. No game calls, writes or inputs.
 
+On client build **6ada3f59-1a86000**, select ``--backend python`` to see **Player
+Tile** in the desktop tracker at 20 Hz. The Python profile for this build covers
+position. Combat telemetry uses the separate 951-3 profile. This tracker mode
+runs with standard-library Python and Tkinter. The launcher forwards
+``--backend python`` and looks for ``pythonw.exe`` in ``C:\Python39`` and on PATH.
+
+JSONL records carry ``position`` with integer ``x`` (east), ``y`` (north), and
+``plane`` (0–3). The tile is ``null`` when unavailable. For repeatable boss
+markers, record tile offsets relative to a recognizable arena landmark and
+locate that landmark each run.
+
 Layout and verification
 -----------------------
 
@@ -73,7 +85,8 @@ Layout and verification
 * ``outputs/rs3_native/tests/``: deterministic C fixtures and lifecycle checks.
 * ``outputs/rs3_reader/native.py``: typed ctypes binding; no remote-memory decoder.
 * ``outputs/rs3_reader/native_telemetry.py``: C observations to tracker/JSON schema.
-* ``outputs/rs3_reader/profile_951_3.json``: single source for hash/signatures/offsets.
+* ``outputs/rs3_reader/profile_951_3.json``: hash, signatures and offsets for combat telemetry.
+* ``outputs/rs3_reader/profile_6ada3f59.json``: hash, signatures and offsets for player tiles.
 * ``outputs/rs3_reader/winmem.py``, ``rs3.py``, ``entities.py``: Python reference backend.
 * ``outputs/rs3_reader/reader.py``, ``tracker.py``: JSONL CLI and desktop UI.
 * ``outputs/rs3_reader/research-notes.rst``: recovered structures and open questions.

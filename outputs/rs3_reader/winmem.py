@@ -53,20 +53,25 @@ INVALID_HANDLE = C.c_void_p(-1).value
 class MemoryReadError(OSError):
     pass
 
-def processes(name="rs2client.exe"):
+def processes(name="rs2client.exe", include_children=True):
     handle = _snapshot(2, 0)
     if handle == INVALID_HANDLE:
         raise C.WinError(C.get_last_error())
     entry = PROCESSENTRY32W()
     entry.dwSize = C.sizeof(entry)
+    matches = {}
     try:
         result = _process_first(handle, C.byref(entry))
         while result:
             if entry.szExeFile.lower() == name.lower():
-                yield entry.th32ProcessID
+                matches[entry.th32ProcessID] = entry.th32ParentProcessID
             result = _process_next(handle, C.byref(entry))
     finally:
         _close(handle)
+    # Compatibility Mode can launch several same-executable helper children.
+    for pid, parent in matches.items():
+        if include_children or parent not in matches:
+            yield pid
 
 @dataclass(frozen=True)
 class Module:

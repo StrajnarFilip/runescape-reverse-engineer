@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from entities import NPCReader, decode_health, decode_hit
+from rs3 import ProfileError, RS3
 from tracker import HitHistory
 from winmem import MemoryReadError
 
@@ -158,6 +159,48 @@ class EntityTests(unittest.TestCase):
         for end in (1120,1180):
             history.observe(dict(s,hit_splats={"newly_observed":[dict(hit,end_client_tick=end)]}))
         self.assertEqual([e["end_client_tick"] for e in history.events],[1120,1180])
+
+class PositionTests(unittest.TestCase):
+    def setUp(self):
+        self.profile = json.loads(Path(__file__).with_name("profile_6ada3f59.json").read_text())
+        self.profile["player_position"]["client_ptr_rva"] = "0x100"
+        self.profile["signatures"] = [{"rva": "0x108", "bytes": "488b"}]
+        self.m = m = FakeMemory()
+        m.pid = 1
+        m.identity = lambda: {"sha256": self.profile["sha256"]}
+        m.module.base = m.base
+        self.client, self.context, table, start, slot, self.actor = range(0x110000, 0x170000, 0x10000)
+        m.put(m.base+0x100, "<Q", self.client)
+        m.put(m.base+0x108, "<2s", bytes.fromhex("488b"))
+        m.put(self.client+0x19fc0, "<i", 30)
+        m.put(self.client+0x19fc8, "<Q", self.context)
+        m.put(self.client+0x19968, "<Q", table)
+        m.put(self.context, "<Q", self.client)
+        m.put(self.context+0x48, "<i", 1)
+        m.put(table+0x10, "<QQ", start, start+16)
+        m.put(start+8, "<Q", slot)
+        m.put(slot+0x38, "<Q", self.actor)
+        m.put(self.actor+0x50, "<i", 2)
+        m.put(self.actor+0x18c, "<i", 1)
+        m.put(self.actor+0x280, "<3f", 3165.5*512, 1285, 3482.5*512)
+
+    def test_tile_updates_and_clears_after_scene_exit(self):
+        reader = RS3(self.m, self.profile)
+        record = reader.snapshot(include_raw=True)
+        self.assertEqual(record["position"], {"x": 3165, "y": 3482, "plane": 2})
+        self.assertIsNone(record["health"])
+        self.m.put(self.actor+0x280, "<3f", 3166*512, 0, 3482.5*512)
+        self.assertEqual(reader.snapshot()["position"], {"x": 3166, "y": 3482, "plane": 2})
+        self.m.put(self.context+0x48, "<i", 2)
+        self.assertIsNone(reader.snapshot()["position"])
+        self.m.put(self.context+0x48, "<i", 1)
+        self.m.put(self.client+0x19fc0, "<i", 20)
+        self.assertIsNone(reader.snapshot()["position"])
+
+    def test_position_requires_matching_code_signature(self):
+        self.m.put(self.m.base+0x108, "<2s", b"\0\0")
+        with self.assertRaises(ProfileError):
+            RS3(self.m, self.profile)
 
 if __name__ == "__main__":
     unittest.main()

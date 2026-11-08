@@ -2,8 +2,8 @@ RS3 LIVE TRACKER - direct memory telemetry
 
 START
   Build the C library first; see ../rs3_native/README.rst.
-  Double-click Start Tracker.cmd on this machine (C:\Python39\pythonw.exe),
-  or run: python tracker.py
+  Double-click Start Tracker.cmd, or run python tracker.py. The launcher
+  uses pythonw.exe from C:\Python39 or PATH and forwards command-line options.
   Close the window to stop its Python consumer and native worker.
   No pip packages, injected game agent, or network server are required.
 
@@ -15,6 +15,12 @@ COLLECTION
   Use --backend python to select the original Python decoder explicitly.
   RS3_BACKEND=python selects it through the environment. RS3_NATIVE_LIBRARY can
   select an alternative DLL. Missing/mismatched DLLs fail explicitly.
+
+LIVE PLAYER TILE IN CLIENT 6ada3f59-1a86000
+  Run python tracker.py --backend python to see Player Tile at 20 Hz.
+  This profile covers position. Combat telemetry uses the 951-3 profile.
+  The JSONL position field gives x (east), y (north) and plane (0–3).
+  A null position indicates the tile is unavailable.
 
 VERIFIED FIELDS IN CLIENT 951-3
   HP/max HP: direct VARP 13537/13538.
@@ -40,9 +46,8 @@ AUDITABILITY
   All source, comments, UI and documentation use English.
 
 LIMITATIONS
-  Supported executable SHA-256:
-    fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45
-  Different hashes or loaded signatures are refused before offsets are used.
+  Supported hashes and loaded-code signatures are listed in profile_*.json.
+  Both are checked before offsets are used.
   Failed reads/process loss produce unavailable fields. Stale samples are hidden
   in the UI. Logout and world changes still need controlled live validation;
   process existence and an advancing client clock do not prove logged-in state.
@@ -57,6 +62,7 @@ LIMITATIONS
 
 CLI AND TESTS
   python reader.py --once --raw
+  python reader.py --backend python --once
   python reader.py --native-hz 500 --hz 20 --duration 60 --raw --output capture.jsonl
   python tracker.py --history PATH_TO_EARLIER_CAPTURE.jsonl
   python -m unittest discover -s . -v

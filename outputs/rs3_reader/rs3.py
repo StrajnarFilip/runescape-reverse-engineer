@@ -9,7 +9,7 @@ from pathlib import Path
 import time
 
 from winmem import MemoryReadError
-from entities import NPCReader
+from entities import NPCReader, PlayerPositionReader
 
 def number(value):
     return int(value, 0) if isinstance(value, str) else value
@@ -45,12 +45,16 @@ def decode_gcd(start, end, clock, tick_ms=20):
 class RS3:
     def __init__(self, memory, profile=None):
         self.memory = memory
-        if profile is None:
-            profile = json.loads(Path(__file__).with_name("profile_951_3.json").read_text())
-        self.profile = profile
         self.identity = memory.identity()
-        if self.identity["sha256"] != profile["sha256"]:
+        if profile is None:
+            for filename in ("profile_951_3.json", "profile_6ada3f59.json"):
+                candidate = json.loads(Path(__file__).with_name(filename).read_text())
+                if self.identity["sha256"] == candidate["sha256"]:
+                    profile = candidate
+                    break
+        if profile is None or self.identity["sha256"] != profile["sha256"]:
             raise ProfileError("Unsupported executable SHA-256; no offsets were used")
+        self.profile = profile
         for signature in profile["signatures"]:
             expected = bytes.fromhex(signature["bytes"])
             actual = memory.read(memory.module.base + number(signature["rva"]), len(expected))
@@ -59,7 +63,9 @@ class RS3:
         self._last_values = {}
         self._last_changed = {}
         self._last_clock = self._clock_changed_at = None
-        self.npc_reader = NPCReader(memory, profile)
+        self.npc_reader = NPCReader(memory, profile) if "npcs" in profile else None
+        position = profile.get("player_position")
+        self.position_reader = PlayerPositionReader(memory, position) if position else None
 
     def domain_capture(self, name):
         spec = self.profile["domains"][name]
@@ -126,8 +132,27 @@ class RS3:
         return {"value": value, "reason": None,
                 "last_change_age_ms": round((now-self._last_changed[name])*1000, 1)}
 
+    def _record(self, started, fields):
+        return {
+            "schema_version": 1, "timestamp_ms": time.time_ns()//1000000,
+            "monotonic_ms": round(time.monotonic()*1000, 3), "pid": self.memory.pid,
+            "executable_sha256": self.identity["sha256"],
+            "client_version": self.profile["version"], "source": "native_memory",
+            "status": "partial", "read_duration_ms": round((time.perf_counter()-started)*1000, 3),
+            **fields,
+        }
+
     def snapshot(self, include_raw=False):
         started = time.perf_counter()
+        if "domains" not in self.profile:
+            position = self.position_reader.read()
+            snapshot = self._record(started, {
+                "position": position, "health": None, "prayer": None,
+                "adrenaline_percent": None, "gcd": None, "telos": None, "npcs": None, "hit_splats": None,
+            })
+            if position is None:
+                snapshot.update(status="unavailable", reason="Player tile unavailable")
+            return snapshot
         player = self.domain_capture("player")
         client = self.domain_capture("client")
         if self.memory.pointer(client) != self.memory.module.base + number(self.profile["client_vtable_rva"]):
@@ -175,13 +200,8 @@ class RS3:
         except OSError as error:
             npcs = {"status": "unavailable", "entities": None, "reason": str(error)}
             hits = {"status": "unavailable", "active": None, "newly_observed": [], "reason": str(error)}
-        finished = time.perf_counter()
-        snapshot = {
-            "schema_version": 1, "timestamp_ms": time.time_ns()//1000000,
-            "monotonic_ms": round(time.monotonic()*1000, 3), "pid": self.memory.pid,
-            "executable_sha256": self.identity["sha256"],
-            "client_version": self.profile["version"], "source": "native_memory",
-            "status": "partial", "read_duration_ms": round((finished-started)*1000, 3),
+        snapshot = self._record(started, {
+            "position": self.position_reader.read() if self.position_reader else None,
             "freshness": {"observed_at_ms": time.time_ns()//1000000,
                           "client_logic_tick": logic_clock, "clock_stalled_ms": clock_stalled,
                           "server_update_age_ms": None},
@@ -194,7 +214,7 @@ class RS3:
             "telos": {"present": None, "animation_id": None, "action": None,
                       "phase": None, "stage_raw": None if raw["telos_packed"] is None else extract_bits(raw["telos_packed"],21,23),
                       "reason": "entity_mapping_pending"},
-        }
+        })
         if include_raw:
             snapshot["raw_variables"] = raw
         return snapshot

@@ -1,4 +1,4 @@
-"""Read NPC identity, transmitted HP statistics and native hitmark rings."""
+"""Read the local player's tile, NPC identity, HP statistics and hitmark rings."""
 import struct
 from winmem import MemoryReadError
 
@@ -31,6 +31,59 @@ def decode_health(current, maximum):
                 "source": "npc_stats", "reason": "invalid_stat_pair"}
     return {"current": current, "max": maximum, "percent": round(current/maximum*100, 2),
             "source": "npc_stats", "reason": None}
+
+class PlayerPositionReader:
+    def __init__(self, memory, spec):
+        self.memory = memory
+        self.spec = {name: offset(value) for name, value in spec.items()}
+
+    def _player(self):
+        m, s = self.memory, self.spec
+        client = m.pointer(m.module.base + s["client_ptr_rva"])
+        if not client or m.i32(client + s["state"]) != s["in_game_state"]:
+            return None
+        context = m.pointer(client + s["player_context"])
+        if not context or m.pointer(context) != client:
+            return None
+        player = m.pointer(context + s["player_override"])
+        if player:
+            return player
+        index = m.i32(context + s["player_index"])
+        table = m.pointer(client + s["player_table"])
+        if not table:
+            return None
+        start, end = m.unpack(table + s["table_range"], "<QQ")
+        if not start or not 0 <= index < (end-start)//8:
+            return None
+        slot = m.pointer(start + index*8)
+        return m.pointer(slot + s["slot_entity"]) if slot else None
+
+    def _sample(self):
+        m, s = self.memory, self.spec
+        player = self._player()
+        if not player:
+            return None
+        plane = m.i32(player + s["plane"])
+        size = m.i32(player + s["size"])
+        fine_x, _, fine_z = m.unpack(player + s["fine_position"], "<3f")
+        # Match the client's CoordGrid footprint origin. Fine Y is height.
+        x, y = fine_x/512 - size//2, fine_z/512 - size//2
+        if not (0 <= plane <= 3 and size >= 1 and 0 <= x < 12800 and 0 <= y < 12800):
+            return None
+        return player, int(x), int(y), plane
+
+    def read(self):
+        previous = None
+        for _ in range(4):
+            try:
+                current = self._sample()
+            except MemoryReadError:
+                current = None
+            if current is not None and current == previous:
+                _, x, y, plane = current
+                return {"x": x, "y": y, "plane": plane}
+            previous = current
+        return None
 
 class NPCReader:
     def __init__(self, memory, profile):
