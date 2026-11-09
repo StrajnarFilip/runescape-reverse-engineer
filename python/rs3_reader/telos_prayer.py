@@ -1,4 +1,4 @@
-"""Record Telos prayer timing or run one experimental F1/F2 switch cycle."""
+"""Record Telos prayer timing or try repeated experimental F1/F2 switches."""
 
 import argparse
 from contextlib import nullcontext
@@ -77,7 +77,7 @@ class ManualPrayerKeys:
 
 
 class PrayerTrial:
-    """One cue-to-Soul-Split cycle. Only a newer sample can acknowledge a key."""
+    """Re-arm after Soul Split is observed. A key needs a newer sample to acknowledge it."""
 
     def __init__(self, send):
         self.send = send
@@ -85,7 +85,11 @@ class PrayerTrial:
         self.release_ns = 0
         self.pending = None
         self.sent_ns = 0
-        self.complete = False
+        self.completed_cycles = 0
+
+    def finish_cycle(self):
+        self.target = None
+        self.completed_cycles += 1
 
     def press(self, prayer):
         self.sent_ns = self.send(prayer)
@@ -93,23 +97,19 @@ class PrayerTrial:
         return {"action": "sent", "prayer": prayer.name.lower(), "observed_ns": self.sent_ns}
 
     def step(self, target, active, sampled_ns, now, cue_ns=None, lost=0):
-        starting = self.target is None
-        if self.complete or (starting and (target is None or cue_ns is None)):
+        if self.target is None and (target is None or cue_ns is None):
             return []
-        if not target or (not starting and target != self.target):
+        if target is None or (self.target is not None and target != self.target):
             raise RuntimeError("Trial stopped because the Telos instance, scene or foreground window changed.")
         if lost or not 0 <= now - sampled_ns <= MAX_AGE_NS:
             raise RuntimeError("Trial stopped because the event stream or snapshot is stale.")
         if active == Prayer.UNKNOWN:
             raise RuntimeError("Trial stopped because the active overhead is unknown.")
 
-        self.target = target
         if cue_ns is not None:
-            if not 0 <= now - cue_ns <= MAX_AGE_NS or self.pending == Prayer.SOUL_SPLIT:
-                raise RuntimeError("Trial stopped because the melee cue is stale or Soul Split is pending.")
+            if not 0 <= now - cue_ns <= MAX_AGE_NS:
+                raise RuntimeError("Trial stopped because the melee cue is stale.")
             self.release_ns = cue_ns + MELEE_HOLD_NS
-        if starting and active != Prayer.MELEE:
-            return [self.press(Prayer.MELEE)]
 
         updates = []
         if self.pending is not None:
@@ -118,19 +118,28 @@ class PrayerTrial:
                                 "observed_ns": sampled_ns})
                 self.pending = None
                 if active == Prayer.SOUL_SPLIT:
-                    self.complete = True
-                    return updates
+                    self.finish_cycle()
+                    if cue_ns is None:
+                        return updates
             else:
+                if cue_ns is not None and self.pending == Prayer.SOUL_SPLIT:
+                    raise RuntimeError("Trial stopped because a melee cue arrived before Soul Split was acknowledged.")
                 deadline = self.release_ns if self.pending == Prayer.MELEE else self.sent_ns + SOUL_SPLIT_ACK_NS
                 if now >= deadline:
                     raise RuntimeError(f"Trial stopped because {self.pending.name.lower()} was not acknowledged.")
+                return updates
+
+        if self.target is None:
+            self.target = target
+            if active != Prayer.MELEE:
+                updates.append(self.press(Prayer.MELEE))
                 return updates
 
         if now >= self.release_ns:
             if now - self.release_ns > MAX_AGE_NS:
                 raise RuntimeError("Trial stopped because the Soul Split return is late.")
             if active == Prayer.SOUL_SPLIT:
-                self.complete = True
+                self.finish_cycle()
                 updates.append({"action": "already_active", "prayer": "soul_split", "observed_ns": sampled_ns})
             elif active == Prayer.MELEE:
                 updates.append(self.press(Prayer.SOUL_SPLIT))
@@ -213,10 +222,8 @@ def observe(reader, duration, out, enrage, keys, trial_window=None):
                 row["trial_updates"] = updates
             print(json.dumps(row), file=out, flush=True)
             previous, last_write = state, started
-        if trial and trial.complete:
-            return True
         time.sleep(max(0, started + POLL_SECONDS - time.monotonic()))
-    return False
+    return trial.completed_cycles if trial else 0
 
 
 def main():
@@ -226,7 +233,7 @@ def main():
     parser.add_argument("--enrage", type=int, help="Manually entered enrage for this capture")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--record-keys", action="store_true", help="Timestamp manual F1/F2 presses in RuneScape")
-    mode.add_argument("--trial", action="store_true", help="Run one experimental F1/F2 cycle on a fresh Telos cue")
+    mode.add_argument("--trial", action="store_true", help="Repeat experimental F1/F2 cycles on fresh Telos cues")
     parser.add_argument("--output", type=Path, help="Write a new local JSONL file instead of standard output")
     args = parser.parse_args()
     if not math.isfinite(args.duration) or args.duration <= 0:
@@ -243,11 +250,10 @@ def main():
                 message = ("Trial armed. Waiting for a fresh 28929 cue in foreground RuneScape."
                            if args.trial else "Recording Telos prayer timing. Switch prayers manually.")
                 print(message, file=sys.stderr, flush=True)
-                complete = observe(reader, args.duration, out, args.enrage, keys if args.record_keys else None,
-                                   keys.game_window if args.trial else None)
+                completed = observe(reader, args.duration, out, args.enrage, keys if args.record_keys else None,
+                                    keys.game_window if args.trial else None)
                 if args.trial:
-                    print("Trial completed." if complete else "Trial ended without a completed switch cycle.",
-                          file=sys.stderr, flush=True)
+                    print(f"Trial ended with {completed} completed switch cycle(s).", file=sys.stderr, flush=True)
     except KeyboardInterrupt:
         return
     except (OSError, RuntimeError, ValueError) as error:

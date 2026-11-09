@@ -5,8 +5,8 @@ Status
 ------
 
 The C timing planner, native prayer/animation observations, Python observer and
-C/Python/Java consumers are implemented. The separate Telos script can run one
-experimental switch cycle. A calibrated automatic Telos flicker requires
+C/Python/Java consumers are implemented. The separate Telos script can repeat
+an experimental switch cycle. A calibrated automatic Telos flicker requires
 measured prayer-check windows and attack coverage.
 
 The intended account has Soul Split. ``profiles/prayer_flick.json`` enables it
@@ -83,7 +83,7 @@ points and native sample times. Compare a cue, key press, overhead transition
 and resulting hit across multiple attacks. An HP change alone cannot establish
 the server's prayer check or distinguish overlapping hits.
 
-To try the requested 600 ms rule for a single cycle::
+To try the requested 600 ms rule on successive melee autos::
 
     python python/rs3_reader/telos_prayer.py --trial --duration 60 --output work/prayer_research/telos-trial.jsonl
 
@@ -91,11 +91,12 @@ With the game in the foreground, the trial waits for a fresh ``28929`` event
 from Telos. It presses F1 if melee protection is inactive and waits to observe
 melee protection. It attempts F2 on the first fresh sample at least 600 ms after
 the cue, skipping the key if Soul Split is already active. Another matching cue
-before the return restarts the 600 ms interval. The trial stops after observing
-Soul Split, losing its target, or encountering an unknown overhead, stale data,
-queue loss, input rejection or missed acknowledgement. The trace records key
-dispatch and overhead acknowledgement separately. The 600 ms interval is an
-experimental setting supplied by the player.
+before the return restarts the 600 ms interval. Once Soul Split is observed,
+the trial re-arms for the next cue until the duration expires or Ctrl+C stops
+it. Loss of the target or foreground window during a cycle, an unknown
+overhead, stale data, queue loss, input rejection or missed acknowledgement
+stops the trial. The trace records key dispatch and overhead acknowledgement
+separately. The 600 ms interval is an experimental setting supplied by the player.
 
 Directly available data
 -----------------------
@@ -236,7 +237,7 @@ caller. An accepted key does not establish a correct action-bar mapping or an
 unlocked prayer; confirm the actual resulting overhead.
 
 The sampler and general prayer observer only collect data. The explicit
-``telos_prayer.py --trial`` mode uses this function for a single switch cycle.
+``telos_prayer.py --trial`` mode uses this function for experimental switch cycles.
 It stops on input failure and requires a new run for another attempt.
 
 CMake builds ``prayer_example`` from ``examples/prayer.c``. Python replay is

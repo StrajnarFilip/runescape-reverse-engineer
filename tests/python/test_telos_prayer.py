@@ -10,8 +10,8 @@ MS = 1_000_000
 
 
 class TelosPrayerTests(unittest.TestCase):
-    def test_trial_waits_for_new_observations_and_returns_at_600_ms(self):
-        send = Mock(side_effect=[1000 * MS + 1, 1600 * MS + 1])
+    def test_trial_waits_for_ack_and_repeats_the_600_ms_cycle(self):
+        send = Mock(side_effect=[t * MS + 1 for t in (1000, 1600, 2000, 2600)])
         trial = PrayerTrial(send)
         target = (1, 2, 3)
         trial.step(target, Prayer.SOUL_SPLIT, 999 * MS, 1000 * MS, 1000 * MS)
@@ -25,8 +25,29 @@ class TelosPrayerTests(unittest.TestCase):
         self.assertEqual(send.call_args.args, (Prayer.SOUL_SPLIT,))
         self.assertEqual(trial.step(target, Prayer.MELEE, 1619 * MS, 1620 * MS), [])
         trial.step(target, Prayer.SOUL_SPLIT, 1629 * MS, 1630 * MS)
-        self.assertTrue(trial.complete)
+        self.assertEqual(trial.completed_cycles, 1)
+        self.assertEqual(trial.step(target, Prayer.SOUL_SPLIT, 1700 * MS, 1700 * MS), [])
         self.assertEqual(send.call_count, 2)
+        trial.step(target, Prayer.SOUL_SPLIT, 1999 * MS, 2000 * MS, 2000 * MS)
+        trial.step(target, Prayer.MELEE, 2019 * MS, 2020 * MS)
+        self.assertEqual(trial.step(target, Prayer.MELEE, 2598 * MS, 2599 * MS), [])
+        trial.step(target, Prayer.MELEE, 2599 * MS, 2600 * MS)
+        trial.step(target, Prayer.SOUL_SPLIT, 2629 * MS, 2630 * MS)
+        self.assertEqual(trial.completed_cycles, 2)
+        self.assertEqual([call.args[0] for call in send.call_args_list],
+                         [Prayer.MELEE, Prayer.SOUL_SPLIT] * 2)
+
+    def test_new_cue_can_share_the_soul_split_acknowledgement_sample(self):
+        send = Mock(side_effect=[1600 * MS + 1, 1630 * MS + 1])
+        trial = PrayerTrial(send)
+        target = (1, 2, 3)
+        trial.step(target, Prayer.MELEE, 999 * MS, 1000 * MS, 1000 * MS)
+        trial.step(target, Prayer.MELEE, 1599 * MS, 1600 * MS)
+        updates = trial.step(target, Prayer.SOUL_SPLIT, 1629 * MS, 1630 * MS, 1630 * MS)
+        self.assertEqual([update["action"] for update in updates], ["acknowledged", "sent"])
+        self.assertEqual(trial.completed_cycles, 1)
+        self.assertEqual(trial.release_ns, 2230 * MS)
+        self.assertEqual(trial.pending, Prayer.MELEE)
 
     def test_already_active_prayers_are_not_toggled(self):
         send = Mock()
@@ -37,7 +58,8 @@ class TelosPrayerTests(unittest.TestCase):
         self.assertEqual(trial.step(target, Prayer.MELEE, 1599 * MS, 1600 * MS), [])
         trial.step(target, Prayer.SOUL_SPLIT, 1899 * MS, 1900 * MS)
         send.assert_not_called()
-        self.assertTrue(trial.complete)
+        self.assertEqual(trial.completed_cycles, 1)
+        self.assertIsNone(trial.target)
 
     def test_trial_stops_after_missing_ack_or_focus(self):
         target = (1, 2, 3)
