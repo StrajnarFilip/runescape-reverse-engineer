@@ -30,8 +30,8 @@ Current capabilities
 * Direct overhead-prayer flags, raw NPC animation sequences and a native NPC
   action event queue on both supported executables, plus a C prayer timing
   planner with Soul Split support. See
-  `Prayer timing <docs/prayer-flick.rst>`_ for the observer/replay commands and
-  remaining Telos calibration. Automatic live flicking is not yet enabled.
+  `Prayer timing <docs/prayer-flick.rst>`_ for the observer, replay and
+  experimental one-cycle Telos trial.
 
 Previously verified in live combat: Goblin **550/550 HP**, Giant spider
 **1000/1000 HP**, and Goblin **550 -> 326 HP** alongside the independently reported

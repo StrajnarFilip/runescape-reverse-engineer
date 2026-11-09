@@ -5,9 +5,9 @@ Status
 ------
 
 The C timing planner, native prayer/animation observations, Python observer and
-C/Python/Java consumers are implemented. **A calibrated automatic Telos flicker
-is not yet implemented.** The command-line observer never sends input. Raw NPC
-animation IDs do not establish an attack style, target or prayer-check time.
+C/Python/Java consumers are implemented. The separate Telos script can run one
+experimental switch cycle. A calibrated automatic Telos flicker requires
+measured prayer-check windows and attack coverage.
 
 The intended account has Soul Split. ``profiles/prayer_flick.json`` enables it
 and records the user's bindings: Ctrl+F1 Magic, Ctrl+F2 Ranged, Ctrl+F3 Soul Split,
@@ -81,9 +81,21 @@ Very short key presses can fall between samples.
 Rows include all observed Telos action applications, current animation, life
 points and native sample times. Compare a cue, key press, overhead transition
 and resulting hit across multiple attacks. An HP change alone cannot establish
-the server's prayer check or distinguish overlapping hits. Automatic switching
-requires measured protection and release windows, plus verified coverage of
-the attacks that can occur during a proposed Soul Split window.
+the server's prayer check or distinguish overlapping hits.
+
+To try the requested 600 ms rule for a single cycle::
+
+    python python/rs3_reader/telos_prayer.py --trial --duration 60 --output work/prayer_research/telos-trial.jsonl
+
+With the game in the foreground, the trial waits for a fresh ``28929`` event
+from Telos. It presses F1 if melee protection is inactive and waits to observe
+melee protection. It attempts F2 on the first fresh sample at least 600 ms after
+the cue, skipping the key if Soul Split is already active. Another matching cue
+before the return restarts the 600 ms interval. The trial stops after observing
+Soul Split, losing its target, or encountering an unknown overhead, stale data,
+queue loss, input rejection or missed acknowledgement. The trace records key
+dispatch and overhead acknowledgement separately. The 600 ms interval is an
+experimental setting supplied by the player.
 
 Directly available data
 -----------------------
@@ -223,9 +235,9 @@ User-held modifiers cause rejection. Input calls should be serialized by their
 caller. An accepted key does not establish a correct action-bar mapping or an
 unlocked prayer; confirm the actual resulting overhead.
 
-The sampler and observer never invoke this function. The live attack adapter
-must be completed before automatic dispatch is enabled. A failed/partially
-accepted input must trigger re-observation, not an unconditional retry.
+The sampler and general prayer observer only collect data. The explicit
+``telos_prayer.py --trial`` mode uses this function for a single switch cycle.
+It stops on input failure and requires a new run for another attempt.
 
 CMake builds ``prayer_example`` from ``examples/prayer.c``. Python replay is
 shown above. The Java 22+ FFM example verifies layouts before invoking C::
