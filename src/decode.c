@@ -5,6 +5,8 @@
 
 #include "profile_generated.h"
 
+/* Resolve the selected domain through the registry's callback object.
+ * Verify its handler before trusting the captured context pointer. */
 int capture(rs3_context *c,int client,uint64_t *out) {
     uint64_t node,visited[64]; unsigned n=0;
     uint32_t id=client?P_CLIENT_ID:P_PLAYER_ID;
@@ -28,6 +30,7 @@ int capture(rs3_context *c,int client,uint64_t *out) {
 }
 int variable(rs3_context *c,uint64_t table,uint64_t count,uint64_t sentinel,uint32_t id,int64_t *value,int *present) {
     uint64_t node,visited[1024]; unsigned n=0; *present=0;
+    // An absent sparse entry leaves present clear and still counts as a successful read.
     if (!rd(c,table+(id%count)*8,&node,8)) return 0;
     while (node && node!=sentinel) {
         if (n==1024) return fail(c,RS3_READ_FAILED,"Variable chain exceeds its bound");
@@ -35,6 +38,7 @@ int variable(rs3_context *c,uint64_t table,uint64_t count,uint64_t sentinel,uint
         visited[n++]=node; unsigned char b[48]; uint32_t check;
         if (!rd(c,node,b,sizeof b)) return 0;
         if (u32(b)==id) {
+            // The node tag selects a signed 32-bit or 64-bit payload at the same offset.
             if (b[32]==0) *value=i32(b+8);
             else if (b[32]==1) memcpy(value,b+8,8);
             else return fail(c,RS3_READ_FAILED,"Non-numeric gameplay variable");
@@ -54,6 +58,7 @@ static int variable_tables(rs3_context *c,rs3_player *p,uint64_t player,uint64_t
         table=u64(b); count=u64(b+8);
         if (!table || count<1 || count>1000000) return fail(c,RS3_READ_FAILED,"Variable table unavailable");
         if (!rd(c,table+count*8,&sentinel,8)) return 0;
+        // The two client-clock GCD variables live in VarClient. The rest use the player table.
         for (unsigned i=0;i<RS3_VARIABLE_COUNT;i++) if ((i==7 || i==8)==(domain!=0)) {
             int present;
             if (!variable(c,table,count,sentinel,p_variable_ids[i],p->raw_variables+i,&present)) return 0;
@@ -93,6 +98,7 @@ int decode(rs3_context *c,rs3_snapshot *s) {
     }
     s->info.status=RS3_AVAILABLE;
     int npc_ok=0; uint32_t ids[1024],npc_count=0; uint64_t npc_manager=0;
+    // Retry a changing NPC list once. Other NPC failures leave the player fields usable.
     for (unsigned attempt=0;attempt<2;attempt++) {
         if (npcs_once(c,s,state,ids,&npc_count,&npc_manager)) { npc_ok=1; break; }
         if (strcmp(c->error,"NPC list changed during read")) break;
@@ -114,6 +120,8 @@ int decode(rs3_context *c,rs3_snapshot *s) {
         c->clock_context=state; c->last_clock=s->info.logic_tick; c->clock_changed=now;
     }
     p->clock_stalled_ns=now-c->clock_changed;
+    // Track observation times for HP, prayer points and adrenaline. Mask out
+    // the other bits in the packed prayer variable before comparing values.
     unsigned indices[3]={0,2,3}; uint64_t *changes[3]={&p->hp_changed_ns,&p->prayer_changed_ns,&p->adrenaline_changed_ns};
     for (unsigned j=0;j<3;j++) {
         unsigned i=indices[j]; uint32_t bit=1u<<j;

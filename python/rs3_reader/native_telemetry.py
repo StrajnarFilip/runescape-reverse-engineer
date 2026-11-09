@@ -41,8 +41,10 @@ class NativeTelemetry:
 
     def sample(self, include_raw=False):
         info, player, npcs, hits = self.reader.sample()
+        # Drain independently of frame availability so earlier observations survive a failed sample.
         events, lost = self.reader.drain_events()
         new_events = [event_record(e) for e in events]
+        # Snapshot age uses the same native monotonic clock as the sample timestamp.
         native = {"sample_sequence": info.sequence, "worker_hz": self.reader.worker_hz,
                   "sample_duration_ms": round(info.sample_duration_ns/1e6, 3),
                   "read_calls": info.read_calls, "read_bytes": info.read_bytes,
@@ -73,6 +75,7 @@ class NativeTelemetry:
                     "last_change_age_ms": None if value is None else
                     round(max(0, info.monotonic_ns-changed)/1e6, 1)}
 
+        # The low 15 bits contain prayer points in tenths. Adrenaline is in tenths of a percent.
         prayer = None if raw["prayer_packed"] is None else (raw["prayer_packed"] & 32767)/10
         adrenaline = None if raw["adrenaline"] is None else raw["adrenaline"]/10
         entities, active = [], []
@@ -88,6 +91,7 @@ class NativeTelemetry:
                     "config_id": npc.config_id if npc.flags & 2 else None,
                     "name": text(npc.name) if npc.flags & 1 else None,
                     "health": health, "hit_splats": []}
+            # Each NPC references a slice of the snapshot's shared hit buffer.
             for j in range(npc.hit_offset, npc.hit_offset+npc.hit_count):
                 hit = hit_record(hits[j])
                 item["hit_splats"].append(hit)
@@ -123,6 +127,7 @@ class NativeTelemetry:
             "hit_splats": {"status": npc_status, "active": None if npc_status == "unavailable" else active,
                            "newly_observed": new_events, "events_lost": lost, "reason": reason,
                            "coverage": "sampled_client_hitmark_rings", "attacker_identity": "not_available"},
+            # Preserve the packed stage bits for research while the entity mapping is pending.
             "telos": {"present": None, "animation_id": None, "action": None, "phase": None,
                       "stage_raw": None if raw["telos_packed"] is None else (raw["telos_packed"] >> 21) & 7,
                       "reason": "entity_mapping_pending"},

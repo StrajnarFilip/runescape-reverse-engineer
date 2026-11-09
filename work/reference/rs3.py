@@ -30,6 +30,7 @@ def extract_bits(value, lsb, msb):
     return ((value & 0xffffffff) >> lsb) & ((1 << (msb-lsb+1)) - 1)
 
 def signed_delta(a, b):
+    # Interpret the wrapped 32-bit difference as a signed interval.
     return ((a-b+0x80000000) & 0xffffffff)-0x80000000
 
 def decode_gcd(start, end, clock, tick_ms=20):
@@ -82,6 +83,7 @@ class RS3:
                 handler = self.memory.pointer(vtable + 16)
                 if handler != self.memory.module.base + number(spec["handler_rva"]):
                     raise ProfileError("Domain callback does not match the profile")
+                # The registered callback carries the context pointer in its captured state.
                 capture = self.memory.pointer(function + self.profile["function_capture_offset"])
                 if not capture:
                     raise MemoryReadError("Domain context unavailable")

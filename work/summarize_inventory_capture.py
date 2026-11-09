@@ -14,6 +14,7 @@ data=source.read_bytes()
 rows=[json.loads(line) for line in data.decode().splitlines() if line]
 items=[];timers=[];adjustments=[];pairs={};equipment=[]
 for row in rows:
+    # Capture rows omit unchanged gear, so keep the last recorded equipment list.
     if "equipment" in row:
         equipment=row["equipment"] or []
     for e in row["inventory_changes"]["newly_observed"]:
@@ -34,6 +35,7 @@ for row in rows:
         pair=(cd["start_tick"],cd["end_tick"])
         old=pairs.get(a["name"])
         running=cd["remaining_ms"] is not None and cd["remaining_ms"]>0
+        # Track changed endpoints while a timer is running across observations.
         if old and old[1] and running and all(x is not None for x in (*old[0],*pair)) and old[0]!=pair:
             adjustments.append({"name":a["name"],"observed_at_ms":row["timestamp_ms"],"before_start_end_ticks":old[0],
                                 "after_start_end_ticks":pair,"remaining_ms":cd["remaining_ms"],

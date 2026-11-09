@@ -53,6 +53,7 @@ def main():
             parser.error("The combat benchmark requires a verified 951-3 client")
         for _ in range(5):
             python.sample(True); native.sample(True)
+        # Bracket each native sample with reference reads to filter out observed scene changes.
         for _ in range(args.pairs):
             start = time.perf_counter_ns(); before = python.sample(True)
             durations_py.append((time.perf_counter_ns()-start)/1e6)

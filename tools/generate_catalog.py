@@ -58,6 +58,7 @@ def main():
                 families[iid]=candidate
     for iid in ambiguous:
         del families[iid]  # Unknown is safer than assigning a conflicting family.
+    # Pool repeated names and reserve offset zero for the empty string.
     strings=bytearray(b"\0");offsets={"":0}
     def string(value):
         value=value or ""
@@ -96,6 +97,7 @@ def main():
         style=1 if parent in (1,2) else (2 if parent==3 else (3 if parent==4 else (4 if parent==29 else 0)))
         if d.get("target_type")!=1 and not requirements:
             style=0  # Self/movement actions do not inherit a weapon style from their ability book.
+        # Only VarClient pairs use the clock sampled by the runtime.
         source=1 if (d["timer_source"] or '').startswith("client_symbol_pair") else 0
         ability_records.append(struct.pack("<IIiiIIIIIIII",d["struct_id"],string(d["name"]),d["start_var"] if source else -1,
             d["end_var"] if source else -1,d["base_cooldown_ms"],requirements,style,source,

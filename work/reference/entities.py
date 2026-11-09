@@ -72,6 +72,7 @@ class PlayerPositionReader:
             return None
         return player, int(x), int(y), plane
 
+    # Require two consecutive observations of the same player and tile.
     def read(self):
         previous = None
         for _ in range(4):
@@ -101,6 +102,8 @@ class NPCReader:
 
     def string(self, address):
         data = self.memory.read(address, 24)
+        # The high bit selects pointer-backed storage. Otherwise the tag gives
+        # the unused byte count for the inline name.
         tag = data[23]
         size = struct.unpack_from("<Q", data, 8)[0] if tag & 128 else 23-tag
         if not 0 <= size <= 512:
@@ -150,6 +153,7 @@ class NPCReader:
             if decoded is not None:
                 decoded["slot"] = slot
                 hits.append(decoded)
+        # Check that the actor still owns the same ring and the payload stayed stable.
         if (memory.pointer(actor+offset(spec["hitmarks_offset"])) != ring or memory.read(ring+24, 16) != header[24:40]
                 or (count and memory.read(data, count*24) != raw)):
             raise MemoryReadError("NPC hitmark ring changed while reading")
@@ -189,6 +193,7 @@ class NPCReader:
             raise MemoryReadError("NPC table unavailable")
         sentinel = memory.unpack(table+buckets*8, "<Q")[0]
         entities, active, newly_observed, errors = [], [], [], 0
+        # Stage identity and hit updates until the loaded NPC list is rechecked.
         instances = {}
         pending_seen = {}
         for uid in ids:
@@ -230,6 +235,7 @@ class NPCReader:
                         newly_observed.append(event)
             except OSError:
                 errors += 1
+                # An unreadable actor may still be present in the loaded list.
                 if uid in self.instances:
                     instances[uid] = self.instances[uid]
         after_count = memory.u32(manager+offset(spec["count_offset"]))

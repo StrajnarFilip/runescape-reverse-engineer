@@ -24,6 +24,7 @@ int32_t project_minimap_tile(const rs3_position *position, const rs3_minimap *ma
         !isfinite(map->east_dx) || !isfinite(map->east_dy) ||
         !isfinite(map->north_dx) || !isfinite(map->north_dy)) return RS3_E_ARGUMENT;
 
+    // The two tile axes must span an area on screen.
     double determinant = map->east_dx * map->north_dy - map->east_dy * map->north_dx;
     if (!isfinite(determinant) || determinant == 0.0) return RS3_E_ARGUMENT;
 
@@ -31,6 +32,7 @@ int32_t project_minimap_tile(const rs3_position *position, const rs3_minimap *ma
         position->plane != map->anchor.plane) return RS3_E_STATE;
     if (plane != position->plane) return RS3_E_TARGET;
 
+    // Apply the calibrated screen displacement for each world-axis step.
     int32_t east = x - position->x, north = y - position->y;
     double px = round(map->screen_x + east * map->east_dx + north * map->north_dx);
     double py = round(map->screen_y + east * map->east_dy + north * map->north_dy);
@@ -57,6 +59,8 @@ static int32_t send_to_game(const rs3_snapshot *s, HWND window, INPUT *events, U
     if (!process) return RS3_E_TARGET;
     DWORD exit_code;
     int32_t result = RS3_E_TARGET;
+    // Creation time distinguishes a restarted client whose PID was reused.
+    // Recheck foreground ownership immediately before sending input.
     if (process_creation_time(process) == s->info.process_creation_time &&
         GetExitCodeProcess(process, &exit_code) && exit_code == STILL_ACTIVE &&
         GetForegroundWindow() == window && window_pid_matches(window, s->info.pid)) {
@@ -85,6 +89,7 @@ static int point_in_client(HWND window, DWORD pid, POINT point) {
     RECT clip;
     if (!GetWindowInfo(window, &info) || !PtInRect(&info.rcClient, point) ||
         !GetClipCursor(&clip) || !PtInRect(&clip, point)) return 0;
+    // A point within the client rectangle can still be covered by another window.
     HWND hit = WindowFromPhysicalPoint(point);
     return window_pid_matches(hit, pid) && GetAncestor(hit, GA_ROOT) == window;
 }
@@ -103,6 +108,7 @@ static int32_t click_game(const rs3_snapshot *s, POINT point, int secondary) {
         GetAsyncKeyState(VK_RBUTTON) < 0 || GetAsyncKeyState(VK_MBUTTON) < 0)
         return RS3_E_STATE;
 
+    // Use physical pixels for hit-testing and the virtual desktop bounds.
     DPI_AWARENESS_CONTEXT prior = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE);
     if (!prior) return RS3_E_OS;
     int inside = point_in_client(window, s->info.pid, point);

@@ -11,12 +11,14 @@
 
 uint64_t monotonic_ns(void) {
     LARGE_INTEGER c,f; QueryPerformanceCounter(&c); QueryPerformanceFrequency(&f);
+    // Scale whole seconds separately to avoid multiplying the full counter by one billion.
     return (uint64_t)(c.QuadPart/f.QuadPart)*1000000000ull+
            (uint64_t)(c.QuadPart%f.QuadPart)*1000000000ull/(uint64_t)f.QuadPart;
 }
 uint64_t unix_ns(void) {
     FILETIME t; ULARGE_INTEGER x; GetSystemTimePreciseAsFileTime(&t);
     x.LowPart=t.dwLowDateTime; x.HighPart=t.dwHighDateTime;
+    // FILETIME counts 100 ns intervals from 1601. Shift to the Unix epoch.
     return (x.QuadPart-116444736000000000ull)*100ull;
 }
 uint64_t process_creation_time(HANDLE process) {
@@ -32,6 +34,7 @@ int windows_read(void *user,uint64_t address,void *out,size_t size) {
     return ReadProcessMemory(c->process,(const void*)(uintptr_t)address,out,size,&got) && got==size;
 }
 int rd(rs3_context *c,uint64_t a,void *out,size_t n) {
+    // Count attempted reads, including failures, for the per-sample diagnostics.
     c->calls++; c->bytes+=n;
     if (!pointer_valid(a) || !n || n>16*1024*1024 || n>0x7fffffffffffULL-a ||
         !c->read(c->read_user,a,out,n)) return fail(c,RS3_READ_FAILED,"Process-memory read failed");
@@ -102,6 +105,7 @@ static BOOL CALLBACK consider_client_window(HWND window, LPARAM param) {
     if (!GetWindowThreadProcessId(window, &pid)) return TRUE;
     for (size_t i = 0; i < selection->count; i++) {
         if (selection->pids[i] != pid) continue;
+        // Prefer the foreground game window, with the lowest eligible PID as the fallback.
         if (GetWindowTextLengthW(window) > 0 &&
             (!selection->selected_pid || pid == selection->foreground_pid ||
              (selection->selected_pid != selection->foreground_pid && pid < selection->selected_pid))) {

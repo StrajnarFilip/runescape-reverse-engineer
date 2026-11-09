@@ -43,6 +43,7 @@ typedef struct npc_identity {
     rs3_hit previous[64];
 } npc_identity;
 
+/* The decoder uses the same bounded read path for live memory and test fixtures. */
 typedef int (*read_callback)(void *user, uint64_t address, void *out, size_t size);
 
 struct rs3_context {
@@ -69,9 +70,11 @@ struct rs3_context {
     inventory_state *inventory;
 };
 
+/* Client fields may be unaligned inside the bulk-read byte buffers. */
 static inline uint32_t u32(const void *p) { uint32_t v; memcpy(&v,p,4); return v; }
 static inline int32_t i32(const void *p) { int32_t v; memcpy(&v,p,4); return v; }
 static inline uint64_t u64(const void *p) { uint64_t v; memcpy(&v,p,8); return v; }
+/* Subtract before interpreting the sign so nearby ticks can span a 32-bit wrap. */
 static inline int32_t tick_delta(uint32_t a,uint32_t b) { return (int32_t)(a-b); }
 static inline int pointer_valid(uint64_t p) { return p >= 0x10000 && p < 0x7fffffffffffULL; }
 static inline int valid_utf8(const char *s,uint32_t n) {

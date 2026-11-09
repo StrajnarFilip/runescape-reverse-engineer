@@ -58,6 +58,7 @@ int catalog_load_wide(inventory_state *v,const wchar_t *path) {
             last=id;
         }
     }
+    // Publish the new backing buffer only after validating all records and string offsets.
     free(v->catalog);v->catalog=data;data=NULL;v->catalog_size=(size_t)size.QuadPart;
     v->item_count=ni;v->ability_count=na;v->strings_size=ns;
     v->item_defs=v->catalog+88;v->ability_defs=v->item_defs+ni*40;v->strings=(const char*)v->ability_defs+na*48;
@@ -76,6 +77,7 @@ void inventory_default_catalog(rs3_context *c) {
 }
 static void catalog_name(char out[128],const inventory_state *v,uint32_t offset) {
     const char *name=v->strings+offset;size_t n=strlen(name);if(n>127)n=127;
+    // Truncate on a UTF-8 character boundary when the ABI name field fills up.
     while(n && !valid_utf8(name,(uint32_t)n))n--;
     memcpy(out,name,n);out[n]=0;
 }
@@ -107,6 +109,8 @@ static int inventory_slots(rs3_context *c,rs3_snapshot *s,uint64_t state) {
         const unsigned char *r=v->entries+offset;uint32_t key=u32(r);
         if (offset && key <= last_key) return fail(c, RS3_READ_FAILED, "Unsorted inventory registry");
         last_key = key;
+        // Keys encode the container ID in the upper bits and a flag in bit zero.
+        // The ordinary backpack and equipment entries have that flag clear.
         if(key!=186 && key!=188)continue;
         uint32_t id=key/2,expected=id==93?28:19;
         uint64_t data=u64(r+24),stop=u64(r+32),capacity=u64(r+40);
@@ -127,6 +131,7 @@ static int inventory_slots(rs3_context *c,rs3_snapshot *s,uint64_t state) {
         }
         found|=id==93?1u:2u;
     }
+    // The registry and its manager must still match after reading both slot vectors.
     if(!rd(c,manager+8,after,24) || memcmp(header,after,24) ||
        (size && (!rd(c,begin,v->checked_entries,size) || memcmp(v->entries,v->checked_entries,size))))
         return fail(c,RS3_READ_FAILED,"Inventory registry changed during read");
@@ -153,6 +158,7 @@ static int variable_node_page(rs3_context *c,uint64_t address,unsigned char out[
  * node values in a second page pass: torn/reused entries remain unknown. */
 static int inventory_timers(rs3_context *c,uint64_t client) {
     inventory_state *v=c->inventory;unsigned char header[16],check[16];
+    // Build a lookup of timer IDs referenced by the catalog before walking the table.
     memset(v->wanted,0,sizeof v->wanted);memset(v->present,0,sizeof v->present);
     memset(v->page_bases,0,sizeof v->page_bases);unsigned selected=0;
     for(uint32_t i=0;i<v->ability_count;i++) {
@@ -183,6 +189,7 @@ static int inventory_timers(rs3_context *c,uint64_t client) {
         }
     }
     memset(v->page_bases,0,sizeof v->page_bases);
+    // Re-read only the selected nodes with an empty page cache.
     for(unsigned i=0;i<selected;i++) {
         unsigned char data[48];uint32_t id=v->selected_ids[i];int64_t value=0;
         if(!variable_node_page(c,v->selected_addresses[i],data))return 0;
@@ -194,6 +201,7 @@ static int inventory_timers(rs3_context *c,uint64_t client) {
     return 1;
 }
 static uint32_t equipment_match(const rs3_snapshot *s,const rs3_ability *a) {
+    // This check evaluates the sampled gear against definition requirements.
     if((s->inventory_info.flags&3)!=3)return RS3_EQUIPMENT_UNKNOWN;
     const rs3_item *main=NULL,*off=NULL;
     for(uint32_t i=0;i<RS3_MAX_ITEMS;i++)if(s->items[i].container_id==94) {
@@ -239,6 +247,8 @@ void inventory_stage(rs3_context *c,rs3_snapshot *s,uint64_t client,uint64_t sta
         a.struct_id=u32(r);a.start_var=i32(r+8);a.end_var=i32(r+12);a.base_cooldown_ms=u32(r+16);
         a.requirements=u32(r+20);a.combat_style=u32(r+24);a.timer_source=u32(r+28);a.level_requirement=u32(r+32);
         a.adrenaline_requirement_raw=u32(r+36);a.flags=(u32(r+44)&1?2u:0u)|(u32(r+44)&2?4u:0u);catalog_name(a.name,v,u32(r+4));
+        // A mapped timer can still be absent from the sparse table.
+        // A valid expired interval is what yields a zero countdown.
         a.reason=a.timer_source?RS3_NOT_SET:RS3_UNMAPPED_TIMER;
         if(timers_ok && a.timer_source && v->present[a.start_var] && v->present[a.end_var]) {
             a.start_tick=(uint32_t)v->values[a.start_var];a.end_tick=(uint32_t)v->values[a.end_var];
@@ -268,6 +278,8 @@ void inventory_commit(rs3_context *c,rs3_snapshot *s,uint64_t world) {
     inventory_state *v=c->inventory;
     if((s->inventory_info.flags&3)!=3)return;
     if(v->world!=world || v->manager!=v->staged_manager){inventory_reset(v);v->world=world;v->manager=v->staged_manager;}
+    // matched maps each current slot to its previous slot. used prevents a
+    // previous item from being matched or reported as removed twice.
     int matched[RS3_MAX_ITEMS],used[RS3_MAX_ITEMS]={0};
     for(unsigned i=0;i<RS3_MAX_ITEMS;i++)matched[i]=-1;
     if(v->previous_valid) {
@@ -278,9 +290,11 @@ void inventory_commit(rs3_context *c,rs3_snapshot *s,uint64_t world) {
             unsigned n=0,index=0,targets=0;
             for(unsigned j=0;j<RS3_MAX_ITEMS;j++)if(!used[j] && same_item(v->previous+j,s->items+i,(int)pass)){n++;index=j;}
             if(n==1)for(unsigned k=0;k<RS3_MAX_ITEMS;k++)if(matched[k]<0 && same_item(v->previous+index,s->items+k,(int)pass))targets++;
+            // Preserve the token only when the candidate is unique in both directions.
             if(n==1 && targets==1){matched[i]=(int)index;used[index]=1;}
             else if(n || targets)s->items[i].flags|=RS3_ITEM_AMBIGUOUS_IDENTITY;
         }
+        // Give a same-slot quantity change a chance after resolving moves and doses.
         for(unsigned i=0;i<RS3_MAX_ITEMS;i++)if(matched[i]<0 && !used[i] && s->items[i].item_id>=0 &&
             s->items[i].item_id==v->previous[i].item_id){matched[i]=(int)i;used[i]=1;}
     }

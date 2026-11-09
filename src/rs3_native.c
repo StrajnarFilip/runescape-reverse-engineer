@@ -30,6 +30,7 @@ _Static_assert(sizeof(rs3_item)==192, "ABI item layout");
 _Static_assert(sizeof(rs3_ability)==192, "ABI ability layout");
 _Static_assert(sizeof(rs3_item_event)==424, "ABI item event layout");
 
+/* Copy only populated array prefixes. The frame counts define which entries are valid. */
 static void copy_frame(rs3_snapshot *to,const rs3_snapshot *from) {
     to->info=from->info; to->player=from->player;
     to->profile = from->profile;
@@ -57,6 +58,7 @@ static void poll_and_publish(rs3_context *c,rs3_snapshot *s) {
         fail(c,c->retry_reason,c->retry_error);
     }
     int decoded = ready && decode(c, s);
+    // Discard staged combat fields when the decode failed and clear their freshness baseline.
     if (!decoded) {
         if (!c->reason) fail(c,RS3_NO_CLIENT,"Waiting to reconnect to RS3");
         s->info.status=RS3_UNAVAILABLE; s->info.reason=c->reason;
@@ -69,6 +71,7 @@ static void poll_and_publish(rs3_context *c,rs3_snapshot *s) {
         snprintf(s->info.message,sizeof s->info.message,"%s",c->error);
         if (c->reason==RS3_UNSUPPORTED_CLIENT && c->attached) schedule_retry(c,begin);
     }
+    // Position can still provide a partial observation when combat decoding fails.
     if (c->profile && c->profile->has_position && decode_position(c, &s->position) && !decoded)
         s->info.status = RS3_PARTIAL;
     s->info.pid=c->pid; s->info.process_creation_time=c->creation_time;
@@ -86,6 +89,8 @@ static DWORD WINAPI worker_main(void *argument) {
     while (WaitForSingleObject(c->stop_event,0)!=WAIT_OBJECT_0) {
         poll_and_publish(c,c->working); deadline+=period;
         uint64_t now=monotonic_ns();
+        // Drop missed deadlines to avoid a burst of catch-up samples.
+        // A negative due time is relative and uses 100 ns units.
         if (now>=deadline) { deadline=now; continue; }
         LARGE_INTEGER due; due.QuadPart=-(LONGLONG)((deadline-now+99)/100);
         if (!SetWaitableTimer(c->timer,&due,0,NULL,NULL,FALSE)) break;
@@ -139,6 +144,7 @@ int32_t rs3_start(rs3_context *c,uint32_t hz) {
     AcquireSRWLockExclusive(&c->control);
     if (c->worker) { ReleaseSRWLockExclusive(&c->control); return RS3_E_STATE; }
     c->stop_event=CreateEventW(NULL,TRUE,FALSE,NULL);
+    // Try a high-resolution timer first, then fall back to a regular waitable timer.
     c->timer=CreateWaitableTimerExW(NULL,NULL,2,TIMER_ALL_ACCESS);
     if (!c->timer) c->timer=CreateWaitableTimerExW(NULL,NULL,0,TIMER_ALL_ACCESS);
     c->hz=hz;
@@ -218,6 +224,8 @@ int32_t rs3_events_since(rs3_context *c,uint64_t after,rs3_event *out,uint32_t c
     *written=0; *lost=0; *next=after;
     if (after>latest) { ReleaseSRWLockShared(&c->events_lock); return RS3_E_ARGUMENT; }
     uint64_t first=after+1;
+    // Report overwritten sequences before copying retained events. A zero-capacity
+    // call can still advance the cursor past the gap.
     if(first<oldest){*lost=oldest-first; first=oldest; *next=oldest-1;}
     while(first<=latest && *written<capacity) { out[(*written)++]=c->events[(first-1)%EVENT_CAPACITY]; *next=first++; }
     ReleaseSRWLockShared(&c->events_lock); return RS3_OK;

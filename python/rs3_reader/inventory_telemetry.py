@@ -5,6 +5,7 @@ CHANGES = {1: "added", 2: "removed", 3: "moved", 4: "replaced", 5: "quantity_cha
 
 
 def item_record(item):
+    # Negative IDs mark explicit empty slots. A missing container is handled separately.
     empty = item.item_id<0
     return {"container_id": item.container_id, "slot": item.slot, "slot_number": item.slot+1,
             "item_id": None if empty else item.item_id, "quantity": item.quantity, "empty": empty,
@@ -32,6 +33,7 @@ def extend_record(record, reader):
                            "catalog_status": "available" if info.catalog_status==1 else "unavailable",
                            "slot_indexing": "zero_based_native_order"}
     equipment = [i for i in items if i["container_id"]==94]
+    # Main and off hand use native logical slots 3 and 5 in container 94.
     main = next((i for i in equipment if i["slot"]==3), None)
     off = next((i for i in equipment if i["slot"]==5), None)
     configuration = "unknown"
@@ -53,6 +55,8 @@ def extend_record(record, reader):
     abilities = []
     for i in range(info.ability_count):
         a = reader.abilities[i]
+        # Separate flags mark observed timing and definition timing. Zero remaining
+        # time means the live timer expired only when the timer-valid flag is set.
         abilities.append({"struct_id": a.struct_id, "name": a.name.decode("utf-8"), "in_ability_book": bool(a.flags&2),
             "cooldown": {"remaining_ms": a.remaining_ms if a.flags&1 else None,
                          "observed_duration_ms": a.duration_ms if a.flags&1 else None,

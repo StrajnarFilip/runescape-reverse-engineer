@@ -71,6 +71,7 @@ def generate(data, position_data):
     for key, value in position_profile["player_position"].items():
         lines.append(f"#define POS_{key.upper()} {number(value):#x}u")
 
+    # Keep this order aligned with the C validity bits and Python field names.
     ids = ", ".join(f"{profile['variables'][key]}u" for key in VARIABLES)
     lines.append(f"static const uint32_t p_variable_ids[] = {{{ids}}};")
     lines.extend(signatures(profile, "p_signatures"))
@@ -83,6 +84,7 @@ def generate(data, position_data):
         "npc_manager_vtable_rva": profile["npcs"]["manager_vtable_rva"],
         "npc_entity_vtable_rva": profile["npcs"]["entity_vtable_rva"],
     }
+    # Compatibility Mode shares the combat layout but has its own verified RVAs.
     compatibility = position_profile["combat_layout"]
     if compatibility["version"] != profile["version"]:
         raise ValueError("Incompatible combat layout version")

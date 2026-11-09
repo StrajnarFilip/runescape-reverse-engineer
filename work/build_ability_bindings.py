@@ -21,6 +21,7 @@ parameter_ids={name:int(identifier) for identifier,name in json.loads((refs/"gam
 cache = Archive(22)
 enums = Archive(17)
 book = set()
+# The top-level ability-book enum points to category enums containing struct IDs.
 for eid in decode_enum(enums.file(10148,8))["values"].values():
     book.update(decode_enum(enums.file(eid,8))["values"].values())
 bindings = []
@@ -39,6 +40,7 @@ for group in cache.groups:
         start, end = client.get(stem+"_start_client"), client.get(stem+"_end_client")
         source = "client_symbol_pair" if start is not None and end is not None else None
         if source is None:
+            # Accept spelling differences in underscores only for a unique start/end pair.
             normalized=stem.replace("_", "")
             starts=[identifier for name,identifier in client.items() if name.endswith("_start_client") and name[:-13].replace("_", "")==normalized]
             ends=[identifier for name,identifier in client.items() if name.endswith("_end_client") and name[:-11].replace("_", "")==normalized]

@@ -8,6 +8,7 @@ with ProcessMemory(list(processes())[0]) as m:
     r=RS3(m); client=r.domain_capture('client'); state=m.pointer(client+8)
     print('client',hex(client),'state',hex(state))
     roots=[('state',state,0x56000),('client',client,0x40000)]
+    # Snapshot the root list so this pass follows only one level of pointers.
     for label, parent, size in list(roots):
         data=m.read(parent,size)
         for off in range(0,len(data),8):
@@ -20,6 +21,7 @@ with ProcessMemory(list(processes())[0]) as m:
         seen.add(base)
         try: b=m.read(base,size)
         except OSError: continue
+        # Look for plausible registry headers, then verify sampled IDs through the buckets.
         for off in range(0,len(b)-0xb0a4,8):
             count=struct.unpack_from('<I',b,off+0xb0a0)[0]
             table,buckets=struct.unpack_from('<QQ',b,off+0x10)

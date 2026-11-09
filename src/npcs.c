@@ -12,6 +12,8 @@ void reset_identities(rs3_context *c) {
     memset(c->identity_index,0,sizeof c->identity_index); c->npc_context=c->npc_state=0;
 }
 static int npc_name(rs3_context *c,uint64_t actor,const unsigned char *b,rs3_npc *npc) {
+    // The high bit of the final byte selects a pointer-backed string.
+    // Inline strings store the unused byte count in that tag.
     const unsigned char *s=b+P_NPC_NAME_OFFSET; uint32_t tag=s[23];
     uint64_t n=tag&128?u64(s+8):23-tag, data=u64(s);
     if (n>512) return fail(c,RS3_READ_FAILED,"Invalid NPC name length");
@@ -25,6 +27,7 @@ static int npc_name(rs3_context *c,uint64_t actor,const unsigned char *b,rs3_npc
 }
 int decode_hit(const unsigned char *b,uint32_t tick,uint32_t slot,rs3_hit *h) {
     int32_t type=i32(b),amount=i32(b+4),duration=i32(b+20); uint32_t end=u32(b+8);
+    // Skip empty or expired slots. Future hits can still be present in the ring.
     if (type<0 || duration<=0 || tick_delta(end,tick)<=0) return 0;
     if (type>1000000 || amount<0 || duration>100000) return -1;
     memset(h,0,sizeof *h); h->slot=slot; h->type_id=type; h->amount=amount;
@@ -99,6 +102,7 @@ rollback:
 }
 static npc_identity *identity(rs3_context *c,uint32_t uid,uint64_t actor) {
     uint16_t index=c->identity_index[uid]; npc_identity *state=NULL;
+    // The runtime ID index is one-based so zero can mean no tracked instance.
     if (index) state=c->identities+index-1;
     else for (unsigned i=0;i<RS3_MAX_NPCS;i++) if (!c->identities[i].used) {
         state=c->identities+i; c->identity_index[uid]=(uint16_t)(i+1); break;
@@ -116,6 +120,8 @@ void commit_npcs(rs3_context *c,rs3_snapshot *s,const uint32_t *ids,uint32_t cou
     if (c->npc_context!=manager || c->npc_state!=world_state) {
         reset_identities(c); c->npc_context=manager; c->npc_state=world_state;
     }
+    // Use the registry list to retire identities. A skipped actor read alone
+    // does not mean the NPC despawned.
     for (uint32_t i=0;i<count;i++) present[ids[i]/8]|=(unsigned char)(1u<<(ids[i]%8));
     for (unsigned i=0;i<RS3_MAX_NPCS;i++) if (c->identities[i].used &&
         !(present[c->identities[i].uid/8]&(1u<<(c->identities[i].uid%8)))) {
@@ -129,6 +135,7 @@ void commit_npcs(rs3_context *c,rs3_snapshot *s,const uint32_t *ids,uint32_t cou
         for (uint32_t j=0;j<npc->hit_count;j++) {
             rs3_hit *h=s->hits+npc->hit_offset+j;
             if (h->state!=RS3_HIT_ACTIVE) continue;
+            // Suppress a hit if this instance's ring slot still holds the same record.
             uint64_t bit=1ull<<h->slot;
             if ((state->valid_hits&bit) && !memcmp(state->previous+h->slot,h,sizeof *h)) continue;
             state->previous[h->slot]=*h; state->valid_hits|=bit;
@@ -156,6 +163,7 @@ int npcs_once(rs3_context *c,rs3_snapshot *s,uint64_t state,uint32_t *ids,uint32
         if (ids[i]>65535 || (seen[ids[i]/8]&(1u<<(ids[i]%8)))) return fail(c,RS3_READ_FAILED,"Invalid NPC index list");
         seen[ids[i]/8]|=(unsigned char)(1u<<(ids[i]%8));
     }
+    // The loaded IDs define what to visit. The hash buckets resolve those IDs to actors.
     if (!rd(c,manager+16,b,16)) return 0;
     table=u64(b); count=u64(b+8);
     if (!table || count<1 || count>1000000) return fail(c,RS3_READ_FAILED,"NPC table unavailable");

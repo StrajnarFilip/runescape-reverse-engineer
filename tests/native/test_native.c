@@ -50,6 +50,7 @@ static void put32(fixture *f,uint64_t a,uint32_t value) { unsigned char *p=at(f,
 static void put64(fixture *f,uint64_t a,uint64_t value) { unsigned char *p=at(f,a,8); assert(p); memcpy(p,&value,8); }
 static int fake_read(void *user,uint64_t a,void *out,size_t size) {
     fixture *f=user;
+    // Mutate just before the selected read to reproduce a client update deterministically.
     if(a==f->trigger && ++f->trigger_count==f->mutate_on) put32(f,f->target,f->replacement);
     unsigned char *p=at(f,a,size); if(!p)return 0; memcpy(out,p,size); return 1;
 }
@@ -62,6 +63,7 @@ static fixture *empty_fixture(void) {
 static fixture *make_profile_fixture(const client_profile *profile) {
     fixture *f = empty_fixture();
     f->c->profile = profile;
+    // Map the two domain registry nodes and their callback captures.
     add(f,BASE+profile->registry_rva+P_REGISTRY_ROOT_OFFSET,8); add(f,DOMAINS,512);
     add(f,FUNCTIONS,512); add(f,VTABLES,512);
     put64(f,BASE+profile->registry_rva+P_REGISTRY_ROOT_OFFSET,DOMAINS);
@@ -79,6 +81,7 @@ static fixture *make_profile_fixture(const client_profile *profile) {
     add(f,SKILLS,32); add(f,ENTRIES,6*P_SKILL_STRIDE);
     put64(f,CLIENT+P_SKILLS_MANAGER_OFFSET,SKILLS); put64(f,SKILLS+P_SKILLS_ENTRIES_OFFSET,ENTRIES);
     put32(f,ENTRIES+5*P_SKILL_STRIDE+P_SKILL_BASE_LEVEL_OFFSET,84);
+    // Each table has 97 buckets and a final sentinel entry.
     add(f,PLAYER_TABLE,98*8); add(f,CLIENT_TABLE,98*8); add(f,VARS,48*10);
     put64(f,PLAYER+P_PLAYER_TABLE_OFFSET,PLAYER_TABLE); put64(f,PLAYER+P_PLAYER_COUNT_OFFSET,97);
     put64(f,CLIENT+P_CLIENT_TABLE_OFFSET,CLIENT_TABLE); put64(f,CLIENT+P_CLIENT_COUNT_OFFSET,97);
@@ -90,6 +93,7 @@ static fixture *make_profile_fixture(const client_profile *profile) {
         put64(f,node+40,u64(at(f,bucket,8))); put64(f,bucket,node);
         put32(f,node,p_variable_ids[i]); put64(f,node+8,(uint64_t)values[i]);
     }
+    // Register one loaded NPC with known HP and a single active hit record.
     add(f,MANAGER,P_NPC_COUNT_OFFSET+4); add(f,NPC_TABLE,98*8); add(f,NPC_NODE,32);
     put64(f,WORLD+P_NPC_MANAGER_OFFSET,MANAGER); put64(f,MANAGER,BASE+profile->npc_manager_vtable_rva);
     put64(f,MANAGER+16,NPC_TABLE); put64(f,MANAGER+24,97);
@@ -401,6 +405,7 @@ static void ability_cooldowns_and_equipment(void) {
     assert(resonance->equipment_match==RS3_EQUIPMENT_UNKNOWN);
     word((unsigned char*)f->c->inventory->item_defs+28,RS3_WEAPON|RS3_SHIELD);assert(read_fixture(f));
     assert(resonance->equipment_match==RS3_EQUIPMENT_ALLOWED); /* Main-hand shield-capable weapon. */
+    // Start just before the 32-bit wrap and sample before the post-wrap end.
     put32(f,EXTRA_VARS+8,0xfffffff0u);put32(f,EXTRA_VARS+48+8,0x50);put32(f,WORLD+P_LOGIC_CLOCK_OFFSET,0x20);
     assert(read_fixture(f));assert(flurry->remaining_ms==960 && flurry->duration_ms==1920);
     put32(f,WORLD+P_LOGIC_CLOCK_OFFSET,3000);assert(read_fixture(f));assert(flurry->remaining_ms==0);

@@ -73,11 +73,13 @@ class HitHistory:
             key = event_key(event)
             if key not in self.keys:
                 if len(self.events) == self.events.maxlen:
+                    # Keep the key set in sync with the deque's automatic eviction.
                     self.keys.discard(event_key(self.events[0]))
                 self.events.append(event)
                 self.keys.add(key)
 
 def sync_rows(tree, rows):
+    # Reuse rows by stable ID so a refresh keeps the selection on surviving rows.
     old = set(tree.get_children())
     for position, (key, values, tags) in enumerate(rows):
         if key in old:
@@ -100,6 +102,7 @@ class Tracker:
         root.minsize(1060, 760)
         root.configure(bg=BG)
         self.stop = threading.Event()
+        # The collector passes the newest view to the Tk thread through this queue.
         self.queue = queue.Queue(maxsize=1)
         self.latest = self.received_at = None
         self.sequence = 0
@@ -212,6 +215,7 @@ class Tracker:
                             record = json.loads(line)
                         except json.JSONDecodeError:
                             continue
+                        # Import hit history only from captures with a supported fingerprint.
                         if record.get("executable_sha256") in supported_hashes:
                             self.hit_history.observe(record)
             with closing(RotatingFileHandler(self.log_path, maxBytes=25*1024*1024,
@@ -222,6 +226,7 @@ class Tracker:
                     self.sequence += 1
                     record["sample_sequence"] = self.sequence
                     line = json.dumps(record, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+                    # Log each collected record before coalescing updates for display.
                     log.emit(logging.makeLogRecord({"msg": line}))
                     self.hit_history.observe(record)
                     self.item_history.extend((record.get("inventory_changes") or {}).get("newly_observed", []))
@@ -229,6 +234,7 @@ class Tracker:
                                       recent_inventory_changes=list(self.item_history)))
                     deadline += .05
                     delay = deadline-time.perf_counter()
+                    # Reset the schedule after a long pause to bound catch-up polling.
                     if delay < -.5:
                         deadline = time.perf_counter()
                     self.stop.wait(max(0, delay))
@@ -253,6 +259,7 @@ class Tracker:
         except queue.Empty:
             pass
         if self.latest:
+            # Add time since queue publication to the snapshot age measured by the collector.
             age = ((time.perf_counter()-self.received_at)*1000 +
                    self.latest.get("native", {}).get("snapshot_age_ms", 0))
             stamp = datetime.fromtimestamp(self.latest["timestamp_ms"]/1000).strftime("%H:%M:%S.%f")[:-3]
@@ -402,6 +409,7 @@ class Tracker:
         inventory = record.get("inventory") or {}
         slots = inventory.get("slots")
         for i, cell in enumerate(self.inventory_cells):
+            # A missing observation and a confirmed empty slot need distinct labels.
             item = slots[i] if slots and i<len(slots) else None
             if item is None:
                 text, colour = "%02d  Unavailable" % (i+1), MUTED
@@ -451,6 +459,7 @@ class Tracker:
                 continue
             cooldown, req = a["cooldown"], a["requirements"]
             remaining = cooldown["remaining_ms"]
+            # This label reflects cooldown only. Equipment match has its own column.
             text = "Unknown" if remaining is None else ("Ready" if remaining==0 else "%.2f s"%(remaining/1000))
             required = [label for key,label in (("dual_wield","Dual wield"),("two_handed","Two-handed"),("shield","Shield"),("weapon","Weapon")) if req[key]]
             if req["style"]:

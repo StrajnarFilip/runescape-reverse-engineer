@@ -193,6 +193,7 @@ class ProcessMemory:
             next_address = info.BaseAddress + info.RegionSize
             if next_address <= address:
                 break
+            # Keep committed regions with readable protection, excluding guard and no-access pages.
             readable = info.State == 0x1000 and not (info.Protect & 0x101) and bool(info.Protect & 0xEE)
             if readable:
                 yield (info.BaseAddress, info.RegionSize, info.Type, info.Protect)

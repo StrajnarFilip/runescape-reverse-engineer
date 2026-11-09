@@ -43,6 +43,7 @@ class Buffer:
     def smart(self):
         if self.pos>=len(self.data):
             raise DecodeError("Truncated smart integer")
+        # The high bit marks the four-byte form and is cleared from its value.
         return self.uint(4)&0x7fffffff if self.data[self.pos]&128 else self.uint(2)
 
     def params(self):
@@ -66,6 +67,7 @@ def decompress(blob):
     if size>32*1024*1024:
         raise DecodeError("Cache group exceeds bound")
     decoder = zlib.decompressobj()
+    # Allow one extra byte so an oversized stream fails the exact-length check.
     value = decoder.decompress(blob[8:], size+1)
     if len(value)!=size or not decoder.eof or decoder.unused_data:
         raise DecodeError("Invalid decompressed group length")
@@ -82,10 +84,12 @@ def reference_table(data):
     count = b.smart() if version>=7 else b.uint(2)
     if count>65536:
         raise DecodeError("Reference table exceeds bound")
+    # Group and file IDs are stored as deltas from their previous IDs.
     ids, current = [], 0
     for _ in range(count):
         current += b.uint(2)
         ids.append(current)
+    # Skip the per-group metadata fields to reach the file counts and IDs.
     b.take(count*(4+(4 if flags&1 else 0)))
     if flags&4:
         b.take(count*12)
@@ -130,6 +134,7 @@ class Archive:
         b = Buffer(data)
         if b.uint()!=1:
             raise DecodeError("Unsupported multi-file cache group")
+        # The offset table starts with the payload start, then one end per file.
         start = b.uint(4)
         if start!=1+4*(len(ids)+1):
             raise DecodeError("Invalid group table")
@@ -192,6 +197,7 @@ def decode_enum(data):
 def decode_item(data):
     b = Buffer(data)
     result = {"name": None, "params": {}, "equip_slot": -1, "hide_slot": -1}
+    # Group unused opcodes by payload size so the cursor stays aligned.
     models = {1,23,24,25,26,78,79,90,91,92,93}
     shorts = {4,5,6,7,8,10,18,44,45,94,95,97,98,110,111,112,121,122,139,140,161,162,163}
     bytes_ = {13,14,27,96,113,114,115,134}

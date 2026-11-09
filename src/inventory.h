@@ -9,6 +9,7 @@ struct inventory_state {
     unsigned char *catalog;
     size_t catalog_size;
     uint32_t item_count, ability_count, strings_size, catalog_status;
+    // Views into the validated catalog backing buffer.
     const unsigned char *item_defs, *ability_defs;
     const char *strings;
     char catalog_error[128];
@@ -16,7 +17,10 @@ struct inventory_state {
     uint32_t previous_valid;
     uint64_t world, manager, staged_manager, token, sequence;
     rs3_item_event events[ITEM_QUEUE_CAPACITY];
+    // Scratch storage for the registry's initial read and consistency check.
     unsigned char entries[4096 * 72], checked_entries[4096 * 72];
+    // Timer staging indexed by variable ID, followed by the page cache and
+    // selected nodes needed for the second pass.
     unsigned char wanted[65536], present[65536];
     int64_t values[65536];
     uint64_t page_bases[128], selected_addresses[4096];

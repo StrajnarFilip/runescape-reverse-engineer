@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 U32, I32, U64, I64 = C.c_uint32, C.c_int32, C.c_uint64, C.c_int64
+# Index order matches the generated C variable ID array and validity mask.
 VARIABLES = ("health_current", "health_max", "prayer_packed", "adrenaline",
              "gcd_start", "gcd_end", "gcd_duration", "gcd_client_start",
              "gcd_client_end", "telos_packed")
@@ -20,6 +21,7 @@ def fields(kind, names):
     return [(name, kind) for name in names.split()]
 
 
+# The ctypes layouts mirror include/rs3/rs3.h, including field order and alignment.
 class Options(C.Structure):
     _fields_ = fields(U32, "struct_size pid retry_ms reserved")
 
@@ -102,6 +104,8 @@ def load_library(path=None):
         raise RuntimeError(f"Native library missing at {path}. Build with CMake or set RS3_NATIVE_LIBRARY.")
     lib = C.CDLL(str(path))
     pointer = C.c_void_p
+    # Declare each prototype before calling the DLL so pointers and 64-bit
+    # values cross the boundary with their full width.
     signatures = {
         "abi_version": (U32, []), "sizeof": (U32, [U32]), "monotonic_ns": (U64, []),
         "profile_sha256": (C.c_char_p, []), "result_string": (C.c_char_p, [I32]),
@@ -136,6 +140,8 @@ def load_library(path=None):
     for kind, structure in enumerate(structures, 1):
         if lib.rs3_sizeof(kind) != C.sizeof(structure):
             raise RuntimeError("C/Python layout mismatch for "+structure.__name__)
+    # This digest identifies the profile used at build time. The DLL checks
+    # the running client's executable fingerprint separately at attachment.
     profile = (ROOT / "profiles" / "profile_951_3.json").read_bytes()
     if lib.rs3_profile_sha256().decode() != hashlib.sha256(profile).hexdigest():
         raise RuntimeError("C library profile differs from Python profile; rebuild rs3_native")
@@ -156,6 +162,7 @@ class Reader:
         self.lib = load_library(library)
         self.context, self.snapshot = C.c_void_p(), C.c_void_p()
         self.worker_hz, self.cursor = worker_hz, 0
+        # Size the reusable snapshot arrays for the ABI limits. Events drain in batches.
         self.info, self.player = Info(), Player()
         self.position = Position()
         self.npcs, self.hits = (NPC*1024)(), (Hit*65536)()
@@ -186,6 +193,7 @@ class Reader:
         self.check(self.lib.rs3_snapshot_info(self.snapshot, C.byref(self.info), C.sizeof(Info)))
         self.check(self.lib.rs3_snapshot_player(self.snapshot, C.byref(self.player), C.sizeof(Player)))
         self.check(self.lib.rs3_snapshot_position(self.snapshot, C.byref(self.position), C.sizeof(Position)))
+        # Only the prefixes reported in the snapshot counts are populated.
         count = U32()
         self.check(self.lib.rs3_snapshot_npcs(self.snapshot, self.npcs, len(self.npcs), C.byref(count)))
         self.check(self.lib.rs3_snapshot_hits(self.snapshot, self.hits, len(self.hits), C.byref(count)))
@@ -211,6 +219,7 @@ class Reader:
 
     def drain_item_events(self):
         result, lost_total = [], 0
+        # Eight batches of 128 cover the entire retained item queue.
         for _ in range(8):
             count, next_cursor, lost = U32(), U64(), U64()
             self.check(self.lib.rs3_item_events_since(self.context, self.item_cursor, self.item_events,

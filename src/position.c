@@ -16,6 +16,7 @@ static uint64_t local_player(rs3_context *c) {
         !ptr(c, client + POS_PLAYER_CONTEXT, &context) || !context ||
         !ptr(c, context, &owner) || owner != client ||
         !ptr(c, context + POS_PLAYER_OVERRIDE, &player)) return 0;
+    // Use the context's player override when set. Otherwise look up the player index.
     if (player) return player;
 
     if (!rd(c, context + POS_PLAYER_INDEX, &index, sizeof index) || index < 0 ||
@@ -46,6 +47,7 @@ static uint64_t read_tile(rs3_context *c, rs3_position *tile) {
 }
 
 int decode_position(rs3_context *c, rs3_position *position) {
+    // Require consecutive reads to agree on both the actor and its tile.
     uint64_t previous_player = 0;
     rs3_position previous = {0};
     for (unsigned attempt = 0; attempt < 4; attempt++) {
