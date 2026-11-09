@@ -61,16 +61,56 @@ class TelosPrayerTests(unittest.TestCase):
         self.assertEqual(trial.completed_cycles, 1)
         self.assertIsNone(trial.target)
 
-    def test_trial_stops_after_missing_ack_or_focus(self):
+    def test_late_melee_confirmation_can_still_return_to_soul_split(self):
+        send = Mock(side_effect=[1000 * MS + 1, 1790 * MS + 1])
+        trial = PrayerTrial(send)
         target = (1, 2, 3)
-        for next_target, reason in [(target, "not acknowledged"), (None, "foreground")]:
+        trial.step(target, Prayer.SOUL_SPLIT, 999 * MS, 1000 * MS, 1000 * MS)
+        self.assertEqual(trial.step(target, Prayer.UNKNOWN, 1599 * MS, 1600 * MS), [])
+        send.assert_called_once_with(Prayer.MELEE)
+        updates = trial.step(target, Prayer.MELEE, 1789 * MS, 1790 * MS)
+        self.assertEqual([update["action"] for update in updates], ["acknowledged", "sent"])
+        self.assertEqual(send.call_args.args, (Prayer.SOUL_SPLIT,))
+
+    def test_cue_waits_briefly_for_pending_soul_split(self):
+        target = (1, 2, 3)
+        for ack_ms, fresh in [(1680, True), (1750, False)]:
+            with self.subTest(ack_ms=ack_ms):
+                send = Mock(side_effect=[1600 * MS + 1, ack_ms * MS + 1])
+                trial = PrayerTrial(send)
+                trial.step(target, Prayer.MELEE, 999 * MS, 1000 * MS, 1000 * MS)
+                trial.step(target, Prayer.MELEE, 1599 * MS, 1600 * MS)
+                self.assertEqual(trial.step(target, Prayer.MELEE, 1629 * MS, 1630 * MS, 1630 * MS), [])
+                send.assert_called_once_with(Prayer.SOUL_SPLIT)
+                trial.step(target, Prayer.SOUL_SPLIT, (ack_ms - 1) * MS, ack_ms * MS)
+                self.assertEqual(trial.completed_cycles, 1)
+                self.assertEqual(send.call_count, 2 if fresh else 1)
+
+    def test_trial_rearms_after_missing_ack_or_focus(self):
+        target = (1, 2, 3)
+        for next_target, now_ms, reason in [(target, 2210, "not observed"), (None, 1600, "foreground")]:
             with self.subTest(reason=reason):
-                send = Mock(return_value=1000 * MS + 1)
+                send = Mock(side_effect=[1000 * MS + 1, 2300 * MS + 1])
                 trial = PrayerTrial(send)
                 trial.step(target, Prayer.SOUL_SPLIT, 999 * MS, 1000 * MS, 1000 * MS)
-                with self.assertRaisesRegex(RuntimeError, reason):
-                    trial.step(next_target, Prayer.SOUL_SPLIT, 1599 * MS, 1600 * MS)
+                updates = trial.step(next_target, Prayer.SOUL_SPLIT, (now_ms - 1) * MS, now_ms * MS)
+                self.assertEqual(updates[0]["action"], "cycle_skipped")
+                self.assertIn(reason, updates[0]["reason"])
+                self.assertEqual(trial.step(target, Prayer.SOUL_SPLIT, 2299 * MS, 2300 * MS), [])
                 send.assert_called_once_with(Prayer.MELEE)
+                trial.step(target, Prayer.SOUL_SPLIT, 2299 * MS, 2300 * MS, 2300 * MS)
+                self.assertEqual(send.call_count, 2)
+
+    def test_input_rejection_skips_cycle_and_cools_down_before_retrying(self):
+        send = Mock(side_effect=[RuntimeError("input rejected"), 2300 * MS + 1])
+        trial = PrayerTrial(send)
+        target = (1, 2, 3)
+        updates = trial.step(target, Prayer.SOUL_SPLIT, 999 * MS, 1000 * MS, 1000 * MS)
+        self.assertEqual(updates[0]["action"], "cycle_skipped")
+        self.assertEqual(trial.step(target, Prayer.SOUL_SPLIT, 2099 * MS, 2100 * MS, 2100 * MS), [])
+        send.assert_called_once_with(Prayer.MELEE)
+        trial.step(target, Prayer.SOUL_SPLIT, 2299 * MS, 2300 * MS, 2300 * MS)
+        self.assertEqual(send.call_count, 2)
 
     def test_same_id_events_require_matching_actor_and_sample(self):
         def event(sequence, instance=7, sample=14, epoch=3):

@@ -22,7 +22,7 @@ MODIFIERS = (0x10, 0x11, 0x12, 0x5B, 0x5C)  # Shift, Ctrl, Alt and the Windows k
 POLL_SECONDS = 0.01
 MELEE_HOLD_NS = 600_000_000
 MAX_AGE_NS = 100_000_000
-SOUL_SPLIT_ACK_NS = 1_200_000_000
+ACK_TIMEOUT_NS = 1_200_000_000
 
 
 class ManualPrayerKeys:
@@ -85,66 +85,91 @@ class PrayerTrial:
         self.release_ns = 0
         self.pending = None
         self.sent_ns = 0
+        self.deferred_cue_ns = None
+        self.rearm_ns = 0
         self.completed_cycles = 0
 
     def finish_cycle(self):
         self.target = None
+        self.deferred_cue_ns = None
         self.completed_cycles += 1
 
-    def press(self, prayer):
-        self.sent_ns = self.send(prayer)
+    def skip_cycle(self, reason, now):
+        if self.pending is not None:
+            self.rearm_ns = self.sent_ns + ACK_TIMEOUT_NS
+        self.target = None
+        self.pending = None
+        self.deferred_cue_ns = None
+        return {"action": "cycle_skipped", "reason": reason, "observed_ns": now}
+
+    def press(self, prayer, now):
+        # A partial Windows insertion can still reach the game. Use the same
+        # cooldown as an unconfirmed key before considering another fresh cue.
         self.pending = prayer
+        self.sent_ns = now
+        try:
+            self.sent_ns = self.send(prayer)
+        except RuntimeError as error:
+            return self.skip_cycle(str(error), now)
         return {"action": "sent", "prayer": prayer.name.lower(), "observed_ns": self.sent_ns}
 
     def step(self, target, active, sampled_ns, now, cue_ns=None, lost=0):
-        if self.target is None and (target is None or cue_ns is None):
+        if now < self.rearm_ns or (self.target is None and (target is None or cue_ns is None)):
             return []
         if target is None or (self.target is not None and target != self.target):
-            raise RuntimeError("Trial stopped because the Telos instance, scene or foreground window changed.")
+            return [self.skip_cycle("Telos instance, scene or foreground window changed", now)]
         if lost or not 0 <= now - sampled_ns <= MAX_AGE_NS:
-            raise RuntimeError("Trial stopped because the event stream or snapshot is stale.")
-        if active == Prayer.UNKNOWN:
-            raise RuntimeError("Trial stopped because the active overhead is unknown.")
-
-        if cue_ns is not None:
-            if not 0 <= now - cue_ns <= MAX_AGE_NS:
-                raise RuntimeError("Trial stopped because the melee cue is stale.")
-            self.release_ns = cue_ns + MELEE_HOLD_NS
+            return [self.skip_cycle("event loss or stale snapshot", now)]
+        if cue_ns is not None and not 0 <= now - cue_ns <= MAX_AGE_NS:
+            cue_ns = None
 
         updates = []
+        melee_acknowledged = False
         if self.pending is not None:
-            if sampled_ns > self.sent_ns and active == self.pending:
+            deadline = self.sent_ns + ACK_TIMEOUT_NS
+            if cue_ns is not None:
+                if self.pending == Prayer.MELEE:
+                    self.release_ns = cue_ns + MELEE_HOLD_NS
+                else:
+                    self.deferred_cue_ns = cue_ns
+            if self.sent_ns < sampled_ns <= deadline and active == self.pending:
                 updates.append({"action": "acknowledged", "prayer": active.name.lower(),
                                 "observed_ns": sampled_ns})
                 self.pending = None
                 if active == Prayer.SOUL_SPLIT:
+                    cue_ns = self.deferred_cue_ns
                     self.finish_cycle()
-                    if cue_ns is None:
+                    if cue_ns is None or now - cue_ns > MAX_AGE_NS:
                         return updates
+                else:
+                    melee_acknowledged = True
             else:
-                if cue_ns is not None and self.pending == Prayer.SOUL_SPLIT:
-                    raise RuntimeError("Trial stopped because a melee cue arrived before Soul Split was acknowledged.")
-                deadline = self.release_ns if self.pending == Prayer.MELEE else self.sent_ns + SOUL_SPLIT_ACK_NS
                 if now >= deadline:
-                    raise RuntimeError(f"Trial stopped because {self.pending.name.lower()} was not acknowledged.")
+                    updates.append(self.skip_cycle(f"{self.pending.name.lower()} was not observed", now))
                 return updates
 
-        if self.target is None:
+        if active == Prayer.UNKNOWN:
+            if self.target is not None:
+                updates.append(self.skip_cycle("active overhead is unknown", now))
+            return updates
+
+        if cue_ns is not None:
             self.target = target
+            self.release_ns = cue_ns + MELEE_HOLD_NS
             if active != Prayer.MELEE:
-                updates.append(self.press(Prayer.MELEE))
+                updates.append(self.press(Prayer.MELEE, now))
                 return updates
 
-        if now >= self.release_ns:
-            if now - self.release_ns > MAX_AGE_NS:
-                raise RuntimeError("Trial stopped because the Soul Split return is late.")
+        if self.target is not None and now >= self.release_ns:
+            if now - self.release_ns > MAX_AGE_NS and not melee_acknowledged:
+                return [self.skip_cycle("Soul Split return is late", now)]
             if active == Prayer.SOUL_SPLIT:
                 self.finish_cycle()
                 updates.append({"action": "already_active", "prayer": "soul_split", "observed_ns": sampled_ns})
             elif active == Prayer.MELEE:
-                updates.append(self.press(Prayer.SOUL_SPLIT))
+                updates.append(self.press(Prayer.SOUL_SPLIT, now))
             else:
-                raise RuntimeError("Trial stopped because the overhead changed during the melee window.")
+                updates.append(self.skip_cycle("overhead changed during the melee window", now))
         return updates
 
 
@@ -173,7 +198,7 @@ def observe(reader, duration, out, enrage, keys, trial_window=None):
         return reader.lib.rs3_monotonic_ns()
 
     trial = PrayerTrial(send) if trial_window else None
-    end = time.monotonic() + duration
+    end = math.inf if duration is None else time.monotonic() + duration
     previous, last_write = None, 0
     while time.monotonic() < end:
         started = time.monotonic()
@@ -229,14 +254,14 @@ def observe(reader, duration, out, enrage, keys, trial_window=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pid", type=int, help="RuneScape process ID")
-    parser.add_argument("--duration", type=float, default=300, help="Recording duration in seconds")
+    parser.add_argument("--duration", type=float, help="Limit in seconds (default: 300 for capture, unlimited for trial)")
     parser.add_argument("--enrage", type=int, help="Manually entered enrage for this capture")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--record-keys", action="store_true", help="Timestamp manual F1/F2 presses in RuneScape")
     mode.add_argument("--trial", action="store_true", help="Repeat experimental F1/F2 cycles on fresh Telos cues")
     parser.add_argument("--output", type=Path, help="Write a new local JSONL file instead of standard output")
     args = parser.parse_args()
-    if not math.isfinite(args.duration) or args.duration <= 0:
+    if args.duration is not None and (not math.isfinite(args.duration) or args.duration <= 0):
         parser.error("--duration must be finite and positive")
     if args.enrage is not None and not 0 <= args.enrage <= 4000:
         parser.error("--enrage must be between 0 and 4000")
@@ -250,7 +275,8 @@ def main():
                 message = ("Trial armed. Waiting for a fresh 28929 cue in foreground RuneScape."
                            if args.trial else "Recording Telos prayer timing. Switch prayers manually.")
                 print(message, file=sys.stderr, flush=True)
-                completed = observe(reader, args.duration, out, args.enrage, keys if args.record_keys else None,
+                duration = args.duration if args.trial or args.duration is not None else 300
+                completed = observe(reader, duration, out, args.enrage, keys if args.record_keys else None,
                                     keys.game_window if args.trial else None)
                 if args.trial:
                     print(f"Trial ended with {completed} completed switch cycle(s).", file=sys.stderr, flush=True)

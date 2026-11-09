@@ -85,18 +85,22 @@ the server's prayer check or distinguish overlapping hits.
 
 To try the requested 600 ms rule on successive melee autos::
 
-    python python/rs3_reader/telos_prayer.py --trial --duration 60 --output work/prayer_research/telos-trial.jsonl
+    python python/rs3_reader/telos_prayer.py --trial
 
 With the game in the foreground, the trial waits for a fresh ``28929`` event
 from Telos. It presses F1 if melee protection is inactive and waits to observe
 melee protection. It attempts F2 on the first fresh sample at least 600 ms after
-the cue, skipping the key if Soul Split is already active. Another matching cue
-before the return restarts the 600 ms interval. Once Soul Split is observed,
-the trial re-arms for the next cue until the duration expires or Ctrl+C stops
-it. Loss of the target or foreground window during a cycle, an unknown
-overhead, stale data, queue loss, input rejection or missed acknowledgement
-stops the trial. The trace records key dispatch and overhead acknowledgement
-separately. The 600 ms interval is an experimental setting supplied by the player.
+the cue when melee protection has been confirmed. It skips F2 if Soul Split is
+already active. Another matching cue before the return restarts the 600 ms
+interval. The trial runs until Ctrl+C unless ``--duration`` sets a limit.
+
+The trial waits up to 1.2 seconds for the game to report the requested overhead.
+A cue received while Soul Split is pending can start the next cycle if it is
+still fresh when Soul Split appears. A timed-out key, input failure or loss of
+reliable observations skips the affected cycle. The trial waits for a fresh
+cue and a known overhead before starting another. The trace records key
+dispatch, overhead acknowledgement and skipped cycles separately. The 600 ms
+interval is an experimental setting supplied by the player.
 
 Directly available data
 -----------------------
@@ -238,7 +242,8 @@ unlocked prayer; confirm the actual resulting overhead.
 
 The sampler and general prayer observer only collect data. The explicit
 ``telos_prayer.py --trial`` mode uses this function for experimental switch cycles.
-It stops on input failure and requires a new run for another attempt.
+An input failure abandons the cycle and applies the same cooldown as an
+unconfirmed key before the trial considers another cue.
 
 CMake builds ``prayer_example`` from ``examples/prayer.c``. Python replay is
 shown above. The Java 22+ FFM example verifies layouts before invoking C::
