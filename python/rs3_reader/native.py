@@ -57,6 +57,12 @@ class NPCAnimation(C.Structure):
                 fields(U32, "valid reason") + fields(I32, "action_sequence movement_sequence"))
 
 
+class NPCActionEvent(C.Structure):
+    _fields_ = (fields(U64, "sequence observed_ns sample_sequence scene_epoch process_creation_time instance_id") +
+                fields(U32, "pid runtime_id") + fields(I32, "config_id previous_action_sequence action_sequence") +
+                fields(U32, "logic_tick application_stamp flags"))
+
+
 class NPC(C.Structure):
     _fields_ = ([("instance_id", U64), ("runtime_id", U32), ("config_id", I32)] +
                 fields(U32, "flags health_reason") + fields(I32, "health_current health_max") +
@@ -132,6 +138,8 @@ def load_library(path=None):
         "combat_sizeof": (U32, [U32]),
         "snapshot_combat": (I32, [pointer, C.POINTER(CombatState), U32]),
         "snapshot_npc_animations": (I32, [pointer, C.POINTER(NPCAnimation), U32, C.POINTER(U32)]),
+        "npc_action_events_since": (I32, [pointer, U64, C.POINTER(NPCActionEvent), U32,
+                                          C.POINTER(U32), C.POINTER(U64), C.POINTER(U64)]),
         "combat_active_prayer": (U32, [C.POINTER(CombatState)]),
         "set_prayer": (I32, [pointer, U32, U32, U32]),
         "snapshot_npcs": (I32, [pointer, C.POINTER(NPC), U32, C.POINTER(U32)]),
@@ -156,7 +164,7 @@ def load_library(path=None):
     for kind, structure in enumerate(structures, 1):
         if lib.rs3_sizeof(kind) != C.sizeof(structure):
             raise RuntimeError("C/Python layout mismatch for "+structure.__name__)
-    for kind, structure in enumerate((CombatState, NPCAnimation), 1):
+    for kind, structure in enumerate((CombatState, NPCAnimation, NPCActionEvent), 1):
         if lib.rs3_combat_sizeof(kind) != C.sizeof(structure):
             raise RuntimeError("C/Python layout mismatch for "+structure.__name__)
     # This digest identifies the profile used at build time. The DLL checks
@@ -187,6 +195,7 @@ class Reader:
         self.combat, self.animations = CombatState(), (NPCAnimation*1024)()
         self.npcs, self.hits = (NPC*1024)(), (Hit*65536)()
         self.events = (Event*256)()
+        self.npc_action_events, self.npc_action_cursor = (NPCActionEvent*256)(), 0
         self.inventory_info, self.items, self.abilities = InventoryInfo(), (Item*47)(), (Ability*2048)()
         self.item_events, self.item_cursor = (ItemEvent*128)(), 0
         try:
@@ -250,6 +259,21 @@ class Reader:
             lost_total += lost.value
             result.extend(ItemEvent.from_buffer_copy(self.item_events[i]) for i in range(count.value))
             if count.value<len(self.item_events):
+                break
+        return result, lost_total
+
+    def drain_npc_action_events(self):
+        """Return owned NPC animation events and the number overwritten in the queue."""
+        result, lost_total = [], 0
+        for _ in range(16):
+            count, next_cursor, lost = U32(), U64(), U64()
+            self.check(self.lib.rs3_npc_action_events_since(
+                self.context, self.npc_action_cursor, self.npc_action_events, len(self.npc_action_events),
+                C.byref(count), C.byref(next_cursor), C.byref(lost)))
+            self.npc_action_cursor = next_cursor.value
+            lost_total += lost.value
+            result.extend(NPCActionEvent.from_buffer_copy(self.npc_action_events[i]) for i in range(count.value))
+            if count.value < len(self.npc_action_events):
                 break
         return result, lost_total
 

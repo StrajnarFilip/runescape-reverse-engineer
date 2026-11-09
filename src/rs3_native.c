@@ -138,9 +138,10 @@ int32_t rs3_create(const rs3_options *o,rs3_context **out) {
     c->requested_pid=o?o->pid:0; c->retry_ms=o && o->retry_ms?o->retry_ms:1000;
     c->read=windows_read; c->read_user=c;
     c->events=calloc(EVENT_CAPACITY,sizeof(rs3_event)); c->identities=calloc(RS3_MAX_NPCS,sizeof(npc_identity));
+    c->action_events=calloc(EVENT_CAPACITY,sizeof(rs3_npc_action_event));
     c->working=calloc(1,sizeof(rs3_snapshot)); c->latest=calloc(1,sizeof(rs3_snapshot));
     c->inventory=inventory_create();
-    if (!c->events || !c->identities || !c->working || !c->latest || !c->inventory) { rs3_destroy(c); return RS3_E_MEMORY; }
+    if (!c->events || !c->action_events || !c->identities || !c->working || !c->latest || !c->inventory) { rs3_destroy(c); return RS3_E_MEMORY; }
     inventory_default_catalog(c);
     *out=c; return RS3_OK;
 }
@@ -171,7 +172,7 @@ int32_t rs3_stop(rs3_context *c) {
 void rs3_destroy(rs3_context *c) {
     if (!c) return;
     rs3_stop(c); if(c->process)CloseHandle(c->process);
-    free(c->events); free(c->identities); free(c->working); free(c->latest); free(c->buckets);
+    free(c->events); free(c->action_events); free(c->identities); free(c->working); free(c->latest); free(c->buckets);
     inventory_free(c->inventory); free(c);
 }
 int32_t rs3_sample(rs3_context *c,rs3_snapshot *s) {

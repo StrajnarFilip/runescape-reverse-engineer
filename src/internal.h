@@ -20,9 +20,9 @@ typedef struct {
     const profile_signature *signatures;
     size_t signature_count;
     uint32_t registry_rva, player_handler_rva, client_handler_rva, client_vtable_rva;
-    uint32_t npc_manager_vtable_rva, npc_entity_vtable_rva;
+    uint32_t npc_manager_vtable_rva, npc_entity_vtable_rva, npc_animation_vtable_rva;
+    uint32_t npc_action_stamp_offset;
     int has_position;
-    int has_npc_animation;
 } client_profile;
 
 struct rs3_snapshot {
@@ -45,6 +45,9 @@ typedef struct npc_identity {
     uint32_t uid, used;
     uint64_t valid_hits;
     rs3_hit previous[64];
+    uint64_t action_sample, action_epoch;
+    int32_t action_sequence;
+    uint32_t action_stamp;
 } npc_identity;
 
 /* The decoder uses the same bounded read path for live memory and test fixtures. */
@@ -71,6 +74,9 @@ struct rs3_context {
     uint64_t *buckets;
     size_t bucket_capacity;
     uint64_t npc_context, npc_state, actors[RS3_MAX_NPCS];
+    uint32_t action_stamps[RS3_MAX_NPCS];
+    rs3_npc_action_event *action_events;
+    uint64_t action_event_sequence;
     uint64_t combat_world, combat_creation, combat_epoch;
     inventory_state *inventory;
 };
@@ -116,6 +122,7 @@ void commit_npcs(rs3_context *c, rs3_snapshot *s, const uint32_t *ids,
                  uint32_t count, uint64_t manager, uint64_t world_state);
 void combat_stage(rs3_context *, rs3_snapshot *, uint64_t player, uint64_t world);
 void combat_commit(rs3_context *, rs3_snapshot *, uint64_t world);
+void npc_action_commit(rs3_context *, const rs3_snapshot *, npc_identity *, uint32_t index);
 
 inventory_state *inventory_create(void);
 void inventory_free(inventory_state *inventory);

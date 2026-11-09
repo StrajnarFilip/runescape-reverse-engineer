@@ -34,7 +34,7 @@ def signatures(profile, array):
     return [*lines, "};"]
 
 
-def client_layout(name, prefix, patterns, rvas, has_position, has_npc_animation=False):
+def client_layout(name, prefix, patterns, rvas, has_position):
     return [
         f"static const client_profile {name} = {{",
         f"    .sha256 = {prefix}_SHA256,",
@@ -44,7 +44,6 @@ def client_layout(name, prefix, patterns, rvas, has_position, has_npc_animation=
         f"    .signature_count = sizeof {patterns} / sizeof {patterns}[0],",
         *(f"    .{key} = {number(value):#x}u," for key, value in rvas.items()),
         f"    .has_position = {int(has_position)},",
-        f"    .has_npc_animation = {int(has_npc_animation)},",
         "};",
     ]
 
@@ -90,10 +89,15 @@ def generate(data, position_data):
     compatibility = position_profile["combat_layout"]
     if compatibility["version"] != profile["version"]:
         raise ValueError("Incompatible combat layout version")
-    lines.extend(client_layout("p_profile", "P", "p_signatures", combat_rvas, False,
-                               bool(profile['npcs'].get('animation_layout_verified'))))
-    lines.extend(client_layout("pos_profile", "POS", "pos_signatures",
-                               {key: compatibility[key] for key in combat_rvas}, True))
+    original = dict(combat_rvas)
+    if profile["npcs"].get("animation_layout_verified"):
+        original["npc_animation_vtable_rva"] = profile["npcs"]["animation_vtable_rva"]
+    lines.extend(client_layout("p_profile", "P", "p_signatures", original, False))
+    compat_rvas = {key: compatibility[key] for key in combat_rvas}
+    for key in ("npc_animation_vtable_rva", "npc_action_stamp_offset"):
+        if key in compatibility:
+            compat_rvas[key] = compatibility[key]
+    lines.extend(client_layout("pos_profile", "POS", "pos_signatures", compat_rvas, True))
     lines.extend(("#endif", ""))
     return "\n".join(lines).encode("ascii")
 

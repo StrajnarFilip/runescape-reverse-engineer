@@ -116,6 +116,7 @@ static fixture *make_fixture(void) {
 }
 static int read_fixture(fixture *f) {
     memset(f->s,0,sizeof *f->s); f->s->info.timestamp_ns=1000000000;
+    f->s->info.sequence=++f->c->sequence;
     f->s->info.monotonic_ns=monotonic_ns(); return decode(f->c,f->s);
 }
 static void dispose(fixture *f) {
@@ -537,9 +538,72 @@ static void combat_flags_and_animation(void) {
     put64(f,ACTOR+P_NPC_ANIMATION_COMPONENT_OFFSET,0); assert(read_fixture(f));
     assert(!f->s->animations[0].valid && (f->s->npcs[0].flags&RS3_NPC_HEALTH));
     dispose(f);
-    client_profile compat=pos_profile; compat.has_position=0;
+    client_profile compat=pos_profile; compat.has_position=0; compat.npc_animation_vtable_rva=0;
     f=make_profile_fixture(&compat); assert(read_fixture(f));
     assert(!f->s->animations[0].valid && f->s->animations[0].reason==RS3_UNSUPPORTED_CLIENT);
+    dispose(f);
+}
+
+static void npc_action_events(void) {
+    client_profile compat=pos_profile; compat.has_position=0;
+    fixture *f=make_profile_fixture(&compat);
+    const uint64_t action=ACTOR+P_NPC_ACTION_SEQUENCE_OFFSET, stamp=ACTOR+compat.npc_action_stamp_offset;
+    put64(f,ACTOR+P_NPC_ANIMATION_COMPONENT_OFFSET,BASE+compat.npc_animation_vtable_rva);
+    put32(f,action,100);
+    put32(f,stamp,1003);
+    assert(read_fixture(f) && f->s->animations[0].valid && !f->c->action_event_sequence);
+    put32(f,stamp,1004);
+    assert(read_fixture(f) && f->c->action_event_sequence==1);
+    rs3_npc_action_event event;
+    uint32_t written; uint64_t next,lost;
+    assert(rs3_combat_sizeof(3)==sizeof event);
+    assert(rs3_npc_action_events_since(f->c,0,&event,1,&written,&next,&lost)==RS3_OK);
+    assert(written==1 && next==1 && !lost && event.sequence==1);
+    assert(event.action_sequence==100 && event.previous_action_sequence==100);
+    assert(event.application_stamp==1004 && event.flags==RS3_NPC_ACTION_HAS_APPLICATION_STAMP);
+    assert(event.sample_sequence==f->s->info.sequence && event.scene_epoch==f->s->combat.scene_epoch);
+    assert(event.instance_id==f->s->npcs[0].instance_id && event.pid==123 && event.process_creation_time==456);
+    assert(event.observed_ns>=f->s->info.monotonic_ns);
+    assert(read_fixture(f) && f->c->action_event_sequence==1);
+    // A torn stamp suppresses an event and forces a fresh baseline.
+    f->trigger=f->target=stamp; f->mutate_on=1; f->replacement=1005;
+    assert(read_fixture(f) && !f->s->animations[0].valid && f->c->action_event_sequence==1);
+    f->trigger=0;
+    assert(read_fixture(f) && f->s->animations[0].valid && f->c->action_event_sequence==1);
+    // Observing the ID write before the stamp write still yields one event.
+    put32(f,action,101);
+    assert(read_fixture(f) && f->c->action_event_sequence==1);
+    put32(f,stamp,1006);
+    assert(read_fixture(f) && f->c->action_event_sequence==2);
+    // A skipped frame leaves no trustworthy edge across the gap.
+    ++f->c->sequence;
+    put32(f,stamp,1007);
+    assert(read_fixture(f) && f->c->action_event_sequence==2);
+    f->c->combat_world=0;
+    put32(f,stamp,1008);
+    assert(read_fixture(f) && f->c->action_event_sequence==2);
+    f->c->action_event_sequence=EVENT_CAPACITY;
+    put32(f,stamp,1009);
+    assert(read_fixture(f));
+    assert(rs3_npc_action_events_since(f->c,0,NULL,0,&written,&next,&lost)==RS3_OK);
+    assert(!written && lost==1 && next==1);
+    assert(rs3_npc_action_events_since(f->c,EVENT_CAPACITY,&event,1,&written,&next,&lost)==RS3_OK);
+    assert(written==1 && !lost && next==EVENT_CAPACITY+1 && event.sequence==next);
+    f->trigger=f->target=WORLD+P_GAME_STATE_OFFSET; f->mutate_on=2; f->trigger_count=0; f->replacement=10;
+    put32(f,stamp,1010);
+    assert(read_fixture(f) && !f->s->combat.scene_epoch && f->c->action_event_sequence==next);
+    dispose(f);
+
+    f=make_fixture();
+    put64(f,ACTOR+P_NPC_ANIMATION_COMPONENT_OFFSET,BASE+P_NPC_ANIMATION_VTABLE_RVA);
+    put32(f,action,(uint32_t)-1);
+    assert(read_fixture(f) && !f->c->action_event_sequence);
+    put32(f,action,200);
+    assert(read_fixture(f) && f->c->action_event_sequence==1);
+    assert(rs3_npc_action_events_since(f->c,0,&event,1,&written,&next,&lost)==RS3_OK);
+    assert(written==1 && event.action_sequence==200 && event.previous_action_sequence==-1 && !event.flags);
+    put32(f,action,(uint32_t)-1);
+    assert(read_fixture(f) && f->c->action_event_sequence==1);
     dispose(f);
 }
 static void prayer_chords_and_partial_release(void) {
@@ -570,7 +634,7 @@ int main(void) {
     position_profile();
     sparse_inventory_slots();
     input_projection_and_guards();
-    combat_flags_and_animation(); prayer_chords_and_partial_release();
-    puts("PASS: 16 native test groups");
+    combat_flags_and_animation(); npc_action_events(); prayer_chords_and_partial_release();
+    puts("PASS: 17 native test groups");
     return 0;
 }

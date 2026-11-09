@@ -56,6 +56,13 @@ among those retained rows was 0.5403ms; this is not a benchmark of every poll.
 Manual Magic, Ranged and Melee transitions were observed. No automatic key
 chords or Telos encounter were recorded.
 
+New captures also contain ``npc_action_events`` and ``npc_action_events_lost``.
+Use each event's ``sample_sequence`` and ``observed_ns`` to align it with nearby
+snapshots. The worker and capture loop run independently, so an event may
+originate from a different sample than its enclosing JSON row. Rows include
+player life points, observed overhead, the raw Telos variable when present,
+and player position on the profile that supports it.
+
 Directly available data
 -----------------------
 
@@ -101,9 +108,46 @@ constructor ``0xc14a00`` initializes the sequence member at slot ``+8`` to -1.
 Observed idle/movement sequences and nonnegative action sequences establish
 that the fields change, not that a particular sequence is a Telos attack.
 
-Compatibility Mode's animation layout is deliberately unavailable until checked
-on that executable. Its established player/NPC/inventory features remain intact.
-The new prayer flags use its shared, hash-pinned variable-table layout.
+Compatibility Mode (``7a60c69f...42dbf``) uses the same sequence offsets and
+component vtable RVA ``0x15b3890``. The constructor at RVA ``0xc3bf00`` sets the
+component at ``+0x310``. The call at ``0xc13006`` passes the action slot at
+component ``+0x788`` into the sequence application routine. That routine writes
+the application stamp to slot ``+0x7c`` (actor ``+0xb14``) after applying the
+sequence. The collector rechecks the stamp alongside the sequence IDs.
+
+NPC action event stream
+-----------------------
+
+``rs3_npc_action_events_since`` returns the 80-byte ``rs3_npc_action_event``
+records from a separate queue of 4096 observations. Start with a caller-owned
+cursor of zero and advance it to ``next`` after each drain. ``lost`` reports
+overwritten entries. The queue stays readable between snapshot reads and each
+event identifies the sampled process, scene, NPC instance and client logic tick.
+
+On Compatibility Mode, a changed stamp on an active action slot emits one
+event even if the sequence ID stays the same. On the original executable, a
+change to a nonnegative action sequence emits an event. A newly observed NPC,
+failed read, or scene change establishes a fresh baseline. The worker can miss
+changes between samples and applications that share a stamp. The stamp and
+observation time describe when the client processed or exposed an animation.
+The server's prayer-check time requires separate measurement.
+
+Python consumers can call ``Reader.drain_npc_action_events()`` to get owned
+records and the queue loss count. For example, inside a loop with a running
+``Reader(worker_hz=100)``::
+
+    events, lost = reader.drain_npc_action_events()
+    for event in events:
+        print(event.instance_id, event.action_sequence, event.observed_ns)
+
+Before using an event for live decisions, match its PID, process creation time
+and scene epoch to the current snapshot, check its age, and invalidate any
+inferred attack state after a queue gap.
+
+The Compatibility Mode smoke capture recorded 21 events in 60 seconds with
+zero queue loss. Two observations kept the same sequence ID around NPC config
+changes. Fixtures exercise repeated IDs, torn reads, scene changes and queue
+overflow. See ``validation/npc-action-validation.json`` for the capture summary.
 
 Planner contract
 ----------------
@@ -178,19 +222,21 @@ Before enabling live flicking, the remaining native observations are:
 * Attacker target identity: an NPC animating nearby may be attacking someone else.
 * Verified Telos sequence-to-attack/style mappings, conditioned on phase, distance
   and special-attack components. Do not identify attacks from an arbitrary ID.
-* Repeated-animation starts or a playback/event counter. Reusing the same sequence
-  ID does not necessarily change the field, and -1 does not prove no pending hit.
+* Repeated-animation coverage in Telos combat. Compatibility Mode has a raw
+  application stamp. The original profile observes sequence changes only.
 * Prayer-check deadlines, including projectile travel and paired/scheduled hits;
   an animation start or a recorded hitsplat is not automatically that deadline.
 * Complete relevant incoming-attack coverage, including golems and phase changes.
 * Measured key-to-observed-overhead latency, tick alignment and live Soul Split
   acknowledgement on the intended account.
 
-A manual Telos practice capture with its enrage and attack context is needed to
-label those raw observations. Existing NPC-recipient hitmarks do not identify
-the attacker or provide the player's complete incoming-hit schedule. The
-current module therefore reports the missing classifier rather than pretending
-to protect against an unrecognised encounter.
+A manual Telos practice capture should label melee-range autos, out-of-range
+magic autos and specials separately. Record enrage, phase, whether Telos
+targets the player, the visible cue, projectile or hit timing, and the prayer
+used. Compare the event timestamp against the latest successful manual
+protection change for each attack. A cue that arrives after prayer is checked
+cannot drive a reactive switch. Use the sequence mapping and lead time only
+after validating them in the intended encounter.
 
 Sources
 -------

@@ -95,18 +95,22 @@ static int npc_one(rs3_context *c,rs3_snapshot *s,uint64_t table,uint64_t count,
     rs3_npc_animation *anim=s->animations+s->info.npc_count;
     memset(anim,0,sizeof *anim); anim->runtime_id=uid; anim->config_id=npc.config_id;
     anim->reason=RS3_UNSUPPORTED_CLIENT;
-    if (c->profile->has_npc_animation) {
+    if (c->profile->npc_animation_vtable_rva) {
         int32_t ids[2]={i32(actor+P_NPC_ACTION_SEQUENCE_OFFSET),i32(actor+P_NPC_MOVEMENT_SEQUENCE_OFFSET)};
         int32_t again[2]; uint64_t component;
+        uint32_t stamp_offset=c->profile->npc_action_stamp_offset, stamp=0;
         anim->reason=RS3_READ_FAILED;
-        if (u64(actor+P_NPC_ANIMATION_COMPONENT_OFFSET)==c->module_base+P_NPC_ANIMATION_VTABLE_RVA &&
+        if (stamp_offset<=sizeof actor-sizeof stamp &&
+            u64(actor+P_NPC_ANIMATION_COMPONENT_OFFSET)==c->module_base+c->profile->npc_animation_vtable_rva &&
             ids[0]>=-1 && ids[0]<=1000000 && ids[1]>=-1 && ids[1]<=1000000 &&
             rd(c,object+P_NPC_ACTION_SEQUENCE_OFFSET,again,4) &&
             rd(c,object+P_NPC_MOVEMENT_SEQUENCE_OFFSET,again+1,4) &&
+            (!stamp_offset || (rd(c,object+stamp_offset,&stamp,4) && stamp==u32(actor+stamp_offset))) &&
             ptr(c,object+P_NPC_ANIMATION_COMPONENT_OFFSET,&component) &&
             component==u64(actor+P_NPC_ANIMATION_COMPONENT_OFFSET) && !memcmp(ids,again,sizeof ids)) {
             anim->valid=1; anim->reason=RS3_REASON_NONE;
             anim->action_sequence=ids[0]; anim->movement_sequence=ids[1];
+            c->action_stamps[s->info.npc_count]=stamp;
         }
     }
     if (!rd(c,address,after,32) || !rd(c,object+0x88,&check_uid,2) || check_uid!=uid ||
@@ -150,6 +154,7 @@ void commit_npcs(rs3_context *c,rs3_snapshot *s,const uint32_t *ids,uint32_t cou
         if (!state) continue;
         npc->instance_id=state->instance;
         s->animations[i].instance_id=npc->instance_id;
+        npc_action_commit(c,s,state,i);
         for (uint32_t j=0;j<npc->hit_count;j++) {
             rs3_hit *h=s->hits+npc->hit_offset+j;
             if (h->state!=RS3_HIT_ACTIVE) continue;

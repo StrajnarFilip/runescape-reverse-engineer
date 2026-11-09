@@ -25,10 +25,30 @@ typedef struct rs3_npc_animation {
     int32_t action_sequence, movement_sequence; /**< -1 is a read idle/absent slot. */
 } rs3_npc_animation;
 
-RS3_API uint32_t rs3_combat_sizeof(uint32_t structure); /**< 1=state, 2=animation. */
+enum rs3_npc_action_flags { RS3_NPC_ACTION_HAS_APPLICATION_STAMP=1 };
+
+/** An observed application of an NPC action animation. Sequence IDs describe
+ * animation, with no attack style, target, or prayer deadline implied.
+ */
+typedef struct rs3_npc_action_event {
+    uint64_t sequence, observed_ns, sample_sequence, scene_epoch;
+    uint64_t process_creation_time, instance_id;
+    uint32_t pid, runtime_id;
+    int32_t config_id, previous_action_sequence, action_sequence; /**< IDs from adjacent valid samples. */
+    uint32_t logic_tick, application_stamp, flags;
+} rs3_npc_action_event;
+
+RS3_API uint32_t rs3_combat_sizeof(uint32_t structure); /**< 1=state, 2=animation, 3=action event. */
 RS3_API int32_t rs3_snapshot_combat(const rs3_snapshot *, rs3_combat_state *, uint32_t out_size);
 RS3_API int32_t rs3_snapshot_npc_animations(const rs3_snapshot *, rs3_npc_animation *,
     uint32_t capacity, uint32_t *required);
+/** Read a bounded event queue with a caller-owned cursor initially set to 0.
+ * Pass next as after on the next call. lost counts overwritten queue entries.
+ * observed_ns uses rs3_monotonic_ns. Match process and scene before consuming.
+ * A fresh instance or a gap in sampling establishes a new baseline.
+ */
+RS3_API int32_t rs3_npc_action_events_since(rs3_context *, uint64_t after,
+    rs3_npc_action_event *out, uint32_t capacity, uint32_t *written, uint64_t *next, uint64_t *lost);
 /** Returns UNKNOWN for conflicting/insufficiently known overheads. */
 RS3_API uint32_t rs3_combat_active_prayer(const rs3_combat_state *);
 

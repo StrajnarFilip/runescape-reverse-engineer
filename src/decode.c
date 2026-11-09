@@ -114,9 +114,9 @@ int decode(rs3_context *c,rs3_snapshot *s) {
         !ptr(c,client+P_STATE_POINTER_OFFSET,&after) || after!=state ||
         (scene && (!player_scene(c, &after) || after != scene)))
         return fail(c,RS3_READ_FAILED,"World context changed during read");
+    combat_commit(c,s,state);
     if (npc_ok) commit_npcs(c,s,ids,npc_count,npc_manager,state);
     inventory_commit(c,s,state);
-    combat_commit(c,s,state);
     uint64_t now=s->info.monotonic_ns;
     if (c->clock_context!=state || c->last_clock!=s->info.logic_tick) {
         c->clock_context=state; c->last_clock=s->info.logic_tick; c->clock_changed=now;

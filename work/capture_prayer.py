@@ -1,4 +1,4 @@
-"""Record C-collected prayer flags and raw animation changes; never send input."""
+"""Record C-collected prayer flags, NPC action events and raw animations."""
 import argparse
 import json
 from pathlib import Path
@@ -6,7 +6,7 @@ import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'python' / 'rs3_reader'))
-from native import Reader
+from native import NPCActionEvent, Reader
 from native_telemetry import combat_record
 
 
@@ -25,7 +25,8 @@ def main():
         previous, last_write, written, previous_sequence = None, 0, 0, 0
         while time.monotonic() < until:
             info, player, npcs, _ = reader.sample()
-            if info.sequence == previous_sequence:
+            actions, lost = reader.drain_npc_action_events()
+            if info.sequence == previous_sequence and not actions and not lost:
                 time.sleep(.002)
                 continue
             previous_sequence = info.sequence
@@ -38,14 +39,20 @@ def main():
                        'process_creation_time': info.process_creation_time,
                        'combat': combat_record(reader), 'animations': animations,
                        'hp': player.raw_variables[0] if player.valid_variables & 1 else None,
-                       'prayer_raw': player.raw_variables[2] if player.valid_variables & 4 else None}
+                       'prayer_raw': player.raw_variables[2] if player.valid_variables & 4 else None,
+                       'telos_raw': player.raw_variables[9] if player.valid_variables & (1 << 9) else None,
+                       'position': ([reader.position.x, reader.position.y, reader.position.plane]
+                                    if reader.position.valid else None)}
             key = json.dumps(payload, sort_keys=True)
             now = time.monotonic()
-            if key != previous or now-last_write >= 1:
+            if actions or lost or key != previous or now-last_write >= 1:
                 payload.update(sequence=info.sequence, observed_ns=info.monotonic_ns,
                                timestamp_ns=info.timestamp_ns, client_logic_tick=info.logic_tick,
                                sample_duration_ns=info.sample_duration_ns,
-                               executable_sha256=info.executable_sha256.decode('ascii'))
+                               executable_sha256=info.executable_sha256.decode('ascii'),
+                               npc_action_events=[{name: getattr(event, name) for name, _ in NPCActionEvent._fields_}
+                                                  for event in actions],
+                               npc_action_events_lost=lost)
                 out.write(json.dumps(payload) + '\n')
                 out.flush()
                 written += 1
