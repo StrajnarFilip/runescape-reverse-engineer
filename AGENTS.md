@@ -48,3 +48,14 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
   abilities or conflicting timings; do not import those as verified constants.
 - EoF stored-special identity, Telos action/phase recognition and complete
   castability are not established merely by inventory IDs or published guides.
+- Prayer timing code is in `src/prayer.c`, with additive APIs in
+  `include/rs3/prayer.h` and `include/rs3/combat.h`; see `docs/prayer-flick.rst`.
+  The target profile includes Soul Split even though the current calibration
+  account lacks it. Preserve the user's Ctrl+F1 Magic, Ctrl+F2 Ranged,
+  Ctrl+F3 Soul Split, Ctrl+F4 Melee bindings in `profiles/prayer_flick.json`.
+- Raw NPC animation IDs and overhead flags are available, but Telos attack
+  classification, prayer-check deadlines and complete incoming-attack coverage
+  remain uncalibrated. The observer must not present itself as a live flicker.
+  Do not send automatic prayer toggles on unvalidated or stale timing evidence.
+- Target Telos range: 300%-4000% enrage. The user is preparing the intended
+  Soul Split account and will say when it is ready for manual calibration.

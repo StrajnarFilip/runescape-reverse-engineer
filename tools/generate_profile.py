@@ -11,6 +11,7 @@ PROFILE_FIELDS = (
     "client_vtable_rva", "state_pointer_offset", "logic_clock_offset", "logic_tick_ms",
     "skills_manager_offset", "skills_entries_offset", "skill_stride",
     "skill_base_level_offset",
+    "game_state_offset", "in_game_state",
 )
 VARIABLES = (
     "health_current", "health_max", "prayer_packed", "adrenaline", "gcd_start",
@@ -33,7 +34,7 @@ def signatures(profile, array):
     return [*lines, "};"]
 
 
-def client_layout(name, prefix, patterns, rvas, has_position):
+def client_layout(name, prefix, patterns, rvas, has_position, has_npc_animation=False):
     return [
         f"static const client_profile {name} = {{",
         f"    .sha256 = {prefix}_SHA256,",
@@ -43,6 +44,7 @@ def client_layout(name, prefix, patterns, rvas, has_position):
         f"    .signature_count = sizeof {patterns} / sizeof {patterns}[0],",
         *(f"    .{key} = {number(value):#x}u," for key, value in rvas.items()),
         f"    .has_position = {int(has_position)},",
+        f"    .has_npc_animation = {int(has_npc_animation)},",
         "};",
     ]
 
@@ -88,7 +90,8 @@ def generate(data, position_data):
     compatibility = position_profile["combat_layout"]
     if compatibility["version"] != profile["version"]:
         raise ValueError("Incompatible combat layout version")
-    lines.extend(client_layout("p_profile", "P", "p_signatures", combat_rvas, False))
+    lines.extend(client_layout("p_profile", "P", "p_signatures", combat_rvas, False,
+                               bool(profile['npcs'].get('animation_layout_verified'))))
     lines.extend(client_layout("pos_profile", "POS", "pos_signatures",
                                {key: compatibility[key] for key in combat_rvas}, True))
     lines.extend(("#endif", ""))

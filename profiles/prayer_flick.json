@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "prayer_book": "not_validated",
+  "available_prayers": ["magic", "ranged", "melee", "soul_split"],
+  "idle_prayer": "soul_split",
+  "soul_split_live_validation": "requires_the_target_account_with_soul_split_unlocked",
+  "mode": "observe",
+  "target_enrage_min": 300,
+  "target_enrage_max": 4000,
+  "bindings": {
+    "magic": {"key": "F1", "virtual_key": 112, "modifiers": 1},
+    "ranged": {"key": "F2", "virtual_key": 113, "modifiers": 1},
+    "soul_split": {"key": "F3", "virtual_key": 114, "modifiers": 1},
+    "melee": {"key": "F4", "virtual_key": 115, "modifiers": 1}
+  },
+  "timing": {
+    "lead_ms": 600,
+    "hold_ms": 100,
+    "min_idle_ms": 300,
+    "ack_timeout_ms": 1200,
+    "max_age_ms": 150
+  },
+  "timing_status": "initial_conservative_settings_not_live_calibrated",
+  "attack_rules": [],
+  "attack_coverage_validated": false
+}

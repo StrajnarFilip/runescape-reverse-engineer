@@ -1,0 +1,204 @@
+Prayer timing engine and native combat observations
+===================================================
+
+Status
+------
+
+The C timing planner, native prayer/animation observations, Python observer and
+C/Python/Java consumers are implemented. **A calibrated automatic Telos flicker
+is not yet implemented.** The command-line observer never sends input. Raw NPC
+animation IDs do not establish an attack style, target or prayer-check time.
+
+The intended account has Soul Split. ``profiles/prayer_flick.json`` enables it
+and records the user's bindings: Ctrl+F1 Magic, Ctrl+F2 Ranged, Ctrl+F3 Soul Split,
+Ctrl+F4 Melee. Soul Split could not be live-validated on the calibration account,
+which has not unlocked it. Both healing and protection transitions are covered
+by deterministic replay tests.
+The requested Telos range is 300%-4000% enrage. The user is preparing that
+account and will signal when it is available for live calibration.
+
+Layout follows the current repository:
+
+* ``src/prayer.c``: deterministic C policy, with no memory access or input.
+* ``include/rs3/prayer.h``: language-neutral planner API and documented layouts.
+* ``src/combat.c``, ``src/npcs.c``: C acquisition of numeric flags and sequences.
+* ``include/rs3/combat.h``: additive snapshot accessors and explicit prayer input.
+* ``python/rs3_reader/prayer.py``: ctypes binding; policy remains in C.
+* ``python/rs3_reader/prayer_flick.py``: observer and synthetic replay runner.
+* ``profiles/prayer_flick.json``: intended-account availability, bindings, margins.
+* ``tests/native/test_prayer.c`` and ``tests/python/test_prayer.py``: policy/FFI checks.
+
+Running it
+----------
+
+Build through the root CMake project, then use::
+
+    python python/rs3_reader/prayer_flick.py --duration 60
+    python python/rs3_reader/prayer_flick.py --pid 12345 --duration 60
+    python python/rs3_reader/prayer_flick.py --replay examples/prayer_replay.json
+
+The observer prints changed observations and heartbeats as JSON Lines. It
+reports current prayer, raw NPC sequences and the planner's reason for holding
+or refusing a switch. ``live_flick_ready`` remains false while the attack
+classifier and timing/coverage calibration are missing. No execute option is
+provided by this observer. The desktop tracker also shows active prayer and an
+NPC Action seq column; full raw fields remain available through Copy current JSON.
+
+For a compact local capture of C-collected observations::
+
+    python work/capture_prayer.py --duration 300 --output work/prayer_research/capture.jsonl
+
+Raw captures remain local. The committed evidence summary is
+``docs/validation/prayer-validation.json``. Its five-minute recording contains
+1244 changed/heartbeat rows and spans 29994 native sample sequence increments.
+The requested acquisition frequency was 100 Hz. The median acquisition time
+among those retained rows was 0.5403ms; this is not a benchmark of every poll.
+Manual Magic, Ranged and Melee transitions were observed. No automatic key
+chords or Telos encounter were recorded.
+
+Directly available data
+-----------------------
+
+``rs3_snapshot_combat`` returns masks of known/active overheads and raw variable
+values with independent presence bits. Its size is 48 bytes. In particular:
+
+================  ======================  ===============================
+Variable          Bits                    Meaning from local definitions
+================  ======================  ===============================
+3272              6 / 7 / 8               Magic / Ranged / Melee protection
+3275              7 / 8 / 9 / 18          Magic / Ranged / Melee / Soul Split
+3273              3                       Necromancy protection
+5859              17                      Necromancy deflection
+================  ======================  ===============================
+
+The observed protection transitions used VARP 3272 values 64, 128 and 256.
+The other rows above are definition-derived and fixture-tested, with their live
+validation still outstanding. The selected prayer book is not inferred from the
+user's key labels. An absent sparse entry remains unknown. A positively observed
+single overhead can be identified even if other flag containers are absent;
+claiming that every overhead is off requires complete known masks. Conflicting
+positive overhead bits are rejected.
+
+The combat extension checks client state 30 at offset ``0x19fc0`` and withholds
+its prayer state outside that scene. On the original executable, the predicate
+at RVA ``0x356b0`` loads the owning client from ``+8`` and compares this field
+with 30; its instruction bytes are now included in the profile signatures.
+The field was observed as 30 in the live scene. Logout/world-hop behaviour is
+fixture-tested but has not had a controlled live validation. ``scene_epoch``
+increments after observed scene loss, world-context replacement or process
+creation changes. Transitions entirely missed by polling cannot be guaranteed.
+
+``rs3_snapshot_npc_animations`` returns 32-byte records tied to the same local NPC
+instance IDs as the existing snapshot. On the original 951-3 executable
+(``fd8afd32...358d45``), it reads action sequence ``+0xaa0`` and movement sequence
+``+0x970``, validating the component at ``+0x310`` against vtable RVA ``0x15dc740``.
+Both IDs are re-read before publication, followed by the existing NPC identity
+checks. A failed optional animation read does not discard valid NPC HP.
+
+Static provenance: actor constructor RVA ``0xc3c110`` embeds this component;
+component constructor ``0xc12910`` creates the two sequence slots; slot
+constructor ``0xc14a00`` initializes the sequence member at slot ``+8`` to -1.
+Observed idle/movement sequences and nonnegative action sequences establish
+that the fields change, not that a particular sequence is a Telos attack.
+
+Compatibility Mode's animation layout is deliberately unavailable until checked
+on that executable. Its established player/NPC/inventory features remain intact.
+The new prayer flags use its shared, hash-pinned variable-table layout.
+
+Planner contract
+----------------
+
+Create one ``rs3_prayer_planner`` per serialized consumer and destroy it with the
+matching API. No collector context or game process is required. All time values
+must use one monotonic clock domain; live consumers can use
+``rs3_monotonic_ns``. Absolute wall-clock capture timestamps must not be mixed
+with that clock. The struct sizes are 32/56/40/56 bytes for config/frame/threat/
+decision; verify them with ``rs3_prayer_sizeof`` when binding another language.
+
+1. Supply a fresh ``rs3_prayer_frame`` containing session identity, sequence,
+   observed overhead, positive prayer points and available prayers.
+2. Supply the complete current list of pending threats. Each needs a unique
+   event identity, source instance, required protection and a validated interval
+   during which prayer may be checked. This interval is independent of when
+   damage appears. A known unprotectable attack uses ``RS3_PRAYER_NONE``.
+3. ``rs3_prayer_step`` expands protection windows by lead/hold margins, returns
+   SET/HOLD/BLOCKED/WAIT_ACK/FAULT, and marks a missed earliest deadline. Two
+   incompatible required overheads in overlapping windows produce a conflict.
+4. A SET result is a proposal, not a keypress. Send it through the separate
+   explicit input layer only after checking the current scene and binding.
+   Call ``rs3_prayer_note_sent`` only if Windows accepted that input.
+5. A later sample must confirm the new overhead. Re-reading the same sample
+   cannot acknowledge a command. While waiting, no second toggle is proposed.
+   A timeout or loss of trustworthy observations after dispatch latches a fault
+   instead of blindly toggling again. Re-observe and explicitly reset to recover.
+
+Soul Split is proposed only with explicit complete attack coverage extending
+far enough into the future and enough room for acknowledgement plus the minimum
+healing window. An empty attack list alone never establishes that it is safe.
+Without enough time, the planner favours early protection. The 600ms lead,
+100ms hold and other default settings are starting margins, not measured Telos
+latency or a guarantee. This engine cannot promise perfect prayer timing over
+network delay, missed samples or incomplete client information.
+
+``next_wakeup_ns`` is an upper bound for re-evaluation, not permission to ignore
+new observations. Continue processing new native frames and threat changes.
+Game ticks (600ms), the client timer unit (20ms) and acquisition intervals are
+distinct. Sampling at 100Hz does not reveal future server decisions.
+
+Input and interoperation
+------------------------
+
+``rs3_set_prayer(snapshot, prayer, virtual_key, modifiers)`` is an explicit C
+function. It checks the verified process, foreground game window, modifier/key
+states, an observed different overhead, positive prayer points and a snapshot
+no older than 150ms. Modifier bit 1 is Ctrl, 2 Shift, 4 Alt. The key chord releases
+its modifiers, including a best-effort release after a partial Windows insertion.
+User-held modifiers cause rejection. Input calls should be serialized by their
+caller. An accepted key does not establish a correct action-bar mapping or an
+unlocked prayer; confirm the actual resulting overhead.
+
+The sampler and observer never invoke this function. The live attack adapter
+must be completed before automatic dispatch is enabled. A failed/partially
+accepted input must trigger re-observation, not an unconditional retry.
+
+CMake builds ``prayer_example`` from ``examples/prayer.c``. Python replay is
+shown above. The Java 22+ FFM example verifies layouts before invoking C::
+
+    java --enable-native-access=ALL-UNNAMED examples/PrayerPlanner.java C:/absolute/path/rs3_native.dll
+
+All three consumers use the same C engine and their examples use synthetic
+observations. Existing ABI-v1 layouts are unchanged; new structs/accessors are
+additive. Installations include ``rs3/prayer.h`` and ``rs3/combat.h``.
+
+Remaining Telos calibration
+---------------------------
+
+Before enabling live flicking, the remaining native observations are:
+
+* Attacker target identity: an NPC animating nearby may be attacking someone else.
+* Verified Telos sequence-to-attack/style mappings, conditioned on phase, distance
+  and special-attack components. Do not identify attacks from an arbitrary ID.
+* Repeated-animation starts or a playback/event counter. Reusing the same sequence
+  ID does not necessarily change the field, and -1 does not prove no pending hit.
+* Prayer-check deadlines, including projectile travel and paired/scheduled hits;
+  an animation start or a recorded hitsplat is not automatically that deadline.
+* Complete relevant incoming-attack coverage, including golems and phase changes.
+* Measured key-to-observed-overhead latency, tick alignment and live Soul Split
+  acknowledgement on the intended account.
+
+A manual Telos practice capture with its enrage and attack context is needed to
+label those raw observations. Existing NPC-recipient hitmarks do not identify
+the attacker or provide the player's complete incoming-hit schedule. The
+current module therefore reports the missing classifier rather than pretending
+to protect against an unrecognised encounter.
+
+Sources
+-------
+
+* `PVME prayer timing <https://pvme.io/pvme-guides/new-to-bossing/prayer-flicking/>`_.
+* `PVME melee Telos <https://pvme.io/pvme-guides/rs3-full-boss-guides/telos/melee/>`_.
+* ``docs/telos-melee-research.rst``: guide assumptions and conflicting legacy values.
+* Local read-only JS5 VarBit definitions: 16745-16747, 16768-16770, 16779,
+  53274 and 53281. Their symbolic names were research leads from public
+  `gameval metadata <https://github.com/BotWithUs/NXTDebugger/tree/c771c1d374c30373662f55776760762300097d8d/resources/gameval>`_.
+  No game agent from that project is used.

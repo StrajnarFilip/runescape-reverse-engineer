@@ -30,6 +30,8 @@ add_library(rs3_objects OBJECT
     src/decode.c
     src/position.c
     src/input.c
+    src/combat.c
+    src/prayer.c
     src/npcs.c
     src/inventory.c
     "${profile_header}"
@@ -58,6 +60,10 @@ target_include_directories(read_example PRIVATE include)
 set_target_properties(read_example PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 add_dependencies(read_example rs3_native)
 
+add_executable(prayer_example examples/prayer.c)
+set_target_properties(prayer_example PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_link_libraries(prayer_example PRIVATE rs3::native)
+
 if(BUILD_TESTING)
     add_executable(test_native tests/native/test_native.c)
     set_target_properties(test_native PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
@@ -68,6 +74,13 @@ if(BUILD_TESTING)
     endif()
     target_link_libraries(test_native PRIVATE rs3_objects bcrypt user32)
     add_test(NAME native COMMAND test_native)
+    add_executable(test_prayer tests/native/test_prayer.c)
+    target_include_directories(test_prayer PRIVATE include)
+    set_target_properties(test_prayer PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+    target_compile_definitions(test_prayer PRIVATE RS3_STATIC)
+    target_link_libraries(test_prayer PRIVATE rs3_objects bcrypt user32)
+    add_test(NAME prayer COMMAND test_prayer)
+    add_test(NAME prayer_example COMMAND prayer_example)
     add_test(NAME python COMMAND "${CMAKE_COMMAND}" -E env
         "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/python/rs3_reader;${CMAKE_CURRENT_SOURCE_DIR}/work/reference"
         "RS3_NATIVE_LIBRARY=$<TARGET_FILE:rs3_native>"
@@ -89,7 +102,8 @@ install(TARGETS rs3_native EXPORT rs3_native_targets
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 )
-install(FILES include/rs3/rs3.h DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/rs3")
+install(FILES include/rs3/rs3.h include/rs3/combat.h include/rs3/prayer.h
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/rs3")
 install(EXPORT rs3_native_targets NAMESPACE rs3:: DESTINATION "${package_dir}")
 configure_package_config_file(cmake/rs3_native-config.cmake.in
     "${CMAKE_CURRENT_BINARY_DIR}/rs3_native-config.cmake" INSTALL_DESTINATION "${package_dir}")

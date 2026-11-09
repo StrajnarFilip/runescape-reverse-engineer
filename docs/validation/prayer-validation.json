@@ -1,0 +1,93 @@
+{
+  "reviewed_utc": "2026-11-09T15:42:27.182913+00:00",
+  "source": "C ReadProcessMemory collector; manual in-game prayer switches",
+  "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+  "raw_capture_sha256": "be99ba747fe281c36eb25a9b7976fb0e2e34b643a61f50abc891a2a1861238ae",
+  "capture_records": 1244,
+  "capture_duration_s": 299.94,
+  "native_sequence_span": 29994,
+  "requested_native_hz": 100,
+  "sample_duration_median_ms": 0.5403,
+  "prayer_transitions": [
+    {
+      "timestamp_ns": 1794238135591568000,
+      "active_prayer": null,
+      "raw_flags": {
+        "3272": 0,
+        "3275": null,
+        "3273": null,
+        "5859": null
+      }
+    },
+    {
+      "timestamp_ns": 1794238175931662500,
+      "active_prayer": "magic",
+      "raw_flags": {
+        "3272": 64,
+        "3275": null,
+        "3273": 0,
+        "5859": null
+      }
+    },
+    {
+      "timestamp_ns": 1794238180121664000,
+      "active_prayer": "ranged",
+      "raw_flags": {
+        "3272": 128,
+        "3275": null,
+        "3273": 0,
+        "5859": null
+      }
+    },
+    {
+      "timestamp_ns": 1794238192121879200,
+      "active_prayer": "melee",
+      "raw_flags": {
+        "3272": 256,
+        "3275": null,
+        "3273": 0,
+        "5859": null
+      }
+    },
+    {
+      "timestamp_ns": 1794238220951684100,
+      "active_prayer": null,
+      "raw_flags": {
+        "3272": 0,
+        "3275": null,
+        "3273": 0,
+        "5859": null
+      }
+    }
+  ],
+  "npc_animation_records_valid": 41046,
+  "distinct_action_sequences": [
+    827,
+    21201,
+    21202
+  ],
+  "limitations": [
+    "Soul Split not unlocked on calibration account; intended target profile includes it.",
+    "Protection flags observed in VARP 3272; selected prayer book is not established.",
+    "Raw animation IDs are not a verified attack classifier or a prayer-check deadline.",
+    "No automatic prayer input was sent during this capture.",
+    "No Telos encounter was recorded.",
+    "Median sample time describes changed/heartbeat observations, not all native polls.",
+    "World-hop/logout gating was fixture-tested, not live validated in this capture."
+  ],
+  "automated_checks": {
+    "cmake_build": "passed; Zig 0.15.2 with CMake 4.4.5/Ninja",
+    "native_decoder_groups": 16,
+    "native_prayer_groups": 6,
+    "python_unittest_cases": 35,
+    "ctest_suites_passed": [
+      "native",
+      "prayer",
+      "prayer_example",
+      "python"
+    ],
+    "java_ffm_example": "passed on JDK 25.0.5+8; synthetic input only",
+    "live_observer_smoke": "passed; state 30 and raw NPC sequences read, no input sent",
+    "visual_ui_qa": "not performed"
+  }
+}

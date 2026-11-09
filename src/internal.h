@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <string.h>
 #include "rs3/rs3.h"
+#include "rs3/combat.h"
 
 #define EVENT_CAPACITY 4096u
 #define RS3_TILE_LIMIT 12800
@@ -21,6 +22,7 @@ typedef struct {
     uint32_t registry_rva, player_handler_rva, client_handler_rva, client_vtable_rva;
     uint32_t npc_manager_vtable_rva, npc_entity_vtable_rva;
     int has_position;
+    int has_npc_animation;
 } client_profile;
 
 struct rs3_snapshot {
@@ -28,6 +30,8 @@ struct rs3_snapshot {
     const client_profile *profile;
     rs3_player player;
     rs3_position position;
+    rs3_combat_state combat;
+    rs3_npc_animation animations[RS3_MAX_NPCS];
     rs3_npc npcs[RS3_MAX_NPCS];
     rs3_hit hits[RS3_MAX_HITS];
     rs3_inventory_info inventory_info;
@@ -67,6 +71,7 @@ struct rs3_context {
     uint64_t *buckets;
     size_t bucket_capacity;
     uint64_t npc_context, npc_state, actors[RS3_MAX_NPCS];
+    uint64_t combat_world, combat_creation, combat_epoch;
     inventory_state *inventory;
 };
 
@@ -98,6 +103,8 @@ int player_scene(rs3_context *c, uint64_t *client);
 int decode_position(rs3_context *c, rs3_position *position);
 int32_t project_minimap_tile(const rs3_position *, const rs3_minimap *,
     int32_t x, int32_t y, int32_t plane, POINT *out);
+int32_t build_key_chord(uint32_t, uint32_t, INPUT out[8], uint32_t *count);
+uint32_t release_inserted_inputs(const INPUT *, uint32_t inserted, INPUT out[8]);
 int capture(rs3_context *c, int client, uint64_t *out);
 int variable(rs3_context *c, uint64_t table, uint64_t count, uint64_t sentinel,
              uint32_t id, int64_t *value, int *present);
@@ -107,6 +114,8 @@ int npcs_once(rs3_context *c, rs3_snapshot *s, uint64_t state, uint32_t *ids,
               uint32_t *out_count, uint64_t *out_manager);
 void commit_npcs(rs3_context *c, rs3_snapshot *s, const uint32_t *ids,
                  uint32_t count, uint64_t manager, uint64_t world_state);
+void combat_stage(rs3_context *, rs3_snapshot *, uint64_t player, uint64_t world);
+void combat_commit(rs3_context *, rs3_snapshot *, uint64_t world);
 
 inventory_state *inventory_create(void);
 void inventory_free(inventory_state *inventory);

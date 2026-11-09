@@ -46,6 +46,17 @@ class Position(C.Structure):
     _fields_ = [("valid", U32)] + fields(I32, "x y plane")
 
 
+class CombatState(C.Structure):
+    _fields_ = ([("scene_epoch", U64)] + fields(U32, "status reason known_mask active_mask") +
+                fields(I32, "normal_raw curses_raw normal_necro_raw curses_necro_raw") +
+                [("raw_valid_mask", U32), ("scene_state", I32)])
+
+
+class NPCAnimation(C.Structure):
+    _fields_ = ([("instance_id", U64), ("runtime_id", U32), ("config_id", I32)] +
+                fields(U32, "valid reason") + fields(I32, "action_sequence movement_sequence"))
+
+
 class NPC(C.Structure):
     _fields_ = ([("instance_id", U64), ("runtime_id", U32), ("config_id", I32)] +
                 fields(U32, "flags health_reason") + fields(I32, "health_current health_max") +
@@ -118,6 +129,11 @@ def load_library(path=None):
         "snapshot_client_version": (C.c_char_p, [pointer]),
         "snapshot_player": (I32, [pointer, C.POINTER(Player), U32]),
         "snapshot_position": (I32, [pointer, C.POINTER(Position), U32]),
+        "combat_sizeof": (U32, [U32]),
+        "snapshot_combat": (I32, [pointer, C.POINTER(CombatState), U32]),
+        "snapshot_npc_animations": (I32, [pointer, C.POINTER(NPCAnimation), U32, C.POINTER(U32)]),
+        "combat_active_prayer": (U32, [C.POINTER(CombatState)]),
+        "set_prayer": (I32, [pointer, U32, U32, U32]),
         "snapshot_npcs": (I32, [pointer, C.POINTER(NPC), U32, C.POINTER(U32)]),
         "snapshot_hits": (I32, [pointer, C.POINTER(Hit), U32, C.POINTER(U32)]),
         "events_since": (I32, [pointer, U64, C.POINTER(Event), U32, C.POINTER(U32),
@@ -139,6 +155,9 @@ def load_library(path=None):
     structures = (Options, Info, Player, NPC, Hit, Event, InventoryInfo, Item, Ability, ItemEvent, Position)
     for kind, structure in enumerate(structures, 1):
         if lib.rs3_sizeof(kind) != C.sizeof(structure):
+            raise RuntimeError("C/Python layout mismatch for "+structure.__name__)
+    for kind, structure in enumerate((CombatState, NPCAnimation), 1):
+        if lib.rs3_combat_sizeof(kind) != C.sizeof(structure):
             raise RuntimeError("C/Python layout mismatch for "+structure.__name__)
     # This digest identifies the profile used at build time. The DLL checks
     # the running client's executable fingerprint separately at attachment.
@@ -165,6 +184,7 @@ class Reader:
         # Size the reusable snapshot arrays for the ABI limits. Events drain in batches.
         self.info, self.player = Info(), Player()
         self.position = Position()
+        self.combat, self.animations = CombatState(), (NPCAnimation*1024)()
         self.npcs, self.hits = (NPC*1024)(), (Hit*65536)()
         self.events = (Event*256)()
         self.inventory_info, self.items, self.abilities = InventoryInfo(), (Item*47)(), (Ability*2048)()
@@ -193,9 +213,11 @@ class Reader:
         self.check(self.lib.rs3_snapshot_info(self.snapshot, C.byref(self.info), C.sizeof(Info)))
         self.check(self.lib.rs3_snapshot_player(self.snapshot, C.byref(self.player), C.sizeof(Player)))
         self.check(self.lib.rs3_snapshot_position(self.snapshot, C.byref(self.position), C.sizeof(Position)))
+        self.check(self.lib.rs3_snapshot_combat(self.snapshot, C.byref(self.combat), C.sizeof(CombatState)))
         # Only the prefixes reported in the snapshot counts are populated.
         count = U32()
         self.check(self.lib.rs3_snapshot_npcs(self.snapshot, self.npcs, len(self.npcs), C.byref(count)))
+        self.check(self.lib.rs3_snapshot_npc_animations(self.snapshot, self.animations, len(self.animations), C.byref(count)))
         self.check(self.lib.rs3_snapshot_hits(self.snapshot, self.hits, len(self.hits), C.byref(count)))
         self.check(self.lib.rs3_snapshot_inventory_info(self.snapshot, C.byref(self.inventory_info), C.sizeof(InventoryInfo)))
         self.check(self.lib.rs3_snapshot_items(self.snapshot, 0, self.items, len(self.items), C.byref(count)))

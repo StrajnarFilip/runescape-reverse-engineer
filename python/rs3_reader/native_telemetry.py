@@ -1,7 +1,23 @@
 """Convert C ABI observations to the existing tracker/JSONL schema."""
 import time
+import ctypes as C
 from native import Reader, VARIABLES
 from inventory_telemetry import extend_record
+
+PRAYERS = {0: "unknown", 1: "none", 2: "melee", 3: "magic", 4: "ranged", 5: "soul_split", 6: "necromancy"}
+
+
+def combat_record(reader):
+    state = reader.combat
+    active = reader.lib.rs3_combat_active_prayer(C.byref(state))
+    raw = (state.normal_raw, state.curses_raw, state.normal_necro_raw, state.curses_necro_raw)
+    return {"scene_epoch": state.scene_epoch, "scene_state": state.scene_state,
+            "active_prayer": PRAYERS[active] if active else None,
+            "known_mask": state.known_mask, "active_mask": state.active_mask,
+            "raw_flags": {str(var): raw[i] if state.raw_valid_mask & (1 << i) else None
+                          for i, var in enumerate((3272, 3275, 3273, 5859))},
+            "reason": None if active else "active_prayer_not_established",
+            "attack_classifier": "not_calibrated", "source": "native_memory"}
 
 
 def text(value):
@@ -63,6 +79,7 @@ class NativeTelemetry:
                           position=position, status="partial" if available else "unavailable",
                           client_version=version, executable_sha256=text(info.executable_sha256),
                           source="native_memory", read_duration_ms=native["sample_duration_ms"])
+            result["combat"] = combat_record(self.reader)
             # Observations from earlier frames retain their own process/timestamp.
             result["hit_splats"] = {"status": "unavailable", "active": None,
                                    "newly_observed": new_events, "events_lost": lost}
@@ -91,6 +108,12 @@ class NativeTelemetry:
                     "config_id": npc.config_id if npc.flags & 2 else None,
                     "name": text(npc.name) if npc.flags & 1 else None,
                     "health": health, "hit_splats": []}
+            animation = self.reader.animations[i]
+            item["animation"] = {
+                "action_sequence": animation.action_sequence if animation.valid else None,
+                "movement_sequence": animation.movement_sequence if animation.valid else None,
+                "reason": None if animation.valid else "animation_layout_unavailable_or_changed",
+                "classification": None}
             # Each NPC references a slice of the snapshot's shared hit buffer.
             for j in range(npc.hit_offset, npc.hit_offset+npc.hit_count):
                 hit = hit_record(hits[j])
@@ -109,6 +132,7 @@ class NativeTelemetry:
             "executable_sha256": text(info.executable_sha256), "client_version": version,
             "source": "native_memory", "status": "partial", "read_duration_ms": native["sample_duration_ms"],
             "position": position,
+            "combat": combat_record(self.reader),
             "freshness": {"observed_at_ms": info.timestamp_ns//1000000,
                           "client_logic_tick": info.logic_tick, "clock_stalled_ms": round(player.clock_stalled_ns/1e6, 1),
                           "server_update_age_ms": None},

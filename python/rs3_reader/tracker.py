@@ -277,11 +277,15 @@ class Tracker:
                     meter.set("—", 0, "Samples are not updating")
                 sync_rows(self.npc_tree, [])
                 self.npc_status.config(text="NPC data is stale; waiting for a fresh sample.", fg=RED)
+                self.pending.config(text="Active prayer unavailable; samples are stale.")
         self.root.after(50, self.refresh)
 
     def render(self, s):
         available = s["status"] != "unavailable"
         stalled = s.get("freshness", {}).get("clock_stalled_ms", 0) > 2000
+        overhead = (s.get("combat") or {}).get("active_prayer") if available and not stalled else None
+        self.pending.config(text="Active prayer: %s · NPC sequences are raw · Telos attack timing is uncalibrated." %
+                            (overhead.replace("_", " ").title() if overhead else "unknown"))
         position = s.get("position") if available and not stalled else None
         self.tile.config(text="{x}, {y} · plane {plane}".format(**position)
                          if position is not None else "Tile unavailable")
@@ -494,8 +498,9 @@ class Tracker:
         for col, text in [(0, "NPCS IN THE LOADED SCENE"), (1, "RECENTLY OBSERVED HIT SPLATS")]:
             tk.Label(tables, text=text, bg=PANEL, fg=MUTED, font=("Segoe UI", 9, "bold")).grid(
                 row=0, column=col, sticky="w", pady=(0, 7), padx=(0, 12))
-        self.npc_tree = self.table(tables, 0, [("name", "Name", 170), ("config", "Type ID", 75),
-                                   ("runtime", "Runtime ID", 85), ("health", "HP / max", 120), ("pct", "%", 65)])
+        self.npc_tree = self.table(tables, 0, [("name", "Name", 135), ("config", "Type ID", 65),
+                                   ("runtime", "Runtime ID", 75), ("health", "HP / max", 105),
+                                   ("pct", "%", 55), ("sequence", "Action seq", 85)])
         self.npc_tree.tag_configure("wounded", foreground=GOLD)
         self.npc_tree.tag_configure("dead", foreground=RED)
         self.hit_tree = self.table(tables, 1, [("time", "Observed", 100), ("npc", "Recipient", 140),
@@ -539,7 +544,8 @@ class Tracker:
                 tag = ("dead",) if h["current"] == 0 else (("wounded",) if h["percent"] is not None and h["percent"] < 100 else ())
                 rows.append(("npc_%d_%d" % (e["runtime_id"], e["instance_id"]),
                              (e["name"] or "(unnamed)", fmt(e["config_id"]), str(e["runtime_id"]),
-                              fmt(h["current"])+" / "+fmt(h["max"]), fmt(h["percent"])), tag))
+                              fmt(h["current"])+" / "+fmt(h["max"]), fmt(h["percent"]),
+                              fmt((e.get("animation") or {}).get("action_sequence"))), tag))
             sync_rows(self.npc_tree, rows)
             self.npc_status.config(text="Loaded %s · read %s · displayed %d · skipped %s" %
                                    (npcs.get("loaded_count", "—"), npcs.get("read_count", "—"), len(visible), npcs.get("skipped_count", 0)),

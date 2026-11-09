@@ -66,8 +66,12 @@ static int32_t send_to_game(const rs3_snapshot *s, HWND window, INPUT *events, U
         GetForegroundWindow() == window && window_pid_matches(window, s->info.pid)) {
         if (fresh_game_frame(s)) {
             UINT sent = SendInput(count, events, sizeof *events);
-            // If a down event was inserted without its matching up, try to release it.
-            if (sent == count - 1) SendInput(1, events + sent, sizeof *events);
+            // A partially inserted chord may contain several unmatched downs.
+            // Release only keys/buttons this call inserted, never unrelated keys.
+            if (sent && sent<count) {
+                INPUT release[8]; uint32_t n=release_inserted_inputs(events,sent,release);
+                if (n) SendInput(n,release,sizeof *release);
+            }
             result = sent == count ? RS3_OK : RS3_E_OS;
         } else {
             result = RS3_E_STATE;
@@ -81,6 +85,51 @@ static int modifier_held(void) {
     return GetAsyncKeyState(VK_SHIFT) < 0 || GetAsyncKeyState(VK_CONTROL) < 0 ||
            GetAsyncKeyState(VK_MENU) < 0 || GetAsyncKeyState(VK_LWIN) < 0 ||
            GetAsyncKeyState(VK_RWIN) < 0;
+}
+
+uint32_t release_inserted_inputs(const INPUT *events,uint32_t inserted,INPUT out[8]) {
+    uint32_t n=0;
+    for (uint32_t i=inserted;i>0 && n<8;i--) {
+        const INPUT *e=events+i-1;
+        if (e->type==INPUT_KEYBOARD && !(e->ki.dwFlags&KEYEVENTF_KEYUP)) {
+            out[n]=*e; out[n++].ki.dwFlags|=KEYEVENTF_KEYUP;
+        } else if (e->type==INPUT_MOUSE && (e->mi.dwFlags&(MOUSEEVENTF_LEFTDOWN|MOUSEEVENTF_RIGHTDOWN))) {
+            out[n]=*e;
+            out[n++].mi.dwFlags=(e->mi.dwFlags&MOUSEEVENTF_LEFTDOWN)?MOUSEEVENTF_LEFTUP:MOUSEEVENTF_RIGHTUP;
+        }
+    }
+    return n;
+}
+int32_t build_key_chord(uint32_t key,uint32_t mods,INPUT out[8],uint32_t *count) {
+    if (!out || !count || (mods&~7u) ||
+        !((key>='A' && key<='Z') || (key>='0' && key<='9') || (key>=VK_F1 && key<=VK_F12)))
+        return RS3_E_ARGUMENT;
+    static const WORD keys[]={VK_CONTROL,VK_SHIFT,VK_MENU};
+    uint32_t n=0;
+    memset(out,0,8*sizeof *out);
+    for (uint32_t i=0;i<3;i++) if (mods&(1u<<i)) { out[n].type=INPUT_KEYBOARD; out[n++].ki.wVk=keys[i]; }
+    out[n].type=INPUT_KEYBOARD; out[n++].ki.wVk=(WORD)key;
+    out[n]=out[n-1]; out[n++].ki.dwFlags=KEYEVENTF_KEYUP;
+    for (uint32_t i=3;i>0;i--) if (mods&(1u<<(i-1))) {
+        out[n].type=INPUT_KEYBOARD; out[n].ki.wVk=keys[i-1]; out[n++].ki.dwFlags=KEYEVENTF_KEYUP;
+    }
+    *count=n; return RS3_OK;
+}
+
+int32_t rs3_set_prayer(const rs3_snapshot *s,uint32_t prayer,uint32_t key,uint32_t mods) {
+    INPUT events[8]; uint32_t count;
+    int32_t result=build_key_chord(key,mods,events,&count);
+    if (!s || prayer<RS3_PRAYER_MELEE || prayer>RS3_PRAYER_NECROMANCY || result!=RS3_OK)
+        return RS3_E_ARGUMENT;
+    if (!fresh_game_frame(s) || monotonic_ns()-s->info.monotonic_ns>150000000ull ||
+        s->player.clock_stalled_ns>150000000ull)
+        return RS3_E_STATE;
+    uint32_t active=rs3_combat_active_prayer(&s->combat);
+    if (!s->combat.scene_epoch || active==RS3_PRAYER_UNKNOWN || active==prayer ||
+        !(s->player.valid_variables&(1ull<<RS3_PRAYER_PACKED)) ||
+        (s->player.raw_variables[RS3_PRAYER_PACKED]&32767)<=0 ||
+        modifier_held() || GetAsyncKeyState((int)key)<0) return RS3_E_STATE;
+    return send_to_game(s,GetForegroundWindow(),events,count);
 }
 
 static int point_in_client(HWND window, DWORD pid, POINT point) {

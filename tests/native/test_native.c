@@ -75,7 +75,8 @@ static fixture *make_profile_fixture(const client_profile *profile) {
         put64(f,fun+P_FUNCTION_CAPTURE_OFFSET,i?CLIENT:PLAYER);
     }
     put64(f,DOMAINS+P_TREE_LEFT_OFFSET,DOMAINS+256);
-    add(f,PLAYER,P_PLAYER_COUNT_OFFSET+8); add(f,CLIENT,0x7400); add(f,WORLD,P_NPC_MANAGER_OFFSET+8);
+    add(f,PLAYER,P_PLAYER_COUNT_OFFSET+8); add(f,CLIENT,0x7400); add(f,WORLD,0x1a000);
+    put32(f,WORLD+P_GAME_STATE_OFFSET,P_IN_GAME_STATE);
     put64(f,CLIENT,BASE+profile->client_vtable_rva); put64(f,CLIENT+P_STATE_POINTER_OFFSET,WORLD);
     put32(f,WORLD+P_LOGIC_CLOCK_OFFSET,1005);
     add(f,SKILLS,32); add(f,ENTRIES,6*P_SKILL_STRIDE);
@@ -495,6 +496,72 @@ static void input_projection_and_guards(void) {
     assert(rs3_interact(f->s, 0, RS3_ENTITY_SELECT_OPTION, 0, 0) == RS3_E_STATE);
     dispose(f);
 }
+static void combat_flags_and_animation(void) {
+    fixture *f=make_fixture();
+    const uint64_t vars=0xb00000;
+    const uint32_t ids[]={3272,3275,3273,5859};
+    add(f,vars,4*48);
+    for (uint32_t i=0;i<4;i++) {
+        uint64_t node=vars+i*48,bucket=PLAYER_TABLE+(ids[i]%97)*8;
+        put64(f,node+40,u64(at(f,bucket,8))); put64(f,bucket,node); put32(f,node,ids[i]);
+    }
+    put32(f,vars+48+8,1u<<7);
+    put64(f,ACTOR+P_NPC_ANIMATION_COMPONENT_OFFSET,BASE+P_NPC_ANIMATION_VTABLE_RVA);
+    put32(f,ACTOR+P_NPC_ACTION_SEQUENCE_OFFSET,28929);
+    put32(f,ACTOR+P_NPC_MOVEMENT_SEQUENCE_OFFSET,(uint32_t)-1);
+    assert(read_fixture(f));
+    rs3_combat_state c;
+    assert(rs3_snapshot_combat(f->s,&c,sizeof c)==RS3_OK && c.raw_valid_mask==15);
+    assert(c.known_mask==RS3_PRAYER_OVERHEADS && rs3_combat_active_prayer(&c)==RS3_PRAYER_MAGIC);
+    assert(rs3_combat_sizeof(1)==sizeof c && rs3_combat_sizeof(2)==sizeof(rs3_npc_animation));
+    rs3_npc_animation a; uint32_t n;
+    assert(rs3_snapshot_npc_animations(f->s,NULL,0,&n)==RS3_E_BUFFER && n==1);
+    assert(rs3_snapshot_npc_animations(f->s,&a,1,&n)==RS3_OK);
+    assert(a.valid && a.action_sequence==28929 && a.movement_sequence==-1 && a.instance_id==f->s->npcs[0].instance_id);
+    uint64_t epoch=c.scene_epoch;
+    put32(f,vars+48+8,1u<<18); assert(read_fixture(f));
+    assert(rs3_combat_active_prayer(&f->s->combat)==RS3_PRAYER_SOUL_SPLIT);
+    put32(f,vars+48+8,0); assert(read_fixture(f));
+    assert(rs3_combat_active_prayer(&f->s->combat)==RS3_PRAYER_NONE);
+    // Two incompatible active flags are not a trustworthy overhead state.
+    put32(f,vars+48+8,(1u<<7)|(1u<<9)); assert(read_fixture(f));
+    assert(rs3_combat_active_prayer(&f->s->combat)==RS3_PRAYER_UNKNOWN);
+    // Sparse absence is not proof that all overheads are off.
+    put64(f,PLAYER_TABLE+(3275%97)*8,UINT64_MAX); assert(read_fixture(f));
+    assert(rs3_combat_active_prayer(&f->s->combat)==RS3_PRAYER_UNKNOWN);
+    f->c->combat_world=0; assert(read_fixture(f)); assert(f->s->combat.scene_epoch>epoch);
+    put32(f,WORLD+P_GAME_STATE_OFFSET,10); assert(read_fixture(f));
+    assert(!f->s->combat.scene_epoch && !f->s->combat.active_mask &&
+           rs3_combat_active_prayer(&f->s->combat)==RS3_PRAYER_UNKNOWN);
+    put32(f,WORLD+P_GAME_STATE_OFFSET,P_IN_GAME_STATE);
+    put64(f,ACTOR+P_NPC_ANIMATION_COMPONENT_OFFSET,0); assert(read_fixture(f));
+    assert(!f->s->animations[0].valid && (f->s->npcs[0].flags&RS3_NPC_HEALTH));
+    dispose(f);
+    client_profile compat=pos_profile; compat.has_position=0;
+    f=make_profile_fixture(&compat); assert(read_fixture(f));
+    assert(!f->s->animations[0].valid && f->s->animations[0].reason==RS3_UNSUPPORTED_CLIENT);
+    dispose(f);
+}
+static void prayer_chords_and_partial_release(void) {
+    INPUT keys[8],release[8]; uint32_t n;
+    assert(build_key_chord(VK_F1,RS3_KEY_CTRL,keys,&n)==RS3_OK && n==4);
+    assert(keys[0].ki.wVk==VK_CONTROL && !keys[0].ki.dwFlags);
+    assert(keys[1].ki.wVk==VK_F1 && !keys[1].ki.dwFlags);
+    assert(keys[2].ki.wVk==VK_F1 && keys[2].ki.dwFlags==KEYEVENTF_KEYUP);
+    assert(keys[3].ki.wVk==VK_CONTROL && keys[3].ki.dwFlags==KEYEVENTF_KEYUP);
+    for (uint32_t inserted=1;inserted<4;inserted++) {
+        uint32_t count=release_inserted_inputs(keys,inserted,release);
+        assert(count==(inserted==1?1:2));
+        for (uint32_t i=0;i<count;i++) assert(release[i].ki.dwFlags&KEYEVENTF_KEYUP);
+        assert(release[count-1].ki.wVk==VK_CONTROL);
+    }
+    assert(build_key_chord('A',7,keys,&n)==RS3_OK && n==8);
+    assert(build_key_chord(VK_CONTROL,0,keys,&n)==RS3_E_ARGUMENT);
+    fixture *f=empty_fixture();
+    assert(rs3_set_prayer(f->s,RS3_PRAYER_MAGIC,VK_F1,RS3_KEY_CTRL)==RS3_E_STATE);
+    assert(rs3_set_prayer(f->s,RS3_PRAYER_MAGIC,VK_F1,8)==RS3_E_ARGUMENT);
+    dispose(f);
+}
 int main(void) {
     player_and_sparse(); invalid_tables_and_profile(); hits_and_health();
     torn_reads_and_transitions(); buffers_and_event_cursors(); failed_sample_clears_fields(); worker_lifecycle();
@@ -503,6 +570,7 @@ int main(void) {
     position_profile();
     sparse_inventory_slots();
     input_projection_and_guards();
-    puts("PASS: 14 native test groups");
+    combat_flags_and_animation(); prayer_chords_and_partial_release();
+    puts("PASS: 16 native test groups");
     return 0;
 }

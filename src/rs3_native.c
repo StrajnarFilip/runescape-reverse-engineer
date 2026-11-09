@@ -35,6 +35,8 @@ static void copy_frame(rs3_snapshot *to,const rs3_snapshot *from) {
     to->info=from->info; to->player=from->player;
     to->profile = from->profile;
     to->position = from->position;
+    to->combat = from->combat;
+    memcpy(to->animations,from->animations,from->info.npc_count*sizeof(rs3_npc_animation));
     memcpy(to->npcs,from->npcs,from->info.npc_count*sizeof(rs3_npc));
     memcpy(to->hits,from->hits,from->info.hit_count*sizeof(rs3_hit));
     to->inventory_info=from->inventory_info;
@@ -45,6 +47,7 @@ static void poll_and_publish(rs3_context *c,rs3_snapshot *s) {
     uint64_t begin=monotonic_ns(); DWORD exit_code=0;
     memset(&s->info,0,sizeof s->info); memset(&s->player,0,sizeof s->player);
     s->position = (rs3_position){0};
+    memset(&s->combat,0,sizeof s->combat);
     memset(&s->inventory_info,0,sizeof s->inventory_info);
     s->info.abi_version=RS3_ABI_VERSION; s->info.sequence=++c->sequence;
     s->info.timestamp_ns=unix_ns(); s->info.monotonic_ns=begin;
@@ -68,6 +71,8 @@ static void poll_and_publish(rs3_context *c,rs3_snapshot *s) {
         memset(&s->inventory_info,0,sizeof s->inventory_info);
         s->inventory_info.status=RS3_UNAVAILABLE; s->inventory_info.reason=c->reason;
         c->previous_valid=0; c->clock_context=0;
+        memset(&s->combat,0,sizeof s->combat);
+        s->combat.status=RS3_UNAVAILABLE; s->combat.reason=c->reason; c->combat_world=0;
         snprintf(s->info.message,sizeof s->info.message,"%s",c->error);
         if (c->reason==RS3_UNSUPPORTED_CLIENT && c->attached) schedule_retry(c,begin);
     }

@@ -32,11 +32,14 @@
   "state_pointer_offset": 8,
   "logic_clock_offset": "0x528",
   "logic_tick_ms": 20,
+  "game_state_offset": "0x19fc0",
+  "in_game_state": 30,
   "skills_manager_offset": "0x72e8",
   "skills_entries_offset": 16,
   "skill_stride": 24,
   "skill_base_level_offset": 16,
   "signatures": [
+    {"rva": "0x356b0", "bytes": "488b410883b8c09f01001e"},
     {
       "rva": "0x466d60",
       "bytes": "48894c24084883ec38488b0580b12b014c8d0569"
@@ -110,7 +113,12 @@
     "config_override_offset": "0x10b8",
     "health_current_offset": "0x115c",
     "health_max_offset": "0x1178",
-    "hitmarks_offset": "0xf18"
+    "hitmarks_offset": "0xf18",
+    "animation_layout_verified": true,
+    "animation_component_offset": "0x310",
+    "animation_vtable_rva": "0x15dc740",
+    "action_sequence_offset": "0xaa0",
+    "movement_sequence_offset": "0x970"
   },
   "inventory": {
     "manager_offset": "0x199e0",

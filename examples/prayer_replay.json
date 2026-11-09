@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "Synthetic protection-switch/acknowledgement example. No game capture or input.",
+  "frames": [
+    {"time_ms": 10000, "sequence": 1, "active_prayer": "melee", "simulate_acceptance": true,
+     "threats": [{"id": 1, "earliest_ms": 10600, "latest_ms": 10600, "prayer": "magic", "validated": true}]},
+    {"time_ms": 10010, "sequence": 2, "active_prayer": "melee",
+     "threats": [{"id": 1, "earliest_ms": 10600, "latest_ms": 10600, "prayer": "magic", "validated": true}]},
+    {"time_ms": 10020, "sequence": 3, "active_prayer": "magic",
+     "threats": [{"id": 1, "earliest_ms": 10600, "latest_ms": 10600, "prayer": "magic", "validated": true}]},
+    {"time_ms": 10701, "sequence": 4, "active_prayer": "magic", "simulate_acceptance": true,
+     "threats": [{"id": 2, "earliest_ms": 11301, "latest_ms": 11301, "prayer": "ranged", "validated": true}]},
+    {"time_ms": 10720, "sequence": 5, "active_prayer": "ranged",
+     "threats": [{"id": 2, "earliest_ms": 11301, "latest_ms": 11301, "prayer": "ranged", "validated": true}]}
+  ]
+}

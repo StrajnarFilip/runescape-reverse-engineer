@@ -27,6 +27,10 @@ Current capabilities
   Working Python ctypes and Java FFM consumers; no language-specific game agent.
 * Opt-in C commands for minimap movement, action-bar abilities and visible entity
   options such as Talk-to and Bank. See `Foreground input <docs/native-api.rst#foreground-input>`_.
+* Direct overhead-prayer flags, raw NPC animation sequences on the original
+  executable, and a C prayer timing planner with Soul Split support. See
+  `Prayer timing <docs/prayer-flick.rst>`_ for the observer/replay commands and
+  remaining Telos calibration. Automatic live flicking is not yet enabled.
 
 Previously verified in live combat: Goblin **550/550 HP**, Giant spider
 **1000/1000 HP**, and Goblin **550 -> 326 HP** alongside the independently reported

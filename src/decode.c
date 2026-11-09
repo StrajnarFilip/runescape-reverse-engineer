@@ -109,12 +109,14 @@ int decode(rs3_context *c,rs3_snapshot *s) {
         snprintf(s->info.message,sizeof s->info.message,"NPCs: %s",c->error);
     } else if (s->info.skipped_npcs) s->info.status=RS3_PARTIAL;
     inventory_stage(c,s,client,state);
+    combat_stage(c,s,player,state);
     if (!capture(c,0,&after) || after!=player || !capture(c,1,&after) || after!=client ||
         !ptr(c,client+P_STATE_POINTER_OFFSET,&after) || after!=state ||
         (scene && (!player_scene(c, &after) || after != scene)))
         return fail(c,RS3_READ_FAILED,"World context changed during read");
     if (npc_ok) commit_npcs(c,s,ids,npc_count,npc_manager,state);
     inventory_commit(c,s,state);
+    combat_commit(c,s,state);
     uint64_t now=s->info.monotonic_ns;
     if (c->clock_context!=state || c->last_clock!=s->info.logic_tick) {
         c->clock_context=state; c->last_clock=s->info.logic_tick; c->clock_changed=now;
