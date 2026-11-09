@@ -63,6 +63,28 @@ originate from a different sample than its enclosing JSON row. Rows include
 player life points, observed overhead, the raw Telos variable when present,
 and player position on the profile that supports it.
 
+Telos timing capture
+--------------------
+
+``telos_prayer.py`` labels Telos action sequence ``28929`` as a melee auto
+using the player's identification. Run it during manual practice::
+
+    python python/rs3_reader/telos_prayer.py --duration 180 --enrage 300 --record-keys --output work/prayer_research/telos-practice.jsonl
+
+Set ``--enrage`` to the enrage actually played. The optional key sampler
+timestamps manual, unmodified F1 (melee protection) and F2 (Soul Split) down
+edges while the attached RuneScape process has focus. The observed overhead
+comes from the native prayer flags. An unknown overhead is JSON null, and a
+sampled key press is recorded separately from any observed prayer transition.
+Very short key presses can fall between samples.
+
+Rows include all observed Telos action applications, current animation, life
+points and native sample times. Compare a cue, key press, overhead transition
+and resulting hit across multiple attacks. An HP change alone cannot establish
+the server's prayer check or distinguish overlapping hits. Automatic switching
+requires measured protection and release windows, plus verified coverage of
+the attacks that can occur during a proposed Soul Split window.
+
 Directly available data
 -----------------------
 
