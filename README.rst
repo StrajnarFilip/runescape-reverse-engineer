@@ -133,6 +133,11 @@ creation and actual log output were checked. This change does not claim visual Q
 Research tools and synchronization
 ----------------------------------
 
+`Melee Telos research <docs/telos-melee-research.rst>`_ covers encounter mechanics,
+PVME rotation assumptions, prayer timing, consumables, EoF contents and Lunar
+defensives. It distinguishes published guidance from live-validated telemetry
+and records outdated or conflicting guide values.
+
 ``work/bootstrap_tools.py`` fetches pinned official Ghidra/JDK tools with hash
 checks. Static PE research scripts use ``pefile==2024.8.26`` and
 ``capstone==5.0.6`` under ``work/vendor/``::

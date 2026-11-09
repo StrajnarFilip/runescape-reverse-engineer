@@ -42,3 +42,9 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
 - Use English throughout source code, comments, UI labels, documentation and
   examples. The user explicitly requested this project-wide language change.
 - Work autonomously; ask only when input is needed for controlled in-game validation.
+- The requested Telos combat style is melee. Research notes and source references
+  are in `docs/telos-melee-research.rst`. Keep guide-derived rules
+  separate from live-validated fields. Some PVME pages retain pre-modernisation
+  abilities or conflicting timings; do not import those as verified constants.
+- EoF stored-special identity, Telos action/phase recognition and complete
+  castability are not established merely by inventory IDs or published guides.
