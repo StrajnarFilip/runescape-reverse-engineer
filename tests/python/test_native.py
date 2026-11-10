@@ -2,9 +2,10 @@
 import ctypes as C
 import time
 import unittest
+from unittest.mock import patch
 
 from native import (Ability, Event, Hit, Info, InventoryInfo, Item, ItemEvent, NPC,
-                    Options, Player, Position, Reader, library_path, load_library)
+                    Options, Player, PlayerHitEvent, Position, Reader, library_path, load_library)
 from native_telemetry import NativeTelemetry
 from tracker import HitHistory
 
@@ -60,6 +61,25 @@ class NativeTests(unittest.TestCase):
             self.assertEqual(reader.lib.rs3_stop(reader.context), 0)
             self.assertEqual(reader.lib.rs3_stop(reader.context), 0)
             self.assertEqual(reader.sample()[0].status, 3)
+
+    def test_queued_player_hit_preserves_identity_after_frame_failure(self):
+        telemetry = NativeTelemetry(pid=0xffffffff, worker_hz=0)
+        event = PlayerHitEvent(sequence=7, observed_ns=123456, sample_sequence=9,
+                               scene_epoch=3, process_creation_time=100, instance_id=4,
+                               pid=22, player_index=5, hit=Hit(type_id=133, amount=224, state=1))
+        try:
+            with patch.object(telemetry.reader, 'drain_player_hit_events', return_value=([event], 2)):
+                record = telemetry.sample()
+            channel = record['player_hit_splats']
+            self.assertEqual(channel['status'], 'unavailable')
+            self.assertEqual(channel['hits'], [])
+            self.assertEqual(channel['events_lost'], 2)
+            hit = channel['newly_observed'][0]
+            self.assertEqual((hit['pid'], hit['process_creation_time'], hit['instance_id'], hit['scene_epoch']),
+                             (22, 100, 4, 3))
+            self.assertEqual((hit['observed_ns'], hit['sample_sequence'], hit['amount']), (123456, 9, 224))
+        finally:
+            telemetry.close()
 
     def test_history_preserves_native_observation_time_and_process(self):
         history = HitHistory()

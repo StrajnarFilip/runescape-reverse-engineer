@@ -22,6 +22,7 @@ typedef struct {
     uint32_t registry_rva, player_handler_rva, client_handler_rva, client_vtable_rva;
     uint32_t npc_manager_vtable_rva, npc_entity_vtable_rva, npc_animation_vtable_rva;
     uint32_t npc_action_stamp_offset;
+    uint32_t player_actor_vtable_rva;
     int has_position;
 } client_profile;
 
@@ -32,6 +33,9 @@ struct rs3_snapshot {
     rs3_position position;
     rs3_combat_state combat;
     rs3_npc_animation animations[RS3_MAX_NPCS];
+    rs3_player_hit_info player_hit_info;
+    rs3_hit player_hits[64];
+    uint64_t player_actor;
     rs3_npc npcs[RS3_MAX_NPCS];
     rs3_hit hits[RS3_MAX_HITS];
     rs3_inventory_info inventory_info;
@@ -49,6 +53,11 @@ typedef struct npc_identity {
     int32_t action_sequence;
     uint32_t action_stamp;
 } npc_identity;
+typedef struct player_hit_identity {
+    uint64_t actor, epoch, creation, instance, sample, valid_hits;
+    uint32_t index;
+    rs3_hit previous[64];
+} player_hit_identity;
 
 /* The decoder uses the same bounded read path for live memory and test fixtures. */
 typedef int (*read_callback)(void *user, uint64_t address, void *out, size_t size);
@@ -78,6 +87,9 @@ struct rs3_context {
     rs3_npc_action_event *action_events;
     uint64_t action_event_sequence;
     uint64_t combat_world, combat_creation, combat_epoch;
+    player_hit_identity player_hit_identity;
+    rs3_player_hit_event *player_hit_events;
+    uint64_t player_hit_event_sequence;
     inventory_state *inventory;
 };
 
@@ -116,12 +128,15 @@ int variable(rs3_context *c, uint64_t table, uint64_t count, uint64_t sentinel,
              uint32_t id, int64_t *value, int *present);
 void reset_identities(rs3_context *c);
 int decode_hit(const unsigned char *bytes, uint32_t tick, uint32_t slot, rs3_hit *hit);
+int read_hitmarks(rs3_context *,uint64_t ring,uint32_t tick,rs3_hit out[64],uint32_t *count);
 int npcs_once(rs3_context *c, rs3_snapshot *s, uint64_t state, uint32_t *ids,
               uint32_t *out_count, uint64_t *out_manager);
 void commit_npcs(rs3_context *c, rs3_snapshot *s, const uint32_t *ids,
                  uint32_t count, uint64_t manager, uint64_t world_state);
 void combat_stage(rs3_context *, rs3_snapshot *, uint64_t player, uint64_t world);
 void combat_commit(rs3_context *, rs3_snapshot *, uint64_t world);
+void player_hits_stage(rs3_context *,rs3_snapshot *,uint64_t world);
+void player_hits_commit(rs3_context *,rs3_snapshot *);
 void npc_action_commit(rs3_context *, const rs3_snapshot *, npc_identity *, uint32_t index);
 
 inventory_state *inventory_create(void);

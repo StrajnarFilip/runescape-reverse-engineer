@@ -74,6 +74,15 @@ class Hit(C.Structure):
                 fields(U32, "start_tick end_tick duration_ticks state reserved"))
 
 
+class PlayerHitInfo(C.Structure):
+    _fields_ = fields(U32, "status reason player_index hit_count") + [("instance_id", U64)]
+
+
+class PlayerHitEvent(C.Structure):
+    _fields_ = (fields(U64, "sequence observed_ns sample_sequence scene_epoch process_creation_time instance_id") +
+                fields(U32, "pid player_index") + [("hit", Hit)])
+
+
 class Event(C.Structure):
     _fields_ = (fields(U64, "sequence observed_at_ns process_creation_time instance_id") +
                 fields(U32, "pid runtime_id") + [("config_id", I32), ("name_length", U32),
@@ -138,6 +147,10 @@ def load_library(path=None):
         "combat_sizeof": (U32, [U32]),
         "snapshot_combat": (I32, [pointer, C.POINTER(CombatState), U32]),
         "snapshot_npc_animations": (I32, [pointer, C.POINTER(NPCAnimation), U32, C.POINTER(U32)]),
+        "snapshot_player_hit_info": (I32, [pointer, C.POINTER(PlayerHitInfo), U32]),
+        "snapshot_player_hits": (I32, [pointer, C.POINTER(Hit), U32, C.POINTER(U32)]),
+        "player_hit_events_since": (I32, [pointer, U64, C.POINTER(PlayerHitEvent), U32,
+                                          C.POINTER(U32), C.POINTER(U64), C.POINTER(U64)]),
         "npc_action_events_since": (I32, [pointer, U64, C.POINTER(NPCActionEvent), U32,
                                           C.POINTER(U32), C.POINTER(U64), C.POINTER(U64)]),
         "combat_active_prayer": (U32, [C.POINTER(CombatState)]),
@@ -164,7 +177,7 @@ def load_library(path=None):
     for kind, structure in enumerate(structures, 1):
         if lib.rs3_sizeof(kind) != C.sizeof(structure):
             raise RuntimeError("C/Python layout mismatch for "+structure.__name__)
-    for kind, structure in enumerate((CombatState, NPCAnimation, NPCActionEvent), 1):
+    for kind, structure in enumerate((CombatState, NPCAnimation, NPCActionEvent, PlayerHitInfo, PlayerHitEvent), 1):
         if lib.rs3_combat_sizeof(kind) != C.sizeof(structure):
             raise RuntimeError("C/Python layout mismatch for "+structure.__name__)
     # This digest identifies the profile used at build time. The DLL checks
@@ -196,6 +209,8 @@ class Reader:
         self.npcs, self.hits = (NPC*1024)(), (Hit*65536)()
         self.events = (Event*256)()
         self.npc_action_events, self.npc_action_cursor = (NPCActionEvent*256)(), 0
+        self.player_hit_info, self.player_hits = PlayerHitInfo(), (Hit*64)()
+        self.player_hit_events, self.player_hit_cursor = (PlayerHitEvent*256)(), 0
         self.inventory_info, self.items, self.abilities = InventoryInfo(), (Item*47)(), (Ability*2048)()
         self.item_events, self.item_cursor = (ItemEvent*128)(), 0
         try:
@@ -223,15 +238,30 @@ class Reader:
         self.check(self.lib.rs3_snapshot_player(self.snapshot, C.byref(self.player), C.sizeof(Player)))
         self.check(self.lib.rs3_snapshot_position(self.snapshot, C.byref(self.position), C.sizeof(Position)))
         self.check(self.lib.rs3_snapshot_combat(self.snapshot, C.byref(self.combat), C.sizeof(CombatState)))
+        self.check(self.lib.rs3_snapshot_player_hit_info(self.snapshot, C.byref(self.player_hit_info), C.sizeof(PlayerHitInfo)))
         # Only the prefixes reported in the snapshot counts are populated.
         count = U32()
         self.check(self.lib.rs3_snapshot_npcs(self.snapshot, self.npcs, len(self.npcs), C.byref(count)))
         self.check(self.lib.rs3_snapshot_npc_animations(self.snapshot, self.animations, len(self.animations), C.byref(count)))
         self.check(self.lib.rs3_snapshot_hits(self.snapshot, self.hits, len(self.hits), C.byref(count)))
+        self.check(self.lib.rs3_snapshot_player_hits(self.snapshot, self.player_hits, len(self.player_hits), C.byref(count)))
         self.check(self.lib.rs3_snapshot_inventory_info(self.snapshot, C.byref(self.inventory_info), C.sizeof(InventoryInfo)))
         self.check(self.lib.rs3_snapshot_items(self.snapshot, 0, self.items, len(self.items), C.byref(count)))
         self.check(self.lib.rs3_snapshot_abilities(self.snapshot, self.abilities, len(self.abilities), C.byref(count)))
         return self.info, self.player, self.npcs, self.hits
+
+    def drain_player_hit_events(self):
+        result, lost_total = [], 0
+        for _ in range(16):
+            count, next_cursor, lost = U32(), U64(), U64()
+            self.check(self.lib.rs3_player_hit_events_since(self.context, self.player_hit_cursor,
+                self.player_hit_events, len(self.player_hit_events), C.byref(count), C.byref(next_cursor), C.byref(lost)))
+            self.player_hit_cursor = next_cursor.value
+            lost_total += lost.value
+            result.extend(PlayerHitEvent.from_buffer_copy(self.player_hit_events[i]) for i in range(count.value))
+            if count.value < len(self.player_hit_events):
+                break
+        return result, lost_total
 
     def drain_events(self):
         result, lost_total = [], 0

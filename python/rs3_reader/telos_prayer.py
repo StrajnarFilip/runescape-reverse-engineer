@@ -1,4 +1,4 @@
-"""Record Telos prayer timing or try repeated experimental F1/F2 switches."""
+"""Record Telos prayer timing using the configured Ctrl+function-key chords."""
 
 import argparse
 from contextlib import nullcontext
@@ -10,13 +10,14 @@ from pathlib import Path
 import sys
 import time
 
-from native import Reader
+from native import Reader, ROOT
 from native_telemetry import combat_record
 from prayer import Prayer
 
 
 MELEE_AUTO_SEQUENCE = 28929
-PRAYER_KEYS = {0x70: ("F1", Prayer.MELEE), 0x71: ("F2", Prayer.SOUL_SPLIT)}
+PRAYER_KEYS = {0x72: ("Ctrl+F3", Prayer.SOUL_SPLIT), 0x73: ("Ctrl+F4", Prayer.MELEE)}
+PRAYER_MODIFIERS = 1
 TRIAL_KEYS = {prayer: key for key, (_, prayer) in PRAYER_KEYS.items()}
 MODIFIERS = (0x10, 0x11, 0x12, 0x5B, 0x5C)  # Shift, Ctrl, Alt and the Windows keys.
 POLL_SECONDS = 0.01
@@ -26,7 +27,7 @@ ACK_TIMEOUT_NS = 1_200_000_000
 
 
 class ManualPrayerKeys:
-    """Sample F1/F2 down edges while the verified game process is foreground."""
+    """Sample Ctrl+F3/F4 down edges while the verified game is foreground."""
 
     def __init__(self):
         user32 = C.WinDLL("user32", use_last_error=True)
@@ -59,7 +60,8 @@ class ManualPrayerKeys:
             return []
 
         down = {key for key in PRAYER_KEYS if self.key_state(key) < 0}
-        modified = any(self.key_state(key) < 0 for key in MODIFIERS)
+        wrong_modifier = any(self.key_state(key) < 0 for key in MODIFIERS if key != 0x11)
+        control_down = self.key_state(0x11) < 0
         observed_ns = clock()
         if self.foreground() != window:
             self.focus = None
@@ -70,7 +72,7 @@ class ManualPrayerKeys:
         # A held key on focus gain is a baseline. A release never emits a press.
         pressed = down - self.down if self.focus == focus else set()
         self.focus, self.down = focus, down
-        if modified:
+        if wrong_modifier or not control_down:
             return []
         return [{"key": PRAYER_KEYS[key][0], "bound_prayer": PRAYER_KEYS[key][1].name.lower(),
                  "observed_ns": observed_ns} for key in sorted(pressed)]
@@ -194,7 +196,7 @@ def telos_actions(events, session, sample_sequence, instances):
 
 def observe(reader, duration, out, enrage, keys, trial_window=None):
     def send(prayer):
-        reader.check(reader.lib.rs3_set_prayer(reader.snapshot, prayer, TRIAL_KEYS[prayer], 0))
+        reader.check(reader.lib.rs3_set_prayer(reader.snapshot, prayer, TRIAL_KEYS[prayer], PRAYER_MODIFIERS))
         return reader.lib.rs3_monotonic_ns()
 
     trial = PrayerTrial(send) if trial_window else None
@@ -257,14 +259,18 @@ def main():
     parser.add_argument("--duration", type=float, help="Limit in seconds (default: 300 for capture, unlimited for trial)")
     parser.add_argument("--enrage", type=int, help="Manually entered enrage for this capture")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--record-keys", action="store_true", help="Timestamp manual F1/F2 presses in RuneScape")
-    mode.add_argument("--trial", action="store_true", help="Repeat experimental F1/F2 cycles on fresh Telos cues")
+    mode.add_argument("--record-keys", action="store_true", help="Timestamp manual Ctrl+F3/F4 presses in RuneScape")
+    mode.add_argument("--trial", action="store_true", help="Requires validated prayer-check timing and attack coverage")
     parser.add_argument("--output", type=Path, help="Write a new local JSONL file instead of standard output")
     args = parser.parse_args()
     if args.duration is not None and (not math.isfinite(args.duration) or args.duration <= 0):
         parser.error("--duration must be finite and positive")
     if args.enrage is not None and not 0 <= args.enrage <= 4000:
         parser.error("--enrage must be between 0 and 4000")
+    if args.trial:
+        profile = json.loads((ROOT / 'profiles' / 'prayer_flick.json').read_text(encoding='utf-8'))
+        if not profile.get('attack_coverage_validated') or not profile.get('prayer_check_deadline_validated'):
+            parser.error('Automatic trial is unavailable until prayer-check timing and attack coverage are validated; use --record-keys')
     try:
         keys = ManualPrayerKeys() if args.record_keys or args.trial else None
         with Reader(pid=args.pid, worker_hz=0) as reader:

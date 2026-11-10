@@ -626,6 +626,58 @@ static void prayer_chords_and_partial_release(void) {
     assert(rs3_set_prayer(f->s,RS3_PRAYER_MAGIC,VK_F1,8)==RS3_E_ARGUMENT);
     dispose(f);
 }
+static void local_player_hitmarks(void) {
+    fixture *f=make_fixture();
+    const uint64_t context=0xc00000,actor=0xd00000,ring=0xe00000,records=0xe01000;
+    add(f,context,0x60); add(f,actor,0xf20); add(f,ring,40); add(f,records,48);
+    put64(f,WORLD+P_LOCAL_CONTEXT_OFFSET,context); put64(f,context,WORLD);
+    put32(f,context+P_LOCAL_INDEX_OFFSET,1455); put64(f,context+P_LOCAL_OVERRIDE_OFFSET,actor);
+    put64(f,actor,BASE+P_LOCAL_VTABLE_RVA); put32(f,actor+P_LOCAL_UID_OFFSET,1455);
+    put64(f,actor+P_LOCAL_HITMARKS_OFFSET,ring); put32(f,ring+4,1);
+    put64(f,ring+24,1); put64(f,ring+32,records);
+    int32_t mark[6]={133,977,1060,-1,-1,60}; memcpy(at(f,records,24),mark,24);
+    f->s->info.sequence=1; assert(decode(f->c,f->s));
+    assert(f->s->player_hit_info.status==RS3_AVAILABLE && f->s->player_hit_info.hit_count==1);
+    assert(f->s->player_hits[0].amount==977 && !f->c->player_hit_event_sequence);
+    uint32_t written,required; uint64_t next,lost;
+    rs3_player_hit_event event; rs3_player_hit_info info;
+    assert(rs3_combat_sizeof(4)==24 && rs3_combat_sizeof(5)==96);
+    assert(rs3_snapshot_player_hit_info(f->s,&info,sizeof info)==RS3_OK && info.player_index==1455);
+    assert(rs3_snapshot_player_hits(f->s,NULL,0,&required)==RS3_E_BUFFER && required==1);
+    put32(f,records+4,321); f->s->info.sequence=2; assert(decode(f->c,f->s));
+    assert(rs3_player_hit_events_since(f->c,0,&event,1,&written,&next,&lost)==RS3_OK);
+    assert(written==1 && next==1 && !lost && event.hit.amount==321 && event.player_index==1455);
+    assert(event.scene_epoch==f->s->combat.scene_epoch && event.instance_id==info.instance_id);
+    f->s->info.sequence=3; assert(decode(f->c,f->s)); assert(f->c->player_hit_event_sequence==1);
+    // A bad local ring is optional; NPCs and HP stay available.
+    put64(f,ring+24,2); f->s->info.sequence=4; assert(decode(f->c,f->s));
+    assert(f->s->player_hit_info.status==RS3_UNAVAILABLE && !f->s->player_hit_info.hit_count);
+    assert(f->s->player.valid_variables && f->s->info.npc_count==1);
+    // Re-observing an active hit after a gap cannot assign it a fresh hit time.
+    put64(f,ring+24,1); put32(f,records+4,400); f->s->info.sequence=5; assert(decode(f->c,f->s));
+    assert(f->s->player_hit_info.status==RS3_AVAILABLE && f->c->player_hit_event_sequence==1);
+    put32(f,actor+P_LOCAL_UID_OFFSET,1); f->s->info.sequence=6; assert(decode(f->c,f->s));
+    assert(f->s->player_hit_info.status==RS3_UNAVAILABLE);
+    put32(f,actor+P_LOCAL_UID_OFFSET,1455);
+    // Exercise the actual player-table route as well as the context override.
+    const uint64_t table=0xf00000,slots=0xf01000,slot=0xf10000;
+    add(f,table,32); add(f,slots,1456*8); add(f,slot,0x40);
+    put64(f,WORLD+P_LOCAL_TABLE_OFFSET,table); put64(f,table+P_LOCAL_RANGE_OFFSET,slots);
+    put64(f,table+P_LOCAL_RANGE_OFFSET+8,slots+1456*8); put64(f,slots+1455*8,slot);
+    put64(f,slot+P_LOCAL_SLOT_ENTITY_OFFSET,actor); put64(f,context+P_LOCAL_OVERRIDE_OFFSET,0);
+    f->s->info.sequence=7; assert(decode(f->c,f->s)); assert(f->s->player_hit_info.status==RS3_AVAILABLE);
+    f->trigger=actor+P_LOCAL_UID_OFFSET; f->target=f->trigger;
+    f->trigger_count=0; f->mutate_on=2; f->replacement=1;
+    f->s->info.sequence=8; assert(decode(f->c,f->s)); assert(f->s->player_hit_info.status==RS3_UNAVAILABLE);
+    f->mutate_on=0; put32(f,actor+P_LOCAL_UID_OFFSET,1455);
+    put32(f,WORLD+P_GAME_STATE_OFFSET,10); f->s->info.sequence=9; assert(decode(f->c,f->s));
+    assert(!f->s->player_hit_info.hit_count && !f->s->combat.scene_epoch);
+    assert(rs3_player_hit_events_since(f->c,2,&event,1,&written,&next,&lost)==RS3_E_ARGUMENT);
+    f->c->player_hit_event_sequence=EVENT_CAPACITY+3;
+    assert(rs3_player_hit_events_since(f->c,0,NULL,0,&written,&next,&lost)==RS3_OK);
+    assert(!written && lost==3 && next==3);
+    dispose(f);
+}
 int main(void) {
     player_and_sparse(); invalid_tables_and_profile(); hits_and_health();
     torn_reads_and_transitions(); buffers_and_event_cursors(); failed_sample_clears_fields(); worker_lifecycle();
@@ -635,6 +687,7 @@ int main(void) {
     sparse_inventory_slots();
     input_projection_and_guards();
     combat_flags_and_animation(); npc_action_events(); prayer_chords_and_partial_release();
-    puts("PASS: 17 native test groups");
+    local_player_hitmarks();
+    puts("PASS: 18 native test groups");
     return 0;
 }

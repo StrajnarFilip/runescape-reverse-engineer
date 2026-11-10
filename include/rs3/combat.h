@@ -38,7 +38,28 @@ typedef struct rs3_npc_action_event {
     uint32_t logic_tick, application_stamp, flags;
 } rs3_npc_action_event;
 
-RS3_API uint32_t rs3_combat_sizeof(uint32_t structure); /**< 1=state, 2=animation, 3=action event. */
+/** Local player's sampled hitmark ring, not a complete incoming attack schedule.
+ * Amounts/types can represent healing, zeroes or text. No attacker is identified.
+ */
+typedef struct rs3_player_hit_info {
+    uint32_t status, reason, player_index, hit_count;
+    uint64_t instance_id;
+} rs3_player_hit_info;
+typedef struct rs3_player_hit_event {
+    uint64_t sequence, observed_ns, sample_sequence, scene_epoch;
+    uint64_t process_creation_time, instance_id;
+    uint32_t pid, player_index;
+    rs3_hit hit;
+} rs3_player_hit_event;
+
+RS3_API uint32_t rs3_combat_sizeof(uint32_t structure); /**< 1=state, 2=animation, 3=action event, 4=player hit info, 5=player hit event. */
+RS3_API int32_t rs3_snapshot_player_hit_info(const rs3_snapshot *, rs3_player_hit_info *, uint32_t out_size);
+RS3_API int32_t rs3_snapshot_player_hits(const rs3_snapshot *, rs3_hit *, uint32_t capacity, uint32_t *required);
+/** Independent 4096-record cursor queue. Existing active records after attachment
+ * or a sampling gap establish a baseline, not freshly timed hit events.
+ */
+RS3_API int32_t rs3_player_hit_events_since(rs3_context *, uint64_t after, rs3_player_hit_event *,
+    uint32_t capacity, uint32_t *written, uint64_t *next, uint64_t *lost);
 RS3_API int32_t rs3_snapshot_combat(const rs3_snapshot *, rs3_combat_state *, uint32_t out_size);
 RS3_API int32_t rs3_snapshot_npc_animations(const rs3_snapshot *, rs3_npc_animation *,
     uint32_t capacity, uint32_t *required);

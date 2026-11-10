@@ -35,7 +35,8 @@ int decode_hit(const unsigned char *b,uint32_t tick,uint32_t slot,rs3_hit *h) {
     h->end_tick=end; h->duration_ticks=(uint32_t)duration; h->start_tick=end-(uint32_t)duration;
     h->state=tick_delta(tick,h->start_tick)>=0?RS3_HIT_ACTIVE:RS3_HIT_SCHEDULED; return 1;
 }
-static int npc_hits(rs3_context *c,uint64_t ring,uint32_t tick,rs3_snapshot *s,rs3_npc *npc) {
+int read_hitmarks(rs3_context *c,uint64_t ring,uint32_t tick,rs3_hit out[64],uint32_t *out_count) {
+    *out_count=0;
     if (!ring) return 1;
     unsigned char header[40],records[64*24],check[64*24],after[16];
     if (!rd(c,ring,header,sizeof header)) return 0;
@@ -47,9 +48,15 @@ static int npc_hits(rs3_context *c,uint64_t ring,uint32_t tick,rs3_snapshot *s,r
     for (uint32_t slot=0;slot<count;slot++) {
         rs3_hit h; int result=decode_hit(records+slot*24,tick,slot,&h);
         if (result<0) return fail(c,RS3_READ_FAILED,"Invalid hitmark record");
-        if (result) { s->hits[s->info.hit_count++]=h; npc->hit_count++; }
+        if (result) out[(*out_count)++]=h;
     }
     return 1;
+}
+static int npc_hits(rs3_context *c,uint64_t ring,uint32_t tick,rs3_snapshot *s,rs3_npc *npc) {
+    rs3_hit hits[64]; uint32_t count;
+    if (!read_hitmarks(c,ring,tick,hits,&count)) return 0;
+    memcpy(s->hits+s->info.hit_count,hits,count*sizeof *hits);
+    s->info.hit_count+=count; npc->hit_count=count; return 1;
 }
 static int npc_node(rs3_context *c,uint64_t table,uint64_t count,uint64_t sentinel,uint32_t uid,uint64_t *address,unsigned char out[32]) {
     uint64_t node=c->buckets[uid%count],visited[1024]; unsigned n=0;

@@ -64,7 +64,8 @@ def generate(data, position_data):
         "#define POS_SHA256 " + json.dumps(position_profile["sha256"]),
     ]
     constants = {key: profile[key] for key in PROFILE_FIELDS}
-    sections = {**profile["domains"], "npc": profile["npcs"], "inv": profile["inventory"]}
+    sections = {**profile["domains"], "npc": profile["npcs"], "inv": profile["inventory"],
+                "local": profile["local_actor"]}
     for section, fields in sections.items():
         constants.update((f"{section}_{key}", value) for key, value in fields.items())
     for key, value in constants.items():
@@ -90,6 +91,7 @@ def generate(data, position_data):
     if compatibility["version"] != profile["version"]:
         raise ValueError("Incompatible combat layout version")
     original = dict(combat_rvas)
+    original["player_actor_vtable_rva"] = profile["local_actor"]["vtable_rva"]
     if profile["npcs"].get("animation_layout_verified"):
         original["npc_animation_vtable_rva"] = profile["npcs"]["animation_vtable_rva"]
     lines.extend(client_layout("p_profile", "P", "p_signatures", original, False))

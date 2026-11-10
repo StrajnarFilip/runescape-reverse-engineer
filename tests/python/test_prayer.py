@@ -3,7 +3,7 @@ import ctypes as C
 import json
 from pathlib import Path
 import unittest
-from native import CombatState, NPCAnimation, ROOT, library_path, load_library
+from native import CombatState, NPCAnimation, PlayerHitInfo, PlayerHitEvent, Reader, ROOT, library_path, load_library
 from prayer import Planner, Frame, Config, Threat, Decision, Prayer
 
 
@@ -16,6 +16,8 @@ class PrayerTests(unittest.TestCase):
         lib = load_library()
         self.assertEqual(lib.rs3_combat_sizeof(1), C.sizeof(CombatState))
         self.assertEqual(lib.rs3_combat_sizeof(2), C.sizeof(NPCAnimation))
+        self.assertEqual(lib.rs3_combat_sizeof(4), C.sizeof(PlayerHitInfo))
+        self.assertEqual(lib.rs3_combat_sizeof(5), C.sizeof(PlayerHitEvent))
         with Planner(self.settings()) as p:
             for i, struct in enumerate((Config, Frame, Threat, Decision), 1):
                 self.assertEqual(p.lib.rs3_prayer_sizeof(i), C.sizeof(struct))
@@ -42,6 +44,13 @@ class PrayerTests(unittest.TestCase):
             self.assertEqual((d.action, d.reason), (1, 9))
             unknown = Threat(1, 42, f.now_ns, f.now_ns, Prayer.UNKNOWN, 0)
             self.assertEqual(p.step(f, [unknown]).action, 0)
+
+    def test_unavailable_player_hitmarks_are_not_stale_records(self):
+        with Reader(pid=0xffffffff, worker_hz=0) as reader:
+            reader.sample()
+            self.assertEqual(reader.player_hit_info.status, 3)
+            self.assertEqual(reader.player_hit_info.hit_count, 0)
+            self.assertEqual(reader.drain_player_hit_events(), ([], 0))
 
     def test_replaced_proposal_rejects_old_dispatch_id(self):
         with Planner(self.settings()) as p:

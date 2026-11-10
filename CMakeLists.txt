@@ -31,6 +31,7 @@ add_library(rs3_objects OBJECT
     src/position.c
     src/input.c
     src/combat.c
+    src/player_hits.c
     src/prayer.c
     src/npcs.c
     src/inventory.c

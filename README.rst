@@ -29,9 +29,10 @@ Current capabilities
   options such as Talk-to and Bank. See `Foreground input <docs/native-api.rst#foreground-input>`_.
 * Direct overhead-prayer flags, raw NPC animation sequences and a native NPC
   action event queue on both supported executables, plus a C prayer timing
-  planner with Soul Split support. See
-  `Prayer timing <docs/prayer-flick.rst>`_ for the observer, replay and
-  experimental Telos prayer trial.
+  planner with Soul Split support. The original executable also provides a
+  guarded local-player hitmark snapshot and event queue. See
+  `Prayer timing <docs/prayer-flick.rst>`_ for the observer and initial Telos
+  calibration; automatic flicking remains disabled pending validated deadlines.
 
 Previously verified in live combat: Goblin **550/550 HP**, Giant spider
 **1000/1000 HP**, and Goblin **550 -> 326 HP** alongside the independently reported
@@ -41,7 +42,11 @@ combat evidence remains in ``docs/validation/npc-validation-summary.json``.
 Hurricane, Flurry and Resonance were also checked live with two-handed, dual-wield
 and shield setups. Item moves and a restore dose change retained their tracking
 tokens. See ``docs/inventory-and-abilities.rst`` and its compact
-validation report. Telos animations/phases remain **unconfirmed**. Controlled logout, world-hop and
+validation report. Two 300% phase-1 Telos captures establish four labelled
+sequence associations and confirm all four configured curses, including Soul
+Split. Other phases, attack coverage and prayer-check deadlines remain
+unvalidated; see ``docs/validation/telos-prayer-calibration-2026-11-10.json``.
+Controlled logout, world-hop and
 restart checks are still needed. Sampling frequency is not server update frequency.
 
 Build and run

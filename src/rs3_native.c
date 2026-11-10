@@ -36,6 +36,9 @@ static void copy_frame(rs3_snapshot *to,const rs3_snapshot *from) {
     to->profile = from->profile;
     to->position = from->position;
     to->combat = from->combat;
+    to->player_hit_info=from->player_hit_info;
+    to->player_actor=from->player_actor;
+    memcpy(to->player_hits,from->player_hits,from->player_hit_info.hit_count*sizeof(rs3_hit));
     memcpy(to->animations,from->animations,from->info.npc_count*sizeof(rs3_npc_animation));
     memcpy(to->npcs,from->npcs,from->info.npc_count*sizeof(rs3_npc));
     memcpy(to->hits,from->hits,from->info.hit_count*sizeof(rs3_hit));
@@ -48,6 +51,7 @@ static void poll_and_publish(rs3_context *c,rs3_snapshot *s) {
     memset(&s->info,0,sizeof s->info); memset(&s->player,0,sizeof s->player);
     s->position = (rs3_position){0};
     memset(&s->combat,0,sizeof s->combat);
+    memset(&s->player_hit_info,0,sizeof s->player_hit_info); s->player_actor=0;
     memset(&s->inventory_info,0,sizeof s->inventory_info);
     s->info.abi_version=RS3_ABI_VERSION; s->info.sequence=++c->sequence;
     s->info.timestamp_ns=unix_ns(); s->info.monotonic_ns=begin;
@@ -73,6 +77,9 @@ static void poll_and_publish(rs3_context *c,rs3_snapshot *s) {
         c->previous_valid=0; c->clock_context=0;
         memset(&s->combat,0,sizeof s->combat);
         s->combat.status=RS3_UNAVAILABLE; s->combat.reason=c->reason; c->combat_world=0;
+        memset(&s->player_hit_info,0,sizeof s->player_hit_info);
+        s->player_hit_info.status=RS3_UNAVAILABLE; s->player_hit_info.reason=c->reason;
+        c->player_hit_identity.sample=0;
         snprintf(s->info.message,sizeof s->info.message,"%s",c->error);
         if (c->reason==RS3_UNSUPPORTED_CLIENT && c->attached) schedule_retry(c,begin);
     }
@@ -139,9 +146,10 @@ int32_t rs3_create(const rs3_options *o,rs3_context **out) {
     c->read=windows_read; c->read_user=c;
     c->events=calloc(EVENT_CAPACITY,sizeof(rs3_event)); c->identities=calloc(RS3_MAX_NPCS,sizeof(npc_identity));
     c->action_events=calloc(EVENT_CAPACITY,sizeof(rs3_npc_action_event));
+    c->player_hit_events=calloc(EVENT_CAPACITY,sizeof(rs3_player_hit_event));
     c->working=calloc(1,sizeof(rs3_snapshot)); c->latest=calloc(1,sizeof(rs3_snapshot));
     c->inventory=inventory_create();
-    if (!c->events || !c->action_events || !c->identities || !c->working || !c->latest || !c->inventory) { rs3_destroy(c); return RS3_E_MEMORY; }
+    if (!c->events || !c->action_events || !c->player_hit_events || !c->identities || !c->working || !c->latest || !c->inventory) { rs3_destroy(c); return RS3_E_MEMORY; }
     inventory_default_catalog(c);
     *out=c; return RS3_OK;
 }
@@ -173,6 +181,7 @@ void rs3_destroy(rs3_context *c) {
     if (!c) return;
     rs3_stop(c); if(c->process)CloseHandle(c->process);
     free(c->events); free(c->action_events); free(c->identities); free(c->working); free(c->latest); free(c->buckets);
+    free(c->player_hit_events);
     inventory_free(c->inventory); free(c);
 }
 int32_t rs3_sample(rs3_context *c,rs3_snapshot *s) {

@@ -120,6 +120,17 @@
     "action_sequence_offset": "0xaa0",
     "movement_sequence_offset": "0x970"
   },
+  "local_actor": {
+    "context_offset": "0x19fc8",
+    "index_offset": "0x48",
+    "override_offset": "0x58",
+    "table_offset": "0x19968",
+    "range_offset": "0x10",
+    "slot_entity_offset": "0x38",
+    "uid_offset": "0x88",
+    "vtable_rva": "0x15367e0",
+    "hitmarks_offset": "0xf18"
+  },
   "inventory": {
     "manager_offset": "0x199e0",
     "entry_stride": 72,

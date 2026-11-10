@@ -10,6 +10,8 @@ uint32_t rs3_combat_sizeof(uint32_t kind) {
     case 1: return sizeof(rs3_combat_state);
     case 2: return sizeof(rs3_npc_animation);
     case 3: return sizeof(rs3_npc_action_event);
+    case 4: return sizeof(rs3_player_hit_info);
+    case 5: return sizeof(rs3_player_hit_event);
     default: return 0;
     }
 }

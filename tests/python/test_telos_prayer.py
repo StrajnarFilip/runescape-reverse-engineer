@@ -1,5 +1,9 @@
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
+import contextlib
+import io
+import json
+import telos_prayer
 
 from native import NPCActionEvent
 from prayer import Prayer
@@ -10,6 +14,17 @@ MS = 1_000_000
 
 
 class TelosPrayerTests(unittest.TestCase):
+    def test_unvalidated_live_trial_never_opens_reader(self):
+        for timing,coverage in ((False,False),(True,False),(False,True)):
+            with self.subTest(timing=timing,coverage=coverage), patch('sys.argv',['telos_prayer','--trial']), \
+                 patch.object(telos_prayer.Path,'read_text',return_value=json.dumps({
+                     'prayer_check_deadline_validated':timing,'attack_coverage_validated':coverage})), \
+                 patch.object(telos_prayer,'Reader') as reader, contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    telos_prayer.main()
+                self.assertEqual(error.exception.code,2)
+                reader.assert_not_called()
+
     def test_trial_waits_for_ack_and_repeats_the_600_ms_cycle(self):
         send = Mock(side_effect=[t * MS + 1 for t in (1000, 1600, 2000, 2600)])
         trial = PrayerTrial(send)
@@ -124,7 +139,7 @@ class TelosPrayerTests(unittest.TestCase):
         self.assertEqual([row["event_sequence"] for row in rows], [1, 2])
         self.assertTrue(all(row["user_labeled_melee_auto"] for row in rows))
 
-    def test_key_edges_are_unmodified_and_foreground_only(self):
+    def test_key_edges_require_control_and_foreground_game(self):
         keys = ManualPrayerKeys.__new__(ManualPrayerKeys)
         keys.focus, keys.down = None, set()
         keys.foreground = Mock(return_value=55)
@@ -134,17 +149,20 @@ class TelosPrayerTests(unittest.TestCase):
             return 123
 
         keys.window_pid = game_pid
-        pressed = {0x70}
+        pressed = {0x73, 0x11}
         keys.key_state = Mock(side_effect=lambda key: -32768 if key in pressed else 0)
         clock = lambda: 1000
         self.assertEqual(keys.sample((4, 2, 3), clock), [])
         keys.key_state.assert_not_called()
-        self.assertEqual(keys.sample((1, 2, 3), clock), [])  # F1 held on focus gain.
-        pressed.clear()
+        self.assertEqual(keys.sample((1, 2, 3), clock), [])  # Ctrl+F4 held on focus gain.
+        pressed.remove(0x73)
         self.assertEqual(keys.sample((1, 2, 3), clock), [])
-        pressed.add(0x70)
+        pressed.add(0x73)
         self.assertEqual(keys.sample((1, 2, 3), clock),
-                         [{"key": "F1", "bound_prayer": "melee", "observed_ns": 1000}])
+                         [{"key": "Ctrl+F4", "bound_prayer": "melee", "observed_ns": 1000}])
         self.assertEqual(keys.sample((1, 2, 3), clock), [])  # No repeat while held.
-        pressed.update((0x71, 0x11))
-        self.assertEqual(keys.sample((1, 2, 3), clock), [])  # Ctrl+F2 is a separate binding.
+        pressed.remove(0x11)
+        pressed.add(0x72)
+        self.assertEqual(keys.sample((1, 2, 3), clock), [])  # Bare F3 is not the configured binding.
+        pressed.add(0x11)
+        self.assertEqual(keys.sample((1, 2, 3), clock), [])  # Adding Ctrl to an already-held key is not a down edge.

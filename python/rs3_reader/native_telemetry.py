@@ -60,6 +60,17 @@ class NativeTelemetry:
         # Drain independently of frame availability so earlier observations survive a failed sample.
         events, lost = self.reader.drain_events()
         new_events = [event_record(e) for e in events]
+        player_events, player_lost = self.reader.drain_player_hit_events()
+        own = self.reader.player_hit_info
+        player_hitmarks = {'status': {1: 'available', 2: 'partial', 3: 'unavailable'}.get(own.status, 'unavailable'),
+                          'reason': own.reason, 'player_index': own.player_index if own.status == 1 else None,
+                          'instance_id': own.instance_id, 'events_lost': player_lost,
+                          'hits': [hit_record(h) for h in self.reader.player_hits[:own.hit_count]],
+                          'newly_observed': [dict(hit_record(e.hit), observed_ns=e.observed_ns,
+                               sample_sequence=e.sample_sequence, scene_epoch=e.scene_epoch,
+                               pid=e.pid, process_creation_time=e.process_creation_time,
+                               instance_id=e.instance_id, player_index=e.player_index, event_sequence=e.sequence)
+                               for e in player_events], 'attacker_identity': None, 'source': 'native_memory'}
         # Snapshot age uses the same native monotonic clock as the sample timestamp.
         native = {"sample_sequence": info.sequence, "worker_hz": self.reader.worker_hz,
                   "sample_duration_ms": round(info.sample_duration_ns/1e6, 3),
@@ -80,6 +91,7 @@ class NativeTelemetry:
                           client_version=version, executable_sha256=text(info.executable_sha256),
                           source="native_memory", read_duration_ms=native["sample_duration_ms"])
             result["combat"] = combat_record(self.reader)
+            result["player_hit_splats"] = player_hitmarks
             # Observations from earlier frames retain their own process/timestamp.
             result["hit_splats"] = {"status": "unavailable", "active": None,
                                    "newly_observed": new_events, "events_lost": lost}
@@ -133,6 +145,7 @@ class NativeTelemetry:
             "source": "native_memory", "status": "partial", "read_duration_ms": native["sample_duration_ms"],
             "position": position,
             "combat": combat_record(self.reader),
+            "player_hit_splats": player_hitmarks,
             "freshness": {"observed_at_ms": info.timestamp_ns//1000000,
                           "client_logic_tick": info.logic_tick, "clock_stalled_ms": round(player.clock_stalled_ns/1e6, 1),
                           "server_update_age_ms": None},
