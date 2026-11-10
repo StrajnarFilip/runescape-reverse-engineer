@@ -1,71 +1,121 @@
-"""Local static disassembly helpers for the installed executable."""
-import sys
-from pathlib import Path
+"""Local static disassembly helpers for the installed executable.
+
+Usage:
+    python work/xrefs.py strings TEXT [TEXT ...]
+    python work/xrefs.py calls ADDRESS [--context]
+    python work/xrefs.py refs ADDRESS [--context]
+    python work/xrefs.py disasm ADDRESS [BYTES]
+    python work/xrefs.py function ADDRESS
+Addresses are hexadecimal virtual addresses.
+"""
+
+import bisect
 import re
 import struct
-import bisect
-sys.path.insert(0, str(Path(__file__).parent / "vendor"))
-import pefile
-import capstone
+import sys
 
-pe = pefile.PE(r"C:\ProgramData\Jagex\launcher\rs2client.exe", fast_load=True)
-pe.parse_data_directories(directories=[3])
-base = pe.OPTIONAL_HEADER.ImageBase
-section = pe.sections[0]
-code = section.get_data()
-binary = pe.__data__[:]
-cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
-starts = [e.struct.BeginAddress for e in pe.DIRECTORY_ENTRY_EXCEPTION]
+from workspace import INSTALLED_CLIENT_PATH, add_import_paths
 
-def function(address):
-    rva = address - base if address >= base else address
-    entry = pe.DIRECTORY_ENTRY_EXCEPTION[bisect.bisect_right(starts, rva) - 1].struct
-    return base + entry.BeginAddress, entry.EndAddress - entry.BeginAddress
+add_import_paths(vendor=True)
 
-def disasm(address, size):
-    for ins in cs.disasm(pe.get_data(address-base, size), address):
-        print(hex(ins.address), ins.mnemonic, ins.op_str)
+import capstone  # noqa: E402
+import pefile  # noqa: E402
 
-mode = sys.argv[1]
-if mode == "strings":
-    for term in sys.argv[2:]:
-        needle = term.encode() + b"\0"
-        for match in re.finditer(re.escape(needle), binary):
-            off = match.start()
-            if off and binary[off-1] != 0:
+EXCEPTION_DIRECTORY = 3
+RIP_RELATIVE_LEA = rb"[\x48\x4c]\x8d[\x05\x0d\x15\x1d\x25\x2d\x35\x3d]"
+LEA_LENGTH = 7
+CALL_OPCODE = b"\xe8"
+CALL_LENGTH = 5
+DEFAULT_DISASSEMBLY_BYTES = 200
+MAX_FUNCTION_DISASSEMBLY_BYTES = 1600
+
+
+class Executable:
+    def __init__(self, path):
+        self.pe = pefile.PE(str(path), fast_load=True)
+        self.pe.parse_data_directories(directories=[EXCEPTION_DIRECTORY])
+        self.image_base = self.pe.OPTIONAL_HEADER.ImageBase
+        self.code_section = self.pe.sections[0]
+        self.code = self.code_section.get_data()
+        self.file_bytes = self.pe.__data__[:]
+        self.disassembler = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+        self.function_starts = [
+            entry.struct.BeginAddress for entry in self.pe.DIRECTORY_ENTRY_EXCEPTION
+        ]
+
+    def function_containing(self, address):
+        """Return (start address, size) of the runtime function containing an address or RVA."""
+        rva = address - self.image_base if address >= self.image_base else address
+        index = bisect.bisect_right(self.function_starts, rva) - 1
+        entry = self.pe.DIRECTORY_ENTRY_EXCEPTION[index].struct
+        return self.image_base + entry.BeginAddress, entry.EndAddress - entry.BeginAddress
+
+    def disassemble(self, address, size):
+        data = self.pe.get_data(address - self.image_base, size)
+        for instruction in self.disassembler.disasm(data, address):
+            print(hex(instruction.address), instruction.mnemonic, instruction.op_str)
+
+    def lea_references(self, target_rva):
+        """Yield the virtual addresses of RIP-relative LEA instructions that load target_rva."""
+        section_rva = self.code_section.VirtualAddress
+        for match in re.finditer(RIP_RELATIVE_LEA, self.code):
+            offset = match.start()
+            displacement = struct.unpack_from("<i", self.code, offset + 3)[0]
+            if section_rva + offset + LEA_LENGTH + displacement == target_rva:
+                yield self.image_base + section_rva + offset
+
+    def call_sites(self, target_rva):
+        section_rva = self.code_section.VirtualAddress
+        for match in re.finditer(CALL_OPCODE, self.code):
+            offset = match.start()
+            if offset + CALL_LENGTH > len(self.code):
                 continue
-            rva = pe.get_rva_from_offset(off)
-            refs = []
-            for m in re.finditer(rb"[\x48\x4c]\x8d[\x05\x0d\x15\x1d\x25\x2d\x35\x3d]", code):
-                k = m.start()
-                target = section.VirtualAddress + k + 7 + struct.unpack_from("<i", code, k+3)[0]
-                if target == rva:
-                    address = base + section.VirtualAddress + k
-                    refs.append({"xref": hex(address), "function": hex(function(address)[0])})
-            print(term, hex(base+rva), refs)
-elif mode == "calls":
-    target = int(sys.argv[2], 16) - base
-    for m in re.finditer(b"\xe8", code):
-        o = m.start()
-        if o+5 <= len(code) and section.VirtualAddress+o+5+struct.unpack_from("<i",code,o+1)[0] == target:
-            address = base + section.VirtualAddress + o
-            print("CALL",hex(address),"FUNCTION",hex(function(address)[0]))
-            if "--context" in sys.argv:
-                disasm(address-100,140)
-elif mode == "disasm":
-    address = int(sys.argv[2],16)
-    disasm(address, int(sys.argv[3],0) if len(sys.argv)>3 else 200)
-elif mode == "function":
-    address = int(sys.argv[2],16)
-    start,size = function(address)
-    print(hex(start),hex(size))
-    disasm(start, min(size, 1600))
-elif mode == "refs":
-    target = int(sys.argv[2], 16) - base
-    for match in re.finditer(rb"[\x48\x4c]\x8d[\x05\x0d\x15\x1d\x25\x2d\x35\x3d]", code):
-        offset = match.start()
-        if section.VirtualAddress + offset + 7 + struct.unpack_from("<i", code, offset+3)[0] == target:
-            address = base + section.VirtualAddress + offset
-            print("REF", hex(address), "FUNCTION", hex(function(address)[0]))
-            if "--context" in sys.argv:
-                disasm(address, 100)
+            displacement = struct.unpack_from("<i", self.code, offset + 1)[0]
+            if section_rva + offset + CALL_LENGTH + displacement == target_rva:
+                yield self.image_base + section_rva + offset
+
+
+def print_string_references(executable, terms):
+    for term in terms:
+        needle = term.encode() + b"\0"
+        for match in re.finditer(re.escape(needle), executable.file_bytes):
+            file_offset = match.start()
+            if file_offset and executable.file_bytes[file_offset - 1] != 0:
+                continue
+            rva = executable.pe.get_rva_from_offset(file_offset)
+            references = [
+                {"xref": hex(address), "function": hex(executable.function_containing(address)[0])}
+                for address in executable.lea_references(rva)
+            ]
+            print(term, hex(executable.image_base + rva), references)
+
+
+def main():
+    executable = Executable(INSTALLED_CLIENT_PATH)
+    mode = sys.argv[1]
+    show_context = "--context" in sys.argv
+    if mode == "strings":
+        print_string_references(executable, sys.argv[2:])
+    elif mode == "calls":
+        target_rva = int(sys.argv[2], 16) - executable.image_base
+        for address in executable.call_sites(target_rva):
+            print("CALL", hex(address), "FUNCTION", hex(executable.function_containing(address)[0]))
+            if show_context:
+                executable.disassemble(address - 100, 140)
+    elif mode == "disasm":
+        size = int(sys.argv[3], 0) if len(sys.argv) > 3 else DEFAULT_DISASSEMBLY_BYTES
+        executable.disassemble(int(sys.argv[2], 16), size)
+    elif mode == "function":
+        start, size = executable.function_containing(int(sys.argv[2], 16))
+        print(hex(start), hex(size))
+        executable.disassemble(start, min(size, MAX_FUNCTION_DISASSEMBLY_BYTES))
+    elif mode == "refs":
+        target_rva = int(sys.argv[2], 16) - executable.image_base
+        for address in executable.lea_references(target_rva):
+            print("REF", hex(address), "FUNCTION", hex(executable.function_containing(address)[0]))
+            if show_context:
+                executable.disassemble(address, 100)
+
+
+if __name__ == "__main__":
+    main()

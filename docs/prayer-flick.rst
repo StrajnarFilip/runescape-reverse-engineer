@@ -21,21 +21,28 @@ Layout follows the current repository:
 
 * ``src/prayer.c``: deterministic C policy, with no memory access or input.
 * ``include/rs3/prayer.h``: language-neutral planner API and documented layouts.
-* ``src/combat.c``, ``src/npcs.c``: C acquisition of numeric flags and sequences.
+* ``src/combat.c``: C acquisition of the numeric overhead prayer flags.
+* ``src/npc_animation.c``: raw NPC animation sequences and NPC action events.
+* ``src/input.c``: the explicit, opt-in ``rs3_set_prayer`` key chord.
 * ``include/rs3/combat.h``: additive snapshot accessors and explicit prayer input.
 * ``python/rs3_reader/prayer.py``: ctypes binding; policy remains in C.
 * ``python/rs3_reader/prayer_flick.py``: observer and synthetic replay runner.
+* ``python/rs3_reader/telos_prayer.py``: Telos timing capture and experimental trial.
 * ``profiles/prayer_flick.json``: intended-account availability, bindings, margins.
-* ``tests/native/test_prayer.c`` and ``tests/python/test_prayer.py``: policy/FFI checks.
+* ``tests/native/test_prayer_planner.c``, ``tests/native/test_combat.c`` and
+  ``tests/python/test_prayer.py``: policy, acquisition and FFI checks.
 
 Running it
 ----------
 
-Build through the root CMake project, then use::
+Build through the root CMake project. From the repository root, put the Python
+package on the import path once per shell (PowerShell shown; use
+``set PYTHONPATH=python`` in ``cmd``), then use::
 
-    python python/rs3_reader/prayer_flick.py --duration 60
-    python python/rs3_reader/prayer_flick.py --pid 12345 --duration 60
-    python python/rs3_reader/prayer_flick.py --replay examples/prayer_replay.json
+    $env:PYTHONPATH = "python"
+    python -m rs3_reader.prayer_flick --duration 60
+    python -m rs3_reader.prayer_flick --pid 12345 --duration 60
+    python -m rs3_reader.prayer_flick --replay examples/prayer_replay.json
 
 The observer prints changed observations and heartbeats as JSON Lines. It
 reports current prayer, raw NPC sequences and the planner's reason for holding
@@ -69,7 +76,7 @@ Telos timing capture
 ``telos_prayer.py`` labels Telos action sequence ``28929`` as a melee auto
 using the player's identification. Run it during manual practice::
 
-    python python/rs3_reader/telos_prayer.py --duration 180 --enrage 300 --record-keys --output work/prayer_research/telos-practice.jsonl
+    python -m rs3_reader.telos_prayer --duration 180 --enrage 300 --record-keys --output work/prayer_research/telos-practice.jsonl
 
 Set ``--enrage`` to the enrage actually played. The optional key sampler
 timestamps manual, unmodified F1 (melee protection) and F2 (Soul Split) down
@@ -85,7 +92,7 @@ the server's prayer check or distinguish overlapping hits.
 
 To try the requested 600 ms rule on successive melee autos::
 
-    python python/rs3_reader/telos_prayer.py --trial
+    python -m rs3_reader.telos_prayer --trial
 
 With the game in the foreground, the trial waits for a fresh ``28929`` event
 from Telos. It presses F1 if melee protection is inactive and waits to observe

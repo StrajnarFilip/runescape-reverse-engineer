@@ -21,7 +21,9 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
 ## Project layout and checks
 
 - Native library: `src/` and `include/rs3/`. Python tracker and bindings:
-  `python/rs3_reader/`. Shared client profiles: `profiles/`.
+  the `rs3_reader` package in `python/rs3_reader/` (run with
+  `python -m rs3_reader.<module>` and `PYTHONPATH=python`). Shared client
+  profiles: `profiles/`. `docs/development.rst` maps every module.
 - Our research scripts: `work/*.py`, `work/decompile.ps1`,
   `work/ghidra_scripts/ExportFunctions.java`. Generated research output is ignored.
 - The sole runtime acquisition engine is a Windows x64 C11 DLL. The Python UI
@@ -41,6 +43,10 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
 - Never report unmapped NPC HP, hitsplats, Telos animations or phases as confirmed.
 - Use English throughout source code, comments, UI labels, documentation and
   examples. The user explicitly requested this project-wide language change.
+- Code style requested by the user: Allman braces and explicit variable names.
+  Format C and Java with the repository `.clang-format` (`clang-format -i`);
+  Python follows PEP 8 with 100 columns (`pyproject.toml`). Name offsets and
+  limits instead of using magic numbers, and document non-static functions.
 - Work autonomously; ask only when input is needed for controlled in-game validation.
 - The requested Telos combat style is melee. Research notes and source references
   are in `docs/telos-melee-research.rst`. Keep guide-derived rules

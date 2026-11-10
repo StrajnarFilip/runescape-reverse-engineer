@@ -1,42 +1,96 @@
-import sys, struct
-from pathlib import Path
-sys.path.insert(0,str(Path(__file__).resolve().parents[1] / "work" / "reference"))
-from winmem import ProcessMemory, processes, MemoryReadError
-from rs3 import RS3
+"""Search the client and world-state objects for an NPC registry layout (read-only).
 
-with ProcessMemory(list(processes())[0]) as m:
-    r=RS3(m); client=r.domain_capture('client'); state=m.pointer(client+8)
-    print('client',hex(client),'state',hex(state))
-    roots=[('state',state,0x56000),('client',client,0x40000)]
-    # Snapshot the root list so this pass follows only one level of pointers.
+Candidate headers are verified by resolving sampled runtime IDs through the buckets.
+"""
+
+import struct
+
+from workspace import add_import_paths, first_client_pid
+
+add_import_paths(reference=True)
+
+from reference_decoder import ReferenceDecoder  # noqa: E402
+from reference_memory import ProcessMemory, is_user_address  # noqa: E402
+
+WORLD_STATE_POINTER_OFFSET = 8
+WORLD_STATE_SCAN_BYTES = 0x56000
+CLIENT_SCAN_BYTES = 0x40000
+CHILD_SCAN_BYTES = 0xB0A8
+REGISTRY_COUNT_OFFSET = 0xB0A0
+REGISTRY_INDICES_OFFSET = 0xA0A0
+REGISTRY_TABLE_OFFSET = 0x10
+SAMPLED_IDS = 8
+MAX_SAMPLED_RUNTIME_ID = 32767
+MAX_CHAIN_LENGTH = 32
+
+
+def collect_roots(memory, world_state, client):
+    """Return the two objects and every object they point to (one level deep)."""
+    roots = [("state", world_state, WORLD_STATE_SCAN_BYTES), ("client", client, CLIENT_SCAN_BYTES)]
     for label, parent, size in list(roots):
-        data=m.read(parent,size)
-        for off in range(0,len(data),8):
-            p=struct.unpack_from('<Q',data,off)[0]
-            if 0x10000<=p<0x7fffffffffff:
-                roots.append((label+' child+'+hex(off),p,0xb0a8))
-    seen=set()
-    for name,base,size in roots:
-        if base in seen: continue
-        seen.add(base)
-        try: b=m.read(base,size)
-        except OSError: continue
-        # Look for plausible registry headers, then verify sampled IDs through the buckets.
-        for off in range(0,len(b)-0xb0a4,8):
-            count=struct.unpack_from('<I',b,off+0xb0a0)[0]
-            table,buckets=struct.unpack_from('<QQ',b,off+0x10)
-            if not (1<=count<=1024 and 0x10000<=table<0x7fffffffffff and 1<=buckets<=1000000): continue
-            ids=struct.unpack_from('<'+'I'*min(count,8),b,off+0xa0a0)
-            if not all(x<32768 for x in ids) or len(set(ids))!=len(ids): continue
+        data = memory.read(parent, size)
+        for offset in range(0, len(data), 8):
+            pointer = struct.unpack_from("<Q", data, offset)[0]
+            if is_user_address(pointer):
+                roots.append((f"{label} child+{hex(offset)}", pointer, CHILD_SCAN_BYTES))
+    return roots
+
+
+def resolve_entities(memory, table, bucket_count, runtime_ids):
+    entities = []
+    for runtime_id in runtime_ids:
+        node = memory.pointer(table + runtime_id % bucket_count * 8)
+        for _ in range(MAX_CHAIN_LENGTH):
+            if not node:
+                break
+            if memory.i32(node) == runtime_id:
+                actor = hex(memory.pointer(node + 16))
+                entities.append((runtime_id, actor, hex(memory.pointer(node + 8))))
+                break
+            node = memory.pointer(node + 24)
+    return entities
+
+
+def scan_root(memory, name, base, data):
+    """Print every plausible registry header inside one object."""
+    for offset in range(0, len(data) - REGISTRY_COUNT_OFFSET - 4, 8):
+        count = struct.unpack_from("<I", data, offset + REGISTRY_COUNT_OFFSET)[0]
+        table, bucket_count = struct.unpack_from("<QQ", data, offset + REGISTRY_TABLE_OFFSET)
+        if not (1 <= count <= 1024 and is_user_address(table) and 1 <= bucket_count <= 1000000):
+            continue
+        sampled = min(count, SAMPLED_IDS)
+        indices_offset = offset + REGISTRY_INDICES_OFFSET
+        runtime_ids = struct.unpack_from("<" + "I" * sampled, data, indices_offset)
+        if not all(runtime_id <= MAX_SAMPLED_RUNTIME_ID for runtime_id in runtime_ids):
+            continue
+        if len(set(runtime_ids)) != len(runtime_ids):
+            continue
+        try:
+            entities = resolve_entities(memory, table, bucket_count, runtime_ids)
+        except OSError:
+            continue
+        if len(entities) == len(runtime_ids):
+            location = (name, hex(offset), hex(base + offset))
+            print("FOUND", *location, "count", count, "buckets", bucket_count, entities)
+
+
+def main():
+    with ProcessMemory(first_client_pid()) as memory:
+        decoder = ReferenceDecoder(memory)
+        client = decoder.domain_capture("client")
+        world_state = memory.pointer(client + WORLD_STATE_POINTER_OFFSET)
+        print("client", hex(client), "state", hex(world_state))
+        scanned_bases = set()
+        for name, base, size in collect_roots(memory, world_state, client):
+            if base in scanned_bases:
+                continue
+            scanned_bases.add(base)
             try:
-                entities=[]
-                for uid in ids:
-                    node=m.pointer(table+uid%buckets*8)
-                    for step in range(32):
-                        if not node:break
-                        if m.i32(node)==uid:
-                            entities.append((uid,hex(m.pointer(node+16)),hex(m.pointer(node+8))))
-                            break
-                        node=m.pointer(node+24)
-                if len(entities)==len(ids): print('FOUND',name,hex(off),hex(base+off),'count',count,'buckets',buckets,entities)
-            except OSError: pass
+                data = memory.read(base, size)
+            except OSError:
+                continue
+            scan_root(memory, name, base, data)
+
+
+if __name__ == "__main__":
+    main()

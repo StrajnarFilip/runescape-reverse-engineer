@@ -1,0 +1,33 @@
+# Formatting rules for the C sources, C examples and Java examples.
+# Apply with: clang-format -i <files>
+---
+BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+BreakBeforeBraces: Allman
+InsertBraces: true
+IndentCaseLabels: true
+PointerAlignment: Right
+AlignAfterOpenBracket: Align
+AlignConsecutiveMacros: Consecutive
+AlignTrailingComments: true
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortEnumsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+BinPackArguments: true
+BinPackParameters: true
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+SortIncludes: Never
+SpaceAfterCStyleCast: false
+---
+Language: Cpp
+---
+Language: Java
+# Keeps annotations such as @Override on their own line.
+BreakAfterJavaFieldAnnotations: true

@@ -1,16 +1,29 @@
 """Minimal Python consumer. Run from anywhere after building rs3_native."""
-from pathlib import Path
+
 import sys
 import time
+from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python" / "rs3_reader"))
-from native import Reader
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
-with Reader(worker_hz=100) as reader:
-    for _ in range(100):
-        info, player, npcs, hits = reader.sample()
-        events, lost = reader.drain_events()
-        hp = player.raw_variables[0] if player.valid_variables & 1 else None
-        print("sample=%d status=%d HP=%s NPCs=%d new_hits=%d lost=%d read=%.3fms" %
-              (info.sequence, info.status, hp, info.npc_count, len(events), lost, info.sample_duration_ns/1e6))
-        time.sleep(.05)
+from rs3_reader.native import Reader, Variable  # noqa: E402
+
+SAMPLE_COUNT = 100
+SAMPLE_PERIOD_SECONDS = 0.05
+
+
+def main():
+    with Reader(worker_hz=100) as reader:
+        for _ in range(SAMPLE_COUNT):
+            info, player, _npcs, _hits = reader.sample()
+            events, lost = reader.drain_events()
+            print(
+                f"sample={info.sequence} status={info.status} "
+                f"HP={player.variable(Variable.HEALTH)} NPCs={info.npc_count} "
+                f"new_hits={len(events)} lost={lost} read={info.sample_duration_ns / 1e6:.3f}ms"
+            )
+            time.sleep(SAMPLE_PERIOD_SECONDS)
+
+
+if __name__ == "__main__":
+    main()

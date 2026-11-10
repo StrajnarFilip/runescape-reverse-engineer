@@ -76,11 +76,14 @@ Set ``-DRS3_CACHE_ROOT=C:/path/to/cache`` at configure time to use a different
 cache. The generator reads the cache locally. Raw inventory IDs and slots are
 available without metadata.
 
-Double-click ``Start Tracker.cmd`` or run the desktop UI and JSONL reader directly::
+Double-click ``Start Tracker.cmd`` or run the desktop UI and JSONL stream
+directly. The ``rs3_reader`` package lives in ``python/``; put it on the import
+path once per shell (PowerShell shown; use ``set PYTHONPATH=python`` in ``cmd``)::
 
-    python python/rs3_reader/tracker.py --native-hz 500
-    python python/rs3_reader/reader.py --native-hz 500 --hz 20 --duration 60 --raw --output capture.jsonl
-    python python/rs3_reader/tracker.py --history capture.jsonl
+    $env:PYTHONPATH = "python"
+    python -m rs3_reader.tracker --native-hz 500
+    python -m rs3_reader.jsonl_stream --native-hz 500 --hz 20 --duration 60 --raw --output capture.jsonl
+    python -m rs3_reader.tracker --history capture.jsonl
 
 The tracker selects a visible RuneScape window automatically. If several are
 open, it prefers the foreground game window at attachment, then the visible
@@ -107,17 +110,22 @@ locate that landmark each run.
 Layout and verification
 -----------------------
 
-* ``include/rs3/rs3.h`` defines the public C ABI.
-* ``src/`` contains the collector, process verification, and gameplay decoders.
-* ``python/rs3_reader/`` contains the ctypes binding, CLI and tracker.
+* ``include/rs3/`` defines the public C ABI (``rs3.h``, ``combat.h``, ``prayer.h``).
+* ``src/`` contains the collector, process verification and gameplay decoders,
+  one module per responsibility.
+* ``python/rs3_reader/`` is the Python package: ctypes binding, telemetry
+  records, command-line tools and the ``tracker`` subpackage.
 * ``profiles/`` contains pinned client hashes, signatures, offsets and ability bindings.
-* ``tests/`` contains deterministic C fixtures and Python tests, including DLL ABI checks.
+* ``tests/native/`` contains deterministic C fixtures, one CTest executable per area;
+  ``tests/python/`` contains the Python tests, including DLL ABI checks.
 * ``examples/`` contains C, Python and Java consumers.
 * ``tools/`` contains the build-time profile and optional catalog generators.
 * ``docs/`` contains the API contract, research notes and compact validation reports.
 * ``work/`` contains research scripts and opt-in live validation tools.
 
-See `the native API guide <docs/native-api.rst>`_ for CMake installation and C, Python and Java usage.
+See `the native API guide <docs/native-api.rst>`_ for CMake installation and C, Python and Java usage,
+and `the development guide <docs/development.rst>`_ for the module map, coding
+conventions (Allman braces via ``.clang-format``, PEP 8 for Python) and checks.
 The live combat benchmark in ``work/benchmark_native.py`` uses the original
 ``profile_951_3.json`` executable.
 

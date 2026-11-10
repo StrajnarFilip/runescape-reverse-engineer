@@ -1,0 +1,15 @@
+# Python tool configuration. The rs3_reader package in python/ uses only the
+# standard library and is run from the checkout with PYTHONPATH=python; it is
+# not packaged for installation.
+
+[tool.black]
+line-length = 100
+target-version = ["py39"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+src = ["python", "tests/python", "tools", "work", "work/reference"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "B", "UP"]
