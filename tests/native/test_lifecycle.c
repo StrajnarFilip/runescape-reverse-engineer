@@ -100,6 +100,10 @@ static void add_player_tile(fixture *test_fixture, float fine_coordinates[3])
     fixture_put_u32(test_fixture, PLAYER_CONTEXT + POSITION_PLAYER_INDEX_OFFSET, 1);
     fixture_put_u64(test_fixture, PLAYER_SLOTS + 8, PLAYER_SLOT);
     fixture_put_u64(test_fixture, PLAYER_SLOT + POSITION_SLOT_ENTITY_OFFSET, PLAYER_ACTOR);
+    /* A profile that pins the player actor vtable also checks the actor's index. */
+    fixture_put_u64(test_fixture, PLAYER_ACTOR,
+                    FIXTURE_MODULE_BASE + profile_compatibility.player_actor_vtable_rva);
+    fixture_put_u32(test_fixture, PLAYER_ACTOR + LAYOUT_LOCAL_ACTOR_RUNTIME_ID_OFFSET, 1);
     fixture_put_u32(test_fixture, PLAYER_ACTOR + POSITION_PLANE_OFFSET, 2);
     fixture_put_u32(test_fixture, PLAYER_ACTOR + POSITION_SIZE_OFFSET, 2);
     memcpy(fixture_bytes(test_fixture, PLAYER_ACTOR + POSITION_FINE_COORDINATES_OFFSET, 12),
@@ -148,6 +152,7 @@ static void compatibility_profile_reports_the_player_tile(void)
 
     /* A tile without combat fields is a partial frame. */
     fixture_put_u64(test_fixture, PLAYER_CONTEXT + POSITION_PLAYER_OVERRIDE_OFFSET, PLAYER_ACTOR);
+    fixture_put_u32(test_fixture, PLAYER_ACTOR + LAYOUT_LOCAL_ACTOR_RUNTIME_ID_OFFSET, 2);
     uint64_t registry_root =
         FIXTURE_MODULE_BASE + profile_compatibility.registry_rva + LAYOUT_REGISTRY_ROOT_OFFSET;
     fixture_put_u64(test_fixture, registry_root, 0);
