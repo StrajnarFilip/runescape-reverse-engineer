@@ -1,7 +1,7 @@
 S0b - Single runtime profile
 ============================
 
-:Status: waiting for live session
+:Status: done
 :Wave: 0
 :Branch: ``telos/S0b``
 :Kind: C (native DLL)
@@ -78,6 +78,9 @@ session on that client (the installed launcher client):
 Pass: at least two distinct tiles, at least one player hit event in a sample
 with a valid tile, and zero lost events. The agent records the counts in the
 validation report and sets this track to done.
+
+Completed 2026-11-11: 3648 samples in 75 seconds, all with a valid tile and an
+available hit channel, 53 tiles, and 19 player hit events with zero lost.
 
 Requests
 --------
