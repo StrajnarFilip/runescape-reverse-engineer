@@ -326,13 +326,16 @@ class InventoryPanel:
                 cell.config(text=text, fg=colour)
         if slots:
             occupied = sum(not item["empty"] for item in slots)
+            catalog_status = inventory.get("catalog_status")
+            metadata = f"metadata {catalog_status}"
+            if catalog_status != "available" and inventory.get("reason"):
+                metadata += f" ({inventory['reason']})"
             self.status.config(
                 text=(
-                    f"Backpack: {occupied} / {BACKPACK_SLOT_COUNT} occupied · "
-                    f"metadata {inventory.get('catalog_status')} · "
+                    f"Backpack: {occupied} / {BACKPACK_SLOT_COUNT} occupied · {metadata} · "
                     f"lost changes {changes.get('events_lost', 0)}"
                 ),
-                fg=theme.GREEN,
+                fg=theme.GREEN if catalog_status == "available" else theme.GOLD,
             )
         else:
             reason = inventory.get("reason") or "waiting for a fresh C sample"
@@ -455,7 +458,8 @@ class AbilityPanel:
         return (f"ability_{ability['struct_id']}", values, tags)
 
     def render(self, record):
-        entries = (record.get("abilities") or {}).get("entries") or []
+        abilities = record.get("abilities") or {}
+        entries = abilities.get("entries") or []
         needle = self.name_filter.get().strip().casefold()
         rows = [
             self._ability_row(ability) for ability in entries if self._is_shown(ability, needle)
@@ -473,7 +477,8 @@ class AbilityPanel:
                 fg=theme.GREEN,
             )
         else:
-            self.status.config(text="Ability metadata unavailable", fg=theme.RED)
+            message = abilities.get("message") or abilities.get("reason") or "waiting for a sample"
+            self.status.config(text=f"Ability metadata unavailable: {message}", fg=theme.RED)
 
 
 class SourcePanel:

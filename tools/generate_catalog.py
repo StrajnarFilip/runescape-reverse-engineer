@@ -21,12 +21,15 @@ from rs3_reader.cache_definitions import (  # noqa: E402
     DecodeError,
     decode_item,
     decode_struct,
+    resolve_item_names,
 )
 
 ITEM_ARCHIVE = 19
 STRUCT_ARCHIVE = 22
 ITEM_GROUP_SHIFT = 8
 STRUCT_GROUP_SHIFT = 5
+# A variant's linked item is normally a plain definition; the limit only bounds bad chains.
+MAX_TEMPLATE_LINK_DEPTH = 4
 CATALOG_MAGIC = b"RS3CAT1\0"
 CATALOG_FORMAT_VERSION = 1
 MAX_NAME_BYTES = 511
@@ -196,19 +199,31 @@ def item_equipment_flags(definition, parameters):
     return flags
 
 
-def build_item_records(items, struct_cache, families, strings):
-    """Return (packed item records, skipped empty definitions)."""
-    records, empty_definitions, failures = [], 0, []
+def decode_item_definitions(items):
+    """Return ({item ID: definition}, skipped empty definitions)."""
+    definitions, empty_definitions, failures = {}, 0, []
     for group_id, file_id, data in iterate_group_files(items):
         item_id = (group_id << ITEM_GROUP_SHIFT) + file_id
         if not data:
             empty_definitions += 1
             continue
         try:
-            definition = decode_item(data)
+            definitions[item_id] = decode_item(data)
         except DecodeError as error:
             failures.append((item_id, str(error)))
-            continue
+    if failures:
+        raise DecodeError("Item decode failures: " + repr(failures[:10]))
+    return definitions, empty_definitions
+
+
+def build_item_records(definitions, struct_cache, families, strings):
+    """Return (packed item records sorted by ID, names inherited through template links)."""
+    names = resolve_item_names(definitions, MAX_TEMPLATE_LINK_DEPTH)
+    records, inherited_names = [], 0
+    for item_id in sorted(definitions):
+        definition = definitions[item_id]
+        if names[item_id] and not definition["name"]:
+            inherited_names += 1
         parameters = definition["params"]
         category = parameters.get(ITEM_CATEGORY_PARAMETER)
         attack_style = 0
@@ -220,7 +235,7 @@ def build_item_records(items, struct_cache, families, strings):
         records.append(
             ITEM_RECORD.pack(
                 item_id,
-                strings.offset(definition["name"]),
+                strings.offset(names[item_id]),
                 family,
                 doses,
                 next_item_id,
@@ -231,9 +246,7 @@ def build_item_records(items, struct_cache, families, strings):
                 base_heal,
             )
         )
-    if failures:
-        raise DecodeError("Item decode failures: " + repr(failures[:10]))
-    return records, empty_definitions
+    return records, inherited_names
 
 
 def build_ability_records(bindings, strings):
@@ -289,7 +302,10 @@ def main():
     struct_cache = StructCache(structs)
     strings = StringTable()
     families, potion_count, ambiguous_items = collect_potion_families(structs, struct_cache)
-    item_records, empty_definitions = build_item_records(items, struct_cache, families, strings)
+    definitions, empty_definitions = decode_item_definitions(items)
+    item_records, inherited_names = build_item_records(
+        definitions, struct_cache, families, strings
+    )
     bindings = read_profile_json("ability_bindings_951_3.json")
     ability_records = build_ability_records(bindings, strings)
 
@@ -314,6 +330,7 @@ def main():
         "abilities": len(ability_records),
         "potion_families": potion_count,
         "empty_definitions_skipped": empty_definitions,
+        "template_names_inherited": inherited_names,
         "ambiguous_potion_items": len(ambiguous_items),
         "decode_failures": 0,
         "client_sha256": profile["sha256"],

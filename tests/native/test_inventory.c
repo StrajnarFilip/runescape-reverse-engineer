@@ -265,17 +265,13 @@ static void write_temporary_file(const unsigned char *data, size_t size, wchar_t
     CloseHandle(file);
 }
 
-static void validates_catalogs_and_reports_item_queue_gaps(void)
+/**
+ * Writes the fixture catalog as a complete file with a valid header and body
+ * checksum. corrupt_first_ability gives the first ability a negative timer ID.
+ */
+static void write_catalog_file(const item_catalog *catalog, int corrupt_first_ability,
+                               wchar_t path[MAX_PATH])
 {
-    fixture *test_fixture = fixture_create_inventory();
-    item_catalog *catalog = &test_fixture->context->inventory->catalog;
-    assert(fixture_decode(test_fixture));
-
-    /*
-     * A valid SHA-256 is integrity checking, not authentication. Every record
-     * is validated too: a negative timer ID with a client source must never
-     * index the timer arrays.
-     */
     unsigned char *data = malloc(catalog->size);
     assert(data != NULL);
     memcpy(data, catalog->data, catalog->size);
@@ -285,19 +281,81 @@ static void validates_catalogs_and_reports_item_queue_gaps(void)
     encode_u32(data + CATALOG_HEADER_ABILITY_COUNT, catalog->ability_count);
     encode_u32(data + CATALOG_HEADER_STRINGS_SIZE, catalog->strings_size);
     write_digest(data + CATALOG_HEADER_CLIENT_SHA256, PROFILE_PRIMARY_SHA256);
-    unsigned char *first_ability =
-        data + CATALOG_HEADER_BYTES + catalog->item_count * CATALOG_ITEM_RECORD_BYTES;
-    encode_u32(first_ability + CATALOG_ABILITY_START_VAR, UINT32_MAX);
+    if (corrupt_first_ability)
+    {
+        unsigned char *first_ability =
+            data + CATALOG_HEADER_BYTES + catalog->item_count * CATALOG_ITEM_RECORD_BYTES;
+        encode_u32(first_ability + CATALOG_ABILITY_START_VAR, UINT32_MAX);
+    }
     assert(catalog_sha256(data + CATALOG_HEADER_BYTES,
                           (uint32_t)(catalog->size - CATALOG_HEADER_BYTES),
                           data + CATALOG_HEADER_BODY_SHA256));
-
-    wchar_t path[MAX_PATH];
     write_temporary_file(data, catalog->size, path);
+    free(data);
+}
+
+/** Asserts that exactly the fixture's item IDs resolve, with the expected names. */
+static void assert_fixture_item_lookups(const item_catalog *catalog)
+{
+    static const int32_t absent_item_ids[] = {-1, 0, 99, 105, 199, 202, 299, 301, INT32_MAX};
+    catalog_item_definition definition;
+    char name[CATALOG_NAME_CAPACITY];
+    assert(catalog_find_item(catalog, FIXTURE_ITEM_SWORD, &definition));
+    assert(definition.item_id == FIXTURE_ITEM_SWORD);
+    catalog_copy_name(catalog, definition.name_offset, name);
+    assert(strcmp(name, "Sword") == 0);
+    assert(catalog_find_item(catalog, FIXTURE_ITEM_OTHER, &definition));
+    catalog_copy_name(catalog, definition.name_offset, name);
+    assert(strcmp(name, "Other item") == 0);
+    assert(catalog_find_item(catalog, FIXTURE_ITEM_BREW_5, &definition));
+    assert(definition.doses == 5);
+    for (unsigned index = 0; index < sizeof absent_item_ids / sizeof absent_item_ids[0]; index++)
+    {
+        assert(!catalog_find_item(catalog, absent_item_ids[index], &definition));
+    }
+    assert(catalog->item_index_size == FIXTURE_ITEM_OTHER + 1);
+}
+
+static void looks_up_items_through_the_direct_index(void)
+{
+    fixture *test_fixture = fixture_create_inventory();
+    item_catalog *catalog = &test_fixture->context->inventory->catalog;
+    assert_fixture_item_lookups(catalog);
+
+    /* A real file load builds its own index. */
+    wchar_t path[MAX_PATH];
+    write_catalog_file(catalog, 0, path);
+    assert(catalog_load_file(catalog, path) == RS3_OK);
+    assert(DeleteFileW(path));
+    assert(catalog->status == RS3_AVAILABLE);
+    assert_fixture_item_lookups(catalog);
+
+    /* An empty catalog has no index, and every lookup misses. */
+    item_catalog empty_catalog = {0};
+    catalog_item_definition definition;
+    assert(catalog_build_item_index(&empty_catalog));
+    assert(empty_catalog.item_index == NULL && empty_catalog.item_index_size == 0);
+    assert(!catalog_find_item(&empty_catalog, FIXTURE_ITEM_SWORD, &definition));
+    fixture_destroy(test_fixture);
+}
+
+static void validates_catalogs_and_reports_item_queue_gaps(void)
+{
+    fixture *test_fixture = fixture_create_inventory();
+    item_catalog *catalog = &test_fixture->context->inventory->catalog;
+    assert(fixture_decode(test_fixture));
+
+    /*
+     * A valid SHA-256 is integrity checking, not authentication. Every record
+     * is validated too: a negative timer ID with a client source must never
+     * index the timer arrays. A rejected file keeps the previous catalog.
+     */
+    wchar_t path[MAX_PATH];
+    write_catalog_file(catalog, 1, path);
     assert(catalog_load_file(catalog, path) == RS3_E_ABI);
     assert(catalog->ability_count == 2 && catalog->status == RS3_AVAILABLE);
+    assert_fixture_item_lookups(catalog);
     assert(DeleteFileW(path));
-    free(data);
 
     /* Overflowing the item queue reports the overwritten sequences. */
     AcquireSRWLockExclusive(&test_fixture->context->event_queue_lock);
@@ -323,6 +381,7 @@ int main(void)
     RUN_TEST(sparse_slot_vectors_report_empty_slots);
     RUN_TEST(evaluates_cooldowns_and_weapon_requirements);
     RUN_TEST(torn_slots_and_duplicates_do_not_invent_identities);
+    RUN_TEST(looks_up_items_through_the_direct_index);
     RUN_TEST(validates_catalogs_and_reports_item_queue_gaps);
     puts("PASS: inventory tests");
     return 0;

@@ -80,6 +80,13 @@ typedef struct item_catalog
     const unsigned char *item_records;
     const unsigned char *ability_records;
     const char *strings;
+    /**
+     * Owned direct-address table: item_index[item_id] is the record index plus
+     * one, or 0 when the ID has no record. Item IDs are dense and bounded, so a
+     * lookup is one array read (about 4 bytes per possible ID).
+     */
+    uint32_t *item_index;
+    uint32_t item_index_size; /**< Highest item ID plus one; 0 without items. */
     char error_message[CATALOG_ERROR_CAPACITY];
 } item_catalog;
 
@@ -127,10 +134,17 @@ int32_t catalog_load_file(item_catalog *catalog, const wchar_t *path);
 /** Tries rs3_catalog.bin beside the module that contains this library. */
 void catalog_load_default(item_catalog *catalog);
 
-/** Releases the backing buffer. */
+/** Releases the backing buffer and the item index. */
 void catalog_free(item_catalog *catalog);
 
-/** Finds an item by ID. Returns nonzero and fills definition when present. */
+/**
+ * Rebuilds the item index from item_records, which must be sorted by ID.
+ * Returns nonzero on success; on allocation failure the index is left empty.
+ * catalog_load_file() calls this itself; tests use it after building records.
+ */
+int catalog_build_item_index(item_catalog *catalog);
+
+/** Finds an item by ID in constant time. Returns nonzero and fills definition when present. */
 int catalog_find_item(const item_catalog *catalog, int32_t item_id,
                       catalog_item_definition *definition);
 

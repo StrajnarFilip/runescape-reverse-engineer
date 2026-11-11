@@ -188,10 +188,13 @@ def extend_record(record, reader):
         "reason": reason,
     }
 
+    # info.message holds the catalog error unless a slot read failure replaced it.
+    catalog_message = reason if info.reason == Reason.CATALOG_UNAVAILABLE else None
     record["abilities"] = {
         "status": "available" if catalog_available else "unavailable",
         "entries": [ability_record(reader.abilities[index]) for index in range(info.ability_count)],
         "reason": None if catalog_available else "catalog_unavailable",
+        "message": None if catalog_available else catalog_message,
     }
 
     events, lost = reader.drain_item_events()

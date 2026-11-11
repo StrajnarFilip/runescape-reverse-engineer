@@ -210,12 +210,62 @@ static int validate_catalog(const unsigned char *data, size_t size, catalog_layo
                             CATALOG_ABILITY_RECORD_BYTES, strings, layout->strings_size, 1);
 }
 
+/**
+ * Allocates the direct-address table of sorted item records. Returns nonzero on
+ * success; *index is NULL when there are no items.
+ */
+static int create_item_index(const unsigned char *item_records, uint32_t item_count,
+                             uint32_t **index, uint32_t *index_size)
+{
+    *index = NULL;
+    *index_size = 0;
+    if (item_count == 0)
+    {
+        return 1;
+    }
+    /* Records are sorted, so the last record holds the highest ID. */
+    const unsigned char *last_record =
+        item_records + (size_t)(item_count - 1) * CATALOG_ITEM_RECORD_BYTES;
+    uint32_t highest_item_id = decode_u32(last_record + CATALOG_ITEM_ID);
+    if (highest_item_id > MAX_CATALOG_RECORD_ID)
+    {
+        return 0;
+    }
+    uint32_t *table = calloc((size_t)highest_item_id + 1, sizeof *table);
+    if (table == NULL)
+    {
+        return 0;
+    }
+    for (uint32_t record_index = 0; record_index < item_count; record_index++)
+    {
+        const unsigned char *record =
+            item_records + (size_t)record_index * CATALOG_ITEM_RECORD_BYTES;
+        table[decode_u32(record + CATALOG_ITEM_ID)] = record_index + 1;
+    }
+    *index = table;
+    *index_size = highest_item_id + 1;
+    return 1;
+}
+
+int catalog_build_item_index(item_catalog *catalog)
+{
+    uint32_t *index;
+    uint32_t index_size;
+    int created =
+        create_item_index(catalog->item_records, catalog->item_count, &index, &index_size);
+    free(catalog->item_index);
+    catalog->item_index = index;
+    catalog->item_index_size = index_size;
+    return created;
+}
+
 int32_t catalog_load_file(item_catalog *catalog, const wchar_t *path)
 {
     HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
     if (file == INVALID_HANDLE_VALUE)
     {
-        set_catalog_error(catalog, "Metadata file unavailable; generate rs3_catalog.bin");
+        set_catalog_error(catalog, "rs3_catalog.bin not found beside rs3_native.dll; "
+                                   "build the rs3_catalog CMake target");
         return RS3_E_ABI;
     }
 
@@ -241,11 +291,22 @@ int32_t catalog_load_file(item_catalog *catalog, const wchar_t *path)
     {
         goto cleanup;
     }
+    uint32_t *item_index;
+    uint32_t item_index_size;
+    if (!create_item_index(data + layout.item_records_offset, layout.item_count, &item_index,
+                           &item_index_size))
+    {
+        result = RS3_E_MEMORY;
+        goto cleanup;
+    }
 
     /* Publish the new backing buffer only after every record and offset is validated. */
     free(catalog->data);
+    free(catalog->item_index);
     catalog->data = data;
     data = NULL;
+    catalog->item_index = item_index;
+    catalog->item_index_size = item_index_size;
     catalog->size = size;
     catalog->item_count = layout.item_count;
     catalog->ability_count = layout.ability_count;
@@ -297,36 +358,25 @@ void catalog_free(item_catalog *catalog)
 {
     free(catalog->data);
     catalog->data = NULL;
+    free(catalog->item_index);
+    catalog->item_index = NULL;
+    catalog->item_index_size = 0;
 }
 
 int catalog_find_item(const item_catalog *catalog, int32_t item_id,
                       catalog_item_definition *definition)
 {
-    /* Binary search over the records, which are sorted by item ID. */
-    uint32_t low = 0;
-    uint32_t high = catalog->item_count;
-    while (low < high)
-    {
-        uint32_t middle = low + (high - low) / 2;
-        uint32_t middle_id = decode_u32(catalog->item_records + middle * CATALOG_ITEM_RECORD_BYTES);
-        if (middle_id < (uint32_t)item_id)
-        {
-            low = middle + 1;
-        }
-        else
-        {
-            high = middle;
-        }
-    }
-    if (low >= catalog->item_count)
+    if (item_id < 0 || (uint32_t)item_id >= catalog->item_index_size)
     {
         return 0;
     }
-    const unsigned char *record = catalog->item_records + low * CATALOG_ITEM_RECORD_BYTES;
-    if (decode_u32(record + CATALOG_ITEM_ID) != (uint32_t)item_id)
+    uint32_t entry = catalog->item_index[item_id];
+    if (entry == 0)
     {
         return 0;
     }
+    const unsigned char *record =
+        catalog->item_records + (size_t)(entry - 1) * CATALOG_ITEM_RECORD_BYTES;
     definition->item_id = decode_u32(record + CATALOG_ITEM_ID);
     definition->name_offset = decode_u32(record + CATALOG_ITEM_NAME_OFFSET);
     definition->family_id = decode_u32(record + CATALOG_ITEM_FAMILY_ID);

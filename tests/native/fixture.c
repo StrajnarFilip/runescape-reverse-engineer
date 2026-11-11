@@ -416,6 +416,7 @@ static void install_synthetic_catalog(fixture *test_fixture)
         encode_u32(record + CATALOG_ABILITY_TIMER_SOURCE, RS3_TIMER_CLIENT_PAIR);
         encode_u32(record + CATALOG_ABILITY_DEFINITION_FLAGS, CATALOG_ABILITY_IN_BOOK);
     }
+    assert(catalog_build_item_index(catalog));
 }
 
 fixture *fixture_create_inventory(void)

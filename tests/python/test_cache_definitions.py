@@ -14,7 +14,14 @@ from rs3_reader.cache_definitions import (
     decode_item,
     decode_struct,
     decompress,
+    resolve_item_names,
 )
+
+NOTE_TEMPLATE_ITEM_ID = 799
+
+
+def three_byte_opcode(opcode, value):
+    return bytes([opcode]) + value.to_bytes(3, "big")
 
 
 def compress(data):
@@ -36,6 +43,41 @@ class CacheDefinitionTests(unittest.TestCase):
             ("Example sword", 3, 5),
         )
         self.assertEqual(definition["params"], {686: 14930, 1: "Text"})
+
+    def test_templated_variants_link_to_their_named_item(self):
+        noted = three_byte_opcode(201, 6) + three_byte_opcode(202, NOTE_TEMPLATE_ITEM_ID) + b"\0"
+        definition = decode_item(noted)
+        self.assertIsNone(definition["name"])
+        self.assertEqual(definition["linked_item_id"], 6)
+        self.assertEqual((definition["note_id"], definition["note_template"]), (6, 799))
+        lent = three_byte_opcode(203, 11235) + three_byte_opcode(204, 13009) + b"\0"
+        self.assertEqual(decode_item(lent)["linked_item_id"], 11235)
+        # A link without its template is a plain cross-reference, not a variant.
+        self.assertIsNone(decode_item(three_byte_opcode(205, 20929) + b"\0")["linked_item_id"])
+        self.assertIsNone(decode_item(b"\x02Sword\0\0")["linked_item_id"])
+
+    def test_variant_names_follow_links_within_bounds(self):
+        def definition(name, linked_item_id=None):
+            return {"name": name, "linked_item_id": linked_item_id}
+
+        definitions = {
+            6: definition("Grimy toadflax"),
+            7: definition(None, 6),
+            8: definition(None, 9),
+            9: definition(None, 8),
+            10: definition(None, 404),
+            11: definition(None, 12),
+            12: definition(None, 7),
+            13: definition("Own name", 6),
+        }
+        names = resolve_item_names(definitions, max_link_depth=2)
+        self.assertEqual(names[7], "Grimy toadflax")
+        self.assertEqual(names[12], "Grimy toadflax")
+        self.assertEqual(names[13], "Own name")
+        # Cycles, missing links and chains longer than the bound stay unnamed.
+        self.assertEqual([names[item_id] for item_id in (8, 9, 10)], [None, None, None])
+        self.assertIsNone(resolve_item_names(definitions, max_link_depth=1)[11])
+        self.assertEqual(resolve_item_names(definitions, max_link_depth=3)[11], "Grimy toadflax")
 
     def test_unknown_and_truncated_definitions_fail(self):
         for data in (b"\xff\0", b"\x02unterminated", b"\x0d", b"\0trailing"):

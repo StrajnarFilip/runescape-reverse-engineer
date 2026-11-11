@@ -72,14 +72,12 @@ tracker finds the DLL in ``build/bin/Release/`` for Visual Studio or
 ``build/bin/`` for Ninja. Set ``RS3_NATIVE_LIBRARY`` to the DLL's absolute path
 when using a different directory or configuration.
 
-With the game cache installed, generate optional item and ability metadata
-beside the DLL::
-
-    cmake --build build --config Release --target rs3_catalog
-
-Set ``-DRS3_CACHE_ROOT=C:/path/to/cache`` at configure time to use a different
-cache. The generator reads the cache locally. Raw inventory IDs and slots are
-available without metadata.
+When the game cache is installed, the build also generates item names and
+ability metadata (``rs3_catalog.bin``) beside the DLL, and regenerates them after
+a game cache update. Set ``-DRS3_CACHE_ROOT=C:/path/to/cache`` at configure time
+to use a different cache, or ``-DRS3_BUILD_CATALOG=OFF`` to skip the step. The
+generator reads the cache locally. Without the catalog, raw inventory IDs and
+slots stay available and the tracker shows why metadata is unavailable.
 
 Double-click ``Start Tracker.cmd`` or run the desktop UI and JSONL stream
 directly. The ``rs3_reader`` package lives in ``python/``; put it on the import

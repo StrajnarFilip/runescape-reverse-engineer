@@ -133,16 +133,72 @@ if(BUILD_TESTING)
 endif()
 
 # ---------------------------------------------------------------------------
-# Optional metadata catalog generated from the installed, read-only game cache
+# Metadata catalog generated from the installed, read-only game cache
 # ---------------------------------------------------------------------------
+# The DLL loads rs3_catalog.bin from its own directory; without it item names
+# and ability metadata are unavailable. When the item (19) and struct (22)
+# archives exist, the default build generates the catalog and regenerates it
+# whenever an archive, a profile or the generator changes.
 set(RS3_CACHE_ROOT "C:/ProgramData/Jagex/RuneScape" CACHE PATH "Installed read-only game cache")
-add_custom_target(rs3_catalog
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_catalog.py"
-            --cache-root "${RS3_CACHE_ROOT}"
-            --output "$<TARGET_FILE_DIR:rs3_native>/rs3_catalog.bin"
-    DEPENDS rs3_native
-    VERBATIM
-)
+set(RS3_CATALOG_ARCHIVES "${RS3_CACHE_ROOT}/js5-19.jcache" "${RS3_CACHE_ROOT}/js5-22.jcache")
+set(RS3_CATALOG_CACHE_FOUND ON)
+foreach(archive IN LISTS RS3_CATALOG_ARCHIVES)
+    if(NOT EXISTS "${archive}")
+        set(RS3_CATALOG_CACHE_FOUND OFF)
+    endif()
+endforeach()
+option(RS3_BUILD_CATALOG "Generate rs3_catalog.bin when the game cache is installed" ON)
+
+if(RS3_BUILD_CATALOG AND RS3_CATALOG_CACHE_FOUND)
+    # OUTPUT cannot name a target directory, so mirror CMAKE_RUNTIME_OUTPUT_DIRECTORY.
+    get_property(RS3_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+    if(RS3_MULTI_CONFIG)
+        set(RS3_CATALOG_OUTPUT "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/rs3_catalog.bin")
+    else()
+        set(RS3_CATALOG_OUTPUT "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rs3_catalog.bin")
+    endif()
+    # A cheap step on every build rewrites the fingerprint only when an archive changed.
+    set(RS3_CATALOG_FINGERPRINT "${RS3_GENERATED_DIR}/catalog_archives.txt")
+    string(REPLACE ";" "|" RS3_CATALOG_ARCHIVE_ARGUMENT "${RS3_CATALOG_ARCHIVES}")
+    add_custom_target(rs3_catalog_fingerprint
+        COMMAND "${CMAKE_COMMAND}" "-DOUTPUT=${RS3_CATALOG_FINGERPRINT}"
+                "-DARCHIVES=${RS3_CATALOG_ARCHIVE_ARGUMENT}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/catalog_fingerprint.cmake"
+        BYPRODUCTS "${RS3_CATALOG_FINGERPRINT}"
+        COMMENT "Checking the installed game cache"
+        VERBATIM
+    )
+    add_custom_command(
+        OUTPUT "${RS3_CATALOG_OUTPUT}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_catalog.py"
+                --cache-root "${RS3_CACHE_ROOT}" --output "${RS3_CATALOG_OUTPUT}"
+        DEPENDS
+            tools/generate_catalog.py
+            python/rs3_reader/cache_definitions.py
+            "${RS3_PRIMARY_PROFILE}"
+            profiles/ability_bindings_951_3.json
+            "${RS3_CATALOG_FINGERPRINT}"
+        COMMENT "Generating rs3_catalog.bin from the installed game cache"
+        VERBATIM
+    )
+    # As a source of the DLL target the catalog is regenerated only when out of date;
+    # a separate utility target would rerun the generator on every build.
+    target_sources(rs3_native PRIVATE "${RS3_CATALOG_OUTPUT}")
+    add_dependencies(rs3_native rs3_catalog_fingerprint)
+    add_custom_target(rs3_catalog)
+    add_dependencies(rs3_catalog rs3_native)
+else()
+    set(RS3_CATALOG_MISSING_MESSAGE
+        "rs3_catalog.bin was not generated: set RS3_CACHE_ROOT to the installed game cache "
+        "(js5-19.jcache and js5-22.jcache) and RS3_BUILD_CATALOG=ON, then reconfigure. "
+        "Without it item names and ability metadata are unavailable.")
+    message(STATUS "${RS3_CATALOG_MISSING_MESSAGE}")
+    add_custom_target(rs3_catalog
+        COMMAND "${CMAKE_COMMAND}" -E echo "${RS3_CATALOG_MISSING_MESSAGE}"
+        COMMAND "${CMAKE_COMMAND}" -E false
+        VERBATIM
+    )
+endif()
 
 # ---------------------------------------------------------------------------
 # Installation and CMake package

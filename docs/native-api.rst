@@ -297,8 +297,8 @@ exporting a testing or injection interface. Each area is its own CTest executabl
 * ``native_lifecycle``: failed-frame invalidation, missing process, worker
   lifecycle and the Compatibility Mode player tile;
 * ``native_inventory``: moves, dose changes, quantity/replacement, duplicate
-  ambiguity, gear switches/defenders, individual timers, catalog validation and
-  item-event queue gaps;
+  ambiguity, gear switches/defenders, individual timers, the direct item index,
+  catalog validation and item-event queue gaps;
 * ``native_combat``: overhead flags, raw animations, scene epochs and NPC action
   events;
 * ``native_player_hits``: local player actor resolution through the context
@@ -337,9 +337,10 @@ matches; ambiguity is flagged. No client-side unique serial number is assumed.
 Events retain their original process identity/time through slower consumer polls.
 
 The C context tries ``rs3_catalog.bin`` beside its loaded module. The standard
-build generates it from the local cache in SQLite read-only mode; use
-``--cache-root`` to select another installation and ``--skip-catalog`` to keep
-an existing catalog. ``rs3_load_catalog(context, utf8_path)`` loads a selected file
+build generates it from the local cache in SQLite read-only mode when the cache is
+installed; use ``-DRS3_CACHE_ROOT`` to select another installation and
+``-DRS3_BUILD_CATALOG=OFF`` to keep an existing catalog. A missing file is reported
+in ``rs3_inventory_info.message``. ``rs3_load_catalog(context, utf8_path)`` loads a selected file
 while the worker is stopped. A failed reload retains an already valid catalog.
 Missing metadata does not prevent raw item IDs/quantities/slots from being read.
 Names/families/ability definitions remain explicitly unavailable. Generated

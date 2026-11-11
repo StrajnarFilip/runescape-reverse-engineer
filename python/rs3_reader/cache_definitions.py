@@ -33,6 +33,10 @@ ITEM_EQUIP_SLOT_OPCODE = 13
 ITEM_HIDE_SLOT_OPCODE = 14
 ITEM_NOTE_ID_OPCODE = 201
 ITEM_NOTE_TEMPLATE_OPCODE = 202
+# Templated variants (noted 201/202 and three further kinds) store the linked item ID in
+# the opcode just before their template ID. The client takes their name from the link.
+ITEM_TEMPLATE_LINK_OPCODES = {202: 201, 204: 203, 206: 205, 208: 207}
+ITEM_LINK_OPCODES = frozenset(ITEM_TEMPLATE_LINK_OPCODES.values())
 PARAMETERS_OPCODE = 249
 ITEM_STRING_OPCODES = frozenset({2, 3, 164, *range(30, 40)})
 ITEM_SMART_OPCODES = frozenset({1, 23, 24, 25, 26, 78, 79, 90, 91, 92, 93})
@@ -268,9 +272,14 @@ def decode_enum(data):
 
 
 def decode_item(data):
-    """Return the name, parameters, equipment slots and note links of an item definition."""
+    """Return the name, parameters, equipment slots and template links of an item definition.
+
+    ``linked_item_id`` is the item a templated variant (such as a banknote) copies
+    its name from, or None for an ordinary definition.
+    """
     reader = ByteReader(data)
     result = {"name": None, "params": {}, "equip_slot": -1, "hide_slot": -1}
+    template_values = {}
     while True:
         opcode = reader.read_unsigned()
         if opcode == 0:
@@ -316,6 +325,8 @@ def decode_item(data):
                 result["note_id"] = value
             if opcode == ITEM_NOTE_TEMPLATE_OPCODE:
                 result["note_template"] = value
+            if opcode in ITEM_TEMPLATE_LINK_OPCODES or opcode in ITEM_LINK_OPCODES:
+                template_values[opcode] = value
         elif 190 <= opcode <= 199:
             reader.read_bytes(5)
         elif opcode == PARAMETERS_OPCODE:
@@ -323,4 +334,38 @@ def decode_item(data):
         else:
             raise DecodeError(f"Unknown item opcode {opcode} at byte {reader.position - 1}")
     reader.require_end()
+    # A link without its template is an ordinary cross-reference, not a variant.
+    result["linked_item_id"] = next(
+        (
+            template_values[link_opcode]
+            for template_opcode, link_opcode in ITEM_TEMPLATE_LINK_OPCODES.items()
+            if template_opcode in template_values and link_opcode in template_values
+        ),
+        None,
+    )
     return result
+
+
+def resolve_item_names(definitions, max_link_depth):
+    """Return {item ID: name}, following template links for unnamed variants.
+
+    ``definitions`` maps item IDs to decode_item() results. A variant's name is
+    taken from its linked item, through at most max_link_depth links; cycles and
+    missing links leave the name None.
+    """
+    names = {}
+    for item_id, definition in definitions.items():
+        name = definition["name"]
+        current = definition
+        visited = {item_id}
+        for _ in range(max_link_depth):
+            linked_item_id = current["linked_item_id"]
+            if name or linked_item_id is None or linked_item_id in visited:
+                break
+            current = definitions.get(linked_item_id)
+            if current is None:
+                break
+            visited.add(linked_item_id)
+            name = current["name"]
+        names[item_id] = name
+    return names

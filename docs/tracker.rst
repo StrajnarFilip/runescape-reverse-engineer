@@ -68,9 +68,10 @@ and Resonance were checked live with two-handed, dual-wield and shield setups.
 Unknown cooldowns remain unknown; a gear match is not full castability. Bone
 Shield substitution, runes, unlocks and other cast conditions are separate
 checks. See ``inventory-and-abilities.rst`` and
-``validation/inventory-validation-summary.json``. The optional ``rs3_catalog``
-CMake target generates metadata beside the DLL. Missing metadata leaves raw IDs
-and positions available, with explicit unknowns.
+``validation/inventory-validation-summary.json``. The build generates this
+metadata (``rs3_catalog.bin``) beside the DLL when the game cache is installed.
+Missing metadata leaves raw IDs and positions available, with explicit unknowns,
+and the Inventory and Abilities tabs show the reason.
 
 Auditability
 ------------
