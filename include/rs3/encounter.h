@@ -13,7 +13,8 @@ extern "C"
 
 enum rs3_encounter_reason
 {
-    RS3_ENCOUNTER_UNMAPPED = 100
+    RS3_ENCOUNTER_UNMAPPED = 100,
+    RS3_ENCOUNTER_NOT_ACTIVE
 };
 
 /** A mapped field. value is meaningful only when valid is nonzero. */
@@ -80,7 +81,11 @@ enum rs3_encounter_structure
 
 /** Return an encounter structure's byte size, or zero. */
 RS3_API uint32_t rs3_encounter_sizeof(uint32_t structure);
-/** Copy the caller-owned snapshot's encounter state. Check per-field validity and age. */
+/**
+ * Copy an owned snapshot's encounter state. Check validity, age and identity per field.
+ * Current calibration covers the original profile, active Telos phases 1..4 and
+ * the instance-enrage source observed at 300/500. Other fields/phases remain unknown.
+ */
 RS3_API int32_t rs3_snapshot_encounter(const rs3_snapshot *snapshot, rs3_encounter_state *out,
                                        uint32_t out_size);
 

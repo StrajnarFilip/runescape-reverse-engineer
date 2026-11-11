@@ -6,12 +6,20 @@
 #include "clock.h"
 #include "variables.h"
 
-#define TELOS_PACKED_VARP  6363u
-#define TELOS_STAGE_VARBIT 32640u
-#define TELOS_STAGE_SHIFT  21u
-#define TELOS_STAGE_MASK   7u
+#define TELOS_PACKED_VARP        6363u
+#define TELOS_STAGE_VARBIT       32640u
+#define TELOS_STAGE_SHIFT        21u
+#define TELOS_STAGE_MASK         7u
+#define TELOS_INSTANCE_VARP      6359u
+#define TELOS_ENRAGE_VARBIT      32626u
+#define TELOS_ENRAGE_MASK        4095u
+#define MAX_SUPPORTED_ENRAGE     4000u
+#define ACTIVE_TELOS_CONFIG_ID   22891
+#define LAST_VALIDATED_STAGE     3u
+#define TELOS_INSTANCE_GUARD_BIT (1u << 29)
 
-/* Neighbouring definitions are research candidates, NOT asserted enrage/streak mappings. */
+/* Raw channels include calibrated sources and neighbouring candidates; presence alone proves no
+ * semantics. */
 static const uint32_t research_varps[RS3_ENCOUNTER_RAW_CAPACITY] = {
     6359u, 6360u, 6361u, 6362u, TELOS_PACKED_VARP, 6364u};
 
@@ -31,6 +39,31 @@ static void invalidate_semantics(rs3_encounter_state *state)
     state->stage_raw.reason = RS3_NOT_SET;
     state->stage_raw.source_varp = TELOS_PACKED_VARP;
     state->stage_raw.source_varbit = TELOS_STAGE_VARBIT;
+}
+
+/** Match the single captured active form; dormant entities and duplicate forms cannot authorize
+ * data. */
+static int has_active_telos(const rs3_snapshot *snapshot)
+{
+    unsigned matches = 0;
+    for (uint32_t index = 0; index < snapshot->info.npc_count; index++)
+    {
+        const rs3_npc *npc = &snapshot->npcs[index];
+        if ((npc->flags & RS3_NPC_CONFIG) && npc->config_id == ACTIVE_TELOS_CONFIG_ID)
+        {
+            matches++;
+        }
+    }
+    int instance_guard = 0;
+    for (uint32_t index = 0; index < snapshot->encounter.raw_count; index++)
+    {
+        const rs3_encounter_raw *raw = &snapshot->encounter.raw[index];
+        if (raw->varp_id == TELOS_INSTANCE_VARP && raw->valid)
+        {
+            instance_guard = ((uint32_t)raw->value & TELOS_INSTANCE_GUARD_BIT) != 0;
+        }
+    }
+    return matches == 1 && instance_guard;
 }
 
 void encounter_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t player_address)
@@ -98,8 +131,55 @@ void encounter_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t play
             state->stage_raw.observed_ns = raw->observed_ns;
         }
     }
-    /* A raw stage, sparse presence, or client_logic_tick / 30 does not validate a phase or game
-     * tick. */
+    /* These semantics were calibrated only on the original profile, phases 1..4. */
+    if (context->target.profile == &profile_primary)
+    {
+        if (!has_active_telos(snapshot))
+        {
+            state->phase.reason = RS3_ENCOUNTER_NOT_ACTIVE;
+            state->enrage.reason = RS3_ENCOUNTER_NOT_ACTIVE;
+        }
+        else
+        {
+            state->phase.reason = state->stage_raw.reason;
+            if (state->stage_raw.valid)
+            {
+                if (state->stage_raw.value <= LAST_VALIDATED_STAGE)
+                {
+                    state->phase = state->stage_raw;
+                    state->phase.value++;
+                }
+                else
+                {
+                    state->phase.reason = RS3_ENCOUNTER_UNMAPPED;
+                }
+            }
+            for (uint32_t index = 0; index < state->raw_count; index++)
+            {
+                const rs3_encounter_raw *raw = &state->raw[index];
+                if (raw->varp_id == TELOS_INSTANCE_VARP)
+                {
+                    state->enrage.reason = raw->reason;
+                    if (raw->valid)
+                    {
+                        uint32_t enrage = (uint32_t)raw->value & TELOS_ENRAGE_MASK;
+                        state->enrage.reason = RS3_INVALID_STATS;
+                        if (raw->value >= INT32_MIN && raw->value <= UINT32_MAX &&
+                            enrage <= MAX_SUPPORTED_ENRAGE)
+                        {
+                            state->enrage =
+                                (rs3_encounter_value){.value = enrage,
+                                                      .observed_ns = raw->observed_ns,
+                                                      .valid = 1,
+                                                      .source_varp = TELOS_INSTANCE_VARP,
+                                                      .source_varbit = TELOS_ENRAGE_VARBIT};
+                        }
+                    }
+                }
+            }
+        }
+    }
+    /* A predicted cadence or client_logic_tick / 30 never validates a game tick. */
 }
 
 void encounter_commit(rs3_context *context, rs3_snapshot *snapshot)

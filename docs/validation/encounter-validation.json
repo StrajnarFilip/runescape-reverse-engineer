@@ -2,7 +2,7 @@
   "schema_version": 1,
   "track": "P2",
   "date": "2026-11-11",
-  "status": "waiting_for_labelled_live_capture",
+  "status": "partial_live_mapping_validated",
   "runtime_observed": "951-3 original profile, fd8afd32...358d45",
   "supported_variable_paths": [
     "951-3",
@@ -28,11 +28,18 @@
   },
   "cache_evidence": [
     {
+      "varbit": 32626,
+      "varp": 6359,
+      "lsb": 0,
+      "msb": 11,
+      "semantics": "current instance enrage, labelled 300/500 active captures"
+    },
+    {
       "varbit": 32633,
       "varp": 6360,
       "lsb": 0,
       "msb": 11,
-      "semantics": "unmapped; enrage candidate only"
+      "semantics": "unchanged comparison value at both instance enrages; not used as current enrage"
     },
     {
       "varbit": 32635,
@@ -74,12 +81,12 @@
     "enrage_ground_truth_label": null
   },
   "unmapped_fields": {
-    "phase": "Needs phase-labelled native transitions while Telos is active; dormant zero must not become phase zero.",
-    "enrage": "Needs two different labelled instance enrages; distinguish current/selected enrage from best/previous enrage.",
-    "streak": "Needs a labelled streak transition; neighbouring bits alone do not establish meaning.",
-    "meter": "Needs displayed meter labels through a fight to establish scale, sign and resets.",
-    "freedom": "No verified active-state flag. A bit or cooldown alone does not establish the state.",
-    "game_tick": "No verified game-tick source. A 7.48-second read-only counter probe of client+0..0x8000 and world-state+0..0x4000 found no monotonic +1 counter with seven or more 400-850 ms intervals. The 20 ms logic clock is not substituted."
+    "streak": "User labelled zero kill streak in the 500% practice attempt. No changing streak count; zero alone does not establish the candidate field.",
+    "meter": "Candidate lower bits varied 0..100; no labelled displayed meter values to establish meaning or scale.",
+    "freedom": "Candidate bit 24 toggled in the 300% attempt; no labelled Freedom state to establish its meaning.",
+    "game_tick": "No verified game-tick source. A 7.48-second read-only counter probe of client+0..0x8000 and world-state+0..0x4000 found no monotonic +1 counter with seven or more 400-850 ms intervals. The 20 ms logic clock is not substituted.",
+    "phase_5_and_other_forms": "No phase-5 capture or form mapping. Raw stages above 3 and unobserved forms remain unknown.",
+    "compatibility_mode_semantics": "Raw variable paths are supported; semantic validity is limited to the original profile that was captured."
   },
   "input_sent": false,
   "raw_capture_committed": false,
@@ -87,7 +94,70 @@
     "windows_x64_release_build": "passed",
     "ctest_suites_passed": 11,
     "python_tests_passed": 78,
-    "native_encounter_cases": 4,
+    "native_encounter_cases": 5,
     "existing_public_structures_changed": false
+  },
+  "semantic_profile_scope": "951-3 original executable only; Compatibility Mode semantic validity remains disabled",
+  "live_validation": {
+    "capture_basename": "p2-encounter-manual-2026-11-11-01.jsonl",
+    "capture_rows": 8706,
+    "attempts": [
+      {
+        "enrage_user_label": 300,
+        "furthest_phase_user_label": 4,
+        "active_samples": 2426,
+        "active_seconds": 121.256,
+        "stage_order": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "current_enrage_6359_low12": [
+          300
+        ],
+        "comparison_6360_low12": [
+          300
+        ]
+      },
+      {
+        "enrage_user_label": 500,
+        "furthest_phase_user_label": 2,
+        "mode_user_label": "practice",
+        "kill_streak_user_label": 0,
+        "active_samples": 1513,
+        "active_seconds": 75.598,
+        "stage_order": [
+          0,
+          1
+        ],
+        "current_enrage_6359_low12": [
+          500
+        ],
+        "comparison_6360_low12": [
+          300
+        ]
+      }
+    ],
+    "phase_mapping": {
+      "0": 1,
+      "1": 2,
+      "2": 3,
+      "3": 4
+    },
+    "phase_evidence": "User-labelled furthest phases and ordered native stages; phase-4 font entities corroborate the final stage. This does not calibrate attack/check timing.",
+    "required_guards": [
+      "original pinned executable profile",
+      "exactly one active Telos config 22891",
+      "VARP 6359 bit 29 set, as in the captured active intervals"
+    ],
+    "event_losses": {
+      "npc_actions": 0,
+      "npc_hits": 0,
+      "player_hits": 0,
+      "inventory": 0
+    },
+    "full_kill_observed": false,
+    "all_semantics_validated": false
   }
 }

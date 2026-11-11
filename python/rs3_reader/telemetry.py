@@ -428,9 +428,13 @@ def extend_encounter_record(record, reader):
             "reason": (
                 None
                 if field.valid
-                else {1: "not_set", 2: "read_failed", 100: "unmapped"}.get(
-                    field.reason or state.reason, "not_observed"
-                )
+                else {
+                    1: "not_set",
+                    2: "read_failed",
+                    8: "invalid_value",
+                    100: "unmapped",
+                    101: "not_active",
+                }.get(field.reason or state.reason, "not_observed")
             ),
         }
 
@@ -472,5 +476,6 @@ def extend_encounter_record(record, reader):
             for index in range(state.raw_count)
         },
         "semantics_validated": False,
+        "validated_fields": [name for name in ("phase", "enrage") if getattr(state, name).valid],
     }
     return record

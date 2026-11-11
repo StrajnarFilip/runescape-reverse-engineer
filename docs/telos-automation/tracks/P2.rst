@@ -57,17 +57,22 @@ Needs the user
 One full manual kill at a stated enrage, calling out each phase change, and one
 attempt at a different enrage so the enrage field can be told apart.
 
-The native recorder is implemented. For the controlled capture:
+Completed: a user-labelled 300% attempt reaching phase 4 and a 500% practice
+attempt reaching phase 2, with zero kill streak. The native capture had zero
+losses across all four event queues. Current enrage and phase 1..4 mappings are
+implemented on the observed original profile, with active-instance guards.
 
-1. Wait for the agent to say recording is active, then state the first practice
-   enrage. Prefer 300% for the initial phase-labelled capture.
-2. Play manually. Identify phase transitions if practical, or report the
-   phases reached and any transition order after the attempt. No automatic
-   input is sent by P2.
-3. After leaving, select a clearly different enrage (for example 500%) and
-   enter another practice attempt. State the exact second enrage.
-4. Report whether the account was on a streak and the displayed meter/Freedom
-   changes that can be labelled. Unlabelled fields remain unknown.
+Remaining controlled evidence:
+
+1. Phase 5 and other Telos forms, preferably during a complete labelled kill.
+2. Labels for displayed anima-meter values and observed Freedom state changes.
+3. A changing, non-practice streak count. A single reported zero is not enough
+   to validate an incrementing streak field.
+4. A Compatibility Mode check before transferring the semantic validity there.
+
+The game-tick reference remains unmapped after the bounded counter probe;
+additional static/source research is needed. No further game action by itself
+can validate a guessed tick boundary.
 
 Requests
 --------
@@ -75,7 +80,7 @@ Requests
 The user authorized P1/P2 include and snapshot-storage registration in
 ``src/context.h`` on 2026-11-11. P2 includes only its own registration fields.
 
-Semantic mappings, the game-tick reference and their validation remain pending.
+Unobserved semantic mappings and the game-tick reference remain pending.
 Raw evidence and attempted mappings are in ``docs/validation/encounter-validation.json``.
 
 Contract and ABI
@@ -87,8 +92,12 @@ game tick 40 bytes and state 472 bytes. Existing public layouts and queues are
 unchanged. Results are caller-owned and carry sample, process and scene identity.
 
 ``phase``, ``enrage``, ``streak``, ``meter`` and ``freedom`` have independent
-validity and reasons. Until labelled live evidence establishes their meanings,
-they are explicitly unmapped. ``stage_raw`` is the verified bit extraction of
+validity and reasons. On the original profile, phase 1..4 is raw stage 0..3
+plus one, and current enrage is VARBIT 32626 (VARP 6359, bits 0..11). Both require
+exactly one active Telos config 22891 and the captured VARP 6359 bit-29 guard.
+Dormant/out-of-instance data is not treated as an active encounter. Other
+phases/forms and Compatibility Mode semantics remain unknown. Streak, meter,
+Freedom and game tick remain explicitly unmapped. ``stage_raw`` is the bit extraction of
 VARBIT 32640 (VARP 6363, bits 21..23); it is not treated as a phase. Raw VARPs
 6359..6364 are separate research channels with per-value validity. They are
 read twice through the existing pinned variable-table path and checked against
@@ -96,7 +105,9 @@ an unchanged table header. Missing sparse entries never become numeric zero.
 
 Telemetry adds observation envelopes in ``telos.phase/enrage/streak/meter/freedom``
 and ``game_tick``, as defined by S0a. ``encounter.raw_candidates`` preserves the
-raw values with observation age/source, and ``semantics_validated`` stays false.
+raw values with observation age/source. ``validated_fields`` names the currently
+known semantic fields; the global ``semantics_validated`` stays false because
+coverage is incomplete.
 The existing root ``telos.stage_raw`` research field remains compatible.
 An unavailable frame clears the new snapshot state; there is no carry-forward.
 
