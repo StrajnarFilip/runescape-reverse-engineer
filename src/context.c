@@ -74,6 +74,7 @@ static void copy_frame(rs3_snapshot *destination, const rs3_snapshot *source)
     destination->profile = source->profile;
     destination->position = source->position;
     destination->combat = source->combat;
+    destination->encounter = source->encounter;
     destination->player_hit_info = source->player_hit_info;
     destination->player_actor_address = source->player_actor_address;
     memcpy(destination->player_hits, source->player_hits,
@@ -109,6 +110,9 @@ static void clear_unavailable_frame(rs3_context *context, rs3_snapshot *snapshot
     memset(&snapshot->combat, 0, sizeof snapshot->combat);
     snapshot->combat.status = RS3_UNAVAILABLE;
     snapshot->combat.reason = context->failure_reason;
+    memset(&snapshot->encounter, 0, sizeof snapshot->encounter);
+    snapshot->encounter.status = RS3_UNAVAILABLE;
+    snapshot->encounter.reason = context->failure_reason;
 
     memset(&snapshot->player_hit_info, 0, sizeof snapshot->player_hit_info);
     snapshot->player_hit_info.status = RS3_UNAVAILABLE;
@@ -160,6 +164,7 @@ static void sample_and_publish(rs3_context *context, rs3_snapshot *snapshot)
     memset(&snapshot->player, 0, sizeof snapshot->player);
     snapshot->position = (rs3_position){0};
     memset(&snapshot->combat, 0, sizeof snapshot->combat);
+    memset(&snapshot->encounter, 0, sizeof snapshot->encounter);
     memset(&snapshot->player_hit_info, 0, sizeof snapshot->player_hit_info);
     snapshot->player_actor_address = 0;
     memset(&snapshot->inventory_info, 0, sizeof snapshot->inventory_info);

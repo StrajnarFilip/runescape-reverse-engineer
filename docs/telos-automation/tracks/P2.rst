@@ -1,7 +1,7 @@
 P2 - Encounter variables
 ========================
 
-:Status: in progress
+:Status: waiting for live session
 :Wave: 1
 :Branch: ``telos/P2``
 :Kind: C (native DLL)
@@ -57,7 +57,50 @@ Needs the user
 One full manual kill at a stated enrage, calling out each phase change, and one
 attempt at a different enrage so the enrage field can be told apart.
 
+The native recorder is implemented. For the controlled capture:
+
+1. Wait for the agent to say recording is active, then state the first practice
+   enrage. Prefer 300% for the initial phase-labelled capture.
+2. Play manually. Identify phase transitions if practical, or report the
+   phases reached and any transition order after the attempt. No automatic
+   input is sent by P2.
+3. After leaving, select a clearly different enrage (for example 500%) and
+   enter another practice attempt. State the exact second enrage.
+4. Report whether the account was on a streak and the displayed meter/Freedom
+   changes that can be labelled. Unlabelled fields remain unknown.
+
 Requests
 --------
 
-None yet.
+The user authorized P1/P2 include and snapshot-storage registration in
+``src/context.h`` on 2026-11-11. P2 includes only its own registration fields.
+
+Semantic mappings, the game-tick reference and their validation remain pending.
+Raw evidence and attempted mappings are in ``docs/validation/encounter-validation.json``.
+
+Contract and ABI
+----------------
+
+``include/rs3/encounter.h`` exports ``rs3_snapshot_encounter`` and
+``rs3_encounter_sizeof``. New layouts are value 32 bytes, raw value 32 bytes,
+game tick 40 bytes and state 472 bytes. Existing public layouts and queues are
+unchanged. Results are caller-owned and carry sample, process and scene identity.
+
+``phase``, ``enrage``, ``streak``, ``meter`` and ``freedom`` have independent
+validity and reasons. Until labelled live evidence establishes their meanings,
+they are explicitly unmapped. ``stage_raw`` is the verified bit extraction of
+VARBIT 32640 (VARP 6363, bits 21..23); it is not treated as a phase. Raw VARPs
+6359..6364 are separate research channels with per-value validity. They are
+read twice through the existing pinned variable-table path and checked against
+an unchanged table header. Missing sparse entries never become numeric zero.
+
+Telemetry adds observation envelopes in ``telos.phase/enrage/streak/meter/freedom``
+and ``game_tick``, as defined by S0a. ``encounter.raw_candidates`` preserves the
+raw values with observation age/source, and ``semantics_validated`` stays false.
+The existing root ``telos.stage_raw`` research field remains compatible.
+An unavailable frame clears the new snapshot state; there is no carry-forward.
+
+The game tick is not inferred by dividing the 20 ms client clock by thirty.
+A measured counter or phase estimate must include its uncertainty before its
+valid flag can be set. Neither a cooldown nor a predicted 600 ms cadence is
+evidence of a server-tick boundary.

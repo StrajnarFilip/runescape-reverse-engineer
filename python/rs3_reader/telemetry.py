@@ -281,7 +281,7 @@ class NativeTelemetry:
             "newly_observed": new_events,
             "events_lost": events_lost,
         }
-        return extend_record(record, self.reader)
+        return extend_encounter_record(extend_record(record, self.reader), self.reader)
 
     def sample(self, include_raw=False):
         """Return one telemetry record. include_raw adds the raw variable values."""
@@ -408,4 +408,69 @@ class NativeTelemetry:
         }
         if include_raw:
             record["raw_variables"] = raw_variables
-        return extend_record(record, reader)
+        return extend_encounter_record(extend_record(record, reader), reader)
+
+
+def extend_encounter_record(record, reader):
+    """Add P2 C observations; raw candidates never establish semantic values."""
+    state = reader.encounter
+    now_ns = reader.monotonic_ns()
+
+    def observation(field):
+        return {
+            "value": field.value if field.valid else None,
+            "age_ms": (
+                nanoseconds_to_milliseconds(max(0, now_ns - field.observed_ns), 3)
+                if field.observed_ns
+                else None
+            ),
+            "source": "native_encounter",
+            "reason": (
+                None
+                if field.valid
+                else {1: "not_set", 2: "read_failed", 100: "unmapped"}.get(
+                    field.reason or state.reason, "not_observed"
+                )
+            ),
+        }
+
+    telos = record.get("telos") or {}
+    for name in ("phase", "enrage", "streak", "meter", "freedom"):
+        telos[name] = observation(getattr(state, name))
+    if state.freedom.valid:
+        telos["freedom"]["value"] = bool(state.freedom.value)
+    record["telos"] = telos
+    tick = state.game_tick
+    record["game_tick"] = {
+        "value": (
+            {
+                "index": tick.counter,
+                "phase_ms": tick.phase_ms,
+                "uncertainty_ms": tick.uncertainty_ms,
+            }
+            if tick.valid
+            else None
+        ),
+        "source": "native_encounter",
+        "age_ms": (
+            nanoseconds_to_milliseconds(max(0, now_ns - tick.observed_ns), 3)
+            if tick.observed_ns
+            else None
+        ),
+        "reason": None if tick.valid else "unmapped",
+    }
+    record["encounter"] = {
+        "sample_sequence": state.sample_sequence,
+        "scene_epoch": state.scene_epoch,
+        "process_creation_time": state.process_creation_time,
+        "pid": state.pid,
+        "status": PLAYER_HIT_STATUS_NAMES.get(state.status, "unavailable"),
+        "reason": state.reason,
+        "stage_raw": observation(state.stage_raw),
+        "raw_candidates": {
+            str(state.raw[index].varp_id): observation(state.raw[index])
+            for index in range(state.raw_count)
+        },
+        "semantics_validated": False,
+    }
+    return record

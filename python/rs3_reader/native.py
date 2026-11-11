@@ -521,6 +521,63 @@ class ItemEvent(ctypes.Structure):
     ]
 
 
+class EncounterValue(ctypes.Structure):
+    _fields_ = [
+        ("value", ctypes.c_int64),
+        ("observed_ns", ctypes.c_uint64),
+        ("valid", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("source_varp", ctypes.c_uint32),
+        ("source_varbit", ctypes.c_uint32),
+    ]
+
+
+class EncounterRaw(ctypes.Structure):
+    _fields_ = [
+        ("value", ctypes.c_int64),
+        ("varp_id", ctypes.c_uint32),
+        ("valid", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32),
+        ("observed_ns", ctypes.c_uint64),
+    ]
+
+
+class GameTick(ctypes.Structure):
+    _fields_ = [
+        ("counter", ctypes.c_uint64),
+        ("observed_ns", ctypes.c_uint64),
+        ("valid", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("phase_ms", ctypes.c_float),
+        ("uncertainty_ms", ctypes.c_float),
+        ("reserved", ctypes.c_uint32 * 2),
+    ]
+
+
+class EncounterState(ctypes.Structure):
+    _fields_ = [
+        ("sample_sequence", ctypes.c_uint64),
+        ("observed_ns", ctypes.c_uint64),
+        ("scene_epoch", ctypes.c_uint64),
+        ("process_creation_time", ctypes.c_uint64),
+        ("pid", ctypes.c_uint32),
+        ("status", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("raw_count", ctypes.c_uint32),
+        ("phase", EncounterValue),
+        ("enrage", EncounterValue),
+        ("streak", EncounterValue),
+        ("meter", EncounterValue),
+        ("freedom", EncounterValue),
+        ("stage_raw", EncounterValue),
+        ("raw", EncounterRaw * 6),
+        ("game_tick", GameTick),
+    ]
+
+
+SIZED_ENCOUNTER_STRUCTURES = {1: EncounterValue, 2: EncounterRaw, 3: GameTick, 4: EncounterState}
+
 # Structures checked against rs3_sizeof() and rs3_combat_sizeof().
 SIZED_STRUCTURES = {
     Structure.OPTIONS: Options,
@@ -569,6 +626,8 @@ def _function_prototypes():
     return {
         "abi_version": (u32, []),
         "sizeof": (u32, [u32]),
+        "encounter_sizeof": (u32, [u32]),
+        "snapshot_encounter": (i32, [handle, ctypes.POINTER(EncounterState), u32]),
         "monotonic_ns": (u64, []),
         "profile_sha256": (ctypes.c_char_p, []),
         "result_string": (ctypes.c_char_p, [i32]),
@@ -614,6 +673,9 @@ def _function_prototypes():
 
 
 def _verify_layouts(library):
+    for structure_id, structure in SIZED_ENCOUNTER_STRUCTURES.items():
+        if library.rs3_encounter_sizeof(structure_id) != ctypes.sizeof(structure):
+            raise RuntimeError("C/Python encounter layout mismatch: " + structure.__name__)
     for structure_id, structure in SIZED_STRUCTURES.items():
         if library.rs3_sizeof(structure_id) != ctypes.sizeof(structure):
             raise RuntimeError("C/Python layout mismatch for " + structure.__name__)
@@ -675,6 +737,7 @@ class Reader:
         self.player = Player()
         self.position = Position()
         self.combat = CombatState()
+        self.encounter = EncounterState()
         self.npcs = (NPC * MAX_NPCS)()
         self.npc_animations = (NPCAnimation * MAX_NPCS)()
         self.hits = (Hit * MAX_HITS)()
@@ -746,6 +809,7 @@ class Reader:
         copy_record(library.rs3_snapshot_player, self.player)
         copy_record(library.rs3_snapshot_position, self.position)
         copy_record(library.rs3_snapshot_combat, self.combat)
+        copy_record(library.rs3_snapshot_encounter, self.encounter)
         copy_array(library.rs3_snapshot_npcs, self.npcs)
         copy_array(library.rs3_snapshot_npc_animations, self.npc_animations)
         copy_array(library.rs3_snapshot_hits, self.hits)

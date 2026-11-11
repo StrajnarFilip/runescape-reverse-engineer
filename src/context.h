@@ -22,6 +22,7 @@
 
 #include "rs3/rs3.h"
 #include "rs3/combat.h"
+#include "rs3/encounter.h"
 #include "profile.h"
 
 /** Capacity of the hit observation queue. */
@@ -58,6 +59,7 @@ struct rs3_snapshot
     rs3_player player;
     rs3_position position;
     rs3_combat_state combat;
+    rs3_encounter_state encounter;
     rs3_player_hit_info player_hit_info;
     rs3_hit player_hits[MAX_HITS_PER_RING];         /**< Prefix of player_hit_info.hit_count. */
     uint64_t player_actor_address;                  /**< Verified local actor, or 0. */

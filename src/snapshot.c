@@ -84,6 +84,15 @@ int32_t rs3_snapshot_position(const rs3_snapshot *snapshot, rs3_position *out, u
     return copy_record(&snapshot->position, sizeof *out, out, out_size);
 }
 
+int32_t rs3_snapshot_encounter(const rs3_snapshot *snapshot, rs3_encounter_state *out, uint32_t out_size)
+{
+    if (snapshot == NULL || out == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    return copy_record(&snapshot->encounter, sizeof *out, out, out_size);
+}
+
 int32_t rs3_snapshot_combat(const rs3_snapshot *snapshot, rs3_combat_state *out, uint32_t out_size)
 {
     if (snapshot == NULL || out == NULL)
