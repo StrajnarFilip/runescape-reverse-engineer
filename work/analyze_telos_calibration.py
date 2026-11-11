@@ -1,131 +1,560 @@
-"""Summarize local Telos captures without publishing raw gameplay records."""
+"""Summarize local Telos captures without publishing raw gameplay records.
+
+The report keeps only timing statistics, counts and capture digests. Cue-to-hit
+delays are client observations, not server prayer-check deadlines.
+
+Usage::
+
+    python work/analyze_telos_calibration.py --capture telos.jsonl --enrage 300
+        --phase 1 --session-date 2026-11-10 --output report.json
+"""
+
 import argparse
 import collections
 import hashlib
 import json
-from pathlib import Path
 import statistics
+from pathlib import Path
+
+NANOSECONDS_PER_MILLISECOND = 1_000_000
+MELEE_AUTO_SEQUENCE = 28929
+MELEE_DAMAGE_HIT_TYPE = 133
+MISS_HIT_TYPE = 482
+PAIRED_HIT_TYPES = (MELEE_DAMAGE_HIT_TYPE, MISS_HIT_TYPE)
+# A hit may be observed in the cue's own sample, slightly before the cue timestamp.
+HIT_BEFORE_CUE_TOLERANCE_NS = 100 * NANOSECONDS_PER_MILLISECOND
+HIT_AFTER_CUE_LIMIT_NS = 1_200 * NANOSECONDS_PER_MILLISECOND
+KEY_BEFORE_CHANGE_TOLERANCE_NS = 20 * NANOSECONDS_PER_MILLISECOND
+KEY_TO_CHANGE_LIMIT_NS = 1_500 * NANOSECONDS_PER_MILLISECOND
+CURSES_VARIABLE_ID = "3275"
+TELOS_NAME = "telos"
+DEVOTION_STRUCT_ID = 25028
+OPENING_AUTO_COUNT = 3
+OPENING_OBSERVATION_LIMIT_NS = 8_000 * NANOSECONDS_PER_MILLISECOND
+CLIENT_LOGIC_TICK_MS = 20
+MAX_DEVOTION_CONTROL_AGE_MS = 8000
+
+USER_LABELLED_CUES = {
+    "28929": "ordinary melee auto in the isolated phase-1 melee context",
+    "28931": "tendrils",
+    "28938": "uppercut",
+    "28935": "Hold Still",
+}
+OBSERVED_NPC_FORMS = {"22891": "Telos active", "22892": "Telos dormant"}
+HITMARK_SYMBOL_LEADS = {
+    "133": "melee_damage_parent",
+    "143": "heal_splat_parent",
+    "144": "damage_parent",
+    "482": "miss_parent",
+}
+LIMITATIONS = [
+    "Only isolated phase-1 melee autos have been checked; other phases/styles "
+    "and complete attack coverage remain unvalidated. Per-capture enrage labels are retained.",
+    "Cue-to-hit observation is not the server prayer-check deadline.",
+    "Overhead flags are observed client state, not proof of server-side activation timing.",
+    "Manual key times are sampled down edges; scripted times record Windows input acceptance.",
+    "Player hitmarks do not identify the attacker; pairing uses the isolated phase-1 context.",
+    "No early/late protection outcome is inferred from a random damage amount alone.",
+    "Complete incoming-attack coverage and safe Soul Split windows are not established.",
+    "Observed success/failure delays are not a universal threshold over network and tick jitter.",
+]
 
 
-def percentile_summary(values):
-    return {'count': len(values), 'min_ms': round(min(values), 3),
-            'median_ms': round(statistics.median(values), 3), 'max_ms': round(max(values), 3)} if values else {'count': 0}
+def to_milliseconds(nanoseconds):
+    return nanoseconds / NANOSECONDS_PER_MILLISECOND
+
+
+def delay_summary(delays_ms):
+    """Return count, minimum, median and maximum of delays in milliseconds."""
+    if not delays_ms:
+        return {"count": 0}
+    return {
+        "count": len(delays_ms),
+        "min_ms": round(min(delays_ms), 3),
+        "median_ms": round(statistics.median(delays_ms), 3),
+        "max_ms": round(max(delays_ms), 3),
+    }
 
 
 def read_rows(path):
+    """Return the complete JSONL rows of a capture."""
     rows = []
-    with path.open(encoding='utf-8') as stream:
+    with path.open(encoding="utf-8") as stream:
         for line in stream:
-            if not line.endswith('\n'):
-                break  # A running writer may not yet have completed its last row.
+            if not line.endswith("\n"):
+                break  # A running writer may not have completed its last row yet.
             if line.strip():
                 rows.append(json.loads(line))
     return rows
 
 
-def session(row):
-    return row['pid'], row['process_creation_time'], row['combat']['scene_epoch']
+def row_session(row):
+    return row["pid"], row["process_creation_time"], row["combat"]["scene_epoch"]
+
+
+def event_session(event):
+    return event["pid"], event["process_creation_time"], event["scene_epoch"]
+
+
+def is_telos(actor):
+    return actor["name"].partition(",")[0].strip().casefold() == TELOS_NAME
+
+
+def collect_observations(rows):
+    """Return (overhead changes, key presses, Telos cues, player hit events)."""
+    changes, keys, cues, hits = [], [], [], []
+    previous_prayer, previous_observed_ns = {}, {}
+    telos_instances = set()
+    for row in rows:
+        session = row_session(row)
+        active_prayer = row["combat"]["active_prayer"]
+        if session not in previous_prayer or active_prayer != previous_prayer[session]:
+            changes.append(
+                {
+                    "session": session,
+                    "prayer": active_prayer,
+                    "observed_ns": row["observed_ns"],
+                    "previous_observation_ns": row.get("previous_sample_ns")
+                    or previous_observed_ns.get(session, row["observed_ns"]),
+                }
+            )
+        previous_prayer[session] = active_prayer
+        previous_observed_ns[session] = row["observed_ns"]
+        keys.extend(dict(key, session=session) for key in row.get("manual_prayer_keys", []))
+        telos_instances.update(
+            (session, actor["instance_id"]) for actor in row["animations"] if is_telos(actor)
+        )
+        cues.extend(row.get("npc_action_events", []))
+        hits.extend(row.get("player_hit_events", []))
+    telos_cues = [
+        cue for cue in cues if (event_session(cue), cue["instance_id"]) in telos_instances
+    ]
+    return changes, keys, telos_cues, hits
+
+
+def pair_cues_with_hits(cues, hits, changes):
+    """Pair each melee auto cue with the first unused melee damage or miss hit after it."""
+    pairs, damage_delays_ms, used_hits = [], [], set()
+    for cue in cues:
+        if cue["action_sequence"] != MELEE_AUTO_SEQUENCE:
+            continue
+        session = event_session(cue)
+        candidates = [
+            hit
+            for hit in hits
+            if hit["sequence"] not in used_hits
+            and event_session(hit) == session
+            and hit["hit"]["type_id"] in PAIRED_HIT_TYPES
+            and -HIT_BEFORE_CUE_TOLERANCE_NS
+            <= hit["observed_ns"] - cue["observed_ns"]
+            <= HIT_AFTER_CUE_LIMIT_NS
+        ]
+        if not candidates:
+            continue
+        hit = min(candidates, key=lambda candidate: candidate["observed_ns"])
+        used_hits.add(hit["sequence"])
+        delay_ms = to_milliseconds(hit["observed_ns"] - cue["observed_ns"])
+        changes_before_hit = [
+            change
+            for change in changes
+            if change["session"] == session and change["observed_ns"] <= hit["observed_ns"]
+        ]
+        pairs.append(
+            {
+                "cue_event": cue["sequence"],
+                "hit_event": hit["sequence"],
+                "cue_to_observed_hit_ms": round(delay_ms, 3),
+                "hit_type": hit["hit"]["type_id"],
+                "amount": hit["hit"]["amount"],
+                "prayer_near_hit_observation": (
+                    changes_before_hit[-1]["prayer"] if changes_before_hit else None
+                ),
+            }
+        )
+        if hit["hit"]["type_id"] == MELEE_DAMAGE_HIT_TYPE:
+            damage_delays_ms.append(delay_ms)
+    return pairs, damage_delays_ms
+
+
+def pair_keys_with_changes(keys, changes):
+    """Pair each key press with the nearest unused change to its bound prayer."""
+    key_pairs, acknowledged_changes = [], set()
+    for key in keys:
+        candidates = [
+            change
+            for change in changes
+            if (change["session"], change["observed_ns"]) not in acknowledged_changes
+            and change["session"] == key["session"]
+            and change["prayer"] == key["prayer"]
+            and key["observed_ns"] - KEY_BEFORE_CHANGE_TOLERANCE_NS
+            <= change["observed_ns"]
+            <= key["observed_ns"] + KEY_TO_CHANGE_LIMIT_NS
+        ]
+        if not candidates:
+            continue
+        change = min(candidates, key=lambda item: abs(item["observed_ns"] - key["observed_ns"]))
+        acknowledged_changes.add((change["session"], change["observed_ns"]))
+        key_pairs.append(
+            {
+                "prayer": key["prayer"],
+                "virtual_key": key["virtual_key"],
+                "modifiers": key["modifiers"],
+                "sampled_key_to_overhead_ms": round(
+                    to_milliseconds(change["observed_ns"] - key["observed_ns"]), 3
+                ),
+                "key_poll_interval_ms": round(
+                    to_milliseconds(key["observed_ns"] - key["previous_poll_ns"]), 3
+                ),
+            }
+        )
+    return key_pairs
+
+
+def devotion_opening_summary(rows, *, clean_opening_confirmed=False):
+    """Describe the first manual Devotion opening without deriving a server deadline.
+
+    Cooldown evidence is paired with a manual cast, not treated as an active
+    buff. The clean-opening label must come from controlled player validation.
+    """
+    changes, keys, cues, hits = collect_observations(rows)
+    casts = [
+        dict(press, session=row_session(row))
+        for row in rows
+        for press in row.get("manual_ability_keys", [])
+        if press.get("ability") == "devotion"
+    ]
+    timer_changes, previous_timers = [], {}
+    for row in rows:
+        timer = row.get("devotion_cooldown", {})
+        session = row_session(row)
+        identity = (timer.get("start_tick"), timer.get("end_tick"))
+        if (
+            timer.get("struct_id") == DEVOTION_STRUCT_ID
+            and timer.get("timer_valid")
+            and identity != previous_timers.get(session)
+        ):
+            timer_changes.append(dict(row, session=session))
+        if timer.get("timer_valid"):
+            previous_timers[session] = identity
+    matched_cast = next(
+        (
+            (cast, row)
+            for cast in casts
+            for row in timer_changes
+            if row["session"] == cast["session"]
+            and -KEY_BEFORE_CHANGE_TOLERANCE_NS
+            <= row["observed_ns"] - cast["observed_ns"]
+            <= KEY_TO_CHANGE_LIMIT_NS
+        ),
+        None,
+    )
+    if matched_cast is None:
+        return None
+    cast, timer_row = matched_cast
+    session = cast["session"]
+    opening = [
+        cue
+        for cue in cues
+        if event_session(cue) == session
+        and cue["action_sequence"] == MELEE_AUTO_SEQUENCE
+        and 0 <= cue["observed_ns"] - timer_row["observed_ns"] <= OPENING_OBSERVATION_LIMIT_NS
+    ][:OPENING_AUTO_COUNT]
+    pairs, _ = pair_cues_with_hits(opening, hits, changes)
+    pairs_by_cue = {pair["cue_event"]: pair for pair in pairs}
+    trials = []
+    previous_hit_ns = timer_row["observed_ns"]
+    for index, cue in enumerate(opening):
+        pair = pairs_by_cue.get(cue["sequence"])
+        if pair is None:
+            continue
+        hit = next(
+            hit
+            for hit in hits
+            if hit["sequence"] == pair["hit_event"] and event_session(hit) == session
+        )
+        presses = [
+            key
+            for key in keys
+            if key["session"] == session
+            and key["prayer"] == "melee"
+            and previous_hit_ns <= key["observed_ns"] <= hit["observed_ns"]
+        ]
+        press = presses[-1] if presses else None
+        acknowledgements = [
+            change
+            for change in changes
+            if press is not None
+            and change["session"] == session
+            and change["prayer"] == "melee"
+            and press["observed_ns"]
+            <= change["observed_ns"]
+            <= press["observed_ns"] + KEY_TO_CHANGE_LIMIT_NS
+        ]
+        acknowledgement = acknowledgements[0] if acknowledgements else None
+
+        def relative_ms(timestamp, cue_observed_ns=cue["observed_ns"]):
+            return round(to_milliseconds(timestamp - cue_observed_ns), 3)
+
+        trials.append(
+            dict(
+                pair,
+                auto_number=index + 1,
+                sampled_melee_key_after_cue_ms=(
+                    relative_ms(press["observed_ns"]) if press else None
+                ),
+                key_previous_poll_after_cue_ms=(
+                    relative_ms(press["previous_poll_ns"]) if press else None
+                ),
+                melee_first_observed_after_cue_ms=(
+                    relative_ms(acknowledgement["observed_ns"]) if acknowledgement else None
+                ),
+                melee_previous_sample_after_cue_ms=(
+                    relative_ms(acknowledgement["previous_observation_ns"])
+                    if acknowledgement
+                    else None
+                ),
+                outcome=(
+                    "one_damage_during_user_confirmed_devotion"
+                    if clean_opening_confirmed
+                    and pair["hit_type"] == MELEE_DAMAGE_HIT_TYPE
+                    and pair["amount"] == 1
+                    else "not_classified"
+                ),
+            )
+        )
+        previous_hit_ns = hit["observed_ns"]
+    return {
+        "scope": "first manual Devotion cast and up to three following phase-1 melee autos",
+        "clean_opening_user_confirmed": clean_opening_confirmed,
+        "devotion_struct_id": DEVOTION_STRUCT_ID,
+        "sampled_cast_key_to_native_cooldown_ms": round(
+            to_milliseconds(timer_row["observed_ns"] - cast["observed_ns"]), 3
+        ),
+        "devotion_buff_active_from_memory": None,
+        "trials": trials,
+        "prayer_check_deadline_validated": False,
+        "interpretation": (
+            "Successful switch observations do not establish the latest reliable switch time. "
+            "Client overhead flags and hitmarks are sampled separately."
+        ),
+    }
+
+
+def controlled_trial_summary(rows, *, clean_opening_confirmed=False):
+    """Summarize accepted experiment inputs separately from manual key observations."""
+    if not any(row.get("input_mode") == "controlled_calibration" for row in rows):
+        return None
+    updates = [update for row in rows for update in row.get("calibration_updates", [])]
+    accepted = [update for update in updates if update["event"] == "input_accepted"]
+    test_commands = [
+        update for update in accepted if update.get("requested_after_cue_ms") is not None
+    ]
+    paired_hits = [update for update in updates if update["event"] == "paired_hit"]
+
+    def hit_for_stage(stage):
+        candidate = next((hit for hit in paired_hits if hit["stage"] == stage), None)
+        return (
+            {
+                "amount": candidate["hit"]["hit"]["amount"],
+                "type_id": candidate["hit"]["hit"]["type_id"],
+            }
+            if candidate
+            else None
+        )
+
+    test = test_commands[-1] if test_commands else None
+    acknowledgement = (
+        next(
+            (
+                update
+                for update in updates
+                if update["event"] == "acknowledged"
+                and update["prayer"] == "melee"
+                and update["observed_ns"] > test["accepted_ns"]
+            ),
+            None,
+        )
+        if test
+        else None
+    )
+    acknowledged = acknowledgement is not None
+    result = hit_for_stage("result")
+    pre_dispatch_hit = hit_for_stage("delay")
+    control = hit_for_stage("control")
+    result_age_ms = None
+    for row in rows:
+        if any(
+            update["event"] == "paired_hit" and update["stage"] == "result"
+            for update in row.get("calibration_updates", [])
+        ):
+            timer = row.get("devotion_cooldown", {})
+            if timer.get("timer_valid"):
+                result_age_ms = (
+                    (row["client_logic_tick"] - timer["start_tick"]) & 0xFFFFFFFF
+                ) * CLIENT_LOGIC_TICK_MS
+    outcome = "unlabelled"
+    if (
+        clean_opening_confirmed
+        and control == {"amount": 1, "type_id": MELEE_DAMAGE_HIT_TYPE}
+        and result_age_ms is not None
+        and 0 <= result_age_ms <= MAX_DEVOTION_CONTROL_AGE_MS
+        and result
+    ):
+        if result["type_id"] == MISS_HIT_TYPE:
+            outcome = "miss_inconclusive"
+        elif result["type_id"] == MELEE_DAMAGE_HIT_TYPE:
+            if result["amount"] == 1:
+                outcome = "protected"
+            elif result["amount"] > 1:
+                outcome = "late_protection"
+            else:
+                outcome = "zero_damage_inconclusive"
+    if pre_dispatch_hit and pre_dispatch_hit["type_id"] == MISS_HIT_TYPE and not test:
+        outcome = "miss_before_dispatch_inconclusive"
+    return {
+        "final_state": rows[-1]["trial_state"],
+        "input_sent_by_calibration": bool(accepted),
+        "accepted_command_counts": dict(collections.Counter(key["prayer"] for key in accepted)),
+        "planned_test_delay_ms": rows[-1].get("requested_delay_ms"),
+        "requested_test_delay_ms": test["requested_after_cue_ms"] if test else None,
+        "accepted_test_delay_ms": round(test["accepted_after_cue_ms"], 3) if test else None,
+        "control_hit": control,
+        "test_hit": result,
+        "pre_dispatch_hit": pre_dispatch_hit,
+        "clean_opening_user_confirmed": clean_opening_confirmed if control else None,
+        "observed_control_age_at_test_hit_ms": result_age_ms,
+        "outcome": outcome,
+        "melee_acknowledged_after_test_command": acknowledged,
+        "accepted_test_key_to_melee_ack_ms": (
+            round(to_milliseconds(acknowledgement["observed_ns"] - test["accepted_ns"]), 3)
+            if acknowledgement
+            else None
+        ),
+        "devotion_buff_active_from_memory": None,
+        "abort_reasons": [update["reason"] for update in updates if update["event"] == "aborted"],
+        "interpretation": (
+            "One-damage control and result support a protected case; damage above one "
+            "needs active-Devotion context. Neither establishes an exact server deadline."
+        ),
+        "prayer_check_deadline_validated": False,
+    }
 
 
 def summarize(rows):
-    changes, previous, previous_ns = [], {}, {}
-    keys, cues, hits, scene_ids = [], [], [], set()
-    for row in rows:
-        scope = session(row)
-        active = row['combat']['active_prayer']
-        if scope not in previous or active != previous[scope]:
-            changes.append({'scope': scope, 'prayer': active, 'observed_ns': row['observed_ns'],
-                            'previous_observation_ns': previous_ns.get(scope, row['observed_ns'])})
-        previous[scope], previous_ns[scope] = active, row['observed_ns']
-        for key in row.get('manual_prayer_keys', []):
-            keys.append(dict(key, scope=scope))
-        for actor in row['animations']:
-            if actor['name'].partition(',')[0].strip().lower() == 'telos':
-                scene_ids.add((scope, actor['instance_id']))
-        for cue in row.get('npc_action_events', []):
-            cues.append(cue)
-        hits.extend(row.get('player_hit_events', []))
-    cues = [c for c in cues if ((c['pid'], c['process_creation_time'], c['scene_epoch']), c['instance_id']) in scene_ids]
-    pairs, delays = [], []
-    used = set()
-    for cue in cues:
-        if cue['action_sequence'] != 28929:
-            continue
-        scope = cue['pid'], cue['process_creation_time'], cue['scene_epoch']
-        matching = [h for h in hits if h['sequence'] not in used and
-                    (h['pid'], h['process_creation_time'], h['scene_epoch']) == scope and
-                    h['hit']['type_id'] in (133, 482) and
-                    -100_000_000 <= h['observed_ns']-cue['observed_ns'] <= 1_200_000_000]
-        if not matching:
-            continue
-        h = min(matching, key=lambda e:e['observed_ns'])
-        used.add(h['sequence'])
-        delay = (h['observed_ns']-cue['observed_ns'])/1e6
-        active_before = [c for c in changes if c['scope'] == scope and c['observed_ns'] <= h['observed_ns']]
-        active = active_before[-1]['prayer'] if active_before else None
-        pair = {'cue_event': cue['sequence'], 'hit_event': h['sequence'],
-                'cue_to_observed_hit_ms': round(delay, 3), 'hit_type': h['hit']['type_id'],
-                'amount': h['hit']['amount'], 'prayer_near_hit_observation': active}
-        pairs.append(pair)
-        if h['hit']['type_id'] == 133:
-            delays.append(delay)
-    key_pairs, acknowledged_changes = [], set()
-    for key in keys:
-        matching = [c for c in changes if (c['scope'], c['observed_ns']) not in acknowledged_changes and
-                    c['scope'] == key['scope'] and c['prayer'] == key['prayer'] and
-                    key['observed_ns']-20_000_000 <= c['observed_ns'] <= key['observed_ns']+1_500_000_000]
-        if not matching:
-            continue
-        c = min(matching, key=lambda c:abs(c['observed_ns']-key['observed_ns']))
-        acknowledged_changes.add((c['scope'], c['observed_ns']))
-        key_pairs.append({'prayer': key['prayer'], 'virtual_key': key['virtual_key'],
-                          'modifiers': key['modifiers'],
-                          'sampled_key_to_overhead_ms': round((c['observed_ns']-key['observed_ns'])/1e6, 3),
-                          'key_poll_interval_ms': round((key['observed_ns']-key['previous_poll_ns'])/1e6, 3)})
-    hit_data_present=any('player_hit_events' in r for r in rows)
-    return {'retained_rows': len(rows), 'player_hit_data_present': hit_data_present,
-            'executable_sha256_values': sorted({r['executable_sha256'] for r in rows if r.get('executable_sha256')}),
-            'observed_curse_raw_values': sorted({r['combat']['raw_flags']['3275'] for r in rows
-                                               if r['combat'].get('raw_flags', {}).get('3275') is not None}),
-            'action_sequence_counts': dict(collections.Counter(str(c['action_sequence']) for c in cues)),
-            'player_hit_events': len(hits), 'hit_type_counts': dict(collections.Counter(str(h['hit']['type_id']) for h in hits)),
-            'cue_hit_pairs': pairs, 'cue_to_observed_damage_delay': percentile_summary(delays),
-            'cue_to_observed_miss_delay': percentile_summary([p['cue_to_observed_hit_ms'] for p in pairs if p['hit_type']==482]),
-            'manual_key_events': len(keys), 'matched_keyboard_changes': key_pairs,
-            'sampled_key_to_overhead_delay': percentile_summary([p['sampled_key_to_overhead_ms'] for p in key_pairs]),
-            'npc_action_events_lost': sum(r.get('npc_action_events_lost', 0) for r in rows),
-            'player_hit_events_lost': sum(r.get('player_hit_events_lost', 0) for r in rows) if hit_data_present else None}
+    """Return the compact timing summary of one capture."""
+    changes, keys, cues, hits = collect_observations(rows)
+    pairs, damage_delays_ms = pair_cues_with_hits(cues, hits, changes)
+    key_pairs = pair_keys_with_changes(keys, changes)
+    hit_data_present = any("player_hit_events" in row for row in rows)
+    miss_delays_ms = [
+        pair["cue_to_observed_hit_ms"] for pair in pairs if pair["hit_type"] == MISS_HIT_TYPE
+    ]
+    curse_raw_values = {
+        row["combat"]["raw_flags"][CURSES_VARIABLE_ID]
+        for row in rows
+        if row["combat"].get("raw_flags", {}).get(CURSES_VARIABLE_ID) is not None
+    }
+    return {
+        "retained_rows": len(rows),
+        "player_hit_data_present": hit_data_present,
+        "executable_sha256_values": sorted(
+            {row["executable_sha256"] for row in rows if row.get("executable_sha256")}
+        ),
+        "observed_curse_raw_values": sorted(curse_raw_values),
+        "action_sequence_counts": dict(
+            collections.Counter(str(cue["action_sequence"]) for cue in cues)
+        ),
+        "player_hit_events": len(hits),
+        "hit_type_counts": dict(collections.Counter(str(hit["hit"]["type_id"]) for hit in hits)),
+        "cue_hit_pairs": pairs,
+        "cue_to_observed_damage_delay": delay_summary(damage_delays_ms),
+        "cue_to_observed_miss_delay": delay_summary(miss_delays_ms),
+        "manual_key_events": len(keys),
+        "matched_keyboard_changes": key_pairs,
+        "sampled_key_to_overhead_delay": delay_summary(
+            [pair["sampled_key_to_overhead_ms"] for pair in key_pairs]
+        ),
+        "npc_action_events_lost": sum(row.get("npc_action_events_lost", 0) for row in rows),
+        "player_hit_events_lost": (
+            sum(row.get("player_hit_events_lost", 0) for row in rows) if hit_data_present else None
+        ),
+    }
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--capture', type=Path, nargs='+', required=True)
-    parser.add_argument('--enrage', type=int, required=True)
-    parser.add_argument('--phase', type=int, choices=[1], required=True)
-    parser.add_argument('--session-date', required=True, help='Client-side calendar date, YYYY-MM-DD')
-    parser.add_argument('--output', type=Path, required=True)
-    args = parser.parse_args()
-    result = {'client_session_date': args.session_date, 'enrage_user_label': args.enrage,
-              'phase_user_label': args.phase, 'input_sent_by_calibration': False,
-              'sources': [{'capture_sha256': hashlib.sha256(p.read_bytes()).hexdigest(),
-                           'summary': summarize(read_rows(p))} for p in args.capture],
-              'user_labelled_cues': {'28929': 'ordinary melee auto in the isolated phase-1 melee context',
-                                    '28931': 'tendrils', '28938': 'uppercut', '28935': 'Hold Still'},
-              'observed_npc_forms': {'22891': 'Telos active', '22892': 'Telos dormant'},
-              'hitmark_symbol_leads': {'133': 'melee_damage_parent', '143': 'heal_splat_parent',
-                                       '144': 'damage_parent', '482': 'miss_parent'},
-              'automatic_flick_ready': False, 'prayer_check_deadline_validated': False,
-              'limitations': ['Only 300% phase 1 has been captured; range, other phases and higher enrages remain unvalidated.',
-                              'Cue-to-hit observation is not the server prayer-check deadline.',
-                              'Overhead flags are observed client state, not proof of server-side activation timing.',
-                              'Keyboard timestamps are sampled down edges with the recorded polling interval.',
-                              'Player hitmarks do not identify the attacker; pairing uses the isolated phase-1 context.',
-                              'No early/late protection outcome is inferred from a random damage amount alone.',
-                              'Complete incoming-attack coverage and safe Soul Split windows are not established.']}
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(result, indent=2)+'\n', encoding='utf-8')
-    print(json.dumps({'captures': len(result['sources']), 'automatic_flick_ready': False}))
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--capture", type=Path, nargs="+", required=True)
+    parser.add_argument("--enrage", type=int, required=True)
+    parser.add_argument(
+        "--capture-enrages",
+        type=int,
+        nargs="+",
+        help="Per-capture user labels, in the same order as --capture",
+    )
+    parser.add_argument("--phase", type=int, choices=[1], required=True)
+    parser.add_argument("--session-date", required=True, help="Client-side date, YYYY-MM-DD")
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--confirmed-devotion-opening",
+        action="store_true",
+        help="Player confirmed Devotion active and no other defensives/stuns for the opening",
+    )
+    arguments = parser.parse_args()
+    enrages = arguments.capture_enrages or [arguments.enrage] * len(arguments.capture)
+    if len(enrages) != len(arguments.capture) or any(not 0 <= value <= 4000 for value in enrages):
+        parser.error("Provide one enrage in 0..4000 per capture")
+    sources = [
+        {
+            "capture_sha256": hashlib.sha256(capture.read_bytes()).hexdigest(),
+            "enrage_user_label": enrage,
+            "summary": summarize(read_rows(capture)),
+            "devotion_opening": devotion_opening_summary(
+                read_rows(capture), clean_opening_confirmed=arguments.confirmed_devotion_opening
+            ),
+            "controlled_trial": controlled_trial_summary(
+                read_rows(capture), clean_opening_confirmed=arguments.confirmed_devotion_opening
+            ),
+        }
+        for capture, enrage in zip(arguments.capture, enrages)
+    ]
+    report = {
+        "client_session_date": arguments.session_date,
+        "enrage_user_label": enrages[0] if len(set(enrages)) == 1 else None,
+        "enrage_user_labels": sorted(set(enrages)),
+        "phase_user_label": arguments.phase,
+        "input_sent_by_calibration": any(
+            source["controlled_trial"] and source["controlled_trial"]["input_sent_by_calibration"]
+            for source in sources
+        ),
+        "sources": sources,
+        "user_labelled_cues": USER_LABELLED_CUES,
+        "observed_npc_forms": OBSERVED_NPC_FORMS,
+        "hitmark_symbol_leads": HITMARK_SYMBOL_LEADS,
+        "automatic_flick_ready": False,
+        "prayer_check_deadline_validated": False,
+        "limitations": LIMITATIONS,
+    }
+    controlled = [source["controlled_trial"] for source in sources if source["controlled_trial"]]
+    successful_delays = sorted(
+        trial["accepted_test_delay_ms"] for trial in controlled if trial["outcome"] == "protected"
+    )
+    failed_delays = sorted(
+        trial["accepted_test_delay_ms"]
+        for trial in controlled
+        if trial["outcome"] == "late_protection"
+    )
+    report["controlled_input_observations"] = {
+        "successful_accepted_delays_ms": successful_delays,
+        "late_accepted_delays_ms": failed_delays,
+        "latest_observed_success_ms": max(successful_delays) if successful_delays else None,
+        "earliest_observed_late_ms": min(failed_delays) if failed_delays else None,
+        "universal_cutoff_established": False,
+        "prayer_check_deadline_validated": False,
+    }
+    arguments.output.parent.mkdir(parents=True, exist_ok=True)
+    arguments.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({"captures": len(sources), "automatic_flick_ready": False}))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

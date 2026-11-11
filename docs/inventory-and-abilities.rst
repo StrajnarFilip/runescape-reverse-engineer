@@ -68,16 +68,26 @@ blobs. ``work/build_ability_bindings.py`` rebuilds it using local cache data and
 the pinned reference JSON under ``work/references/``. Those reference downloads
 are research inputs, not runtime dependencies.
 
-Build the optional local catalog from the repository root after configuring
-CMake::
-
-    cmake --build build --config Release --target rs3_catalog
-
-The target writes ``rs3_catalog.bin`` and its manifest beside the DLL. Set
+When ``js5-19.jcache`` (items) and ``js5-22.jcache`` (structs) exist under
+``RS3_CACHE_ROOT``, the default build writes ``rs3_catalog.bin`` and its manifest
+beside the DLL. A fingerprint of the archives' sizes and modification times
+(``build/generated/catalog_archives.txt``) reruns the generator after a game
+cache update; unchanged builds skip it. ``cmake --build build --config Release
+--target rs3_catalog`` builds it explicitly. Set
 ``-DRS3_CACHE_ROOT=C:/path/to/cache`` during configuration to use a different
-cache. Raw inventory IDs, quantities and slots remain available without a valid
-catalog. The loader verifies the format, body SHA-256 and client fingerprint
-before it accepts metadata.
+cache, or ``-DRS3_BUILD_CATALOG=OFF`` to skip it. Raw inventory IDs, quantities
+and slots remain available without a valid catalog. The loader verifies the
+format, body SHA-256 and client fingerprint before it accepts metadata.
+
+Templated item variants carry no name of their own. A banknote (opcodes 201/202)
+and the three other link/template pairs (203/204, 205/206, 207/208) take the
+name of their linked item, as the client does; 13,849 of the 64,175 definitions
+are named this way. Definitions without a name or a link stay unnamed.
+
+The C library looks items up through a direct-address table built at load time:
+``item_index[item_id]`` holds the record position, so each lookup is one array
+read. Item IDs are dense (highest 64,514 for 64,175 definitions), so the table
+costs 4 bytes per ID, about 252 KB for the current cache.
 
 Potions and item identity
 -------------------------

@@ -1,68 +1,130 @@
-"""Exercise the exported C planner through ctypes, without game input."""
-import ctypes as C
+"""Exercise the exported C prayer planner through ctypes, without game input."""
+
+import ctypes
 import json
-from pathlib import Path
 import unittest
-from native import CombatState, NPCAnimation, PlayerHitInfo, PlayerHitEvent, Reader, ROOT, library_path, load_library
-from prayer import Planner, Frame, Config, Threat, Decision, Prayer
+
+from rs3_reader.native import (
+    REPOSITORY_ROOT,
+    CombatState,
+    CombatStructure,
+    NPCAnimation,
+    PlayerHitEvent,
+    PlayerHitInfo,
+    Reader,
+    Status,
+    library_path,
+    load_library,
+)
+from rs3_reader.prayer import (
+    OVERHEAD_PRAYER_MASK,
+    PLANNER_STRUCTURES,
+    Action,
+    Frame,
+    FrameFlags,
+    Planner,
+    Prayer,
+    Threat,
+    ThreatFlags,
+)
+
+START_NS = 10_000_000_000
+LIVE_FLAGS = FrameFlags.CONNECTED | FrameFlags.ACTIVE_KNOWN | FrameFlags.POINTS_KNOWN
+ALL_FLAGS = LIVE_FLAGS | FrameFlags.COVERAGE_KNOWN
+PRAYER_POINTS = 840
+INCOMPLETE_COVERAGE_REASON = 9
+# A PID that never belongs to a running client.
+ABSENT_PID = 0xFFFFFFFF
 
 
-@unittest.skipUnless(library_path().is_file(), 'Build rs3_native for FFI checks')
-class PrayerTests(unittest.TestCase):
-    def settings(self):
-        return json.loads((ROOT / 'profiles' / 'prayer_flick.json').read_text())
+def load_settings():
+    return json.loads((REPOSITORY_ROOT / "profiles" / "prayer_flick.json").read_text())
 
+
+def frame(active_prayer, coverage_until_ns=0, flags=LIVE_FLAGS):
+    """A fresh frame at START_NS with every overhead available."""
+    return Frame(
+        START_NS,
+        START_NS,
+        1,
+        1,
+        coverage_until_ns,
+        flags,
+        active_prayer,
+        OVERHEAD_PRAYER_MASK,
+        PRAYER_POINTS,
+    )
+
+
+@unittest.skipUnless(library_path().is_file(), "Build rs3_native for FFI checks")
+class PrayerPlannerTests(unittest.TestCase):
     def test_additive_abi_sizes(self):
-        lib = load_library()
-        self.assertEqual(lib.rs3_combat_sizeof(1), C.sizeof(CombatState))
-        self.assertEqual(lib.rs3_combat_sizeof(2), C.sizeof(NPCAnimation))
-        self.assertEqual(lib.rs3_combat_sizeof(4), C.sizeof(PlayerHitInfo))
-        self.assertEqual(lib.rs3_combat_sizeof(5), C.sizeof(PlayerHitEvent))
-        with Planner(self.settings()) as p:
-            for i, struct in enumerate((Config, Frame, Threat, Decision), 1):
-                self.assertEqual(p.lib.rs3_prayer_sizeof(i), C.sizeof(struct))
+        library = load_library()
+        self.assertEqual(
+            library.rs3_combat_sizeof(CombatStructure.STATE), ctypes.sizeof(CombatState)
+        )
+        self.assertEqual(
+            library.rs3_combat_sizeof(CombatStructure.ANIMATION), ctypes.sizeof(NPCAnimation)
+        )
+        self.assertEqual(
+            library.rs3_combat_sizeof(CombatStructure.PLAYER_HIT_INFO),
+            ctypes.sizeof(PlayerHitInfo),
+        )
+        self.assertEqual(
+            library.rs3_combat_sizeof(CombatStructure.PLAYER_HIT_EVENT),
+            ctypes.sizeof(PlayerHitEvent),
+        )
+        with Planner(load_settings()) as planner:
+            for structure_id, structure in PLANNER_STRUCTURES.items():
+                self.assertEqual(
+                    planner.library.rs3_prayer_sizeof(structure_id), ctypes.sizeof(structure)
+                )
 
-    def test_soul_split_proposal_needs_new_observed_acknowledgement(self):
-        with Planner(self.settings()) as p:
-            f = Frame(10000000000, 10000000000, 1, 1, 20000000000, 15, Prayer.MAGIC, 0x7c, 840)
-            d = p.step(f)
-            self.assertEqual((d.action, d.prayer), (2, Prayer.SOUL_SPLIT))
-            p.note_sent(d.command_id, f.now_ns)
-            f.now_ns += 10000000
-            self.assertEqual(p.step(f).action, 3)
-            f.sequence += 1
-            f.observed_ns = f.now_ns
-            f.active_prayer = Prayer.SOUL_SPLIT
-            self.assertEqual(p.step(f).action, 1)
+    def test_soul_split_proposal_needs_a_newer_observed_acknowledgement(self):
+        with Planner(load_settings()) as planner:
+            current_frame = frame(Prayer.MAGIC, coverage_until_ns=2 * START_NS, flags=ALL_FLAGS)
+            decision = planner.step(current_frame)
+            self.assertEqual((decision.action, decision.prayer), (Action.SET, Prayer.SOUL_SPLIT))
+            planner.note_sent(decision.command_id, current_frame.now_ns)
+            current_frame.now_ns += 10_000_000
+            self.assertEqual(planner.step(current_frame).action, Action.WAIT_ACK)
+            current_frame.sequence += 1
+            current_frame.observed_ns = current_frame.now_ns
+            current_frame.active_prayer = Prayer.SOUL_SPLIT
+            self.assertEqual(planner.step(current_frame).action, Action.HOLD)
         with self.assertRaises(RuntimeError):
-            p.step(f)
+            planner.step(current_frame)
 
     def test_unclassified_live_coverage_never_authorizes_soul_split(self):
-        with Planner(self.settings()) as p:
-            f = Frame(10000000000, 10000000000, 1, 1, 0, 7, Prayer.MAGIC, 0x7c, 840)
-            d = p.step(f)
-            self.assertEqual((d.action, d.reason), (1, 9))
-            unknown = Threat(1, 42, f.now_ns, f.now_ns, Prayer.UNKNOWN, 0)
-            self.assertEqual(p.step(f, [unknown]).action, 0)
+        with Planner(load_settings()) as planner:
+            current_frame = frame(Prayer.MAGIC)
+            decision = planner.step(current_frame)
+            self.assertEqual(
+                (decision.action, decision.reason), (Action.HOLD, INCOMPLETE_COVERAGE_REASON)
+            )
+            now_ns = current_frame.now_ns
+            unknown_attack = Threat(1, 42, now_ns, now_ns, Prayer.UNKNOWN, 0)
+            self.assertEqual(planner.step(current_frame, [unknown_attack]).action, Action.BLOCKED)
 
     def test_unavailable_player_hitmarks_are_not_stale_records(self):
-        with Reader(pid=0xffffffff, worker_hz=0) as reader:
+        with Reader(pid=ABSENT_PID, worker_hz=0) as reader:
             reader.sample()
-            self.assertEqual(reader.player_hit_info.status, 3)
+            self.assertEqual(reader.player_hit_info.status, Status.UNAVAILABLE)
             self.assertEqual(reader.player_hit_info.hit_count, 0)
             self.assertEqual(reader.drain_player_hit_events(), ([], 0))
 
-    def test_replaced_proposal_rejects_old_dispatch_id(self):
-        with Planner(self.settings()) as p:
-            f = Frame(10000000000, 10000000000, 1, 1, 0, 7, Prayer.SOUL_SPLIT, 0x7c, 840)
-            t = Threat(1, 42, 10600000000, 10600000000, Prayer.MAGIC, 1)
-            old = p.step(f, [t])
-            t.prayer = Prayer.MELEE
-            new = p.step(f, [t])
-            self.assertNotEqual(old.command_id, new.command_id)
+    def test_replaced_proposal_rejects_the_old_command_id(self):
+        with Planner(load_settings()) as planner:
+            current_frame = frame(Prayer.SOUL_SPLIT)
+            attack_ns = 10_600_000_000
+            threat = Threat(1, 42, attack_ns, attack_ns, Prayer.MAGIC, ThreatFlags.TIMING_VALIDATED)
+            old_decision = planner.step(current_frame, [threat])
+            threat.prayer = Prayer.MELEE
+            new_decision = planner.step(current_frame, [threat])
+            self.assertNotEqual(old_decision.command_id, new_decision.command_id)
             with self.assertRaises(RuntimeError):
-                p.note_sent(old.command_id, f.now_ns)
+                planner.note_sent(old_decision.command_id, current_frame.now_ns)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

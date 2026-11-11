@@ -1,96 +1,127 @@
-"""Read the installed cache, without modifying it, to verify varbit definitions.
+"""Read the installed cache, without modifying it, to inspect varbit definitions.
 
 Format reference: skillbert/rsmv a92b892, src/opcodes/cacheindex.json and
-src/cache/index.ts (SQLite archive layout). This is an independent small decoder.
+src/cache/index.ts (SQLite archive layout). This is an independent small
+decoder; the maintained decoder is rs3_reader.cache_definitions.
 """
+
 import sqlite3
-from pathlib import Path
 import struct
 import zlib
+from pathlib import Path
+
+DEFAULT_CACHE_ROOT = r"C:\ProgramData\Jagex\RuneScape"
+VARBIT_ARCHIVE = 2
+VARBIT_GROUP = 69
+INSPECTED_VARBITS = (1668, 16736, 24595, 32640)
+REFERENCE_HAS_NAMES = 1
+REFERENCE_HAS_WHIRLPOOL = 2
+REFERENCE_HAS_SIZES = 4
+
 
 def decompress(blob):
     if not blob.startswith(b"ZLB\x01"):
         raise ValueError("Unsupported cache compression")
-    expected, = struct.unpack_from(">I", blob, 4)
-    raw = zlib.decompress(blob[8:])
-    if len(raw) != expected:
+    (expected_length,) = struct.unpack_from(">I", blob, 4)
+    data = zlib.decompress(blob[8:])
+    if len(data) != expected_length:
         raise ValueError("Invalid decompressed length")
-    return raw
+    return data
 
-class Buffer:
+
+class ByteReader:
     def __init__(self, data):
-        self.data, self.pos = data, 0
-    def read(self, fmt):
-        value, = struct.unpack_from(fmt, self.data, self.pos)
-        self.pos += struct.calcsize(fmt)
+        self.data = data
+        self.position = 0
+
+    def read(self, layout):
+        (value,) = struct.unpack_from(layout, self.data, self.position)
+        self.position += struct.calcsize(layout)
         return value
-    def varuint(self):
-        if self.data[self.pos] & 0x80:
-            return self.read(">I") & 0x7fffffff
+
+    def read_smart(self):
+        if self.data[self.position] & 0x80:
+            return self.read(">I") & 0x7FFFFFFF
         return self.read(">H")
 
-def index(data):
-    reader = Buffer(data)
+
+def read_delta_encoded_ids(reader, count):
+    identifiers, current = [], 0
+    for _ in range(count):
+        current += reader.read(">H")
+        identifiers.append(current)
+    return identifiers
+
+
+def parse_reference_table(data):
+    """Return {group ID: [file IDs]} from a JS5 reference table."""
+    reader = ByteReader(data)
     version = reader.read(">B")
     if version not in (6, 7):
         raise ValueError("Unsupported reference-table version")
-    reader.read(">I")
+    reader.read(">I")  # Revision.
     flags = reader.read(">B")
-    count = reader.varuint() if version >= 7 else reader.read(">H")
-    ids, value = [], 0
-    for _ in range(count):
-        value += reader.read(">H")
-        ids.append(value)
-    reader.pos += count * (4 + (4 if flags & 1 else 0))
-    if flags & 4:
-        reader.pos += count * 12
-    if flags & 2:
-        reader.pos += count * 64
-    reader.pos += count * 4
-    counts = [reader.varuint() for _ in ids]
-    groups = {}
-    for group, nfiles in zip(ids, counts):
-        subids, value = [], 0
-        for _ in range(nfiles):
-            value += reader.read(">H")
-            subids.append(value)
-        groups[group] = subids
-    if flags & 1:
-        reader.pos += sum(counts) * 4
-    if reader.pos != len(data):
-        raise ValueError("Reference table did not decode completely: %s / %s" % (reader.pos, len(data)))
-    return groups
+    group_count = reader.read_smart() if version >= 7 else reader.read(">H")
+    group_ids = read_delta_encoded_ids(reader, group_count)
+    reader.position += group_count * (4 + (4 if flags & REFERENCE_HAS_NAMES else 0))
+    if flags & REFERENCE_HAS_SIZES:
+        reader.position += group_count * 12
+    if flags & REFERENCE_HAS_WHIRLPOOL:
+        reader.position += group_count * 64
+    reader.position += group_count * 4
+    file_counts = [reader.read_smart() for _ in group_ids]
+    group_files = {
+        group_id: read_delta_encoded_ids(reader, file_count)
+        for group_id, file_count in zip(group_ids, file_counts)
+    }
+    if flags & REFERENCE_HAS_NAMES:
+        reader.position += sum(file_counts) * 4
+    if reader.position != len(data):
+        raise ValueError(
+            f"Reference table did not decode completely: {reader.position} / {len(data)}"
+        )
+    return group_files
+
 
 class Cache:
-    def __init__(self, archive=2, root=r"C:\ProgramData\Jagex\RuneScape"):
-        path = Path(root) / ("js5-%d.jcache" % archive)
-        self.db = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
-        self.groups = index(decompress(self.db.execute("SELECT DATA FROM cache_index").fetchone()[0]))
-    def group(self, group):
-        row = self.db.execute("SELECT DATA FROM cache WHERE KEY=?", (group,)).fetchone()
+    """One js5-N.jcache SQLite archive, opened read-only."""
+
+    def __init__(self, archive_number=VARBIT_ARCHIVE, cache_root=DEFAULT_CACHE_ROOT):
+        path = Path(cache_root) / f"js5-{archive_number}.jcache"
+        self.database = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
+        reference_blob = self.database.execute("SELECT DATA FROM cache_index").fetchone()[0]
+        self.group_files = parse_reference_table(decompress(reference_blob))
+
+    def read_group(self, group_id):
+        row = self.database.execute("SELECT DATA FROM cache WHERE KEY=?", (group_id,)).fetchone()
         if row is None:
-            raise KeyError(group)
+            raise KeyError(group_id)
         data = decompress(row[0])
-        ids = self.groups[group]
-        if len(ids) == 1:
-            return {ids[0]: data}
-        start, = struct.unpack_from(">I", data, 1)
-        if start != 1 + 4 * (len(ids) + 1):
+        file_ids = self.group_files[group_id]
+        if len(file_ids) == 1:
+            return {file_ids[0]: data}
+        (start,) = struct.unpack_from(">I", data, 1)
+        if start != 1 + 4 * (len(file_ids) + 1):
             raise ValueError("Invalid SQLite archive table")
-        result = {}
-        for i, fileid in enumerate(ids):
-            end, = struct.unpack_from(">I", data, 5 + i * 4)
+        files = {}
+        for index, file_id in enumerate(file_ids):
+            (end,) = struct.unpack_from(">I", data, 5 + index * 4)
             if not start <= end <= len(data):
                 raise ValueError("Invalid file extent")
-            result[fileid] = data[start:end]
+            files[file_id] = data[start:end]
             start = end
         if start != len(data):
             raise ValueError("Trailing group data")
-        return result
+        return files
+
+
+def main():
+    cache = Cache()
+    print("groups", {group_id: len(file_ids) for group_id, file_ids in cache.group_files.items()})
+    varbits = cache.read_group(VARBIT_GROUP)
+    for file_id in INSPECTED_VARBITS:
+        print("varbit", file_id, varbits.get(file_id, b"").hex())
+
 
 if __name__ == "__main__":
-    cache = Cache()
-    print("groups", {k: len(v) for k, v in cache.groups.items()})
-    bits = cache.group(69)
-    for fileid in [1668, 16736, 24595, 32640]:
-        print("varbit", fileid, bits.get(fileid, b"").hex())
+    main()

@@ -1,163 +1,463 @@
-/* A proposal is distinct from accepted input and from observed game state. */
+/*
+ * Deterministic prayer timing planner.
+ *
+ * A proposal (RS3_PRAYER_SET) is distinct from input accepted by Windows,
+ * which the caller reports with rs3_prayer_note_sent(), and from the prayer
+ * observed in game, which must confirm that input in a newer frame.
+ */
 #include "rs3/prayer.h"
+
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
-#include <limits.h>
 
-#define MS 1000000ull
-struct rs3_prayer_planner {
+#define NANOSECONDS_PER_MILLISECOND 1000000ull
+#define MAX_CONFIGURED_MS           60000u
+#define VALID_FRAME_FLAGS                                                                          \
+    ((uint32_t)(RS3_PRAYER_CONNECTED | RS3_PRAYER_ACTIVE_KNOWN | RS3_PRAYER_POINTS_KNOWN |         \
+                RS3_PRAYER_COVERAGE_KNOWN))
+
+struct rs3_prayer_planner
+{
     rs3_prayer_config config;
-    uint64_t session, last_now, last_sequence, serial, proposal, proposed_at;
-    uint64_t sent_at, sent_sequence;
-    uint32_t proposed_prayer, pending, fault;
+    uint64_t session_id;
+    uint64_t last_now_ns;
+    uint64_t last_sequence;
+    uint64_t last_command_id;     /**< Never reset, so command IDs are never reused. */
+    uint64_t proposed_command_id; /**< Outstanding proposal, or 0. */
+    uint64_t proposed_at_ns;
+    uint32_t proposed_prayer;
+    uint32_t input_pending; /**< Nonzero after note_sent() until acknowledged. */
+    uint64_t sent_at_ns;
+    uint64_t sent_sequence;
+    uint32_t latched_fault; /**< enum rs3_prayer_reason, or RS3_PRAYER_READY. */
 };
-static uint64_t add_sat(uint64_t a,uint64_t b) { return UINT64_MAX-a<b?UINT64_MAX:a+b; }
-static uint64_t sub_sat(uint64_t a,uint64_t b) { return a>b?a-b:0; }
-static int valid_prayer(uint32_t p) { return p>=RS3_PRAYER_NONE && p<=RS3_PRAYER_NECROMANCY; }
-static int protective(uint32_t p) { return p>=RS3_PRAYER_MELEE && p!=RS3_PRAYER_SOUL_SPLIT && p<=RS3_PRAYER_NECROMANCY; }
-static uint32_t validate_threats(const rs3_prayer_threat *t,uint32_t n) {
-    for (uint32_t i=0;i<n;i++) {
-        if (!t[i].event_id || t[i].check_earliest_ns>t[i].check_latest_ns ||
-            t[i].flags!=RS3_PRAYER_TIMING_VALIDATED || !valid_prayer(t[i].prayer) ||
-            t[i].prayer==RS3_PRAYER_SOUL_SPLIT) return RS3_PRAYER_UNKNOWN_ATTACK;
-        for (uint32_t j=0;j<i;j++) if (t[j].event_id==t[i].event_id) return RS3_PRAYER_BAD_FRAME;
+
+static uint64_t milliseconds_to_ns(uint32_t milliseconds)
+{
+    return (uint64_t)milliseconds * NANOSECONDS_PER_MILLISECOND;
+}
+
+static uint64_t saturating_add(uint64_t left, uint64_t right)
+{
+    return UINT64_MAX - left < right ? UINT64_MAX : left + right;
+}
+
+static uint64_t saturating_subtract(uint64_t left, uint64_t right)
+{
+    return left > right ? left - right : 0;
+}
+
+static int is_valid_prayer(uint32_t prayer)
+{
+    return prayer >= RS3_PRAYER_NONE && prayer <= RS3_PRAYER_NECROMANCY;
+}
+
+/** Returns nonzero for the overheads that mitigate an attack style. */
+static int is_protection_prayer(uint32_t prayer)
+{
+    return prayer >= RS3_PRAYER_MELEE && prayer <= RS3_PRAYER_NECROMANCY &&
+           prayer != RS3_PRAYER_SOUL_SPLIT;
+}
+
+/** Returns RS3_PRAYER_READY or the reason the threat list cannot be trusted. */
+static uint32_t validate_threats(const rs3_prayer_threat *threats, uint32_t threat_count)
+{
+    for (uint32_t index = 0; index < threat_count; index++)
+    {
+        const rs3_prayer_threat *threat = &threats[index];
+        if (threat->event_id == 0 || threat->check_earliest_ns > threat->check_latest_ns ||
+            threat->flags != RS3_PRAYER_TIMING_VALIDATED || !is_valid_prayer(threat->prayer) ||
+            threat->prayer == RS3_PRAYER_SOUL_SPLIT)
+        {
+            return RS3_PRAYER_UNKNOWN_ATTACK;
+        }
+        for (uint32_t earlier = 0; earlier < index; earlier++)
+        {
+            if (threats[earlier].event_id == threat->event_id)
+            {
+                return RS3_PRAYER_BAD_FRAME;
+            }
+        }
     }
     return RS3_PRAYER_READY;
 }
-static int32_t block(rs3_prayer_planner *p,rs3_prayer_decision *d,uint32_t reason) {
-    if (p->pending) p->fault=reason;
-    p->proposal=0;
-    d->action=p->fault?RS3_PRAYER_FAULT:RS3_PRAYER_BLOCKED; d->reason=reason;
+
+/** Withdraws any proposal; latches a fault while input is still unacknowledged. */
+static int32_t block(rs3_prayer_planner *planner, rs3_prayer_decision *decision, uint32_t reason)
+{
+    if (planner->input_pending)
+    {
+        planner->latched_fault = reason;
+    }
+    planner->proposed_command_id = 0;
+    decision->action = planner->latched_fault ? RS3_PRAYER_FAULT : RS3_PRAYER_BLOCKED;
+    decision->reason = reason;
     return RS3_OK;
 }
-uint32_t rs3_prayer_sizeof(uint32_t s) {
-    switch(s) { case RS3_PRAYER_SIZE_CONFIG:return sizeof(rs3_prayer_config);
-    case RS3_PRAYER_SIZE_FRAME:return sizeof(rs3_prayer_frame);
-    case RS3_PRAYER_SIZE_THREAT:return sizeof(rs3_prayer_threat);
-    case RS3_PRAYER_SIZE_DECISION:return sizeof(rs3_prayer_decision); default:return 0; }
+
+/** Returns the end of a threat's protection window, including the hold time. */
+static uint64_t protection_end_ns(const rs3_prayer_planner *planner,
+                                  const rs3_prayer_threat *threat)
+{
+    return saturating_add(threat->check_latest_ns, milliseconds_to_ns(planner->config.hold_ms));
 }
-const char *rs3_prayer_reason_string(uint32_t r) {
-    static const char *names[]={"ready","bad_frame","stale_observation","disconnected",
-        "active_prayer_unknown","prayer_points_unavailable_or_empty","unvalidated_attack",
-        "incompatible_protection_windows","prayer_unavailable","incomplete_attack_coverage",
-        "awaiting_game_acknowledgement","acknowledgement_timeout","protection_deadline_missed"};
-    return r<sizeof names/sizeof names[0]?names[r]:"unknown_reason";
-}
-int32_t rs3_prayer_create(const rs3_prayer_config *c,rs3_prayer_planner **out) {
-    if (!out) return RS3_E_ARGUMENT;
-    *out=NULL;
-    if (!c || c->struct_size!=sizeof *c || c->reserved ||
-        (c->idle_prayer!=RS3_PRAYER_NONE && c->idle_prayer!=RS3_PRAYER_SOUL_SPLIT) ||
-        !c->lead_ms || !c->ack_timeout_ms || !c->max_age_ms ||
-        c->lead_ms>60000 || c->hold_ms>60000 || c->min_idle_ms>60000 ||
-        c->ack_timeout_ms>60000 || c->max_age_ms>60000) return RS3_E_ARGUMENT;
-    rs3_prayer_planner *p=calloc(1,sizeof *p); if (!p) return RS3_E_MEMORY;
-    p->config=*c; *out=p; return RS3_OK;
-}
-void rs3_prayer_destroy(rs3_prayer_planner *p) { free(p); }
-int32_t rs3_prayer_reset(rs3_prayer_planner *p) {
-    if (!p) return RS3_E_ARGUMENT;
-    rs3_prayer_config c=p->config; uint64_t serial=p->serial;
-    memset(p,0,sizeof *p); p->config=c; p->serial=serial; return RS3_OK;
-}
-int32_t rs3_prayer_note_sent(rs3_prayer_planner *p,uint64_t id,uint64_t now) {
-    if (!p || !id) return RS3_E_ARGUMENT;
-    if (p->fault || p->pending || p->proposal!=id || now<p->proposed_at ||
-        now-p->proposed_at>(uint64_t)p->config.max_age_ms*MS) return RS3_E_STATE;
-    p->pending=1; p->sent_at=now; p->sent_sequence=p->last_sequence; return RS3_OK;
-}
-int32_t rs3_prayer_step(rs3_prayer_planner *p,const rs3_prayer_frame *f,
-    const rs3_prayer_threat *t,uint32_t count,rs3_prayer_decision *d,uint32_t size) {
-    if (!p || !f || !d || (count && !t)) return RS3_E_ARGUMENT;
-    if (size<sizeof *d) return RS3_E_ABI;
-    memset(d,0,sizeof *d);
-    if (count>RS3_PRAYER_MAX_THREATS) {
-        block(p,d,RS3_PRAYER_BAD_FRAME); return RS3_E_BUFFER;
+
+uint32_t rs3_prayer_sizeof(uint32_t structure)
+{
+    switch (structure)
+    {
+        case RS3_PRAYER_SIZE_CONFIG:
+            return sizeof(rs3_prayer_config);
+        case RS3_PRAYER_SIZE_FRAME:
+            return sizeof(rs3_prayer_frame);
+        case RS3_PRAYER_SIZE_THREAT:
+            return sizeof(rs3_prayer_threat);
+        case RS3_PRAYER_SIZE_DECISION:
+            return sizeof(rs3_prayer_decision);
+        default:
+            return 0;
     }
-    /* Invalid frames cannot leave an old sendable proposal behind. */
-    if (!f->session_id || !f->sequence || f->observed_ns>f->now_ns ||
-        (f->flags&~15u) || (f->available_mask&~RS3_PRAYER_OVERHEADS))
-        return block(p,d,RS3_PRAYER_BAD_FRAME);
-    if (p->session && p->session!=f->session_id) rs3_prayer_reset(p);
-    if ((p->last_now && f->now_ns<p->last_now) || f->sequence<p->last_sequence)
-        return block(p,d,RS3_PRAYER_BAD_FRAME);
-    p->session=f->session_id; p->last_now=f->now_ns; p->last_sequence=f->sequence;
-    if (p->fault) { d->action=RS3_PRAYER_FAULT; d->reason=p->fault; return RS3_OK; }
-    if (!(f->flags&RS3_PRAYER_CONNECTED)) return block(p,d,RS3_PRAYER_DISCONNECTED);
-    if (f->now_ns-f->observed_ns>(uint64_t)p->config.max_age_ms*MS)
-        return block(p,d,RS3_PRAYER_STALE);
-    if (!(f->flags&RS3_PRAYER_ACTIVE_KNOWN) || !valid_prayer(f->active_prayer))
-        return block(p,d,RS3_PRAYER_ACTIVE_UNMAPPED);
-    if (!(f->flags&RS3_PRAYER_POINTS_KNOWN) || !f->prayer_points)
-        return block(p,d,RS3_PRAYER_NO_POINTS);
-    uint32_t invalid=validate_threats(t,count);
-    if (invalid) return block(p,d,invalid);
-    if (p->pending) {
-        if (f->now_ns<p->sent_at) return block(p,d,RS3_PRAYER_BAD_FRAME);
-        if (f->sequence>p->sent_sequence && f->observed_ns>=p->sent_at &&
-            f->active_prayer==p->proposed_prayer) { p->pending=0; p->proposal=0; }
-        else if (f->now_ns-p->sent_at>=(uint64_t)p->config.ack_timeout_ms*MS) {
-            p->fault=RS3_PRAYER_ACK_TIMEOUT; p->proposal=0;
-            d->action=RS3_PRAYER_FAULT; d->reason=RS3_PRAYER_ACK_TIMEOUT; return RS3_OK;
-        } else {
-            d->action=RS3_PRAYER_WAIT_ACK; d->prayer=p->proposed_prayer;
-            d->reason=RS3_PRAYER_ACK_PENDING; d->command_id=p->proposal;
-            d->next_wakeup_ns=add_sat(p->sent_at,(uint64_t)p->config.ack_timeout_ms*MS);
-            for (uint32_t i=0;i<count;i++) if (protective(t[i].prayer) &&
-                f->active_prayer!=t[i].prayer && f->now_ns>=t[i].check_earliest_ns &&
-                f->now_ns<=add_sat(t[i].check_latest_ns,(uint64_t)p->config.hold_ms*MS)) {
-                d->flags|=RS3_PRAYER_DEADLINE_MISSED; d->threat_id=t[i].event_id;
-                d->check_earliest_ns=t[i].check_earliest_ns; d->check_latest_ns=t[i].check_latest_ns;
-            }
+}
+
+const char *rs3_prayer_reason_string(uint32_t reason)
+{
+    static const char *const reason_names[] = {
+        "ready",
+        "bad_frame",
+        "stale_observation",
+        "disconnected",
+        "active_prayer_unknown",
+        "prayer_points_unavailable_or_empty",
+        "unvalidated_attack",
+        "incompatible_protection_windows",
+        "prayer_unavailable",
+        "incomplete_attack_coverage",
+        "awaiting_game_acknowledgement",
+        "acknowledgement_timeout",
+        "protection_deadline_missed",
+    };
+    if (reason < sizeof reason_names / sizeof reason_names[0])
+    {
+        return reason_names[reason];
+    }
+    return "unknown_reason";
+}
+
+int32_t rs3_prayer_create(const rs3_prayer_config *config, rs3_prayer_planner **out)
+{
+    if (out == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    *out = NULL;
+    if (config == NULL || config->struct_size != sizeof *config || config->reserved != 0 ||
+        (config->idle_prayer != RS3_PRAYER_NONE && config->idle_prayer != RS3_PRAYER_SOUL_SPLIT) ||
+        config->lead_ms == 0 || config->ack_timeout_ms == 0 || config->max_age_ms == 0 ||
+        config->lead_ms > MAX_CONFIGURED_MS || config->hold_ms > MAX_CONFIGURED_MS ||
+        config->min_idle_ms > MAX_CONFIGURED_MS || config->ack_timeout_ms > MAX_CONFIGURED_MS ||
+        config->max_age_ms > MAX_CONFIGURED_MS)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    rs3_prayer_planner *planner = calloc(1, sizeof *planner);
+    if (planner == NULL)
+    {
+        return RS3_E_MEMORY;
+    }
+    planner->config = *config;
+    *out = planner;
+    return RS3_OK;
+}
+
+void rs3_prayer_destroy(rs3_prayer_planner *planner)
+{
+    free(planner);
+}
+
+int32_t rs3_prayer_reset(rs3_prayer_planner *planner)
+{
+    if (planner == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    rs3_prayer_config config = planner->config;
+    uint64_t last_command_id = planner->last_command_id;
+    memset(planner, 0, sizeof *planner);
+    planner->config = config;
+    planner->last_command_id = last_command_id;
+    return RS3_OK;
+}
+
+int32_t rs3_prayer_note_sent(rs3_prayer_planner *planner, uint64_t command_id, uint64_t sent_at_ns)
+{
+    if (planner == NULL || command_id == 0)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    if (planner->latched_fault || planner->input_pending ||
+        planner->proposed_command_id != command_id || sent_at_ns < planner->proposed_at_ns ||
+        sent_at_ns - planner->proposed_at_ns > milliseconds_to_ns(planner->config.max_age_ms))
+    {
+        return RS3_E_STATE;
+    }
+    planner->input_pending = 1;
+    planner->sent_at_ns = sent_at_ns;
+    planner->sent_sequence = planner->last_sequence;
+    return RS3_OK;
+}
+
+/** Returns nonzero when the frame is structurally valid. */
+static int frame_is_well_formed(const rs3_prayer_frame *frame)
+{
+    return frame->session_id != 0 && frame->sequence != 0 && frame->observed_ns <= frame->now_ns &&
+           (frame->flags & ~VALID_FRAME_FLAGS) == 0 &&
+           (frame->available_mask & ~RS3_PRAYER_OVERHEADS) == 0;
+}
+
+/**
+ * Handles a proposal whose input was sent but not yet observed.
+ * Returns nonzero when decision is final; zero once the input was acknowledged.
+ */
+static int handle_pending_input(rs3_prayer_planner *planner, const rs3_prayer_frame *frame,
+                                const rs3_prayer_threat *threats, uint32_t threat_count,
+                                rs3_prayer_decision *decision)
+{
+    uint64_t ack_timeout_ns = milliseconds_to_ns(planner->config.ack_timeout_ms);
+    int acknowledged = frame->sequence > planner->sent_sequence &&
+                       frame->observed_ns >= planner->sent_at_ns &&
+                       frame->active_prayer == planner->proposed_prayer;
+    if (acknowledged)
+    {
+        planner->input_pending = 0;
+        planner->proposed_command_id = 0;
+        return 0;
+    }
+    if (frame->now_ns - planner->sent_at_ns >= ack_timeout_ns)
+    {
+        planner->latched_fault = RS3_PRAYER_ACK_TIMEOUT;
+        planner->proposed_command_id = 0;
+        decision->action = RS3_PRAYER_FAULT;
+        decision->reason = RS3_PRAYER_ACK_TIMEOUT;
+        return 1;
+    }
+
+    decision->action = RS3_PRAYER_WAIT_ACK;
+    decision->prayer = planner->proposed_prayer;
+    decision->reason = RS3_PRAYER_ACK_PENDING;
+    decision->command_id = planner->proposed_command_id;
+    decision->next_wakeup_ns = saturating_add(planner->sent_at_ns, ack_timeout_ns);
+    /* Report a protection window that opened while the switch is still unconfirmed. */
+    for (uint32_t index = 0; index < threat_count; index++)
+    {
+        const rs3_prayer_threat *threat = &threats[index];
+        if (is_protection_prayer(threat->prayer) && frame->active_prayer != threat->prayer &&
+            frame->now_ns >= threat->check_earliest_ns &&
+            frame->now_ns <= protection_end_ns(planner, threat))
+        {
+            decision->flags |= RS3_PRAYER_DEADLINE_MISSED;
+            decision->threat_id = threat->event_id;
+            decision->check_earliest_ns = threat->check_earliest_ns;
+            decision->check_latest_ns = threat->check_latest_ns;
+        }
+    }
+    return 1;
+}
+
+int32_t rs3_prayer_step(rs3_prayer_planner *planner, const rs3_prayer_frame *frame,
+                        const rs3_prayer_threat *threats, uint32_t threat_count,
+                        rs3_prayer_decision *decision, uint32_t out_size)
+{
+    if (planner == NULL || frame == NULL || decision == NULL ||
+        (threat_count != 0 && threats == NULL))
+    {
+        return RS3_E_ARGUMENT;
+    }
+    if (out_size < sizeof *decision)
+    {
+        return RS3_E_ABI;
+    }
+    memset(decision, 0, sizeof *decision);
+    if (threat_count > RS3_PRAYER_MAX_THREATS)
+    {
+        block(planner, decision, RS3_PRAYER_BAD_FRAME);
+        return RS3_E_BUFFER;
+    }
+
+    /* An invalid frame cannot leave an older sendable proposal behind. */
+    if (!frame_is_well_formed(frame))
+    {
+        return block(planner, decision, RS3_PRAYER_BAD_FRAME);
+    }
+    if (planner->session_id != 0 && planner->session_id != frame->session_id)
+    {
+        rs3_prayer_reset(planner);
+    }
+    if ((planner->last_now_ns != 0 && frame->now_ns < planner->last_now_ns) ||
+        frame->sequence < planner->last_sequence)
+    {
+        return block(planner, decision, RS3_PRAYER_BAD_FRAME);
+    }
+    planner->session_id = frame->session_id;
+    planner->last_now_ns = frame->now_ns;
+    planner->last_sequence = frame->sequence;
+
+    if (planner->latched_fault)
+    {
+        decision->action = RS3_PRAYER_FAULT;
+        decision->reason = planner->latched_fault;
+        return RS3_OK;
+    }
+    if (!(frame->flags & RS3_PRAYER_CONNECTED))
+    {
+        return block(planner, decision, RS3_PRAYER_DISCONNECTED);
+    }
+    if (frame->now_ns - frame->observed_ns > milliseconds_to_ns(planner->config.max_age_ms))
+    {
+        return block(planner, decision, RS3_PRAYER_STALE);
+    }
+    if (!(frame->flags & RS3_PRAYER_ACTIVE_KNOWN) || !is_valid_prayer(frame->active_prayer))
+    {
+        return block(planner, decision, RS3_PRAYER_ACTIVE_UNMAPPED);
+    }
+    if (!(frame->flags & RS3_PRAYER_POINTS_KNOWN) || frame->prayer_points == 0)
+    {
+        return block(planner, decision, RS3_PRAYER_NO_POINTS);
+    }
+    uint32_t threat_problem = validate_threats(threats, threat_count);
+    if (threat_problem != RS3_PRAYER_READY)
+    {
+        return block(planner, decision, threat_problem);
+    }
+
+    if (planner->input_pending)
+    {
+        if (frame->now_ns < planner->sent_at_ns)
+        {
+            return block(planner, decision, RS3_PRAYER_BAD_FRAME);
+        }
+        if (handle_pending_input(planner, frame, threats, threat_count, decision))
+        {
             return RS3_OK;
         }
     }
-    uint32_t desired=RS3_PRAYER_UNKNOWN; const rs3_prayer_threat *selected=NULL,*next=NULL;
-    uint64_t next_switch=UINT64_MAX, lead=(uint64_t)p->config.lead_ms*MS;
-    for (uint32_t i=0;i<count;i++) {
-        uint64_t end=add_sat(t[i].check_latest_ns,(uint64_t)p->config.hold_ms*MS);
-        if (end<f->now_ns || !protective(t[i].prayer)) continue;
-        if (!(f->available_mask&RS3_PRAYER_BIT(t[i].prayer)))
-            return block(p,d,RS3_PRAYER_UNAVAILABLE);
-        uint64_t start=sub_sat(t[i].check_earliest_ns,lead);
-        if (start<=f->now_ns) {
-            if (desired && desired!=t[i].prayer) return block(p,d,RS3_PRAYER_CONFLICT);
-            desired=t[i].prayer;
-            if (!selected || t[i].check_earliest_ns<selected->check_earliest_ns) selected=t+i;
-            uint64_t wake=add_sat(end,1); if (!d->next_wakeup_ns || wake<d->next_wakeup_ns) d->next_wakeup_ns=wake;
-        } else if (start<next_switch) { next_switch=start; next=t+i; }
+
+    /* Select the protection required now, and the next protection window after it. */
+    uint32_t desired_prayer = RS3_PRAYER_UNKNOWN;
+    const rs3_prayer_threat *selected_threat = NULL;
+    const rs3_prayer_threat *next_threat = NULL;
+    uint64_t next_switch_ns = UINT64_MAX;
+    uint64_t lead_ns = milliseconds_to_ns(planner->config.lead_ms);
+    for (uint32_t index = 0; index < threat_count; index++)
+    {
+        const rs3_prayer_threat *threat = &threats[index];
+        uint64_t window_end_ns = protection_end_ns(planner, threat);
+        if (window_end_ns < frame->now_ns || !is_protection_prayer(threat->prayer))
+        {
+            continue;
+        }
+        if (!(frame->available_mask & RS3_PRAYER_BIT(threat->prayer)))
+        {
+            return block(planner, decision, RS3_PRAYER_UNAVAILABLE);
+        }
+        uint64_t switch_at_ns = saturating_subtract(threat->check_earliest_ns, lead_ns);
+        if (switch_at_ns <= frame->now_ns)
+        {
+            if (desired_prayer != RS3_PRAYER_UNKNOWN && desired_prayer != threat->prayer)
+            {
+                return block(planner, decision, RS3_PRAYER_CONFLICT);
+            }
+            desired_prayer = threat->prayer;
+            if (selected_threat == NULL ||
+                threat->check_earliest_ns < selected_threat->check_earliest_ns)
+            {
+                selected_threat = threat;
+            }
+            uint64_t wakeup_ns = saturating_add(window_end_ns, 1);
+            if (decision->next_wakeup_ns == 0 || wakeup_ns < decision->next_wakeup_ns)
+            {
+                decision->next_wakeup_ns = wakeup_ns;
+            }
+        }
+        else if (switch_at_ns < next_switch_ns)
+        {
+            next_switch_ns = switch_at_ns;
+            next_threat = threat;
+        }
     }
-    if (!desired) {
-        uint64_t safe_until=sub_sat(f->coverage_until_ns,lead);
-        if (next_switch<safe_until) safe_until=next_switch;
-        uint64_t gap=(uint64_t)p->config.min_idle_ms*MS;
-        if (f->active_prayer!=RS3_PRAYER_SOUL_SPLIT) gap=add_sat(gap,(uint64_t)p->config.ack_timeout_ms*MS);
-        if (p->config.idle_prayer==RS3_PRAYER_SOUL_SPLIT &&
-            (f->available_mask&RS3_PRAYER_BIT(RS3_PRAYER_SOUL_SPLIT)) &&
-            (f->flags&RS3_PRAYER_COVERAGE_KNOWN) && safe_until>f->now_ns && safe_until-f->now_ns>=gap) {
-            desired=RS3_PRAYER_SOUL_SPLIT; d->next_wakeup_ns=safe_until;
-        } else if (next && (f->flags&RS3_PRAYER_COVERAGE_KNOWN) &&
-                   f->coverage_until_ns>=next->check_earliest_ns) {
+
+    if (desired_prayer == RS3_PRAYER_UNKNOWN)
+    {
+        /* No protection is due: consider the idle prayer within complete coverage. */
+        uint64_t safe_until_ns = saturating_subtract(frame->coverage_until_ns, lead_ns);
+        if (next_switch_ns < safe_until_ns)
+        {
+            safe_until_ns = next_switch_ns;
+        }
+        uint64_t required_gap_ns = milliseconds_to_ns(planner->config.min_idle_ms);
+        if (frame->active_prayer != RS3_PRAYER_SOUL_SPLIT)
+        {
+            required_gap_ns =
+                saturating_add(required_gap_ns, milliseconds_to_ns(planner->config.ack_timeout_ms));
+        }
+        int coverage_known = (frame->flags & RS3_PRAYER_COVERAGE_KNOWN) != 0;
+        int soul_split_fits = planner->config.idle_prayer == RS3_PRAYER_SOUL_SPLIT &&
+                              (frame->available_mask & RS3_PRAYER_BIT(RS3_PRAYER_SOUL_SPLIT)) &&
+                              coverage_known && safe_until_ns > frame->now_ns &&
+                              safe_until_ns - frame->now_ns >= required_gap_ns;
+        if (soul_split_fits)
+        {
+            desired_prayer = RS3_PRAYER_SOUL_SPLIT;
+            decision->next_wakeup_ns = safe_until_ns;
+        }
+        else if (next_threat != NULL && coverage_known &&
+                 frame->coverage_until_ns >= next_threat->check_earliest_ns)
+        {
             /* An insufficient healing gap favours early protection. */
-            desired=next->prayer; selected=next; d->next_wakeup_ns=next_switch;
-        } else {
-            p->proposal=0; d->action=RS3_PRAYER_HOLD; d->prayer=f->active_prayer;
-            d->reason=RS3_PRAYER_INCOMPLETE_COVERAGE; return RS3_OK;
+            desired_prayer = next_threat->prayer;
+            selected_threat = next_threat;
+            decision->next_wakeup_ns = next_switch_ns;
+        }
+        else
+        {
+            planner->proposed_command_id = 0;
+            decision->action = RS3_PRAYER_HOLD;
+            decision->prayer = frame->active_prayer;
+            decision->reason = RS3_PRAYER_INCOMPLETE_COVERAGE;
+            return RS3_OK;
         }
     }
-    d->prayer=desired;
-    if (selected) {
-        d->threat_id=selected->event_id; d->check_earliest_ns=selected->check_earliest_ns;
-        d->check_latest_ns=selected->check_latest_ns;
-        if (f->now_ns>=selected->check_earliest_ns && f->active_prayer!=desired) {
-            d->flags|=RS3_PRAYER_DEADLINE_MISSED; d->reason=RS3_PRAYER_LATE;
+
+    decision->prayer = desired_prayer;
+    if (selected_threat != NULL)
+    {
+        decision->threat_id = selected_threat->event_id;
+        decision->check_earliest_ns = selected_threat->check_earliest_ns;
+        decision->check_latest_ns = selected_threat->check_latest_ns;
+        if (frame->now_ns >= selected_threat->check_earliest_ns &&
+            frame->active_prayer != desired_prayer)
+        {
+            decision->flags |= RS3_PRAYER_DEADLINE_MISSED;
+            decision->reason = RS3_PRAYER_LATE;
         }
     }
-    if (desired==f->active_prayer) { p->proposal=0; d->action=RS3_PRAYER_HOLD; return RS3_OK; }
-    if (!p->proposal || p->proposed_prayer!=desired) {
-        if (p->serial==UINT64_MAX) return block(p,d,RS3_PRAYER_BAD_FRAME);
-        p->proposal=++p->serial; p->proposed_prayer=desired;
+    if (desired_prayer == frame->active_prayer)
+    {
+        planner->proposed_command_id = 0;
+        decision->action = RS3_PRAYER_HOLD;
+        return RS3_OK;
     }
-    p->proposed_at=f->now_ns; d->command_id=p->proposal; d->action=RS3_PRAYER_SET;
+    if (planner->proposed_command_id == 0 || planner->proposed_prayer != desired_prayer)
+    {
+        if (planner->last_command_id == UINT64_MAX)
+        {
+            return block(planner, decision, RS3_PRAYER_BAD_FRAME);
+        }
+        planner->proposed_command_id = ++planner->last_command_id;
+        planner->proposed_prayer = desired_prayer;
+    }
+    planner->proposed_at_ns = frame->now_ns;
+    decision->command_id = planner->proposed_command_id;
+    decision->action = RS3_PRAYER_SET;
     return RS3_OK;
 }

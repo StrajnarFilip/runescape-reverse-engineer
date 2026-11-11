@@ -21,7 +21,9 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
 ## Project layout and checks
 
 - Native library: `src/` and `include/rs3/`. Python tracker and bindings:
-  `python/rs3_reader/`. Shared client profiles: `profiles/`.
+  the `rs3_reader` package in `python/rs3_reader/` (run with
+  `python -m rs3_reader.<module>` and `PYTHONPATH=python`). Shared client
+  profiles: `profiles/`. `docs/development.rst` maps every module.
 - Our research scripts: `work/*.py`, `work/decompile.ps1`,
   `work/ghidra_scripts/ExportFunctions.java`. Generated research output is ignored.
 - The sole runtime acquisition engine is a Windows x64 C11 DLL. The Python UI
@@ -41,6 +43,10 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
 - Never report unmapped NPC HP, hitsplats, Telos animations or phases as confirmed.
 - Use English throughout source code, comments, UI labels, documentation and
   examples. The user explicitly requested this project-wide language change.
+- Code style requested by the user: Allman braces and explicit variable names.
+  Format C and Java with the repository `.clang-format` (`clang-format -i`);
+  Python follows PEP 8 with 100 columns (`pyproject.toml`). Name offsets and
+  limits instead of using magic numbers, and document non-static functions.
 - Work autonomously; ask only when input is needed for controlled in-game validation.
 - The requested Telos combat style is melee. Research notes and source references
   are in `docs/telos-melee-research.rst`. Keep guide-derived rules
@@ -53,13 +59,29 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
   The intended account now has Soul Split; all four configured curses and six
   Ctrl+F3/Ctrl+F4 switches were observed on 2026-11-10. Preserve Ctrl+F1 Magic, Ctrl+F2 Ranged,
   Ctrl+F3 Soul Split, Ctrl+F4 Melee bindings in `profiles/prayer_flick.json`.
+- Manual Devotion calibration uses the user's Alt+G binding. Capture it with
+  `work/capture_prayer.py --record-devotion-alt-g`; native cooldown evidence is
+  separate from the still-unmapped active buff. The 2026-11-11 clean opening
+  produced three 1-damage autos, including Melee keys 228ms and 93ms after cues.
+  See `docs/validation/telos-prayer-check-2026-11-11.json`. Successful cases alone
+  do not establish the latest reliable switch time or validate the automatic trial.
 - Raw NPC animation IDs, overhead flags and original-profile player hitmarks
   are available. Two 300% phase-1 captures associate 28929 with melee autos,
   28931 with tendrils, 28938 with uppercut and 28935 with Hold Still. See
   `docs/validation/telos-prayer-calibration-2026-11-10.json`. Other phases/styles,
   prayer-check deadlines and complete incoming-attack coverage remain
   uncalibrated. The observer must not present itself as a live flicker.
-  Do not send automatic prayer toggles on unvalidated or stale timing evidence.
+  Do not send production prayer toggles on unvalidated or stale timing evidence.
+  On 2026-11-11 the user explicitly authorized bounded automatic calibration
+  instead of manual subsecond switches. `work/calibrate_prayer_check.py` may
+  perform one test return from Soul Split after a one-damage Devotion control,
+  using fresh observations and the existing foreground C input checks. The
+  player starts the encounter and casts Devotion. Keep the regular observer
+  and trial validation flags unchanged; calibration is not a validated flicker.
+  Completed clean experiments observed a protected return at 359ms after the
+  auto cue (300%) and late returns at 408ms/452ms (2000%) and 516ms (300%).
+  These are client-input observations, not a universal server deadline. Enrage
+  labels are metadata and do not drive the isolated ordinary-auto delay.
 - Target Telos range: 300%-4000% enrage. The intended Soul Split account is ready;
-  only 300% phase 1 has been captured. Key-to-client-overhead timing and
+  phase-1 opening autos have been captured at 300% and 2000%. Key-to-client-overhead timing and
   cue-to-hitmark timing do not establish server protection deadlines.

@@ -88,21 +88,25 @@ its runtime PATH. Use a matching Windows x64 compiler and import library.
 Consumers
 ---------
 
-Python (standard library only)::
+Python (standard library only). The ``rs3_reader`` package lives in ``python/``;
+put that directory on the import path, then run its modules with ``-m``::
 
+    $env:PYTHONPATH = "python"
     python examples/read.py
-    python python/rs3_reader/reader.py --native-hz 500 --hz 20 --duration 10 --raw
-    python python/rs3_reader/tracker.py
+    python -m rs3_reader.jsonl_stream --native-hz 500 --hz 20 --duration 10 --raw
+    python -m rs3_reader.tracker
 
-``python/rs3_reader/native.py`` is the reusable typed ctypes binding.
+``rs3_reader.native`` is the reusable typed ctypes binding. It mirrors every
+public structure and the enumerations (``Status``, ``Reason``, ``NPCFlags`` and
+so on), so consumers never need to repeat magic numbers.
 ``Reader(worker_hz=100)`` starts the native collector; ``worker_hz=0`` samples
 synchronously. ``reader.sample()`` returns typed info/player/NPC/hit buffers.
 They are views of reusable storage: copy values that must survive another sample.
 ``reader.drain_events()`` returns owned event copies and an overflow count.
 Use a context manager or ``close()``. Each Reader must be confined to one Python
 thread. ctypes CDLL calls release the GIL; the native worker does not acquire it.
-The adapter in ``native_telemetry.py`` preserves the previous JSON/tracker schema
-and adds ``backend: c``, native read metrics, sample sequence, age and event gaps.
+``rs3_reader.telemetry`` converts snapshots into the JSON/tracker schema and adds
+``backend: c``, native read metrics, sample sequence, age and event gaps.
 Existing profile and executable hashes are checked before returning game data.
 Both pinned executable profiles provide combat, inventory and ability telemetry.
 The ``6ada3f59-1a86000`` profile also provides player tiles.
@@ -281,18 +285,31 @@ Logout state and Telos classification remain separate, documented research gaps.
 Validation
 ----------
 
-``tests/test_native.c`` uses private fake-memory fixtures by including the
-implementation, without exporting a testing/injection interface. Eleven groups test
-decoding, sparse sentinels/int64, profile mismatch, cyclic chains, unknown/zero HP,
-expiry/scheduling/wrap, torn rings, world/list transitions, NPC reuse, deduplication,
-buffer errors, two consumer cursors, overflow, failed-frame invalidation, missing
-process and worker lifecycle.
-The inventory groups additionally cover moves, dose changes, quantity/replacement,
-duplicate ambiguity, gear switches/defenders, individual timers, catalog validation
-and item-event queue gaps. There are 30 Python tests in the combined suite,
-including the independently added player-tile tests.
-Assertions remain enabled in optimized test builds. Python tests verify the actual
-DLL ABI/lifecycle and preserve observation identity/time through UI coalescing.
+The native tests in ``tests/native/`` link the private library objects and serve
+every remote read from deterministic fake-memory fixtures (``fixture.c``), without
+exporting a testing or injection interface. Each area is its own CTest executable:
+
+* ``native_player``: decoding, sparse sentinels and int64 values, profile
+  mismatch and cyclic chains;
+* ``native_npcs``: unknown/zero HP, expiry/scheduling/wrap, torn rings,
+  world/list transitions, NPC reuse, deduplication, buffer errors, two
+  consumer cursors and queue overflow;
+* ``native_lifecycle``: failed-frame invalidation, missing process, worker
+  lifecycle and the Compatibility Mode player tile;
+* ``native_inventory``: moves, dose changes, quantity/replacement, duplicate
+  ambiguity, gear switches/defenders, individual timers, the direct item index,
+  catalog validation and item-event queue gaps;
+* ``native_combat``: overhead flags, raw animations, scene epochs and NPC action
+  events;
+* ``native_player_hits``: local player actor resolution through the context
+  override and the player table, torn and invalid rings, attachment and gap
+  baselines, and player hit queue overflow;
+* ``native_input``: minimap projection, input guards and key chords;
+* ``native_prayer_planner``: deterministic prayer planner replays.
+
+Assertions remain enabled in optimized test builds. The Python suite in
+``tests/python/`` verifies the actual DLL ABI and lifecycle, the planner binding,
+the cache decoder, the reference decoder and the hit history used by the tracker.
 
 ``work/benchmark_native.py`` compares the C adapter to Python, bracketed by two
 Python reads to exclude changing scenes. The compact ``validation/native-validation.json``
@@ -320,9 +337,10 @@ matches; ambiguity is flagged. No client-side unique serial number is assumed.
 Events retain their original process identity/time through slower consumer polls.
 
 The C context tries ``rs3_catalog.bin`` beside its loaded module. The standard
-build generates it from the local cache in SQLite read-only mode; use
-``--cache-root`` to select another installation and ``--skip-catalog`` to keep
-an existing catalog. ``rs3_load_catalog(context, utf8_path)`` loads a selected file
+build generates it from the local cache in SQLite read-only mode when the cache is
+installed; use ``-DRS3_CACHE_ROOT`` to select another installation and
+``-DRS3_BUILD_CATALOG=OFF`` to keep an existing catalog. A missing file is reported
+in ``rs3_inventory_info.message``. ``rs3_load_catalog(context, utf8_path)`` loads a selected file
 while the worker is stopped. A failed reload retains an already valid catalog.
 Missing metadata does not prevent raw item IDs/quantities/slots from being read.
 Names/families/ability definitions remain explicitly unavailable. Generated

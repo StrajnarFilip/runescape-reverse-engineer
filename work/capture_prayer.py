@@ -1,82 +1,189 @@
-"""Record C-collected prayer flags, NPC action events and raw animations."""
+"""Record C-collected prayer flags, NPC actions, local hitmarks and prayer keys. Sends no input."""
+
 import argparse
 import json
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'python' / 'rs3_reader'))
-from native import NPCActionEvent, Reader
-from native_telemetry import combat_record, hit_record
-from capture_local_combat import PrayerKeys
+from workspace import add_import_paths
+
+add_import_paths(package=True)
+
+from capture_local_combat import PrayerKeys, load_bindings  # noqa: E402
+from rs3_reader.native import (  # noqa: E402
+    AbilityFlags,
+    NPCActionEvent,
+    Reader,
+    Variable,
+    decode_text,
+)
+from rs3_reader.telemetry import combat_record, hit_record  # noqa: E402
+
+POLL_SECONDS = 0.002
+HEARTBEAT_SECONDS = 1
+DEVOTION_STRUCT_ID = 25028
+VK_G = 0x47
+ALT_MODIFIER = 4
+
+
+def animation_records(reader, info, npcs):
+    return [
+        {
+            "instance_id": npc.instance_id,
+            "runtime_id": npc.runtime_id,
+            "config_id": npc.config_id,
+            "name": decode_text(npc.name),
+            "valid": bool(animation.valid),
+            "action_sequence": animation.action_sequence if animation.valid else None,
+            "movement_sequence": animation.movement_sequence if animation.valid else None,
+        }
+        for npc, animation in zip(npcs[: info.npc_count], reader.npc_animations[: info.npc_count])
+    ]
+
+
+def action_event_record(event):
+    return {field_name: getattr(event, field_name) for field_name, _ in NPCActionEvent._fields_}
+
+
+def player_hit_event_record(event):
+    record = {
+        field_name: getattr(event, field_name)
+        for field_name, _ in event._fields_
+        if field_name != "hit"
+    }
+    record["hit"] = hit_record(event.hit)
+    return record
+
+
+def player_hitmarks_record(reader):
+    info = reader.player_hit_info
+    return {
+        "status": info.status,
+        "reason": info.reason,
+        "player_index": info.player_index,
+        "instance_id": info.instance_id,
+        "hits": [hit_record(hit) for hit in reader.player_hits[: info.hit_count]],
+    }
+
+
+def devotion_cooldown_record(reader):
+    """Return native cast-timer evidence, without inferring an active Devotion buff."""
+    for ability in reader.abilities[: reader.inventory_info.ability_count]:
+        if ability.struct_id == DEVOTION_STRUCT_ID:
+            valid = bool(ability.flags & AbilityFlags.TIMER_VALID)
+            return {
+                "struct_id": ability.struct_id,
+                "timer_valid": valid,
+                "reason": ability.reason,
+                "start_tick": ability.start_tick if valid else None,
+                "end_tick": ability.end_tick if valid else None,
+                "buff_active": None,
+            }
+    return {"struct_id": DEVOTION_STRUCT_ID, "timer_valid": False, "buff_active": None}
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--pid', type=int)
-    parser.add_argument('--duration', type=float, default=300)
-    parser.add_argument('--output', type=Path, required=True)
-    args = parser.parse_args()
-    if args.duration <= 0:
-        parser.error('duration must be positive')
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with Reader(pid=args.pid, worker_hz=100) as reader, args.output.open('w', encoding='utf-8') as out:
-        print('Recording native prayer/animation observations; no game input.', file=sys.stderr, flush=True)
-        until = time.monotonic() + args.duration
-        settings = json.loads((Path(__file__).resolve().parents[1] / 'profiles' / 'prayer_flick.json').read_text())
-        keys = PrayerKeys(reader.info.pid or args.pid, settings['bindings'])
-        previous, last_write, written, previous_sequence = None, 0, 0, 0
-        while time.monotonic() < until:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--pid", type=int)
+    parser.add_argument("--duration", type=float, default=300)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--record-devotion-alt-g",
+        action="store_true",
+        help="Also observe the user's manual Alt+G Devotion binding in the game window",
+    )
+    arguments = parser.parse_args()
+    if arguments.duration <= 0:
+        parser.error("duration must be positive")
+    arguments.output.parent.mkdir(parents=True, exist_ok=True)
+
+    with (
+        Reader(pid=arguments.pid, worker_hz=100) as reader,
+        arguments.output.open("x", encoding="utf-8") as output,
+    ):
+        print(
+            "Recording native prayer/animation observations; no game input.",
+            file=sys.stderr,
+            flush=True,
+        )
+        deadline = time.monotonic() + arguments.duration
+        keys = PrayerKeys(reader.info.pid or arguments.pid, load_bindings())
+        ability_keys = None
+        if arguments.record_devotion_alt_g:
+            ability_keys = PrayerKeys(
+                reader.info.pid or arguments.pid,
+                {"devotion": {"virtual_key": VK_G, "modifiers": ALT_MODIFIER}},
+                additional_virtual_keys=(VK_G,),
+            )
+        previous_signature, last_write, written_rows, previous_sequence = None, 0, 0, 0
+        last_sample_ns = 0
+        previous_sample_ns = None
+        while time.monotonic() < deadline:
             info, player, npcs, _ = reader.sample()
+            if info.sequence != previous_sequence:
+                previous_sample_ns = last_sample_ns or None
+                last_sample_ns = info.monotonic_ns
             actions, lost = reader.drain_npc_action_events()
-            hits, hit_lost = reader.drain_player_hit_events()
+            hits, hits_lost = reader.drain_player_hit_events()
             if info.pid:
                 keys.pid = info.pid
-            presses = keys.sample(reader.lib.rs3_monotonic_ns)
-            if info.sequence == previous_sequence and not actions and not lost and not hits and not hit_lost and not presses:
-                time.sleep(.002)
+            presses = keys.sample(reader.monotonic_ns)
+            ability_presses = []
+            if ability_keys is not None:
+                ability_keys.pid = info.pid
+                for press in ability_keys.sample(reader.monotonic_ns):
+                    press["ability"] = press.pop("prayer")
+                    ability_presses.append(press)
+            new_observations = actions or lost or hits or hits_lost or presses or ability_presses
+            if info.sequence == previous_sequence and not new_observations:
+                time.sleep(POLL_SECONDS)
                 continue
             previous_sequence = info.sequence
-            animations = [{'instance_id': n.instance_id, 'runtime_id': n.runtime_id,
-                           'config_id': n.config_id, 'name': n.name.decode('utf-8'),
-                           'valid': bool(a.valid), 'action_sequence': a.action_sequence if a.valid else None,
-                           'movement_sequence': a.movement_sequence if a.valid else None}
-                          for n, a in zip(npcs[:info.npc_count], reader.animations[:info.npc_count])]
-            payload = {'status': info.status, 'pid': info.pid,
-                       'process_creation_time': info.process_creation_time,
-                       'combat': combat_record(reader), 'animations': animations,
-                       'hp': player.raw_variables[0] if player.valid_variables & 1 else None,
-                       'hp_changed_ns': player.hp_changed_ns,
-                       'prayer_raw': player.raw_variables[2] if player.valid_variables & 4 else None,
-                       'telos_raw': player.raw_variables[9] if player.valid_variables & (1 << 9) else None,
-                       'position': ([reader.position.x, reader.position.y, reader.position.plane]
-                                    if reader.position.valid else None),
-                       'player_hitmarks': {
-                           'status': reader.player_hit_info.status, 'reason': reader.player_hit_info.reason,
-                           'player_index': reader.player_hit_info.player_index,
-                           'instance_id': reader.player_hit_info.instance_id,
-                           'hits': [hit_record(h) for h in reader.player_hits[:reader.player_hit_info.hit_count]]}}
-            key = json.dumps(payload, sort_keys=True)
+            tile = reader.position
+            payload = {
+                "status": info.status,
+                "pid": info.pid,
+                "process_creation_time": info.process_creation_time,
+                "combat": combat_record(reader),
+                "animations": animation_records(reader, info, npcs),
+                "hp": player.variable(Variable.HEALTH),
+                "hp_changed_ns": player.hp_changed_ns,
+                "prayer_raw": player.variable(Variable.PRAYER_PACKED),
+                "telos_raw": player.variable(Variable.TELOS_PACKED),
+                "position": [tile.x, tile.y, tile.plane] if tile.valid else None,
+                "player_hitmarks": player_hitmarks_record(reader),
+                "devotion_cooldown": devotion_cooldown_record(reader),
+            }
+            signature = json.dumps(payload, sort_keys=True)
             now = time.monotonic()
-            if actions or lost or hits or hit_lost or presses or key != previous or now-last_write >= 1:
-                payload.update(sequence=info.sequence, observed_ns=info.monotonic_ns,
-                               timestamp_ns=info.timestamp_ns, client_logic_tick=info.logic_tick,
-                               sample_duration_ns=info.sample_duration_ns,
-                               executable_sha256=info.executable_sha256.decode('ascii'),
-                               npc_action_events=[{name: getattr(event, name) for name, _ in NPCActionEvent._fields_}
-                                                  for event in actions],
-                               npc_action_events_lost=lost,
-                               manual_prayer_keys=presses,
-                               player_hit_events=[dict({name: getattr(event, name) for name, _ in event._fields_ if name != 'hit'},
-                                                       hit=hit_record(event.hit)) for event in hits],
-                               player_hit_events_lost=hit_lost)
-                out.write(json.dumps(payload) + '\n')
-                out.flush()
-                written += 1
-                previous, last_write = key, now
-            time.sleep(.002)
-        print(f'Wrote {written} changed/heartbeat observations to {args.output}', file=sys.stderr)
+            changed = new_observations or signature != previous_signature
+            if changed or now - last_write >= HEARTBEAT_SECONDS:
+                payload.update(
+                    sequence=info.sequence,
+                    observed_ns=info.monotonic_ns,
+                    previous_sample_ns=previous_sample_ns or None,
+                    timestamp_ns=info.timestamp_ns,
+                    client_logic_tick=info.logic_tick,
+                    sample_duration_ns=info.sample_duration_ns,
+                    executable_sha256=info.executable_sha256.decode("ascii"),
+                    npc_action_events=[action_event_record(event) for event in actions],
+                    npc_action_events_lost=lost,
+                    manual_prayer_keys=presses,
+                    manual_ability_keys=ability_presses,
+                    player_hit_events=[player_hit_event_record(event) for event in hits],
+                    player_hit_events_lost=hits_lost,
+                )
+                output.write(json.dumps(payload) + "\n")
+                output.flush()
+                written_rows += 1
+                previous_signature, last_write = signature, now
+            time.sleep(POLL_SECONDS)
+        print(
+            f"Wrote {written_rows} changed/heartbeat observations to {arguments.output}",
+            file=sys.stderr,
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

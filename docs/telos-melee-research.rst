@@ -234,7 +234,7 @@ These steps do not establish live recognition of Telos mechanics or complete
 castability. Unknown/stale observations must remain unknown. No gameplay action
 layer or changes to acquisition code were added in this research task.
 
-The repository's ``blindfold-telos.md`` contains separate notes about a 2022
+The repository's ``docs/blindfold-telos.md`` contains separate notes about a 2022
 clear. Treat that as historical encounter context, not a current melee rotation.
 
 Sources

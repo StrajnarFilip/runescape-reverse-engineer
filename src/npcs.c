@@ -1,213 +1,673 @@
-/* Decode and commit observations from the loaded NPC registry. */
-#include "internal.h"
+/* Loaded NPC registry: identities, health, hit mark rings and hit events. */
+#include "npcs.h"
 
-#include <stdlib.h>
+#include "decode_utils.h"
+#include "event_ring.h"
+#include "memory.h"
+#include "npc_animation.h"
 
-#include "profile_generated.h"
+/* NPC manager layout. */
+#define NPC_MANAGER_TABLE_OFFSET 16u /**< Bucket pointer array, followed by the bucket count. */
+#define MAX_NPC_BUCKETS          1000000u
 
-#define ACTOR_BYTES (P_NPC_HEALTH_MAX_OFFSET + 4u)
+/* Bucket node layout: runtime ID, actor pointer and next pointer. */
+#define NPC_NODE_BYTES             32u
+#define NPC_NODE_RUNTIME_ID_OFFSET 0u
+#define NPC_NODE_ACTOR_OFFSET      16u
+#define NPC_NODE_NEXT_OFFSET       24u
+#define MAX_NPC_CHAIN_LENGTH       1024u
 
-void reset_identities(rs3_context *c) {
-    memset(c->identities,0,sizeof(npc_identity)*RS3_MAX_NPCS);
-    memset(c->identity_index,0,sizeof c->identity_index); c->npc_context=c->npc_state=0;
+/* Actor fields outside the profile. */
+#define NPC_ACTOR_RUNTIME_ID_OFFSET 0x88u
+#define NPC_CONFIG_ID_OFFSET        8u
+#define MAX_NPC_CONFIG_ID           1000000
+#define MAX_NPC_HEALTH              0xffffff
+
+/* Client string object: 24 bytes. The final byte is a tag. */
+#define CLIENT_STRING_BYTES           24u
+#define CLIENT_STRING_INLINE_CAPACITY 23u
+#define CLIENT_STRING_HEAP_FLAG       0x80u
+#define CLIENT_STRING_DATA_OFFSET     0u
+#define CLIENT_STRING_LENGTH_OFFSET   8u
+#define MAX_NPC_NAME_BYTES            512u
+
+/* Hit mark ring header and record layout. */
+#define HIT_RING_HEADER_BYTES              40u
+#define HIT_RING_CAPACITY_OFFSET           4u
+#define HIT_RING_COUNT_OFFSET              24u
+#define HIT_RING_DATA_OFFSET               32u
+#define HIT_RECORD_TYPE_OFFSET             0u
+#define HIT_RECORD_AMOUNT_OFFSET           4u
+#define HIT_RECORD_END_TICK_OFFSET         8u
+#define HIT_RECORD_SECONDARY_TYPE_OFFSET   12u
+#define HIT_RECORD_SECONDARY_AMOUNT_OFFSET 16u
+#define HIT_RECORD_DURATION_OFFSET         20u
+#define MAX_HIT_TYPE_ID                    1000000
+#define MAX_HIT_DURATION_TICKS             100000
+
+/** Bitmap with one bit per 16-bit runtime ID. */
+typedef struct runtime_id_set
+{
+    unsigned char bits[NPC_RUNTIME_ID_COUNT / 8];
+} runtime_id_set;
+
+static int runtime_id_set_contains(const runtime_id_set *set, uint32_t runtime_id)
+{
+    return (set->bits[runtime_id / 8] & (1u << (runtime_id % 8))) != 0;
 }
-static int npc_name(rs3_context *c,uint64_t actor,const unsigned char *b,rs3_npc *npc) {
-    // The high bit of the final byte selects a pointer-backed string.
-    // Inline strings store the unused byte count in that tag.
-    const unsigned char *s=b+P_NPC_NAME_OFFSET; uint32_t tag=s[23];
-    uint64_t n=tag&128?u64(s+8):23-tag, data=u64(s);
-    if (n>512) return fail(c,RS3_READ_FAILED,"Invalid NPC name length");
-    if (!n) return 1;
-    if (!(tag&128)) memcpy(npc->name,s,(size_t)n);
-    else if (data>=actor && data-actor<=ACTOR_BYTES && n<=ACTOR_BYTES-(data-actor)) memcpy(npc->name,b+(size_t)(data-actor),(size_t)n);
-    else if (!rd(c,data,npc->name,(size_t)n)) return 0;
-    for (uint32_t i=0;i<n;i++) if ((unsigned char)npc->name[i]<32) return fail(c,RS3_READ_FAILED,"Invalid NPC name");
-    if (!valid_utf8(npc->name,(uint32_t)n)) return fail(c,RS3_READ_FAILED,"Invalid NPC name encoding");
-    npc->name[n]=0; npc->name_length=(uint32_t)n; npc->flags|=RS3_NPC_NAME; return 1;
+
+static void runtime_id_set_add(runtime_id_set *set, uint32_t runtime_id)
+{
+    set->bits[runtime_id / 8] |= (unsigned char)(1u << (runtime_id % 8));
 }
-int decode_hit(const unsigned char *b,uint32_t tick,uint32_t slot,rs3_hit *h) {
-    int32_t type=i32(b),amount=i32(b+4),duration=i32(b+20); uint32_t end=u32(b+8);
-    // Skip empty or expired slots. Future hits can still be present in the ring.
-    if (type<0 || duration<=0 || tick_delta(end,tick)<=0) return 0;
-    if (type>1000000 || amount<0 || duration>100000) return -1;
-    memset(h,0,sizeof *h); h->slot=slot; h->type_id=type; h->amount=amount;
-    h->secondary_type_id=i32(b+12); h->secondary_amount=i32(b+16);
-    h->end_tick=end; h->duration_ticks=(uint32_t)duration; h->start_tick=end-(uint32_t)duration;
-    h->state=tick_delta(tick,h->start_tick)>=0?RS3_HIT_ACTIVE:RS3_HIT_SCHEDULED; return 1;
+
+/** Bucket array of the NPC hash table, copied into the context's bucket buffer. */
+typedef struct npc_table
+{
+    uint64_t bucket_count;
+    uint64_t sentinel;
+} npc_table;
+
+void npc_reset_identities(rs3_context *context)
+{
+    npc_tracker *tracker = &context->npcs;
+    memset(tracker->identities, 0, sizeof(npc_identity) * RS3_MAX_NPCS);
+    memset(tracker->identity_slot_by_runtime_id, 0, sizeof tracker->identity_slot_by_runtime_id);
+    tracker->registry_manager = 0;
+    tracker->registry_world_state = 0;
 }
-int read_hitmarks(rs3_context *c,uint64_t ring,uint32_t tick,rs3_hit out[64],uint32_t *out_count) {
-    *out_count=0;
-    if (!ring) return 1;
-    unsigned char header[40],records[64*24],check[64*24],after[16];
-    if (!rd(c,ring,header,sizeof header)) return 0;
-    uint64_t count=u64(header+24),data=u64(header+32); uint32_t capacity=u32(header+4);
-    if (count>capacity || capacity>64 || (count && !data)) return fail(c,RS3_READ_FAILED,"Invalid NPC hitmark ring");
-    if (count && (!rd(c,data,records,(size_t)count*24) || !rd(c,data,check,(size_t)count*24))) return 0;
-    if ((count && memcmp(records,check,(size_t)count*24)) || !rd(c,ring+24,after,16) || memcmp(after,header+24,16))
-        return fail(c,RS3_READ_FAILED,"NPC hitmark ring changed during read");
-    for (uint32_t slot=0;slot<count;slot++) {
-        rs3_hit h; int result=decode_hit(records+slot*24,tick,slot,&h);
-        if (result<0) return fail(c,RS3_READ_FAILED,"Invalid hitmark record");
-        if (result) out[(*out_count)++]=h;
+
+/** Copies the NPC name from the client string object inside the actor bulk copy. */
+static int decode_npc_name(rs3_context *context, uint64_t actor_address,
+                           const unsigned char *actor_bytes, rs3_npc *npc)
+{
+    /*
+     * The high bit of the tag selects a heap-backed string. An inline string
+     * stores the unused byte count in the tag instead.
+     */
+    const unsigned char *string_object = actor_bytes + LAYOUT_NPC_NAME_OFFSET;
+    uint32_t tag = string_object[CLIENT_STRING_BYTES - 1];
+    int heap_backed = (tag & CLIENT_STRING_HEAP_FLAG) != 0;
+    uint64_t length = heap_backed ? decode_u64(string_object + CLIENT_STRING_LENGTH_OFFSET)
+                                  : (uint64_t)(uint32_t)(CLIENT_STRING_INLINE_CAPACITY - tag);
+    uint64_t data_address = decode_u64(string_object + CLIENT_STRING_DATA_OFFSET);
+    if (length > MAX_NPC_NAME_BYTES)
+    {
+        return context_fail(context, RS3_READ_FAILED, "Invalid NPC name length");
+    }
+    if (length == 0)
+    {
+        return 1;
+    }
+
+    size_t name_length = (size_t)length;
+    uint64_t offset_in_actor = data_address - actor_address;
+    int data_inside_bulk_copy = data_address >= actor_address &&
+                                offset_in_actor <= NPC_ACTOR_BYTES &&
+                                name_length <= NPC_ACTOR_BYTES - offset_in_actor;
+    if (!heap_backed)
+    {
+        memcpy(npc->name, string_object, name_length);
+    }
+    else if (data_inside_bulk_copy)
+    {
+        memcpy(npc->name, actor_bytes + (size_t)offset_in_actor, name_length);
+    }
+    else if (!memory_read(context, data_address, npc->name, name_length))
+    {
+        return 0;
+    }
+
+    for (size_t index = 0; index < name_length; index++)
+    {
+        if ((unsigned char)npc->name[index] < 32)
+        {
+            return context_fail(context, RS3_READ_FAILED, "Invalid NPC name");
+        }
+    }
+    if (!is_valid_utf8(npc->name, (uint32_t)name_length))
+    {
+        return context_fail(context, RS3_READ_FAILED, "Invalid NPC name encoding");
+    }
+    npc->name[name_length] = '\0';
+    npc->name_length = (uint32_t)name_length;
+    npc->flags |= RS3_NPC_NAME;
+    return 1;
+}
+
+hit_decode_result npc_decode_hit(const unsigned char *record, uint32_t logic_tick, uint32_t slot,
+                                 rs3_hit *hit)
+{
+    int32_t type_id = decode_i32(record + HIT_RECORD_TYPE_OFFSET);
+    int32_t amount = decode_i32(record + HIT_RECORD_AMOUNT_OFFSET);
+    int32_t duration_ticks = decode_i32(record + HIT_RECORD_DURATION_OFFSET);
+    uint32_t end_tick = decode_u32(record + HIT_RECORD_END_TICK_OFFSET);
+
+    /* Skip empty or expired slots. Future hits can still be present in the ring. */
+    if (type_id < 0 || duration_ticks <= 0 || tick_difference(end_tick, logic_tick) <= 0)
+    {
+        return HIT_ABSENT;
+    }
+    if (type_id > MAX_HIT_TYPE_ID || amount < 0 || duration_ticks > MAX_HIT_DURATION_TICKS)
+    {
+        return HIT_INVALID;
+    }
+
+    memset(hit, 0, sizeof *hit);
+    hit->slot = slot;
+    hit->type_id = type_id;
+    hit->amount = amount;
+    hit->secondary_type_id = decode_i32(record + HIT_RECORD_SECONDARY_TYPE_OFFSET);
+    hit->secondary_amount = decode_i32(record + HIT_RECORD_SECONDARY_AMOUNT_OFFSET);
+    hit->end_tick = end_tick;
+    hit->duration_ticks = (uint32_t)duration_ticks;
+    hit->start_tick = end_tick - (uint32_t)duration_ticks;
+    hit->state =
+        tick_difference(logic_tick, hit->start_tick) >= 0 ? RS3_HIT_ACTIVE : RS3_HIT_SCHEDULED;
+    return HIT_DECODED;
+}
+
+int npc_read_hit_ring(rs3_context *context, uint64_t ring_address, uint32_t logic_tick,
+                      rs3_hit hits[MAX_HITS_PER_RING], uint32_t *hit_count)
+{
+    *hit_count = 0;
+    if (ring_address == 0)
+    {
+        return 1;
+    }
+    unsigned char header[HIT_RING_HEADER_BYTES];
+    unsigned char records[MAX_HITS_PER_RING * HIT_RECORD_BYTES];
+    unsigned char records_again[MAX_HITS_PER_RING * HIT_RECORD_BYTES];
+    unsigned char count_and_data_again[16];
+    if (!memory_read(context, ring_address, header, sizeof header))
+    {
+        return 0;
+    }
+    uint64_t record_count = decode_u64(header + HIT_RING_COUNT_OFFSET);
+    uint64_t record_data = decode_u64(header + HIT_RING_DATA_OFFSET);
+    uint32_t ring_capacity = decode_u32(header + HIT_RING_CAPACITY_OFFSET);
+    if (record_count > ring_capacity || ring_capacity > MAX_HITS_PER_RING ||
+        (record_count != 0 && record_data == 0))
+    {
+        return context_fail(context, RS3_READ_FAILED, "Invalid hitmark ring");
+    }
+
+    /* Read the records twice and the header tail again: a torn ring is never a hit. */
+    size_t record_bytes = (size_t)record_count * HIT_RECORD_BYTES;
+    if (record_count != 0 && (!memory_read(context, record_data, records, record_bytes) ||
+                              !memory_read(context, record_data, records_again, record_bytes)))
+    {
+        return 0;
+    }
+    if ((record_count != 0 && memcmp(records, records_again, record_bytes) != 0) ||
+        !memory_read(context, ring_address + HIT_RING_COUNT_OFFSET, count_and_data_again,
+                     sizeof count_and_data_again) ||
+        memcmp(count_and_data_again, header + HIT_RING_COUNT_OFFSET, sizeof count_and_data_again) !=
+            0)
+    {
+        return context_fail(context, RS3_READ_FAILED, "Hitmark ring changed during read");
+    }
+
+    for (uint32_t slot = 0; slot < record_count; slot++)
+    {
+        hit_decode_result result =
+            npc_decode_hit(records + slot * HIT_RECORD_BYTES, logic_tick, slot, &hits[*hit_count]);
+        if (result == HIT_INVALID)
+        {
+            return context_fail(context, RS3_READ_FAILED, "Invalid hitmark record");
+        }
+        if (result == HIT_DECODED)
+        {
+            (*hit_count)++;
+        }
     }
     return 1;
 }
-static int npc_hits(rs3_context *c,uint64_t ring,uint32_t tick,rs3_snapshot *s,rs3_npc *npc) {
-    rs3_hit hits[64]; uint32_t count;
-    if (!read_hitmarks(c,ring,tick,hits,&count)) return 0;
-    memcpy(s->hits+s->info.hit_count,hits,count*sizeof *hits);
-    s->info.hit_count+=count; npc->hit_count=count; return 1;
+
+/** Appends the NPC's current hit records to the snapshot hit array. */
+static int decode_npc_hits(rs3_context *context, uint64_t ring_address, rs3_snapshot *snapshot,
+                           rs3_npc *npc)
+{
+    rs3_hit hits[MAX_HITS_PER_RING];
+    uint32_t hit_count;
+    if (!npc_read_hit_ring(context, ring_address, snapshot->info.logic_tick, hits, &hit_count))
+    {
+        return 0;
+    }
+    memcpy(&snapshot->hits[snapshot->info.hit_count], hits, hit_count * sizeof hits[0]);
+    snapshot->info.hit_count += hit_count;
+    npc->hit_count = hit_count;
+    return 1;
 }
-static int npc_node(rs3_context *c,uint64_t table,uint64_t count,uint64_t sentinel,uint32_t uid,uint64_t *address,unsigned char out[32]) {
-    uint64_t node=c->buckets[uid%count],visited[1024]; unsigned n=0;
-    (void)table;
-    while (node && node!=sentinel) {
-        if (n==1024) return fail(c,RS3_READ_FAILED,"NPC bucket chain exceeds its bound");
-        for (unsigned j=0;j<n;j++) if (visited[j]==node) return fail(c,RS3_READ_FAILED,"NPC bucket chain cycle");
-        visited[n++]=node;
-        if (!rd(c,node,out,32)) return 0;
-        if (u32(out)==uid) { *address=node; return 1; }
-        node=u64(out+24);
-    }
-    return fail(c,RS3_READ_FAILED,"NPC left the registry");
-}
-static int npc_one(rs3_context *c,rs3_snapshot *s,uint64_t table,uint64_t count,uint64_t sentinel,uint32_t uid) {
-    /* Decode fixed actor fields from one bulk read, then verify identity/ring.
-     * A failure rolls back this NPC's hit slice without touching other NPCs. */
-    unsigned char node[32], after[32], actor[ACTOR_BYTES];
-    uint64_t address = 0, object, config, check_vtable, check_ring;
-    uint16_t check_uid;
-    rs3_npc npc={0}; npc.config_id=-1; npc.runtime_id=uid; npc.hit_offset=s->info.hit_count;
-    if (!npc_node(c,table,count,sentinel,uid,&address,node)) return 0;
-    object=u64(node+16);
-    if (!rd(c,object,actor,sizeof actor)) return 0;
-    if (u64(actor)!=c->module_base+c->profile->npc_entity_vtable_rva || (u32(actor+0x88)&65535)!=uid)
-        return fail(c,RS3_READ_FAILED,"NPC identity mismatch");
-    config=u64(actor+P_NPC_CONFIG_OVERRIDE_OFFSET);
-    if (!config) config=u64(actor+P_NPC_CONFIG_OFFSET);
-    if (config) {
-        if (!rd(c,config+8,&npc.config_id,4)) return 0;
-        if (npc.config_id<0 || npc.config_id>1000000) return fail(c,RS3_READ_FAILED,"Invalid NPC config ID");
-        npc.flags|=RS3_NPC_CONFIG;
-    }
-    if (!npc_name(c,object,actor,&npc)) return 0;
-    npc.health_current=i32(actor+P_NPC_HEALTH_CURRENT_OFFSET); npc.health_max=i32(actor+P_NPC_HEALTH_MAX_OFFSET);
-    npc.health_reason=RS3_NOT_TRANSMITTED;
-    if (npc.health_max) {
-        if (npc.health_max>0 && npc.health_max<=0xffffff && npc.health_current>=0 && npc.health_current<=npc.health_max) {
-            npc.flags|=RS3_NPC_HEALTH; npc.health_reason=RS3_REASON_NONE;
-        } else npc.health_reason=RS3_INVALID_STATS;
-    }
-    if (!npc_hits(c,u64(actor+P_NPC_HITMARKS_OFFSET),s->info.logic_tick,s,&npc)) goto rollback;
-    rs3_npc_animation *anim=s->animations+s->info.npc_count;
-    memset(anim,0,sizeof *anim); anim->runtime_id=uid; anim->config_id=npc.config_id;
-    anim->reason=RS3_UNSUPPORTED_CLIENT;
-    if (c->profile->npc_animation_vtable_rva) {
-        int32_t ids[2]={i32(actor+P_NPC_ACTION_SEQUENCE_OFFSET),i32(actor+P_NPC_MOVEMENT_SEQUENCE_OFFSET)};
-        int32_t again[2]; uint64_t component;
-        uint32_t stamp_offset=c->profile->npc_action_stamp_offset, stamp=0;
-        anim->reason=RS3_READ_FAILED;
-        if (stamp_offset<=sizeof actor-sizeof stamp &&
-            u64(actor+P_NPC_ANIMATION_COMPONENT_OFFSET)==c->module_base+c->profile->npc_animation_vtable_rva &&
-            ids[0]>=-1 && ids[0]<=1000000 && ids[1]>=-1 && ids[1]<=1000000 &&
-            rd(c,object+P_NPC_ACTION_SEQUENCE_OFFSET,again,4) &&
-            rd(c,object+P_NPC_MOVEMENT_SEQUENCE_OFFSET,again+1,4) &&
-            (!stamp_offset || (rd(c,object+stamp_offset,&stamp,4) && stamp==u32(actor+stamp_offset))) &&
-            ptr(c,object+P_NPC_ANIMATION_COMPONENT_OFFSET,&component) &&
-            component==u64(actor+P_NPC_ANIMATION_COMPONENT_OFFSET) && !memcmp(ids,again,sizeof ids)) {
-            anim->valid=1; anim->reason=RS3_REASON_NONE;
-            anim->action_sequence=ids[0]; anim->movement_sequence=ids[1];
-            c->action_stamps[s->info.npc_count]=stamp;
+
+/** Walks the bucket chain of runtime_id and copies its node into node_bytes. */
+static int find_npc_node(rs3_context *context, const npc_table *table, uint32_t runtime_id,
+                         uint64_t *node_address, unsigned char node_bytes[NPC_NODE_BYTES])
+{
+    uint64_t node = context->bucket_buffer[runtime_id % table->bucket_count];
+    uint64_t visited[MAX_NPC_CHAIN_LENGTH];
+    unsigned visited_count = 0;
+    while (node != 0 && node != table->sentinel)
+    {
+        if (visited_count == MAX_NPC_CHAIN_LENGTH)
+        {
+            return context_fail(context, RS3_READ_FAILED, "NPC bucket chain exceeds its bound");
         }
+        for (unsigned index = 0; index < visited_count; index++)
+        {
+            if (visited[index] == node)
+            {
+                return context_fail(context, RS3_READ_FAILED, "NPC bucket chain cycle");
+            }
+        }
+        visited[visited_count++] = node;
+        if (!memory_read(context, node, node_bytes, NPC_NODE_BYTES))
+        {
+            return 0;
+        }
+        if (decode_u32(node_bytes + NPC_NODE_RUNTIME_ID_OFFSET) == runtime_id)
+        {
+            *node_address = node;
+            return 1;
+        }
+        node = decode_u64(node_bytes + NPC_NODE_NEXT_OFFSET);
     }
-    if (!rd(c,address,after,32) || !rd(c,object+0x88,&check_uid,2) || check_uid!=uid ||
-        !ptr(c,object,&check_vtable) || check_vtable!=u64(actor) ||
-        !ptr(c,object+P_NPC_HITMARKS_OFFSET,&check_ring) || check_ring!=u64(actor+P_NPC_HITMARKS_OFFSET) ||
-        u32(after)!=uid || u64(after+16)!=object) goto rollback;
-    c->actors[s->info.npc_count]=object; s->npcs[s->info.npc_count++]=npc; return 1;
+    return context_fail(context, RS3_READ_FAILED, "NPC left the registry");
+}
+
+/** Decodes the health pair and its validity. */
+static void decode_npc_health(const unsigned char *actor_bytes, rs3_npc *npc)
+{
+    npc->health_current = decode_i32(actor_bytes + LAYOUT_NPC_HEALTH_CURRENT_OFFSET);
+    npc->health_max = decode_i32(actor_bytes + LAYOUT_NPC_HEALTH_MAX_OFFSET);
+    npc->health_reason = RS3_NOT_TRANSMITTED;
+    if (npc->health_max == 0)
+    {
+        return;
+    }
+    int pair_is_valid = npc->health_max > 0 && npc->health_max <= MAX_NPC_HEALTH &&
+                        npc->health_current >= 0 && npc->health_current <= npc->health_max;
+    if (pair_is_valid)
+    {
+        npc->flags |= RS3_NPC_HEALTH;
+        npc->health_reason = RS3_REASON_NONE;
+    }
+    else
+    {
+        npc->health_reason = RS3_INVALID_STATS;
+    }
+}
+
+/**
+ * Decodes one NPC from a single bulk actor read, then verifies its identity
+ * and hit ring. A failure rolls back this NPC's hit slice without touching
+ * other NPCs.
+ */
+static int decode_one_npc(rs3_context *context, rs3_snapshot *snapshot, const npc_table *table,
+                          uint32_t runtime_id)
+{
+    const client_profile *profile = context->target.profile;
+    uint64_t expected_vtable = context->target.module_base + profile->npc_entity_vtable_rva;
+    unsigned char node_bytes[NPC_NODE_BYTES];
+    unsigned char actor_bytes[NPC_ACTOR_BYTES];
+    uint64_t node_address = 0;
+    uint32_t npc_index = snapshot->info.npc_count;
+
+    rs3_npc npc = {0};
+    npc.config_id = -1;
+    npc.runtime_id = runtime_id;
+    npc.hit_offset = snapshot->info.hit_count;
+
+    if (!find_npc_node(context, table, runtime_id, &node_address, node_bytes))
+    {
+        return 0;
+    }
+    uint64_t actor_address = decode_u64(node_bytes + NPC_NODE_ACTOR_OFFSET);
+    if (!memory_read(context, actor_address, actor_bytes, sizeof actor_bytes))
+    {
+        return 0;
+    }
+    uint32_t actor_runtime_id = decode_u32(actor_bytes + NPC_ACTOR_RUNTIME_ID_OFFSET) & 0xffffu;
+    if (decode_u64(actor_bytes) != expected_vtable || actor_runtime_id != runtime_id)
+    {
+        return context_fail(context, RS3_READ_FAILED, "NPC identity mismatch");
+    }
+
+    uint64_t config_address = decode_u64(actor_bytes + LAYOUT_NPC_CONFIG_OVERRIDE_OFFSET);
+    if (config_address == 0)
+    {
+        config_address = decode_u64(actor_bytes + LAYOUT_NPC_CONFIG_OFFSET);
+    }
+    if (config_address != 0)
+    {
+        if (!memory_read(context, config_address + NPC_CONFIG_ID_OFFSET, &npc.config_id,
+                         sizeof npc.config_id))
+        {
+            return 0;
+        }
+        if (npc.config_id < 0 || npc.config_id > MAX_NPC_CONFIG_ID)
+        {
+            return context_fail(context, RS3_READ_FAILED, "Invalid NPC config ID");
+        }
+        npc.flags |= RS3_NPC_CONFIG;
+    }
+    if (!decode_npc_name(context, actor_address, actor_bytes, &npc))
+    {
+        return 0;
+    }
+    decode_npc_health(actor_bytes, &npc);
+
+    uint64_t ring_address = decode_u64(actor_bytes + LAYOUT_NPC_HITMARKS_OFFSET);
+    if (!decode_npc_hits(context, ring_address, snapshot, &npc))
+    {
+        goto rollback;
+    }
+    npc_animation_decode(context, snapshot, npc_index, &npc, actor_address, actor_bytes);
+
+    /* The node, actor identity and ring pointer must be unchanged after the read. */
+    unsigned char node_after[NPC_NODE_BYTES];
+    uint16_t runtime_id_after;
+    uint64_t vtable_after;
+    uint64_t ring_after;
+    if (!memory_read(context, node_address, node_after, sizeof node_after) ||
+        !memory_read(context, actor_address + NPC_ACTOR_RUNTIME_ID_OFFSET, &runtime_id_after,
+                     sizeof runtime_id_after) ||
+        runtime_id_after != runtime_id ||
+        !memory_read_pointer(context, actor_address, &vtable_after) ||
+        vtable_after != decode_u64(actor_bytes) ||
+        !memory_read_pointer(context, actor_address + LAYOUT_NPC_HITMARKS_OFFSET, &ring_after) ||
+        ring_after != ring_address ||
+        decode_u32(node_after + NPC_NODE_RUNTIME_ID_OFFSET) != runtime_id ||
+        decode_u64(node_after + NPC_NODE_ACTOR_OFFSET) != actor_address)
+    {
+        goto rollback;
+    }
+
+    context->npcs.staged_actor_addresses[npc_index] = actor_address;
+    snapshot->npcs[npc_index] = npc;
+    snapshot->info.npc_count++;
+    return 1;
+
 rollback:
-    s->info.hit_count=npc.hit_offset; return fail(c,RS3_READ_FAILED,"NPC changed during read");
+    snapshot->info.hit_count = npc.hit_offset;
+    return context_fail(context, RS3_READ_FAILED, "NPC changed during read");
 }
-static npc_identity *identity(rs3_context *c,uint32_t uid,uint64_t actor) {
-    uint16_t index=c->identity_index[uid]; npc_identity *state=NULL;
-    // The runtime ID index is one-based so zero can mean no tracked instance.
-    if (index) state=c->identities+index-1;
-    else for (unsigned i=0;i<RS3_MAX_NPCS;i++) if (!c->identities[i].used) {
-        state=c->identities+i; c->identity_index[uid]=(uint16_t)(i+1); break;
+
+/** Reads the listed runtime IDs and rejects out-of-range or duplicate entries. */
+static int read_runtime_ids(rs3_context *context, uint64_t manager_address, uint32_t *runtime_ids,
+                            uint32_t *listed_count)
+{
+    if (!memory_read(context, manager_address + LAYOUT_NPC_COUNT_OFFSET, listed_count,
+                     sizeof *listed_count) ||
+        *listed_count > RS3_MAX_NPCS)
+    {
+        return context_fail(context, RS3_READ_FAILED, "Invalid NPC count");
     }
-    if (!state) return NULL;
-    if (!state->used || state->actor!=actor) {
-        memset(state,0,sizeof *state); state->used=1; state->actor=actor;
-        state->uid=uid; state->instance=++c->next_instance;
+    if (*listed_count != 0 && !memory_read(context, manager_address + LAYOUT_NPC_INDICES_OFFSET,
+                                           runtime_ids, *listed_count * sizeof *runtime_ids))
+    {
+        return 0;
     }
-    return state;
+
+    runtime_id_set seen = {0};
+    for (uint32_t index = 0; index < *listed_count; index++)
+    {
+        uint32_t runtime_id = runtime_ids[index];
+        if (runtime_id >= NPC_RUNTIME_ID_COUNT || runtime_id_set_contains(&seen, runtime_id))
+        {
+            return context_fail(context, RS3_READ_FAILED, "Invalid NPC index list");
+        }
+        runtime_id_set_add(&seen, runtime_id);
+    }
+    return 1;
 }
-/* Commit identities/events only after every frame-level consistency check. */
-void commit_npcs(rs3_context *c,rs3_snapshot *s,const uint32_t *ids,uint32_t count,uint64_t manager,uint64_t world_state) {
-    unsigned char present[65536/8]={0};
-    if (c->npc_context!=manager || c->npc_state!=world_state) {
-        reset_identities(c); c->npc_context=manager; c->npc_state=world_state;
+
+/** Copies the bucket array of the NPC hash table into the context bucket buffer. */
+static int read_npc_table(rs3_context *context, uint64_t manager_address, npc_table *table)
+{
+    unsigned char table_header[16];
+    if (!memory_read(context, manager_address + NPC_MANAGER_TABLE_OFFSET, table_header,
+                     sizeof table_header))
+    {
+        return 0;
     }
-    // Use the registry list to retire identities. A skipped actor read alone
-    // does not mean the NPC despawned.
-    for (uint32_t i=0;i<count;i++) present[ids[i]/8]|=(unsigned char)(1u<<(ids[i]%8));
-    for (unsigned i=0;i<RS3_MAX_NPCS;i++) if (c->identities[i].used &&
-        !(present[c->identities[i].uid/8]&(1u<<(c->identities[i].uid%8)))) {
-        c->identity_index[c->identities[i].uid]=0; c->identities[i].used=0;
+    uint64_t bucket_array = decode_u64(table_header);
+    table->bucket_count = decode_u64(table_header + 8);
+    if (bucket_array == 0 || table->bucket_count < 1 || table->bucket_count > MAX_NPC_BUCKETS)
+    {
+        return context_fail(context, RS3_READ_FAILED, "NPC table unavailable");
     }
-    AcquireSRWLockExclusive(&c->events_lock);
-    for (uint32_t i=0;i<s->info.npc_count;i++) {
-        rs3_npc *npc=s->npcs+i; npc_identity *state=identity(c,npc->runtime_id,c->actors[i]);
-        if (!state) continue;
-        npc->instance_id=state->instance;
-        s->animations[i].instance_id=npc->instance_id;
-        npc_action_commit(c,s,state,i);
-        for (uint32_t j=0;j<npc->hit_count;j++) {
-            rs3_hit *h=s->hits+npc->hit_offset+j;
-            if (h->state!=RS3_HIT_ACTIVE) continue;
-            // Suppress a hit if this instance's ring slot still holds the same record.
-            uint64_t bit=1ull<<h->slot;
-            if ((state->valid_hits&bit) && !memcmp(state->previous+h->slot,h,sizeof *h)) continue;
-            state->previous[h->slot]=*h; state->valid_hits|=bit;
-            uint64_t sequence=++c->event_sequence;
-            rs3_event *event=c->events+(sequence-1)%EVENT_CAPACITY;
-            memset(event,0,sizeof *event); event->sequence=sequence; event->observed_at_ns=s->info.timestamp_ns;
-            event->process_creation_time=c->creation_time; event->pid=c->pid;
-            event->instance_id=npc->instance_id; event->runtime_id=npc->runtime_id;
-            event->config_id=npc->config_id; event->name_length=npc->name_length;
-            event->hit=*h; memcpy(event->name,npc->name,npc->name_length+1);
+    if (!context_reserve_buckets(context, table->bucket_count))
+    {
+        return 0;
+    }
+    size_t bucket_bytes = (size_t)table->bucket_count * sizeof(uint64_t);
+    return memory_read(context, bucket_array, context->bucket_buffer, bucket_bytes) &&
+           memory_read(context, bucket_array + bucket_bytes, &table->sentinel,
+                       sizeof table->sentinel);
+}
+
+/** One pass over the registry; returns 0 with the failure recorded on the context. */
+static int decode_list_once(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_state,
+                            uint32_t *runtime_ids, uint32_t *listed_count,
+                            uint64_t *manager_address)
+{
+    snapshot->info.npc_count = 0;
+    snapshot->info.hit_count = 0;
+    snapshot->info.skipped_npcs = 0;
+
+    uint64_t manager;
+    if (!memory_read_pointer(context, world_state + LAYOUT_NPC_MANAGER_OFFSET, &manager))
+    {
+        return 0;
+    }
+    if (manager == 0)
+    {
+        return context_fail(context, RS3_READ_FAILED, "NPC manager unavailable");
+    }
+    uint64_t manager_vtable;
+    if (!memory_read(context, manager, &manager_vtable, sizeof manager_vtable))
+    {
+        return 0;
+    }
+    if (manager_vtable !=
+        context->target.module_base + context->target.profile->npc_manager_vtable_rva)
+    {
+        return context_fail(context, RS3_READ_FAILED, "NPC manager profile mismatch");
+    }
+
+    uint32_t count;
+    npc_table table;
+    if (!read_runtime_ids(context, manager, runtime_ids, &count) ||
+        !read_npc_table(context, manager, &table))
+    {
+        return 0;
+    }
+
+    /* The listed IDs define what to visit; the hash buckets resolve them to actors. */
+    snapshot->info.loaded_npcs = count;
+    for (uint32_t index = 0; index < count; index++)
+    {
+        if (!decode_one_npc(context, snapshot, &table, runtime_ids[index]))
+        {
+            snapshot->info.skipped_npcs++;
         }
     }
-    s->info.event_sequence=c->event_sequence; ReleaseSRWLockExclusive(&c->events_lock);
+
+    uint32_t count_after;
+    uint32_t runtime_ids_after[RS3_MAX_NPCS];
+    uint64_t manager_after;
+    if (!memory_read(context, manager + LAYOUT_NPC_COUNT_OFFSET, &count_after,
+                     sizeof count_after) ||
+        count_after != count ||
+        (count != 0 &&
+         (!memory_read(context, manager + LAYOUT_NPC_INDICES_OFFSET, runtime_ids_after,
+                       count * sizeof runtime_ids_after[0]) ||
+          memcmp(runtime_ids, runtime_ids_after, count * sizeof runtime_ids_after[0]) != 0)) ||
+        !memory_read_pointer(context, world_state + LAYOUT_NPC_MANAGER_OFFSET, &manager_after) ||
+        manager_after != manager)
+    {
+        context_fail(context, RS3_READ_FAILED, "NPC list changed during read");
+        return -1;
+    }
+    *listed_count = count;
+    *manager_address = manager;
+    return 1;
 }
-int npcs_once(rs3_context *c,rs3_snapshot *s,uint64_t state,uint32_t *ids,uint32_t *out_n,uint64_t *out_manager) {
-    uint64_t manager,table,count,sentinel,after_manager; uint32_t n,after_n,after_ids[1024];
-    unsigned char b[16],seen[65536/8]={0}; s->info.npc_count=s->info.hit_count=s->info.skipped_npcs=0;
-    if (!ptr(c,state+P_NPC_MANAGER_OFFSET,&manager)) return 0;
-    if (!manager) return fail(c,RS3_READ_FAILED,"NPC manager unavailable");
-    if (!rd(c,manager,b,8)) return 0;
-    if (u64(b)!=c->module_base+c->profile->npc_manager_vtable_rva) return fail(c,RS3_READ_FAILED,"NPC manager profile mismatch");
-    if (!rd(c,manager+P_NPC_COUNT_OFFSET,&n,4) || n>1024) return fail(c,RS3_READ_FAILED,"Invalid NPC count");
-    if (n && !rd(c,manager+P_NPC_INDICES_OFFSET,ids,n*4)) return 0;
-    for (uint32_t i=0;i<n;i++) {
-        if (ids[i]>65535 || (seen[ids[i]/8]&(1u<<(ids[i]%8)))) return fail(c,RS3_READ_FAILED,"Invalid NPC index list");
-        seen[ids[i]/8]|=(unsigned char)(1u<<(ids[i]%8));
+
+npc_list_result npc_decode_list(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_state,
+                                uint32_t *runtime_ids, uint32_t *listed_count,
+                                uint64_t *manager_address)
+{
+    /* Retry a list that changed during the read once. */
+    for (unsigned attempt = 0; attempt < 2; attempt++)
+    {
+        int result = decode_list_once(context, snapshot, world_state, runtime_ids, listed_count,
+                                      manager_address);
+        if (result > 0)
+        {
+            return NPC_LIST_DECODED;
+        }
+        if (result == 0)
+        {
+            return NPC_LIST_FAILED;
+        }
     }
-    // The loaded IDs define what to visit. The hash buckets resolve those IDs to actors.
-    if (!rd(c,manager+16,b,16)) return 0;
-    table=u64(b); count=u64(b+8);
-    if (!table || count<1 || count>1000000) return fail(c,RS3_READ_FAILED,"NPC table unavailable");
-    if (c->bucket_capacity<count) {
-        void *memory=realloc(c->buckets,(size_t)count*8);
-        if (!memory) return fail(c,RS3_READ_FAILED,"NPC bucket allocation failed");
-        c->buckets=memory; c->bucket_capacity=(size_t)count;
+    return NPC_LIST_CHANGED;
+}
+
+/** Returns the identity of runtime_id, creating a fresh one for a new actor. */
+static npc_identity *track_identity(rs3_context *context, uint32_t runtime_id,
+                                    uint64_t actor_address)
+{
+    npc_tracker *tracker = &context->npcs;
+    uint16_t slot = tracker->identity_slot_by_runtime_id[runtime_id];
+    npc_identity *identity = NULL;
+    /* Slots are one-based so zero can mean "no tracked instance". */
+    if (slot != 0)
+    {
+        identity = &tracker->identities[slot - 1];
     }
-    if (!rd(c,table,c->buckets,(size_t)count*8) || !rd(c,table+count*8,&sentinel,8)) return 0;
-    s->info.loaded_npcs=n;
-    for (uint32_t i=0;i<n;i++) if (!npc_one(c,s,table,count,sentinel,ids[i])) s->info.skipped_npcs++;
-    if (!rd(c,manager+P_NPC_COUNT_OFFSET,&after_n,4) || after_n!=n ||
-        (n && (!rd(c,manager+P_NPC_INDICES_OFFSET,after_ids,n*4) || memcmp(ids,after_ids,n*4))) ||
-        !ptr(c,state+P_NPC_MANAGER_OFFSET,&after_manager) || after_manager!=manager)
-        return fail(c,RS3_READ_FAILED,"NPC list changed during read");
-    *out_n=n; *out_manager=manager; return 1;
+    else
+    {
+        for (unsigned index = 0; index < RS3_MAX_NPCS; index++)
+        {
+            if (!tracker->identities[index].in_use)
+            {
+                identity = &tracker->identities[index];
+                tracker->identity_slot_by_runtime_id[runtime_id] = (uint16_t)(index + 1);
+                break;
+            }
+        }
+    }
+    if (identity == NULL)
+    {
+        return NULL;
+    }
+    if (!identity->in_use || identity->actor_address != actor_address)
+    {
+        memset(identity, 0, sizeof *identity);
+        identity->in_use = 1;
+        identity->actor_address = actor_address;
+        identity->runtime_id = runtime_id;
+        identity->instance_id = ++tracker->next_instance_id;
+    }
+    return identity;
+}
+
+/** Retires identities whose runtime ID is no longer listed by the registry. */
+static void retire_unlisted_identities(rs3_context *context, const uint32_t *runtime_ids,
+                                       uint32_t listed_count)
+{
+    /* A skipped actor read alone does not mean that the NPC despawned. */
+    runtime_id_set listed = {0};
+    for (uint32_t index = 0; index < listed_count; index++)
+    {
+        runtime_id_set_add(&listed, runtime_ids[index]);
+    }
+    npc_tracker *tracker = &context->npcs;
+    for (unsigned index = 0; index < RS3_MAX_NPCS; index++)
+    {
+        npc_identity *identity = &tracker->identities[index];
+        if (identity->in_use && !runtime_id_set_contains(&listed, identity->runtime_id))
+        {
+            tracker->identity_slot_by_runtime_id[identity->runtime_id] = 0;
+            identity->in_use = 0;
+        }
+    }
+}
+
+/** Appends one hit observation to the hit event queue. */
+static void publish_hit_event(rs3_context *context, const rs3_snapshot *snapshot,
+                              const rs3_npc *npc, const rs3_hit *hit)
+{
+    uint64_t sequence = ++context->hit_event_sequence;
+    rs3_event *event = &context->hit_events[event_ring_index(sequence, HIT_EVENT_CAPACITY)];
+    memset(event, 0, sizeof *event);
+    event->sequence = sequence;
+    event->observed_at_ns = snapshot->info.timestamp_ns;
+    event->process_creation_time = context->target.process_creation_time;
+    event->pid = context->target.pid;
+    event->instance_id = npc->instance_id;
+    event->runtime_id = npc->runtime_id;
+    event->config_id = npc->config_id;
+    event->name_length = npc->name_length;
+    event->hit = *hit;
+    memcpy(event->name, npc->name, npc->name_length + 1);
+}
+
+/** Publishes active hits whose ring slot changed since the last report. */
+static void publish_new_hits(rs3_context *context, const rs3_snapshot *snapshot, const rs3_npc *npc,
+                             npc_identity *identity)
+{
+    for (uint32_t index = 0; index < npc->hit_count; index++)
+    {
+        const rs3_hit *hit = &snapshot->hits[npc->hit_offset + index];
+        if (hit->state != RS3_HIT_ACTIVE)
+        {
+            continue;
+        }
+        /* Suppress a hit while this instance's ring slot still holds the same record. */
+        uint64_t slot_bit = 1ull << hit->slot;
+        if ((identity->reported_hit_slots & slot_bit) &&
+            memcmp(&identity->last_reported_hits[hit->slot], hit, sizeof *hit) == 0)
+        {
+            continue;
+        }
+        identity->last_reported_hits[hit->slot] = *hit;
+        identity->reported_hit_slots |= slot_bit;
+        publish_hit_event(context, snapshot, npc, hit);
+    }
+}
+
+void npc_commit_frame(rs3_context *context, rs3_snapshot *snapshot, const uint32_t *runtime_ids,
+                      uint32_t listed_count, uint64_t manager_address, uint64_t world_state)
+{
+    npc_tracker *tracker = &context->npcs;
+    if (tracker->registry_manager != manager_address ||
+        tracker->registry_world_state != world_state)
+    {
+        npc_reset_identities(context);
+        tracker->registry_manager = manager_address;
+        tracker->registry_world_state = world_state;
+    }
+    retire_unlisted_identities(context, runtime_ids, listed_count);
+
+    AcquireSRWLockExclusive(&context->event_queue_lock);
+    for (uint32_t index = 0; index < snapshot->info.npc_count; index++)
+    {
+        rs3_npc *npc = &snapshot->npcs[index];
+        npc_identity *identity =
+            track_identity(context, npc->runtime_id, tracker->staged_actor_addresses[index]);
+        if (identity == NULL)
+        {
+            continue;
+        }
+        npc->instance_id = identity->instance_id;
+        snapshot->npc_animations[index].instance_id = npc->instance_id;
+        npc_animation_commit_action(context, snapshot, identity, index);
+        publish_new_hits(context, snapshot, npc, identity);
+    }
+    snapshot->info.event_sequence = context->hit_event_sequence;
+    ReleaseSRWLockExclusive(&context->event_queue_lock);
 }
