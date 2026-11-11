@@ -225,7 +225,10 @@
     "tried": [
       "Inspected the original executable Lua GetInterface/GetComponent registrations with Ghidra; no game functions were called.",
       "Inspected older Windows 949-4 InterfaceManager/InterfaceList/component metadata as leads only.",
-      "Checked bounded current-world manager-pointer candidates against the older embedded vector shape. The candidate at world+0x19968 failed shared-pointer entry plausibility and was rejected."
+      "Checked bounded current-world manager-pointer candidates against the older embedded vector shape. The candidate at world+0x19968 failed shared-pointer entry plausibility and was rejected.",
+      "Followed original-profile world manager displacements 0x19960/0x19968/0x19970/0x199c0/0x199d0/0x199d8/0x199f0 through targeted Ghidra decompilation. None established a guarded open-interface/visibility chain.",
+      "The 0x19968 uses at RVAs 0x75580 and 0x34840 dereference indexed objects via manager+0x10; they do not establish the older InterfaceList vector shape.",
+      "Lua GetInterface registration binds a virtual slot +0x30 through RVA 0x9d3f94; the concrete current manager identity and backing registry remain unresolved."
     ],
     "result": "No guarded current open-interface registry or complete visibility/geometry chain established. Cached or loaded interface definitions are not reported as open."
   },
