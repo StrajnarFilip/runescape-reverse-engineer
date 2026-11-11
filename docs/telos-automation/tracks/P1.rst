@@ -62,13 +62,14 @@ camera, and attack one so target fields change.
 The current native implementation reads poses and physical projected pixels
 on the running original 951-3 executable. Before marking this track done:
 
-1. Label the player's tile and one nearby NPC's movement while walking around it.
-2. Rotate/zoom the camera and check at least twenty projected samples against
-   the entity. No automated clicks are enabled by this track.
-3. Select/attack and clear a target in a controlled encounter. Target identity
-   is still unmapped; these transitions are needed to distinguish it from a
-   desired facing angle. Use a low-risk NPC for this part if available.
-4. Repeat layout/signature verification on the Compatibility Mode executable
+1. Completed: the two manual encounters recorded changing player/NPC poses.
+   The user then confirmed 22 Training dummy projections through 22 distinct
+   camera orientations using the read-only marker. No game inputs were sent.
+2. Combat-target identity is still unmapped. One selected-target label was
+   captured; the older context+0x98 candidate did not match its runtime ID.
+   A cleared-target label was not recorded. A fresh, explicitly labelled
+   select/clear sequence is needed after finding another static candidate.
+3. Repeat layout/signature verification on the Compatibility Mode executable
    before enabling P1 there. The running binary currently hashes to the original.
 
 Requests

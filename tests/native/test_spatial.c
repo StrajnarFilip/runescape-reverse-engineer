@@ -81,13 +81,17 @@ static rs3_camera test_camera(void)
 static void projects_with_physical_origin_and_y_inversion(void)
 {
     rs3_camera camera = test_camera();
-    rs3_actor_spatial actor = {.valid_mask = RS3_SPATIAL_FINE_POSITION,
+    rs3_actor_spatial actor = {.valid_mask = RS3_SPATIAL_FINE_POSITION | RS3_SPATIAL_SAME_WORLD,
                                .tile = {1, 0, 0, 1},
                                .fine_x = 0.5f,
                                .fine_height = 0.5f};
     rs3_screen_point point;
     assert(rs3_project_actor(&camera, &actor, 0, &point, sizeof point) == RS3_OK);
     assert(point.valid && point.x == 700 && point.y == 350);
+    actor.valid_mask &= ~RS3_SPATIAL_SAME_WORLD;
+    assert(rs3_project_actor(&camera, &actor, 0, &point, sizeof point) == RS3_OK);
+    assert(!point.valid && point.reason == RS3_SPATIAL_WRONG_WORLD);
+    actor.valid_mask |= RS3_SPATIAL_SAME_WORLD;
     camera.valid_mask &= ~RS3_CAMERA_PHYSICAL_ORIGIN;
     assert(rs3_project_actor(&camera, &actor, 0, &point, sizeof point) == RS3_OK && !point.valid);
     camera = test_camera();

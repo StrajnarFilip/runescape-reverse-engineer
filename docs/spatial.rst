@@ -39,6 +39,9 @@ view matrix into it again would be incorrect. The scene manager at client world
 state ``+0x199e8`` supplies viewport x/y/width/height at ``+0x84..+0x90``.
 Native functions ``0x05a260`` and ``0x6dec20`` establish this path and Y inversion.
 Matrix, viewport and owner pointers must agree across repeated reads.
+An actor must also belong to the player's current world object before actor
+projection is allowed. The loaded registry may retain actors from another
+world/instance; a matching plane alone is insufficient.
 
 Physical client origin is read from the unique visible, non-minimized process
 window using a temporarily per-monitor-aware thread DPI context. The previous
@@ -74,5 +77,8 @@ Validation
 ----------
 
 ``validation/spatial-validation.json`` separates fixture/static evidence,
-read-only live smoke observations and pending controlled checks. It does not
-claim that twenty projected samples or combat-target transitions are validated.
+read-only live observations and controlled checks. On 2026-11-11 the user
+confirmed 22 projected ground points on a Training dummy through 22 distinct
+camera orientations using a click-through marker. The observer sent no game
+input. This validates the checked physical projections, not occlusion handling,
+body-click hitboxes or combat-target identities. Target fields remain unmapped.

@@ -80,8 +80,8 @@ int spatial_decode_actor(rs3_context *context, uint64_t actor, uint32_t vtable_r
         return 0;
     }
     const uint32_t offsets[] = {ACTOR_PLANE_OFFSET, ACTOR_SIZE_OFFSET, ACTOR_FINE_OFFSET,
-                                ACTOR_QUATERNION_OFFSET};
-    const uint32_t lengths[] = {4, 4, 12, 16};
+                                ACTOR_QUATERNION_OFFSET, ACTOR_WORLD_OFFSET};
+    const uint32_t lengths[] = {4, 4, 12, 16, 8};
     for (unsigned index = 0; index < sizeof offsets / sizeof offsets[0]; index++)
     {
         if (memcmp(before + offsets[index], after + offsets[index], lengths[index]) != 0)
@@ -245,6 +245,7 @@ void spatial_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_
     info->status = RS3_PARTIAL;
     info->reason = RS3_SPATIAL_UNMAPPED;
     uint64_t actor;
+    uint64_t player_world = 0;
     uint32_t index;
     if (position_find_local_actor(context, world_state, &actor, &index))
     {
@@ -252,6 +253,11 @@ void spatial_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_
                              index, &info->player);
         if (info->player.valid_mask & RS3_SPATIAL_FINE_POSITION)
         {
+            if (memory_read_pointer(context, actor + ACTOR_WORLD_OFFSET, &player_world) &&
+                player_world)
+            {
+                info->player.valid_mask |= RS3_SPATIAL_SAME_WORLD;
+            }
             read_camera(context, world_state, actor, &info->camera);
             info->camera.plane = info->player.tile.plane;
         }
@@ -262,6 +268,15 @@ void spatial_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_
         spatial_decode_actor(context, context->npcs.staged_actor_addresses[npc],
                              context->target.profile->npc_entity_vtable_rva,
                              snapshot->npcs[npc].runtime_id, &snapshot->npc_spatial[npc]);
+        uint64_t npc_world = 0;
+        if (player_world &&
+            memory_read_pointer(context,
+                                context->npcs.staged_actor_addresses[npc] + ACTOR_WORLD_OFFSET,
+                                &npc_world) &&
+            npc_world == player_world)
+        {
+            snapshot->npc_spatial[npc].valid_mask |= RS3_SPATIAL_SAME_WORLD;
+        }
     }
 }
 
@@ -382,6 +397,20 @@ int32_t rs3_project_actor(const rs3_camera *camera, const rs3_actor_spatial *act
     if (actor == NULL || !(actor->valid_mask & RS3_SPATIAL_FINE_POSITION))
     {
         return RS3_E_ARGUMENT;
+    }
+    if (!(actor->valid_mask & RS3_SPATIAL_SAME_WORLD))
+    {
+        if (out == NULL)
+        {
+            return RS3_E_ARGUMENT;
+        }
+        if (out_size < sizeof *out)
+        {
+            return RS3_E_ABI;
+        }
+        memset(out, 0, sizeof *out);
+        out->reason = RS3_SPATIAL_WRONG_WORLD;
+        return RS3_OK;
     }
     return project(camera, actor->tile.plane, actor->fine_x,
                    (double)actor->fine_height + height_offset, actor->fine_z, out, out_size);

@@ -549,6 +549,7 @@ class SpatialFlags(IntFlag):
     FINE_POSITION = 2
     FACING = 4
     TARGET = 8
+    SAME_WORLD = 16
 
 
 class Camera(ctypes.Structure):

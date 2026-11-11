@@ -2,7 +2,7 @@
   "schema_version": 1,
   "track": "P1",
   "date": "2026-11-11",
-  "status": "controlled_validation_and_target_mapping_pending",
+  "status": "projection_validated_targets_and_compatibility_pending",
   "runtime_profile_observed": "951-3",
   "sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
   "additional_signature_guards": {
@@ -51,5 +51,23 @@
     "python_tests_passed": 78,
     "native_spatial_cases": 5,
     "existing_public_structures_changed": false
-  }
+  },
+  "controlled_projection_validation": {
+    "checked_samples": 22,
+    "distinct_camera_orientations": 22,
+    "npc_names": [
+      "Training dummy"
+    ],
+    "npc_config_ids": [
+      16027
+    ],
+    "camera_complete_in_all_checks": true,
+    "user_confirmation": "User completed the check and reported that the marker tracked correctly.",
+    "method": "C-projected physical ground-point marker; user confirms each new camera view; no screenshot or game input.",
+    "target_selected_labels": 1,
+    "target_cleared_labels": 0,
+    "limits": "Ground-point projection only; not a validation of occlusion, body-click hitboxes, targets or another executable."
+  },
+  "cross_world_projection_guard": "An actor must carry SAME_WORLD before projection; actor-world pointers are checked against the player world. Existing public structure sizes are unchanged.",
+  "target_research": "The older context+0x98 candidate did not match the user-selected dummy runtime ID. No plain/packed runtime-ID match was found in a later bounded local-actor probe. Neither is treated as a target mapping."
 }

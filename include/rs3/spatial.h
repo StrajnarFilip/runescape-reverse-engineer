@@ -14,7 +14,8 @@ enum rs3_spatial_flags
     RS3_SPATIAL_TILE = 1u,
     RS3_SPATIAL_FINE_POSITION = 2u,
     RS3_SPATIAL_FACING = 4u,
-    RS3_SPATIAL_TARGET = 8u
+    RS3_SPATIAL_TARGET = 8u,
+    RS3_SPATIAL_SAME_WORLD = 16u
 };
 
 enum rs3_spatial_reason
@@ -24,7 +25,8 @@ enum rs3_spatial_reason
     RS3_SPATIAL_BEHIND_CAMERA,
     RS3_SPATIAL_WRONG_PLANE,
     RS3_SPATIAL_WINDOW_UNKNOWN,
-    RS3_SPATIAL_NONFINITE
+    RS3_SPATIAL_NONFINITE,
+    RS3_SPATIAL_WRONG_WORLD
 };
 
 enum rs3_camera_flags
@@ -124,7 +126,8 @@ RS3_API int32_t rs3_snapshot_npc_spatial(const rs3_snapshot *snapshot, rs3_actor
  */
 RS3_API int32_t rs3_project_tile(const rs3_camera *camera, const rs3_position *tile,
                                  float fine_height, rs3_screen_point *out, uint32_t out_size);
-/** Pure projection of the actor's observed fine position with a supplied vertical offset. */
+/** Project an observed fine position in the camera's world; requires SAME_WORLD, with a vertical
+ * offset. */
 RS3_API int32_t rs3_project_actor(const rs3_camera *camera, const rs3_actor_spatial *actor,
                                   float height_offset, rs3_screen_point *out, uint32_t out_size);
 
