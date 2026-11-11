@@ -184,7 +184,11 @@
         "reference_clock": 19397,
         "source_endpoint": 20207,
         "computed_remaining_seconds": 16.2,
-        "user_display": "less than a minute"
+        "user_display": "less than a minute",
+        "dose_source_first_observed_timestamp_ms": 1794426091811,
+        "countdown_reference_timestamp_ms": 1794426435571,
+        "elapsed_plus_remaining_ms": 359960,
+        "interpretation": "The labelled dose plus independently read clock/endpoint predicts expiry about six minutes after its source appeared; active presence still unproven."
       },
       "defensives": "Separate end_effect candidates appeared in the stated order. Their use of the existing 20 ms client clock is inferred from the common VarClient expiry representation; exact durations and early consumption still need controlled checks."
     },
