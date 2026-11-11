@@ -27,6 +27,8 @@ build instructions and serial protocol.
 The `Telos automation roadmap <telos-automation/README.rst>`_ splits the
 remaining work into one brief per agent under ``docs/telos-automation/tracks/``.
 New decision code goes in ``python/rs3_reader/bot/``.
+`Action cooldowns <telos-automation/action-cooldowns.rst>`_ lists which
+actions have their own timer, which share one, and what may go out in one tick.
 
 Native library modules
 ----------------------

@@ -249,8 +249,13 @@ uses the player table at world ``+0x19968`` and slot ``+0x38``. It validates the
 world-context owner, actor vtable RVA ``0x15367e0`` and actor UID at ``+0x88``
 before decoding the hitmark ring at actor ``+0xf18``. It rechecks identity and
 ring fields after the read. The profile hash/signature checks still apply.
-The Compatibility Mode local-player actor layout has not been validated, so
-this optional channel reports unsupported there.
+S0b pinned the Compatibility Mode player actor vtable at ``0x150d8c8``, with
+constructor and UID-getter signatures. Its tile and hitmark channels now share
+the verified actor lookup, and the profile generator emits that vtable for the
+shipped DLL. This is the chosen runtime profile. The S0b smoke check observed
+both channels available in the same samples, with an empty ring; a live walk
+and incoming-hit event remain pending. See
+``validation/profile-unification.json`` for the evidence and limits.
 
 An initial active ring establishes a baseline instead of replaying old hits as
 new events. Failed reads and scene changes invalidate this baseline. Scheduled

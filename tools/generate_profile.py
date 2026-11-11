@@ -166,7 +166,7 @@ def primary_addresses(primary):
         "client_vtable_rva": primary["client_vtable_rva"],
         "npc_manager_vtable_rva": primary["npcs"]["manager_vtable_rva"],
         "npc_entity_vtable_rva": primary["npcs"]["entity_vtable_rva"],
-        # The Compatibility Mode profile pins its own vtable in combat_layout.
+        # Each executable pins its local player actor vtable independently.
         "player_actor_vtable_rva": primary["local_actor"]["vtable_rva"],
     }
     if primary["npcs"].get("animation_layout_verified"):

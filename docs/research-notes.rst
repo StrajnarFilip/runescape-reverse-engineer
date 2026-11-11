@@ -28,6 +28,13 @@ and inventory instructions in addition to the player position instructions.
 The scene global at ``0x18df2c8`` is distinct from the VarClient capture.
 Its state field at ``+0x19fc0`` must be 30 before and after combat sampling.
 
+S0b pinned the player actor vtable at ``0x150d8c8`` through its constructor
+at ``0x40cc00`` and the type-2 player UID getter at ``0x36c400``. Both new code
+signatures are in the profile. The tile and local-player hitmark readers share
+one actor lookup, checking its vtable and player index. Compatibility Mode is
+the chosen runtime profile; the live movement-plus-hit check remains pending
+in ``validation/profile-unification.json``.
+
 The local item and struct definition indexes and generated catalog body matched
 the original 951-3 validation report. Live reads on the Compatibility Mode
 build returned player stats, an advancing logic clock, loaded NPC names and HP,

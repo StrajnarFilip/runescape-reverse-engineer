@@ -88,10 +88,16 @@ Requests
 These files are outside this track's Owns list and owned by no other track;
 track L routes them.
 
-1. Done on this branch with the user's approval (2026-11-11):
-   ``tools/generate_profile.py`` emits
-   ``combat_layout.player_actor_vtable_rva``, and the generated table carries
-   ``0x150d8c8u``.
+Integration update (2026-11-11): requests 1-4 below are implemented on
+``telos/integration``. The generated Compatibility Mode table now carries
+``0x150d8c8``. The live movement-plus-hit check under Needs the user passed
+afterwards, on the build with request 1 applied.
+
+1. ``tools/generate_profile.py``: add ``"player_actor_vtable_rva"`` to
+   ``OPTIONAL_PROFILE_FIELDS``, so ``compatibility_addresses()`` emits
+   ``combat_layout.player_actor_vtable_rva``, and reword the comment in
+   ``primary_addresses()``. Also applied on this branch with the user's
+   approval; ``tests/native/test_player_hits.c`` now uses the shipped profile.
 2. ``docs/prayer-flick.rst``, section "Local-player hitmarks": replace the
    sentence saying the Compatibility Mode actor layout is unvalidated with the
    S0b result and a link to ``validation/profile-unification.json``.

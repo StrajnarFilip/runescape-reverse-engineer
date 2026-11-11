@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-11",
+  "purpose": "Integration of wave-0 S0a and S0b; no live ladder rung enabled",
+  "status": "merged_and_fixture_validated_live_validation_pending",
+  "target_branch": "telos/integration",
+  "source_commits": {
+    "S0a": "f91de994673075c573e4775871e42a795be1c019",
+    "S0b": "5d807d9de0f4c0c8bb804c7446b362f1d524e16c"
+  },
+  "merge_commits": {
+    "S0a": "718502b94bfa8d1dbd29c79c88bccdf8dbc024df",
+    "S0b": "5426b32cd5b96b5425b73902e9e1cb040badb727"
+  },
+  "conflicts": [],
+  "integration_fixes": [
+    "Generate combat_layout.player_actor_vtable_rva for the Compatibility Mode DLL profile.",
+    "Resolve S0b Requests 1-4: generator wiring, prayer documentation, research notes and runtime-profile guidance."
+  ],
+  "runtime_profile": {
+    "name": "Compatibility Mode",
+    "version": "6ada3f59-1a86000",
+    "sha256": "7a60c69fcf11eda42a328732721f5e89e1c85a6bc919038ff3451d4643e42dbf",
+    "player_actor_vtable_rva": "0x150d8c8"
+  },
+  "checks": {
+    "windows_x64_configure": "passed",
+    "release_build": "passed",
+    "ctest_suites_passed": 10,
+    "ctest_suites_failed": 0,
+    "python_tests_passed": 78,
+    "generated_player_actor_vtable_verified": true,
+    "primary_player_actor_vtable_unchanged": true
+  },
+  "s0b_live_validation": {
+    "status": "pending",
+    "reason": "Published S0b report records a stationary smoke check with zero incoming hit events.",
+    "required": [
+      "Observe at least two distinct player tiles in one Compatibility Mode session.",
+      "Observe at least one local-player hit event while the tile is valid.",
+      "Observe zero player-hit queue losses."
+    ],
+    "source_report": "docs/validation/profile-unification.json"
+  },
+  "ladder_rungs_enabled": [],
+  "input_sent": false,
+  "raw_gameplay_committed": false
+}
