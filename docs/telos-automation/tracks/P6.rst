@@ -1,0 +1,67 @@
+P6 - Attack catalogue
+=====================
+
+:Status: open
+:Wave: 1
+:Branch: ``telos/P6``
+:Kind: Data and analysis (no DLL changes)
+
+Shared rules and procedure: ``../README.rst``.
+
+Goal
+----
+
+A measured table of every Telos attack: which animation sequence means which
+attack, in which phase, with which damage style and components, how attacks are
+counted between specials, and how long after the cue the prayer is checked.
+Today only four sequences are labelled, all from 300% phase 1.
+
+Read first
+----------
+
+* ``docs/prayer-flick.rst``, sections "First live calibration" and "Remaining
+  Telos calibration".
+* ``docs/validation/telos-prayer-calibration-2026-11-10.json``.
+* ``python/rs3_reader/telos_prayer.py``, ``work/analyze_telos_calibration.py``.
+* ``docs/telos-melee-research.rst`` for leads only.
+
+Owns
+----
+
+* ``profiles/telos_attacks.json``
+* ``python/rs3_reader/telos_prayer.py``, ``tests/python/test_telos_prayer.py``
+* ``work/analyze_telos_calibration.py``,
+  ``tests/python/test_calibration_analysis.py``
+* ``docs/validation/telos-prayer-calibration-*.json``
+
+Depends on
+----------
+
+S0a. Benefits from P2 (phase) and P1 (distance) when they land; until then the
+user's spoken labels are the phase source.
+
+Delivers
+--------
+
+``profiles/telos_attacks.json``: per phase and enrage band, each sequence with
+its attack name, style, required protection, hit components, the measured
+cue-to-check window, a sample count and a ``validated`` flag. Rows from guides
+are marked as leads and are never ``validated``.
+
+Done when
+---------
+
+Phases 1-5 at 300% each have every observed sequence labelled or listed as
+unlabelled, with sample counts, and tracks D1 and D2 can load the file. Higher
+enrage bands are added later during track L.
+
+Needs the user
+--------------
+
+Several manual kills at 300% with ``telos_prayer --record-keys`` running,
+calling out phase changes and each special by name. Raw captures stay local.
+
+Requests
+--------
+
+None yet.

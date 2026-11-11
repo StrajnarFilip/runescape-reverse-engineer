@@ -1,0 +1,63 @@
+D2 - Prayer executor
+====================
+
+:Status: open
+:Wave: 2
+:Branch: ``telos/D2``
+:Kind: Python
+
+Shared rules and procedure: ``../README.rst``.
+
+Goal
+----
+
+Drive the existing C prayer planner from live encounter state: feed D1's
+threats to ``rs3_prayer_step``, turn a SET decision into a prayer intent, report
+accepted input with ``rs3_prayer_note_sent``, and wait for the observed
+overhead.
+
+Read first
+----------
+
+* ``docs/prayer-flick.rst`` in full.
+* ``include/rs3/prayer.h``, ``python/rs3_reader/prayer.py``.
+* ``python/rs3_reader/telos_prayer.py`` (the gated ``--trial`` prototype).
+* ``profiles/prayer_flick.json``.
+
+Owns
+----
+
+* ``python/rs3_reader/bot/prayer_executor.py``
+* ``profiles/prayer_flick.json``
+* ``tests/python/test_bot_prayer_executor.py``
+
+Depends on
+----------
+
+D1 (threats), P6 (validated windows), A1 (actuator).
+
+Delivers
+--------
+
+Prayer intents at the second-highest priority, with the planner's reason
+attached as evidence. The ``attack_coverage_validated`` and
+``prayer_check_deadline_validated`` flags are set per phase and enrage band,
+and only for bands where P6 marks the windows validated. Everywhere else the
+executor stays in protection and proposes no Soul Split window.
+
+Done when
+---------
+
+Replay tests show protection is up inside every validated check window of the
+captures, a planner FAULT stops proposals until reset, and no proposal is made
+for an unvalidated band.
+
+Needs the user
+--------------
+
+Nothing in this track. Live use starts at rung 2 of track L.
+
+Requests
+--------
+
+None yet.

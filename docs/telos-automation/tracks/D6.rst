@@ -1,0 +1,61 @@
+D6 - Arbiter
+============
+
+:Status: open
+:Wave: 1
+:Branch: ``telos/D6``
+:Kind: Python
+
+Shared rules and procedure: ``../README.rst``.
+
+Goal
+----
+
+Be the single writer to the actuator. Collect the intents every producer emits
+for a sample, pick what is actually sent within the tick budget, track what is
+awaiting confirmation, and drop what has expired.
+
+Read first
+----------
+
+* ``python/rs3_reader/bot/intents.py`` and ``actuator.py`` from S0a.
+* ``docs/prayer-flick.rst``, section "Planner contract" (the acknowledgement
+  pattern to generalize).
+* ``docs/telos-melee-research.rst`` on queued versus stalled abilities.
+
+Owns
+----
+
+* ``python/rs3_reader/bot/arbiter.py``
+* ``tests/python/test_bot_arbiter.py``
+
+Depends on
+----------
+
+S0a.
+
+Delivers
+--------
+
+* Priority order: survival, then prayer, then mechanics, then rotation.
+* Separate budgets for actions on the GCD, actions off the GCD and pointer
+  actions.
+* No re-send of an unconfirmed intent before its confirmation timeout.
+* A decision log line per sample: what was sent, what was deferred, and why.
+
+Done when
+---------
+
+Tests with synthetic producers show the order and budgets hold, a
+lower-priority intent never delays a higher one, expired intents are dropped,
+and a rejected send is reported to the producer.
+
+Needs the user
+--------------
+
+Nothing.
+
+Requests
+--------
+
+None yet.

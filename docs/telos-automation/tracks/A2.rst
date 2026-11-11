@@ -1,0 +1,62 @@
+A2 - Movement primitives
+========================
+
+:Status: open
+:Wave: 2
+:Branch: ``telos/A2``
+:Kind: Python and C input layer
+
+Shared rules and procedure: ``../README.rst``.
+
+Goal
+----
+
+Reliable building blocks for moving and targeting: walk to a tile, click an
+entity or object, select a target, and use movement abilities, each confirmed
+by a later observation.
+
+Read first
+----------
+
+* ``include/rs3/rs3.h``: ``rs3_minimap``, ``rs3_move_to_tile``,
+  ``rs3_interact``.
+* ``src/input.c``, ``tests/native/test_input.c``.
+* ``docs/spatial.rst`` from P1; the actuator backends from A1.
+
+Owns
+----
+
+* ``python/rs3_reader/bot/movement.py``, ``tests/python/test_bot_movement.py``
+* ``src/input.c``, ``src/input.h``, ``tests/native/test_input.c``
+* ``docs/validation/movement-validation.json``
+
+Depends on
+----------
+
+P1 (projection and tiles) and A1 (backends).
+
+Delivers
+--------
+
+* Minimap calibration derived from observation instead of hand measurement.
+* ``move_to(tile)``, ``click_entity(instance)``, ``click_object(tile)``,
+  ``select_target(instance)`` as intents with a confirmation rule each (tile
+  reached, target field changed).
+* A stated worst-case time from intent to confirmed result.
+
+Done when
+---------
+
+Fixture tests pass and, live, twenty consecutive moves and twenty consecutive
+target selections are confirmed by observation with none silently wrong.
+
+Needs the user
+--------------
+
+One supervised session in a safe area where the bot walks a square and targets
+a dummy, with the user ready on the kill switch.
+
+Requests
+--------
+
+None yet.

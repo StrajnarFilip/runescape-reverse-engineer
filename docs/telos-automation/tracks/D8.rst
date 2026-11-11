@@ -1,0 +1,63 @@
+D8 - Supervisor
+===============
+
+:Status: open
+:Wave: 1
+:Branch: ``telos/D8``
+:Kind: Python
+
+Shared rules and procedure: ``../README.rst``.
+
+Goal
+----
+
+The process that runs everything and can stop everything: the entry point, the
+run modes, the kill switch, the watchdogs and the per-kill report.
+
+Read first
+----------
+
+* S0a contracts and ``replay.py``.
+* ``python/rs3_reader/native.py`` (``Reader``, event cursors, loss counters).
+* ``docs/prayer-flick.rst`` on scene epochs and event-queue gaps.
+* ``python/rs3_reader/jsonl_stream.py``.
+
+Owns
+----
+
+* ``python/rs3_reader/bot/supervisor.py``
+* ``python/rs3_reader/bot/__main__.py``
+* ``tests/python/test_bot_supervisor.py``
+
+Depends on
+----------
+
+S0a. Loads whichever producers exist; a missing producer is simply absent.
+
+Delivers
+--------
+
+* ``python -m rs3_reader.bot --mode shadow|assist|full`` with a per-producer
+  enable list. Shadow mode uses the recording fake actuator.
+* A global kill-switch hotkey that stops input and releases every held key.
+* Watchdogs that stop input on: stale snapshot, event-queue loss, scene-epoch
+  or process change, lost window focus, planner FAULT, an unknown Telos
+  sequence, or an unconfirmed intent past its timeout.
+* A JSON Lines session log and a compact per-kill report.
+* Kill-count and wall-time caps.
+
+Done when
+---------
+
+Tests trip every watchdog with synthetic input and confirm input stops and keys
+are released each time, and shadow mode runs against a replayed capture.
+
+Needs the user
+--------------
+
+The preferred kill-switch key.
+
+Requests
+--------
+
+None yet.

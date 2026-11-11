@@ -1,0 +1,65 @@
+P5 - Interface state
+====================
+
+:Status: open
+:Wave: 1
+:Branch: ``telos/P5``
+:Kind: C (native DLL)
+
+Shared rules and procedure: ``../README.rst``.
+
+Goal
+----
+
+Know which interfaces and dialogs are open, and decode the action bar so key
+bindings are read instead of hand-configured. Required: the instance and
+enrage dialogs, the loot and claim/continue interface, the bank preset
+interface, the death screen, and action-bar slot to ability to key binding.
+
+Read first
+----------
+
+* ``docs/inventory-and-abilities.rst`` (inventory manager path, ability
+  definitions).
+* ``profiles/ability_bindings_951_3.json``.
+* ``src/abilities.c``, ``src/inventory.c``.
+* ``profiles/prayer_flick.json`` (the bindings that are configured by hand
+  today).
+
+Owns
+----
+
+* ``src/interface.c``, ``src/interface.h``, ``include/rs3/interface.h``
+* ``tests/native/test_interface.c``
+* ``docs/validation/interface-validation.json``
+* Own registration lines in the shared wiring files.
+
+Depends on
+----------
+
+S0a for the field names.
+
+Delivers
+--------
+
+* ``WorldState.ui.open[]``: interface identity and, for dialogs, the visible
+  options with a clickable pixel for each.
+* ``WorldState.action_bar[]``: bar, slot, ability or item, and bound key.
+
+Done when
+---------
+
+Each required interface is validated live or reported as unmapped, the decoded
+bindings match the user's four configured prayer chords, and fixture tests
+pass.
+
+Needs the user
+--------------
+
+One session opening each dialog in turn: bank preset, the Telos instance and
+enrage prompts, the loot interface after a kill, and one deliberate death.
+
+Requests
+--------
+
+None yet.

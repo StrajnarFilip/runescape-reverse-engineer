@@ -1,0 +1,64 @@
+P3 - Player effects
+===================
+
+:Status: open
+:Wave: 1
+:Branch: ``telos/P3``
+:Kind: C (native DLL)
+
+Shared rules and procedure: ``../README.rst``.
+
+Goal
+----
+
+Read the local player's buffs and debuffs with identity, stacks and expiry.
+Required set: Berserk, Bloodlust, overload, adrenaline renewal, anima virus,
+stun and bind, Resonance, Anticipation, Freedom, Devotion, Barricade,
+Immortality and Disruption Shield. Stretch goal: the special stored in an
+Essence of Finality amulet.
+
+Read first
+----------
+
+* ``docs/telos-melee-research.rst``, sections "Prayer and defensive decisions"
+  and "Essence of Finality identity and special attacks".
+* ``docs/inventory-and-abilities.rst`` (how VarClient timers are read; Bone
+  Shield tier from VARP 11212).
+* ``src/variables.c``, ``src/abilities.c``.
+
+Owns
+----
+
+* ``src/effects.c``, ``src/effects.h``, ``include/rs3/effects.h``
+* ``tests/native/test_effects.c``
+* ``docs/validation/effects-validation.json``
+* Own registration lines in the shared wiring files.
+
+Depends on
+----------
+
+S0a for the field names.
+
+Delivers
+--------
+
+``WorldState.player.effects[]``: effect identity, stacks, remaining time and a
+validity reason. An effect that was not observed is unknown, not absent, unless
+the whole effect list was read completely.
+
+Done when
+---------
+
+Each required effect is validated live or reported as unmapped, fixture tests
+pass, and the report lists the source variable or structure of every effect.
+
+Needs the user
+--------------
+
+One session triggering each effect in turn out of combat where possible, and
+taking a stun and a virus during a Telos attempt.
+
+Requests
+--------
+
+None yet.

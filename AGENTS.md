@@ -18,6 +18,20 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
 - No scheduled/background uploader is required; synchronize as part of completing
   authorized project work.
 
+## Telos automation roadmap
+
+- On 2026-11-11 the user asked for a bot that completes Telos kills unattended.
+  This replaces the earlier observe-only scope. The work is split into tracks in
+  `docs/telos-automation/README.rst`, one brief per agent under
+  `docs/telos-automation/tracks/<ID>.rst`.
+- When assigned a track, read its brief, work on branch `telos/<ID>` cut from
+  `telos/integration`, and edit only the files the brief lists under Owns. Keep
+  the brief's `Status:` line current. Write needs outside your files under
+  Requests in your own brief instead of editing another track's files.
+- Automatic input is enabled rung by rung through track L, only on validated
+  evidence. The rules below on unverified data and prayer timing still apply.
+- Memory access stays read-only. Do not add work aimed at hiding automation.
+
 ## Project layout and checks
 
 - Native library: `src/` and `include/rs3/`. Python tracker and bindings:

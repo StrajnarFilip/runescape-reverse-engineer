@@ -1,0 +1,63 @@
+P2 - Encounter variables
+========================
+
+:Status: open
+:Wave: 1
+:Branch: ``telos/P2``
+:Kind: C (native DLL)
+
+Shared rules and procedure: ``../README.rst``.
+
+Goal
+----
+
+Verified Telos encounter state from client variables: phase, enrage, streak,
+anima meter and Freedom state, plus a measured 600 ms game-tick reference.
+
+Read first
+----------
+
+* ``include/rs3/rs3.h``: ``RS3_TELOS_PACKED`` (VARP 6363 bits 21..23, marked
+  unverified).
+* ``src/variables.c``, ``src/player.c``, ``src/clock.c``.
+* ``docs/telos-melee-research.rst``, section "Telos encounter model".
+* ``work/probe_var_nodes.py``, ``work/find_clock.py``.
+
+Owns
+----
+
+* ``src/encounter.c``, ``src/encounter.h``, ``include/rs3/encounter.h``
+* ``tests/native/test_encounter.c``
+* ``docs/validation/encounter-validation.json``
+* Own registration lines in the shared wiring files.
+
+Depends on
+----------
+
+S0a for the field names.
+
+Delivers
+--------
+
+* ``WorldState.telos.phase``, ``.enrage``, ``.streak``, ``.meter``,
+  ``.freedom``.
+* ``WorldState.game_tick``: a tick counter or phase estimate with stated
+  uncertainty. The 20 ms client logic clock is not the game tick.
+
+Done when
+---------
+
+Each field is either validated against a labelled manual kill and recorded in
+the report, or explicitly reported as unmapped with what was tried. Fixture
+tests cover present, absent and changing values.
+
+Needs the user
+--------------
+
+One full manual kill at a stated enrage, calling out each phase change, and one
+attempt at a different enrage so the enrage field can be told apart.
+
+Requests
+--------
+
+None yet.

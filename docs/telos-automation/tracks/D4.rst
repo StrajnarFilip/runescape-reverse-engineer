@@ -1,0 +1,67 @@
+D4 - Melee rotation engine
+==========================
+
+:Status: open
+:Wave: 1
+:Branch: ``telos/D4``
+:Kind: Python
+
+Shared rules and procedure: ``../README.rst``.
+
+Goal
+----
+
+Choose the next offensive ability. A small engine evaluates data-driven
+priority lists per phase against cooldowns, GCD, adrenaline, buffs and
+equipment match. The first rotation is simple and forgiving; it is not the
+PVME speedkill.
+
+Read first
+----------
+
+* ``docs/telos-melee-research.rst``, sections "Current combat rules and legacy
+  material" and "Melee rotation reference".
+* ``docs/inventory-and-abilities.rst``, section "Ability requirements and
+  readiness".
+* ``profiles/ability_bindings_951_3.json``.
+* S0a contracts.
+
+Owns
+----
+
+* ``python/rs3_reader/bot/rotation.py``
+* ``profiles/rotations/`` (one file per phase)
+* ``tests/python/test_bot_rotation.py``
+
+Depends on
+----------
+
+S0a. Uses P3 effects and P5 action-bar bindings when present; until then
+conditions on unknown buffs evaluate as not met, and bindings come from a
+hand-written section of the rotation profile.
+
+Delivers
+--------
+
+Ability intents at the lowest priority, at most one per GCD, naming the rule
+that fired. An ability whose timer is unmapped or whose equipment match is
+unknown is never selected. Removed pre-modernisation abilities are not
+referenced.
+
+Done when
+---------
+
+Replay and scenario tests show a legal ability is proposed whenever one is
+ready and the GCD is free, nothing is proposed during the GCD, and each phase
+file loads and validates against the ability bindings.
+
+Needs the user
+--------------
+
+The intended gear, weapons and unlocked abilities, written once into
+``profiles/rotations/``. Live use starts at rung 4 of track L.
+
+Requests
+--------
+
+None yet.

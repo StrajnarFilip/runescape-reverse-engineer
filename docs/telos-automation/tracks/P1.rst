@@ -1,0 +1,65 @@
+P1 - Spatial
+============
+
+:Status: open
+:Wave: 1
+:Branch: ``telos/P1``
+:Kind: C (native DLL)
+
+Shared rules and procedure: ``../README.rst``.
+
+Goal
+----
+
+Know where things are and where to click: tile, facing and current target of
+every NPC; facing and target of the local player; and a projection from a
+world tile to a physical screen pixel, without screenshots.
+
+Read first
+----------
+
+* ``src/npcs.c``, ``src/position.c``, ``src/player_hits.c`` (actor layouts
+  already mapped).
+* ``include/rs3/rs3.h``: ``rs3_npc``, ``rs3_position``, ``rs3_minimap``,
+  ``rs3_interact``.
+* ``docs/research-notes.rst``.
+
+Owns
+----
+
+* ``src/spatial.c``, ``src/spatial.h``, ``include/rs3/spatial.h``
+* ``tests/native/test_spatial.c``
+* ``docs/spatial.rst``, ``docs/validation/spatial-validation.json``
+* Own registration lines in the shared wiring files.
+
+Depends on
+----------
+
+S0a for the field names. S0b decides the profile; until it is done, work on the
+original executable profile.
+
+Delivers
+--------
+
+* ``WorldState.npcs[].tile``, ``.facing``, ``.target``.
+* ``WorldState.player.facing``, ``.target``.
+* A projection accessor: tile to screen pixel, with a validity flag when the
+  tile is off screen or the camera state is unknown.
+
+Done when
+---------
+
+Fixture tests pass, NPC tiles agree with observed movement live, and projected
+pixels land on the entity for at least twenty checked samples across camera
+angles. Record the results in the validation report.
+
+Needs the user
+--------------
+
+One session: stand near several NPCs, walk around them, rotate and zoom the
+camera, and attack one so target fields change.
+
+Requests
+--------
+
+None yet.

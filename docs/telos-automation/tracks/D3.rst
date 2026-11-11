@@ -1,0 +1,64 @@
+D3 - Survival manager
+=====================
+
+:Status: open
+:Wave: 1
+:Branch: ``telos/D3``
+:Kind: Python
+
+Shared rules and procedure: ``../README.rst``.
+
+Goal
+----
+
+Keep the player alive. Produce intents for food and brews, defensive abilities
+on the specific hits they are meant for (Resonance, Freedom, Anticipation,
+Devotion, Barricade, Immortality, Disruption Shield), virus cleansing, prayer
+restoration and an emergency exit.
+
+Read first
+----------
+
+* ``docs/telos-melee-research.rst``, sections "Prayer and defensive decisions",
+  "Food, potions and inventory semantics" and "Disruption Shield and
+  Vengeance".
+* ``docs/inventory-and-abilities.rst`` (item families, doses, cooldown timers).
+* ``python/rs3_reader/inventory_records.py``.
+* S0a contracts.
+
+Owns
+----
+
+* ``python/rs3_reader/bot/survival.py``
+* ``profiles/survival.json`` (thresholds and item roles; no code constants)
+* ``tests/python/test_bot_survival.py``
+
+Depends on
+----------
+
+S0a. Uses P3 effects and D1 threats when present; without them it falls back to
+life-point thresholds only and never claims a defensive is correctly timed.
+
+Delivers
+--------
+
+Survival intents at the highest priority, each with its trigger as evidence.
+Item roles (heal, restore, brew, renewal) come from catalog families, not from
+names or slots. Rules taken from guides are tagged as leads in the profile.
+
+Done when
+---------
+
+Scenario tests pass for: low life points with and without food, empty
+inventory, unknown life points, a predicted heavy hit, a stun, a virus, low
+prayer, and the emergency exit when nothing else is available.
+
+Needs the user
+--------------
+
+Nothing in this track. Live use starts at rung 3 of track L.
+
+Requests
+--------
+
+None yet.

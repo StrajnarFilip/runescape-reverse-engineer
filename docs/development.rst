@@ -24,6 +24,10 @@ Repository layout
 See `Arduino Leonardo serial keyboard <arduino-keyboard.rst>`_ for the sketch's
 build instructions and serial protocol.
 
+The `Telos automation roadmap <telos-automation/README.rst>`_ splits the
+remaining work into one brief per agent under ``docs/telos-automation/tracks/``.
+New decision code goes in ``python/rs3_reader/bot/``.
+
 Native library modules
 ----------------------
 
