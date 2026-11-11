@@ -2,7 +2,8 @@
 
 Uses the independent reference decoder for the local player actor; production
 acquisition stays in C. Hitmark amounts are not assumed to be damage. Only the
-configured function keys are observed, and only in the foreground game window.
+configured function keys are observed by default, and only in the foreground game
+window. A caller may explicitly allow a fixed additional calibration binding.
 
 Usage::
 
@@ -137,14 +138,21 @@ def local_hits(memory, layout, world_state, logic_tick):
 
 
 class PrayerKeys:
-    """Samples down edges of the configured prayer chords in the foreground game window."""
+    """Sample configured chords in the foreground game, with an explicit key allowlist.
 
-    def __init__(self, pid, bindings):
+    Function keys are accepted by default. Other keys must be declared by the
+    caller in additional_virtual_keys and still match their complete chord.
+    """
+
+    def __init__(self, pid, bindings, *, additional_virtual_keys=()):
         self.pid = pid
         self.bindings = bindings
         for binding in bindings.values():
-            if not VK_F1 <= binding["virtual_key"] <= VK_F12:
-                raise ValueError("Calibration records function keys only")
+            key = binding["virtual_key"]
+            if not VK_F1 <= key <= VK_F12 and key not in additional_virtual_keys:
+                raise ValueError(
+                    "Calibration records function keys and explicitly allowed keys only"
+                )
         self.previous_keys = set()
         self.was_focused = False
         self.last_poll_ns = 0
@@ -214,9 +222,11 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     arguments = parser.parse_args()
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
-    with ProcessMemory(arguments.pid) as memory, Reader(
-        pid=arguments.pid, worker_hz=100
-    ) as reader, arguments.output.open("x", encoding="utf-8") as output:
+    with (
+        ProcessMemory(arguments.pid) as memory,
+        Reader(pid=arguments.pid, worker_hz=100) as reader,
+        arguments.output.open("x", encoding="utf-8") as output,
+    ):
         decoder = ReferenceDecoder(memory)
         layout = LocalActorLayout(decoder.profile)
         state_pointer_offset = decoder.profile["state_pointer_offset"]

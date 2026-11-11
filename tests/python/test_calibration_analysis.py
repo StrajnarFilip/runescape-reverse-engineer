@@ -70,6 +70,82 @@ def soul_split_key(time_ms, virtual_key=VK_F3, prayer="soul_split"):
 
 
 class CalibrationAnalysisTests(unittest.TestCase):
+    def test_zero_damage_is_not_a_failed_protection_result(self):
+        row = capture_row(2000)
+        row.update(
+            input_mode="controlled_calibration",
+            trial_state="completed",
+            client_logic_tick=200,
+            devotion_cooldown={"timer_valid": True, "start_tick": 0, "end_tick": 3000},
+        )
+        row["calibration_updates"] = [
+            {"event": "paired_hit", "stage": "control", "hit": player_hit(ms(1000), 133, 1)},
+            {"event": "paired_hit", "stage": "result", "hit": player_hit(ms(1600), 133, 0)},
+        ]
+        result = analysis.controlled_trial_summary([row], clean_opening_confirmed=True)
+        self.assertEqual(result["outcome"], "zero_damage_inconclusive")
+
+    def test_controlled_inputs_are_not_reported_as_manual_only(self):
+        row = capture_row(1000)
+        row.update(input_mode="controlled_calibration", trial_state="completed")
+        row["calibration_updates"] = [
+            {
+                "event": "input_accepted",
+                "prayer": "melee",
+                "accepted_ns": ms(1359),
+                "requested_after_cue_ms": 350,
+                "accepted_after_cue_ms": 359,
+            },
+            {"event": "acknowledged", "prayer": "melee", "observed_ns": ms(1600)},
+            {"event": "paired_hit", "stage": "result", "hit": player_hit(ms(1600), 133, 1)},
+        ]
+        result = analysis.controlled_trial_summary([row])
+        self.assertTrue(result["input_sent_by_calibration"])
+        self.assertEqual(result["accepted_test_delay_ms"], 359)
+        self.assertEqual(result["test_hit"], {"amount": 1, "type_id": 133})
+        self.assertTrue(result["melee_acknowledged_after_test_command"])
+        self.assertFalse(result["prayer_check_deadline_validated"])
+
+    def devotion_rows(self):
+        cast = capture_row(800)
+        cast["manual_ability_keys"] = [{"ability": "devotion", "observed_ns": ms(800)}]
+        timer = capture_row(900)
+        timer["devotion_cooldown"] = {
+            "struct_id": analysis.DEVOTION_STRUCT_ID,
+            "timer_valid": True,
+            "start_tick": 10,
+            "end_tick": 3010,
+        }
+        cue = capture_row(1000, "soul_split")
+        cue["npc_action_events"] = [melee_cue(ms(1000))]
+        press = capture_row(1110, "soul_split")
+        press["manual_prayer_keys"] = [soul_split_key(1110, virtual_key=115, prayer="melee")]
+        hit = capture_row(1600, "soul_split")
+        hit["player_hit_events"] = [player_hit(ms(1600), analysis.MELEE_DAMAGE_HIT_TYPE, 1)]
+        acknowledgement = capture_row(1610)
+        acknowledgement["previous_sample_ns"] = ms(1600)
+        return [cast, timer, cue, press, hit, acknowledgement]
+
+    def test_devotion_outcome_requires_a_clean_user_label(self):
+        rows = self.devotion_rows()
+        result = analysis.devotion_opening_summary(rows)
+        self.assertEqual(result["trials"][0]["outcome"], "not_classified")
+        result = analysis.devotion_opening_summary(rows, clean_opening_confirmed=True)
+        trial = result["trials"][0]
+        self.assertEqual(trial["outcome"], "one_damage_during_user_confirmed_devotion")
+        self.assertEqual(trial["sampled_melee_key_after_cue_ms"], 110)
+        self.assertEqual(trial["melee_first_observed_after_cue_ms"], 610)
+        self.assertEqual(trial["melee_previous_sample_after_cue_ms"], 600)
+        self.assertEqual(trial["prayer_near_hit_observation"], "soul_split")
+        self.assertFalse(result["prayer_check_deadline_validated"])
+        self.assertIsNone(result["devotion_buff_active_from_memory"])
+
+    def test_an_old_cooldown_does_not_confirm_a_new_devotion_cast(self):
+        rows = self.devotion_rows()
+        baseline = capture_row(500)
+        baseline["devotion_cooldown"] = rows[1]["devotion_cooldown"]
+        self.assertIsNone(analysis.devotion_opening_summary([baseline] + rows))
+
     def test_same_tick_miss_is_not_lost_or_counted_as_damage(self):
         row = capture_row(1000)
         row["npc_action_events"] = [melee_cue(ms(1000))]

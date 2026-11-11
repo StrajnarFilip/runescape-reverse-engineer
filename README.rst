@@ -33,6 +33,8 @@ Current capabilities
   guarded local-player hitmark snapshot and event queue. See
   `Prayer timing <docs/prayer-flick.rst>`_ for the observer and initial Telos
   calibration; automatic flicking remains disabled pending validated deadlines.
+  The opt-in controlled calibration runner records scripted Ctrl+F-key tests
+  under Devotion; its findings are in ``docs/validation/telos-prayer-check-2026-11-11.json``.
 
 Previously verified in live combat: Goblin **550/550 HP**, Giant spider
 **1000/1000 HP**, and Goblin **550 -> 326 HP** alongside the independently reported
