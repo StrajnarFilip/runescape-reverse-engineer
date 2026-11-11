@@ -1,7 +1,7 @@
 P3 - Player effects
 ===================
 
-:Status: open
+:Status: in progress
 :Wave: 1
 :Branch: ``telos/P3``
 :Kind: C (native DLL)
