@@ -114,6 +114,10 @@ Channels, Greater Barge's bleed setup, GCD, adrenaline, gear effects, individual
 cooldowns, bombs on the last GCD tick, and off-GCD combinations all need measured
 timing. The runner does not silently assign a three-tick interval to them.
 
+The `Mostima video timing report`_ records visible cast and item cues from
+the guide's 2:15 red beam example at 2,449% enrage. Use it as a comparison
+when measuring key timing on the target account.
+
 The ``choices`` object defines the guide's alternatives. Select ``red_finisher``,
 ``green_filler`` and ``green_finisher`` with ``--choice NAME=ACTION``. These are
 explicit choices, not inferred combat decisions. ``melee_basic`` is an explicit
@@ -193,7 +197,7 @@ script already completes an unattended kill. The wider roadmap supplies the
 missing encounter, movement, cast-confirmation and survival behavior.
 
 Validation of this implementation
---------------------------------
+---------------------------------
 
 Fake clocks/devices cover guide ordering and alternatives, missing configuration,
 calibration invalidation, deadlines, interruption during waits, foreground and
@@ -202,4 +206,5 @@ errors/timeouts. They never send OS keyboard input. Live transport and complete
 kill validation remain pending.
 
 .. _PVME melee Telos guide: https://pvme.io/pvme-guides/rs3-full-boss-guides/telos/melee/
+.. _Mostima video timing report: validation/pvme-telos-mostima-video-2026-11-11.rst
 .. _track L: telos-automation/tracks/L.rst
