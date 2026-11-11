@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "track": "P1",
+  "date": "2026-11-11",
+  "status": "controlled_validation_and_target_mapping_pending",
+  "runtime_profile_observed": "951-3",
+  "sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+  "additional_signature_guards": {
+    "position_getter_rva": "0x6ee1f0",
+    "facing_getter_rva": "0x44b690",
+    "projection_instruction_rva": "0x5a34e"
+  },
+  "static_fields": {
+    "plane": "actor+0x50",
+    "footprint": "actor+0x18c",
+    "fine_position": "actor+0x280",
+    "facing_quaternion": "actor+0x1cc; proxy 0x44c910 and yaw helper 0x44b690",
+    "world_to_clip": "actor+0x60 -> world+0x13900; 0x05a260 and 0x6dec20",
+    "viewport": "client world state+0x199e8 -> scene manager+0x84..0x90"
+  },
+  "read_only_smoke_observation": {
+    "player_tile": [
+      6879,
+      2062,
+      0
+    ],
+    "player_facing_degrees": 134.99998474121094,
+    "npc_config_id": 22892,
+    "npc_name": "Telos, the Warden (dormant)",
+    "npc_tile": [
+      6867,
+      2067,
+      0
+    ],
+    "camera_valid_mask": 7,
+    "world_state_adapter_received_player_tile": true,
+    "manual_position_ground_truth": null,
+    "manually_checked_projected_samples": 0
+  },
+  "unmapped": {
+    "player_target": "No verified combat-target identity field. facingTarget is a heading.",
+    "npc_target": "No verified combat-target identity field.",
+    "terrain_height": "Tile projection requires an explicitly known caller-supplied height.",
+    "compatibility_mode_spatial": "The currently installed binary is the original profile; new Compatibility Mode pose/projection guards remain unverified."
+  },
+  "input_sent": false,
+  "raw_capture_committed": false,
+  "checks": {
+    "windows_x64_release_build": "passed",
+    "ctest_suites_passed": 11,
+    "python_tests_passed": 78,
+    "native_spatial_cases": 5,
+    "existing_public_structures_changed": false
+  }
+}

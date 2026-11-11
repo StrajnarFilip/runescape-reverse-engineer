@@ -71,6 +71,7 @@ add_library(rs3_objects OBJECT
     src/prayer.c
     src/process.c
     src/snapshot.c
+    src/spatial.c
     src/variables.c
     ${RS3_PROFILE_OUTPUTS}
 )
@@ -120,6 +121,7 @@ if(BUILD_TESTING)
     rs3_add_native_test(native_inventory tests/native/test_inventory.c ${RS3_FIXTURE_SOURCES})
     rs3_add_native_test(native_combat tests/native/test_combat.c ${RS3_FIXTURE_SOURCES})
     rs3_add_native_test(native_player_hits tests/native/test_player_hits.c ${RS3_FIXTURE_SOURCES})
+    rs3_add_native_test(native_spatial tests/native/test_spatial.c ${RS3_FIXTURE_SOURCES})
     rs3_add_native_test(native_input tests/native/test_input.c ${RS3_FIXTURE_SOURCES})
     rs3_add_native_test(native_prayer_planner tests/native/test_prayer_planner.c)
 
@@ -209,6 +211,7 @@ install(TARGETS rs3_native EXPORT rs3_native_targets
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 )
 install(FILES include/rs3/rs3.h include/rs3/combat.h include/rs3/prayer.h
+    include/rs3/spatial.h
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/rs3"
 )
 install(EXPORT rs3_native_targets NAMESPACE rs3:: DESTINATION "${RS3_PACKAGE_DIR}")
