@@ -74,7 +74,12 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
   Ctrl+F3/Ctrl+F4 switches were observed on 2026-11-10. Preserve Ctrl+F1 Magic, Ctrl+F2 Ranged,
   Ctrl+F3 Soul Split, Ctrl+F4 Melee bindings in `profiles/prayer_flick.json`.
 - Raw NPC animation IDs, overhead flags and original-profile player hitmarks
-  are available. Two 300% phase-1 captures associate 28929 with melee autos,
+  are available. S0b selected Compatibility Mode (6ada3f59-1a86000) as the
+  runtime profile: its player actor is pinned and its tile/hitmark channels
+  share one actor lookup. The generator now emits its player actor vtable;
+  the live movement-plus-hit validation remains pending in
+  docs/validation/profile-unification.json. Two 300% phase-1 captures associate
+  28929 with melee autos,
   28931 with tendrils, 28938 with uppercut and 28935 with Hold Still. See
   `docs/validation/telos-prayer-calibration-2026-11-10.json`. Other phases/styles,
   prayer-check deadlines and complete incoming-attack coverage remain

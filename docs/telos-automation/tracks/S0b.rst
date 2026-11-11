@@ -86,6 +86,11 @@ Requests
 These files are outside this track's Owns list and owned by no other track;
 track L routes them.
 
+Integration update (2026-11-11): requests 1-4 below are implemented on
+``telos/integration``. The generated Compatibility Mode table now carries
+``0x150d8c8``. The remaining live movement-plus-hit check under Needs the user
+is still pending; this merge does not change the track's validation status.
+
 1. ``tools/generate_profile.py``: add ``"player_actor_vtable_rva"`` to
    ``OPTIONAL_PROFILE_FIELDS``, so ``compatibility_addresses()`` emits
    ``combat_layout.player_actor_vtable_rva``. Also reword the comment in

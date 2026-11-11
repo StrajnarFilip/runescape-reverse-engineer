@@ -110,7 +110,11 @@ PROFILE_ADDRESS_FIELDS = (
     "npc_manager_vtable_rva",
     "npc_entity_vtable_rva",
 )
-OPTIONAL_PROFILE_FIELDS = ("npc_animation_vtable_rva", "npc_action_stamp_offset")
+OPTIONAL_PROFILE_FIELDS = (
+    "npc_animation_vtable_rva",
+    "npc_action_stamp_offset",
+    "player_actor_vtable_rva",
+)
 
 
 def parse_number(value):
@@ -162,7 +166,7 @@ def primary_addresses(primary):
         "client_vtable_rva": primary["client_vtable_rva"],
         "npc_manager_vtable_rva": primary["npcs"]["manager_vtable_rva"],
         "npc_entity_vtable_rva": primary["npcs"]["entity_vtable_rva"],
-        # Only the original executable has a verified local player actor layout.
+        # Each executable pins its local player actor vtable independently.
         "player_actor_vtable_rva": primary["local_actor"]["vtable_rva"],
     }
     if primary["npcs"].get("animation_layout_verified"):
