@@ -1,7 +1,7 @@
 P2 - Encounter variables
 ========================
 
-:Status: open
+:Status: in progress
 :Wave: 1
 :Branch: ``telos/P2``
 :Kind: C (native DLL)
