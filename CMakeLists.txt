@@ -69,6 +69,7 @@ add_library(rs3_objects OBJECT
     src/player_hits.c
     src/position.c
     src/prayer.c
+    src/prayer_cycle.c
     src/process.c
     src/snapshot.c
     src/variables.c
@@ -122,6 +123,7 @@ if(BUILD_TESTING)
     rs3_add_native_test(native_player_hits tests/native/test_player_hits.c ${RS3_FIXTURE_SOURCES})
     rs3_add_native_test(native_input tests/native/test_input.c ${RS3_FIXTURE_SOURCES})
     rs3_add_native_test(native_prayer_planner tests/native/test_prayer_planner.c)
+    rs3_add_native_test(native_prayer_cycle tests/native/test_prayer_cycle.c)
 
     add_test(NAME prayer_example COMMAND prayer_example)
 

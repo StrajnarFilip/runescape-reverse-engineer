@@ -247,6 +247,73 @@ distinguishes actual scripted commands from manual key observations; misses
 and aborted runs do not become successful trials. Use ``--capture-enrages``
 when reproducing a report that combines different user-reported enrages.
 
+Anticipatory opening test
+-------------------------
+
+``rs3_prayer_predict_cycle`` is an additive, stateless C calculator. Its
+56-byte ``rs3_prayer_cycle_frame`` and 48-byte ``rs3_prayer_cycle_prediction``
+are caller-owned; verify them with ``rs3_prayer_sizeof(5)`` and
+``rs3_prayer_sizeof(6)``. It accepts
+an explicit protection style, so a consumer can request Melee, Magic or another
+known protection. An unknown style is rejected. It does not classify attacks,
+establish incoming-attack coverage or mark a threat's timing validated.
+Python uses the same calculation through ``CyclePredictor`` in ``prayer.py``.
+Existing ABI layouts and exports are unchanged.
+
+The bounded test is selected explicitly::
+
+    python work/calibrate_prayer_check.py --controlled-input --anticipate --cycles 2 --pid 12345 --enrage-label 2000 --output work/prayer_research/anticipated.jsonl
+
+The player selects Melee before starting, stays in melee range without stuns,
+and casts Devotion. After the one-damage control, the next cue is estimated as
+the last observed cue plus 2400ms. Melee input is scheduled 100ms before that
+estimate. Soul Split is requested after a resolved hit and only when the
+acknowledgement budget and minimum window fit. Pending inputs must be confirmed
+before another is issued. Each observed cue re-anchors the model, so timing does
+not drift across successive predictions.
+
+The test ends after at most two predicted autos. Missing/shifted cues, special
+or unknown actions, unclassified incoming damage, changed scene/NPC, changed raw
+stage signature, stale samples and lost focus invalidate the cycle. The raw
+signature only detects changes; it is not a verified phase decoder. Manual
+protection-style changes stop the melee test without replacing the selected
+style. The final handoff leaves Melee active; it is not a continuous boss script.
+
+Live observations on 2026-11-11:
+
+=================  ========================  ========================  =============
+Lead before cue    Observed Soul Split       Observed Melee interval   Predicted hits
+=================  ========================  ========================  =============
+900ms initial      609.658ms / 610.012ms      1790.215ms                1 / 1
+100ms retuned      1800.367ms / 1810.157ms    609.619ms                 1 / 1
+=================  ========================  ========================  =============
+
+The measured Melee interval ends at the following Soul Split acknowledgement;
+the final Melee handoff has no such endpoint. The first pass was deliberately
+early and left roughly one tick for Soul Split. The user requested protection
+for the check tick instead. The retuned pass observed roughly three ticks of
+Soul Split and one of Melee, and the user reported much better timing. Both
+passes had a one-damage control and two one-damage predicted hits.
+
+The retuned requests were 31.039ms and 78.858ms before the actual observed cues;
+prediction errors were -60.074ms and -10.297ms. One Melee flag was sampled about
+9ms after its protected hitmark, consistent with separately sampled fields;
+these client observations do not establish the exact server check timestamp.
+Evidence is in ``validation/telos-prayer-anticipatory-2026-11-11.json``.
+
+Magic and phase scope
+~~~~~~~~~~~~~~~~~~~~~
+
+The `PVME mechanics reference <https://pvme.io/pvme-guides/basic-guides/telos-basic/>`_
+describes Magic autos outside melee distance and Magic-only autos in phases 3
+and 5. Phase 4 can also switch style with distance. The generic C calculator
+supports Magic, but the live opening controller recognizes only the calibrated
+phase-1 melee cue. Unknown actions stop it; it does not infer Magic from an
+unmapped animation or apply a Melee cycle across phases. Style/target mapping,
+projectile/check timing, golems, beams and stun/Freedom rhythm changes require
+their own live validation. The general observer and production validation
+flags remain unchanged.
+
 Directly available data
 -----------------------
 

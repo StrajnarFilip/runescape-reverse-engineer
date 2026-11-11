@@ -66,6 +66,15 @@ class PlannerStructure(IntEnum):
     FRAME = 2
     THREAT = 3
     DECISION = 4
+    CYCLE_FRAME = 5
+    CYCLE_PREDICTION = 6
+
+
+class CycleReason(IntEnum):
+    READY = 0
+    NEEDS_ANCHOR = 1
+    EXPIRED = 2
+    SHORT_WINDOW = 3
 
 
 class Config(ctypes.Structure):
@@ -120,11 +129,41 @@ class Decision(ctypes.Structure):
     ]
 
 
+class CycleFrame(ctypes.Structure):
+    _fields_ = [
+        ("now_ns", ctypes.c_uint64),
+        ("last_cue_ns", ctypes.c_uint64),
+        ("last_outcome_ns", ctypes.c_uint64),
+        ("period_ms", ctypes.c_uint32),
+        ("lead_before_cue_ms", ctypes.c_uint32),
+        ("acknowledgement_budget_ms", ctypes.c_uint32),
+        ("minimum_soul_split_ms", ctypes.c_uint32),
+        ("cue_tolerance_ms", ctypes.c_uint32),
+        ("active_prayer", ctypes.c_uint32),
+        ("protection_prayer", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32),
+    ]
+
+
+class CyclePrediction(ctypes.Structure):
+    _fields_ = [
+        ("next_cue_ns", ctypes.c_uint64),
+        ("protection_send_ns", ctypes.c_uint64),
+        ("cue_deadline_ns", ctypes.c_uint64),
+        ("latest_soul_split_send_ns", ctypes.c_uint64),
+        ("desired_prayer", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32 * 2),
+    ]
+
+
 PLANNER_STRUCTURES = {
     PlannerStructure.CONFIG: Config,
     PlannerStructure.FRAME: Frame,
     PlannerStructure.THREAT: Threat,
     PlannerStructure.DECISION: Decision,
+    PlannerStructure.CYCLE_FRAME: CycleFrame,
+    PlannerStructure.CYCLE_PREDICTION: CyclePrediction,
 }
 
 # Keys of the "timing" object in profiles/prayer_flick.json, in Config order.
@@ -157,6 +196,7 @@ def _declare_planner_functions(library):
             ],
         ),
         "note_sent": (i32, [handle, u64, u64]),
+        "predict_cycle": (i32, [ctypes.POINTER(CycleFrame), ctypes.POINTER(CyclePrediction), u32]),
     }
     for name, (result_type, argument_types) in prototypes.items():
         function = getattr(library, "rs3_prayer_" + name)
@@ -165,6 +205,48 @@ def _declare_planner_functions(library):
     for structure_id, structure in PLANNER_STRUCTURES.items():
         if library.rs3_prayer_sizeof(structure_id) != ctypes.sizeof(structure):
             raise RuntimeError("C/Python prayer layout mismatch: " + structure.__name__)
+
+
+class CyclePredictor:
+    """C cadence estimates; no game access, input dispatch or validated check windows."""
+
+    def __init__(self, library=None):
+        self.library = load_library(library)
+        _declare_planner_functions(self.library)
+
+    def predict(
+        self,
+        now_ns,
+        last_cue_ns,
+        last_outcome_ns,
+        active_prayer,
+        protection_prayer=Prayer.MELEE,
+        period_ms=2400,
+        lead_before_cue_ms=100,
+        acknowledgement_budget_ms=800,
+        minimum_soul_split_ms=100,
+        cue_tolerance_ms=200,
+    ):
+        frame = CycleFrame(
+            now_ns,
+            last_cue_ns,
+            last_outcome_ns,
+            period_ms,
+            lead_before_cue_ms,
+            acknowledgement_budget_ms,
+            minimum_soul_split_ms,
+            cue_tolerance_ms,
+            active_prayer,
+            protection_prayer,
+            0,
+        )
+        result = CyclePrediction()
+        status = self.library.rs3_prayer_predict_cycle(
+            ctypes.byref(frame), ctypes.byref(result), ctypes.sizeof(result)
+        )
+        if status:
+            raise RuntimeError(self.library.rs3_result_string(status).decode())
+        return result
 
 
 class Planner:

@@ -27,8 +27,10 @@ build instructions and serial protocol.
 Native library modules
 ----------------------
 
-Every ``src/<module>.c`` has a matching internal header ``src/<module>.h``.
-Internal headers are included without a prefix (``"npcs.h"``); public headers
+Acquisition modules pair ``src/<module>.c`` with an internal ``src/<module>.h``.
+The prayer planner and cycle calculator export their declarations directly in
+``include/rs3/prayer.h``. Other internal headers are included without a prefix
+(``"npcs.h"``); public headers
 always use the ``rs3/`` prefix (``"rs3/combat.h"``).
 
 =================== =========================================================
@@ -53,6 +55,7 @@ Module              Responsibility
 ``abilities``       Ability cooldown timers and weapon requirement checks
 ``input``           Opt-in foreground input
 ``prayer``          Deterministic prayer planner
+``prayer_cycle``    Stateless next-cue and prayer-send estimates (no attack validation)
 ``clock``           Monotonic and wall-clock time sources
 ``decode_utils``    Byte decoding helpers for copied remote memory
 ``profile``         Pinned client profiles (tables generated at build time)

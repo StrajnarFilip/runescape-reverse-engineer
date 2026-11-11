@@ -115,6 +115,10 @@ uint32_t rs3_prayer_sizeof(uint32_t structure)
             return sizeof(rs3_prayer_threat);
         case RS3_PRAYER_SIZE_DECISION:
             return sizeof(rs3_prayer_decision);
+        case RS3_PRAYER_SIZE_CYCLE_FRAME:
+            return sizeof(rs3_prayer_cycle_frame);
+        case RS3_PRAYER_SIZE_CYCLE_PREDICTION:
+            return sizeof(rs3_prayer_cycle_prediction);
         default:
             return 0;
     }

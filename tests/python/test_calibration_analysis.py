@@ -70,6 +70,56 @@ def soul_split_key(time_ms, virtual_key=VK_F3, prayer="soul_split"):
 
 
 class CalibrationAnalysisTests(unittest.TestCase):
+    def test_forecast_and_observed_prayer_intervals_are_distinct(self):
+        row = capture_row(5000)
+        row.update(
+            anticipatory_mode=True, input_mode="anticipatory_calibration", trial_state="completed"
+        )
+        row["calibration_updates"] = [
+            {
+                "event": "paired_hit",
+                "stage": "control",
+                "cue_sequence": 1,
+                "hit": player_hit(ms(1500), 133, 1),
+            },
+            {
+                "event": "prediction_scheduled",
+                "anchor_cue_sequence": 1,
+                "next_cue_ns": ms(3400),
+                "protection_send_ns": ms(3300),
+                "period_ms": 2400,
+                "lead_before_cue_ms": 100,
+            },
+            {"event": "input_accepted", "prayer": "soul_split", "accepted_ns": ms(1510)},
+            {"event": "acknowledged", "prayer": "soul_split", "observed_ns": ms(2100)},
+            {
+                "event": "input_accepted",
+                "prayer": "melee",
+                "accepted_ns": ms(3300),
+                "predicted_cue_ns": ms(3400),
+            },
+            {"event": "auto_cue", "stage": "result", "cue_sequence": 2, "cue_ns": ms(3370)},
+            {"event": "acknowledged", "prayer": "melee", "observed_ns": ms(3900)},
+            {
+                "event": "paired_hit",
+                "stage": "result",
+                "cue_sequence": 2,
+                "hit": player_hit(ms(3920), 133, 1),
+            },
+            {"event": "input_accepted", "prayer": "soul_split", "accepted_ns": ms(3930)},
+            {"event": "acknowledged", "prayer": "soul_split", "observed_ns": ms(4500)},
+            {"event": "cycle_completed"},
+        ]
+        result = analysis.anticipatory_trial_summary([row])
+        cycle = result["cycles"][0]
+        self.assertEqual(cycle["prediction_error_ms"], -30)
+        self.assertEqual(cycle["command_before_actual_cue_ms"], 70)
+        self.assertEqual(cycle["melee_observed_before_hit_ms"], 20)
+        self.assertEqual(cycle["soul_split_observed_ms"], 1800)
+        self.assertEqual(cycle["melee_observed_ms_until_next_soul_split"], 600)
+        self.assertIsNone(analysis.controlled_trial_summary([row]))
+        self.assertFalse(result["prayer_check_deadline_validated"])
+
     def test_zero_damage_is_not_a_failed_protection_result(self):
         row = capture_row(2000)
         row.update(

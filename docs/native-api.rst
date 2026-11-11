@@ -8,6 +8,17 @@ receive typed snapshots through a plain C ABI. Python remains responsible for
 presentation, JSON serialization and the desktop UI. No callbacks into Python or
 Java are needed on the collector thread.
 
+Prayer cycle estimates
+-----------------------
+
+The public ``rs3/prayer.h`` also provides the stateless
+``rs3_prayer_predict_cycle`` cadence calculator. Its caller-owned frame and
+prediction are 56 and 48 bytes; ``rs3_prayer_sizeof(5)`` and
+``rs3_prayer_sizeof(6)`` verify the layouts.
+It accepts an explicit protection style and estimates the next cue/send times.
+It sends no input and does not validate attack style or server check timing.
+See `Anticipatory opening test <prayer-flick.rst#anticipatory-opening-test>`_.
+
 Foreground input
 ----------------
 

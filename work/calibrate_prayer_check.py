@@ -22,7 +22,7 @@ from capture_prayer import (  # noqa: E402
     player_hit_event_record,
 )
 from rs3_reader.native import LOGIC_TICK_MS, Reader, Status, Variable  # noqa: E402
-from rs3_reader.prayer import Prayer  # noqa: E402
+from rs3_reader.prayer import CyclePredictor, CycleReason, Prayer  # noqa: E402
 from rs3_reader.telemetry import combat_record  # noqa: E402
 from rs3_reader.telos_prayer import ManualPrayerKeys  # noqa: E402
 
@@ -43,12 +43,17 @@ MAX_TEST_DELAY_MS = 600
 MAX_CALIBRATION_DURATION_SECONDS = 600
 DEFAULT_CALIBRATION_DURATION_SECONDS = 300
 MAX_ENRAGE_LABEL = 4000
+AUTO_PERIOD_MS = 2400
+PROTECTION_LEAD_BEFORE_CUE_MS = 100
+CUE_TOLERANCE_NS = 200 * MILLISECOND_NS
+MAX_PREDICTED_CYCLES = 2
+HEAL_HIT_TYPE = 143
 
 
 class PrayerCheckTrial:
     """One controlled input experiment; send_prayer returns native acceptance time."""
 
-    def __init__(self, delay_ms, send_prayer):
+    def __init__(self, delay_ms, send_prayer, *, predictor=None, cycles=1):
         self.delay_ns = delay_ms * MILLISECOND_NS
         self.send_prayer = send_prayer
         self.state = "waiting"
@@ -63,6 +68,12 @@ class PrayerCheckTrial:
         self.cue = None
         self.hit = None
         self.finished = False
+        self.predictor = predictor
+        self.maximum_cycles = cycles
+        self.completed_cycles = 0
+        self.prediction = None
+        self.predicted_anchor = None
+        self.opening_stage_signature = None
 
     def command(self, prayer, frame, output):
         if frame["prayer"] == prayer:
@@ -93,6 +104,56 @@ class PrayerCheckTrial:
                 ),
             }
         )
+        if self.predictor and prayer == Prayer.MELEE and self.prediction is not None:
+            output[-1].update(
+                predicted_cue_ns=self.prediction.next_cue_ns,
+                accepted_before_predicted_cue_ms=(self.prediction.next_cue_ns - accepted_ns)
+                / MILLISECOND_NS,
+            )
+        return True
+
+    def apply_prediction(self, frame, output):
+        """Use the native cadence estimate without marking its timing validated."""
+        outcome_ns = max(self.hit["observed_ns"], self.cue["observed_ns"])
+        try:
+            self.prediction = self.predictor.predict(
+                frame["now_ns"],
+                self.cue["observed_ns"],
+                outcome_ns,
+                frame["prayer"],
+                period_ms=AUTO_PERIOD_MS,
+                lead_before_cue_ms=PROTECTION_LEAD_BEFORE_CUE_MS,
+            )
+        except RuntimeError as error:
+            self.abort(frame, output, str(error))
+            return False
+        if self.prediction.reason in (CycleReason.EXPIRED, CycleReason.NEEDS_ANCHOR):
+            self.abort(frame, output, "prediction anchor expired or unavailable")
+            return False
+        if self.predicted_anchor != self.cue["sequence"]:
+            self.predicted_anchor = self.cue["sequence"]
+            output.append(
+                {
+                    "event": "prediction_scheduled",
+                    "anchor_cue_sequence": self.cue["sequence"],
+                    "next_cue_ns": self.prediction.next_cue_ns,
+                    "protection_send_ns": self.prediction.protection_send_ns,
+                    "period_ms": AUTO_PERIOD_MS,
+                    "lead_before_cue_ms": PROTECTION_LEAD_BEFORE_CUE_MS,
+                    "prediction_reason": CycleReason(self.prediction.reason).name.lower(),
+                    "timing_validated": False,
+                }
+            )
+        if self.pending is None and self.prediction.desired_prayer != frame["prayer"]:
+            if (
+                self.prediction.desired_prayer == Prayer.MELEE
+                and frame["now_ns"] - self.prediction.protection_send_ns > MAX_DISPATCH_LATENESS_NS
+            ):
+                self.abort(frame, output, "predicted protection request was missed")
+                return False
+            if not self.command(Prayer(self.prediction.desired_prayer), frame, output):
+                self.abort(frame, output, "predicted prayer input failed")
+                return False
         return True
 
     def abort(self, frame, output, reason):
@@ -132,6 +193,23 @@ class PrayerCheckTrial:
             if self.state != "waiting":
                 return self.abort(frame, output, "overhead unknown")
             return output
+        if (
+            self.predictor
+            and self.state not in ("waiting", "restoring")
+            and frame["prayer"] not in (Prayer.MELEE, Prayer.SOUL_SPLIT)
+        ):
+            self.finished, self.state = True, "aborted"
+            output.append(
+                {"event": "aborted", "reason": "manual protection style changed; ending melee test"}
+            )
+            if self.pending is not None:
+                output.append(
+                    {
+                        "event": "manual_protection_required",
+                        "reason": "an earlier test input was pending",
+                    }
+                )
+            return output
         if self.pending is not None:
             if (
                 frame["sequence"] > self.pending_sequence
@@ -169,11 +247,18 @@ class PrayerCheckTrial:
                 if self.pending is not None or frame["prayer"] != Prayer.MELEE:
                     return self.abort(frame, output, "encounter began before Melee confirmation")
                 self.instance = frame["telos_instance"]
+                self.opening_stage_signature = frame.get("stage_signature")
+                if self.predictor and self.opening_stage_signature is None:
+                    return self.abort(frame, output, "opening stage signature unavailable")
                 self.state = "control"
                 output.append({"event": "opening_detected"})
             return output
         if frame["telos_instance"] != self.instance or frame["telos_form"] != ACTIVE_TELOS_ID:
             return self.abort(frame, output, "Telos identity changed")
+        if self.predictor and frame.get("stage_signature") != self.opening_stage_signature:
+            return self.abort(
+                frame, output, "stage signature changed; manual style selection required"
+            )
         if frame["devotion_start"] != self.baseline_timer and frame["devotion_age_ms"] is not None:
             self.fresh_devotion = True
         devotion_valid = (
@@ -181,6 +266,19 @@ class PrayerCheckTrial:
             and frame["devotion_age_ms"] is not None
             and 0 <= frame["devotion_age_ms"] <= MAX_DEVOTION_AGE_MS
         )
+        if self.predictor and self.state == "next_cue":
+            if not devotion_valid:
+                return self.abort(frame, output, "predicted test left its Devotion control window")
+            if not self.apply_prediction(frame, output):
+                return output
+        if self.predictor and any(
+            hit["hit"]["type_id"] not in (MELEE_DAMAGE_TYPE, MISS_TYPE, HEAL_HIT_TYPE)
+            and hit["hit"]["amount"] > 0
+            for hit in hits
+        ):
+            return self.abort(
+                frame, output, "unclassified incoming hit; manual style selection required"
+            )
         for action in actions:
             if action["instance_id"] != self.instance:
                 continue
@@ -193,14 +291,29 @@ class PrayerCheckTrial:
                 return self.abort(frame, output, "auto cue is stale or ahead of the current clock")
             if self.cue is not None and self.state not in ("next_cue",):
                 return self.abort(frame, output, "new auto before the previous result")
-            self.cue = action
-            self.hit = None
             if self.state == "next_cue":
-                if self.pending is not None or frame["prayer"] != Prayer.SOUL_SPLIT:
+                if self.predictor:
+                    error_ns = action["observed_ns"] - self.prediction.next_cue_ns
+                    if abs(error_ns) > CUE_TOLERANCE_NS:
+                        return self.abort(
+                            frame, output, "auto rhythm changed; prediction invalidated"
+                        )
+                    protected = frame["prayer"] == Prayer.MELEE or self.pending == Prayer.MELEE
+                    if not protected or self.pending == Prayer.SOUL_SPLIT:
+                        return self.abort(frame, output, "protection was not requested before cue")
+                    output.append(
+                        {
+                            "event": "prediction_observed",
+                            "prediction_error_ms": error_ns / MILLISECOND_NS,
+                        }
+                    )
+                elif self.pending is not None or frame["prayer"] != Prayer.SOUL_SPLIT:
                     return self.abort(frame, output, "Soul Split not confirmed before test cue")
                 if not devotion_valid:
                     return self.abort(frame, output, "no fresh Devotion control window")
-                self.state = "delay"
+                self.state = "result" if self.predictor else "delay"
+            self.cue = action
+            self.hit = None
             output.append(
                 {
                     "event": "auto_cue",
@@ -237,7 +350,10 @@ class PrayerCheckTrial:
                         frame, output, "opening did not establish a one-damage control"
                     )
                 self.state = "next_cue"
-                if not self.command(Prayer.SOUL_SPLIT, frame, output):
+                if self.predictor:
+                    if not self.apply_prediction(frame, output):
+                        return output
+                elif not self.command(Prayer.SOUL_SPLIT, frame, output):
                     return self.abort(frame, output, "Soul Split input failed")
             elif self.state == "delay":
                 if frame["prayer"] != Prayer.SOUL_SPLIT:
@@ -262,17 +378,26 @@ class PrayerCheckTrial:
             elif self.state == "result" and self.hit is not None and self.pending is None:
                 if frame["prayer"] != Prayer.MELEE:
                     return self.abort(frame, output, "Melee was not restored")
+                self.completed_cycles += 1
                 output.append(
                     {
-                        "event": "completed",
+                        "event": "cycle_completed" if self.predictor else "completed",
+                        "cycle": self.completed_cycles,
                         "hit_amount": self.hit["hit"]["amount"],
                         "hit_type": self.hit["hit"]["type_id"],
                         "devotion_buff_from_memory": None,
                         "prayer_check_deadline_validated": False,
                     }
                 )
-                self.finished = True
-                self.state = "completed"
+                if self.completed_cycles >= self.maximum_cycles:
+                    self.finished = True
+                    self.state = "completed"
+                    if self.predictor:
+                        output.append({"event": "completed", "cycles": self.completed_cycles})
+                else:
+                    self.state = "next_cue"
+                    if not self.apply_prediction(frame, output):
+                        return output
             if (
                 self.state not in ("next_cue",)
                 and self.hit is None
@@ -286,14 +411,21 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--controlled-input", action="store_true")
     parser.add_argument("--pid", type=int, required=True)
-    parser.add_argument("--delay-ms", type=int, required=True)
+    parser.add_argument("--delay-ms", type=int)
+    parser.add_argument(
+        "--anticipate",
+        action="store_true",
+        help="Test the native four-tick predictor in the isolated opening",
+    )
+    parser.add_argument("--cycles", type=int, choices=range(1, MAX_PREDICTED_CYCLES + 1), default=2)
     parser.add_argument("--duration", type=float, default=DEFAULT_CALIBRATION_DURATION_SECONDS)
     parser.add_argument("--enrage-label", type=int, help="User-reported enrage; unknown if omitted")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if (
         not args.controlled_input
-        or not 0 <= args.delay_ms <= MAX_TEST_DELAY_MS
+        or (not args.anticipate and args.delay_ms is None)
+        or (args.delay_ms is not None and not 0 <= args.delay_ms <= MAX_TEST_DELAY_MS)
         or not 0 < args.duration <= MAX_CALIBRATION_DURATION_SECONDS
         or (args.enrage_label is not None and not 0 <= args.enrage_label <= MAX_ENRAGE_LABEL)
     ):
@@ -313,7 +445,12 @@ def main():
             )
             return reader.monotonic_ns()
 
-        trial = PrayerCheckTrial(args.delay_ms, send_prayer)
+        trial = PrayerCheckTrial(
+            args.delay_ms or 0,
+            send_prayer,
+            predictor=CyclePredictor() if args.anticipate else None,
+            cycles=args.cycles if args.anticipate else 1,
+        )
         print(
             "Controlled calibration armed; select Melee, then start the dormant Telos encounter.",
             file=sys.stderr,
@@ -331,6 +468,7 @@ def main():
             ]
             actor = telos[0] if len(telos) == 1 else {}
             timer = devotion_cooldown_record(reader)
+            stage_raw = player.variable(Variable.TELOS_PACKED)
             elapsed = (
                 ((info.logic_tick - timer["start_tick"]) & 0xFFFFFFFF) * LOGIC_TICK_MS
                 if timer.get("timer_valid")
@@ -352,6 +490,7 @@ def main():
                 "telos_instance": actor.get("instance_id"),
                 "devotion_start": timer.get("start_tick"),
                 "devotion_age_ms": elapsed,
+                "stage_signature": ((stage_raw >> 21) & 7) if stage_raw is not None else None,
             }
             actions, action_lost = reader.drain_npc_action_events()
             hits, hit_lost = reader.drain_player_hit_events()
@@ -384,6 +523,8 @@ def main():
                 "trial_state": trial.state,
                 "requested_delay_ms": args.delay_ms,
                 "enrage_user_label": args.enrage_label,
+                "anticipatory_mode": args.anticipate,
+                "stage_signature": frame["stage_signature"],
             }
             signature = json.dumps(payload, sort_keys=True)
             if (
@@ -404,7 +545,9 @@ def main():
                     player_hit_events=hit_records,
                     player_hit_events_lost=hit_lost,
                     calibration_updates=updates,
-                    input_mode="controlled_calibration",
+                    input_mode=(
+                        "anticipatory_calibration" if args.anticipate else "controlled_calibration"
+                    ),
                     automatic_flick_ready=False,
                 )
                 print(json.dumps(payload), file=out, flush=True)

@@ -440,6 +440,156 @@ def controlled_trial_summary(rows, *, clean_opening_confirmed=False):
     }
 
 
+def anticipatory_trial_summary(rows, *, clean_opening_confirmed=False):
+    """Keep forecasts, actual early commands and observed curses distinct."""
+    if not any(row.get("anticipatory_mode") for row in rows):
+        return None
+    updates = [update for row in rows for update in row.get("calibration_updates", [])]
+    schedules = [update for update in updates if update["event"] == "prediction_scheduled"]
+    cues = [update for update in updates if update["event"] == "auto_cue"]
+    hits = [update for update in updates if update["event"] == "paired_hit"]
+    accepted = [update for update in updates if update["event"] == "input_accepted"]
+    acknowledgements = [update for update in updates if update["event"] == "acknowledged"]
+    cycles = []
+    for schedule in schedules:
+        matching_cues = [
+            cue
+            for cue in cues
+            if cue["stage"] == "result"
+            and abs(cue["cue_ns"] - schedule["next_cue_ns"]) <= 200 * NANOSECONDS_PER_MILLISECOND
+        ]
+        if not matching_cues:
+            continue
+        cue = matching_cues[0]
+        hit = next((entry for entry in hits if entry["cue_sequence"] == cue["cue_sequence"]), None)
+        protection = next(
+            (
+                key
+                for key in accepted
+                if key["prayer"] == "melee"
+                and key.get("predicted_cue_ns") == schedule["next_cue_ns"]
+            ),
+            None,
+        )
+        protection_ack = next(
+            (
+                ack
+                for ack in acknowledgements
+                if protection
+                and ack["prayer"] == "melee"
+                and ack["observed_ns"] > protection["accepted_ns"]
+            ),
+            None,
+        )
+        anchor = next(
+            (entry for entry in hits if entry["cue_sequence"] == schedule["anchor_cue_sequence"]),
+            None,
+        )
+        soul_split = next(
+            (
+                key
+                for key in accepted
+                if anchor
+                and key["prayer"] == "soul_split"
+                and anchor["hit"]["observed_ns"]
+                <= key["accepted_ns"]
+                < schedule["protection_send_ns"]
+            ),
+            None,
+        )
+        soul_split_ack = next(
+            (
+                ack
+                for ack in acknowledgements
+                if soul_split
+                and ack["prayer"] == "soul_split"
+                and soul_split["accepted_ns"] < ack["observed_ns"] < cue["cue_ns"]
+            ),
+            None,
+        )
+        observed_soul_split_ms = (
+            to_milliseconds(protection_ack["observed_ns"] - soul_split_ack["observed_ns"])
+            if protection_ack and soul_split_ack
+            else None
+        )
+        next_soul_split_ack = next(
+            (
+                ack
+                for ack in acknowledgements
+                if protection_ack
+                and ack["prayer"] == "soul_split"
+                and ack["observed_ns"] > protection_ack["observed_ns"]
+            ),
+            None,
+        )
+        cycles.append(
+            {
+                "anchor_cue": schedule["anchor_cue_sequence"],
+                "actual_cue": cue["cue_sequence"],
+                "period_ms": schedule["period_ms"],
+                "lead_before_predicted_cue_ms": schedule["lead_before_cue_ms"],
+                "prediction_error_ms": round(
+                    to_milliseconds(cue["cue_ns"] - schedule["next_cue_ns"]), 3
+                ),
+                "command_before_actual_cue_ms": (
+                    round(to_milliseconds(cue["cue_ns"] - protection["accepted_ns"]), 3)
+                    if protection
+                    else None
+                ),
+                "melee_observed_before_actual_cue_ms": (
+                    round(to_milliseconds(cue["cue_ns"] - protection_ack["observed_ns"]), 3)
+                    if protection_ack
+                    else None
+                ),
+                "melee_observed_before_hit_ms": (
+                    round(
+                        to_milliseconds(hit["hit"]["observed_ns"] - protection_ack["observed_ns"]),
+                        3,
+                    )
+                    if hit and protection_ack
+                    else None
+                ),
+                "soul_split_observed_ms": (
+                    round(observed_soul_split_ms, 3) if observed_soul_split_ms is not None else None
+                ),
+                "melee_observed_ms_until_next_soul_split": (
+                    round(
+                        to_milliseconds(
+                            next_soul_split_ack["observed_ns"] - protection_ack["observed_ns"]
+                        ),
+                        3,
+                    )
+                    if next_soul_split_ack
+                    else None
+                ),
+                "hit": (
+                    {"amount": hit["hit"]["hit"]["amount"], "type_id": hit["hit"]["hit"]["type_id"]}
+                    if hit
+                    else None
+                ),
+            }
+        )
+    return {
+        "final_state": rows[-1]["trial_state"],
+        "clean_opening_user_confirmed": clean_opening_confirmed,
+        "input_sent_by_calibration": bool(accepted),
+        "cycles": cycles,
+        "control_hit": next(
+            (
+                {"amount": entry["hit"]["hit"]["amount"], "type_id": entry["hit"]["hit"]["type_id"]}
+                for entry in hits
+                if entry["stage"] == "control"
+            ),
+            None,
+        ),
+        "devotion_buff_active_from_memory": None,
+        "abort_reasons": [update["reason"] for update in updates if update["event"] == "aborted"],
+        "completed_cycles": sum(update["event"] == "cycle_completed" for update in updates),
+        "prayer_check_deadline_validated": False,
+        "scope": "bounded isolated phase-1 melee opening, not other phases or Magic cue classification",
+    }
+
+
 def summarize(rows):
     """Return the compact timing summary of one capture."""
     changes, keys, cues, hits = collect_observations(rows)
@@ -514,6 +664,9 @@ def main():
             "controlled_trial": controlled_trial_summary(
                 read_rows(capture), clean_opening_confirmed=arguments.confirmed_devotion_opening
             ),
+            "anticipatory_trial": anticipatory_trial_summary(
+                read_rows(capture), clean_opening_confirmed=arguments.confirmed_devotion_opening
+            ),
         }
         for capture, enrage in zip(arguments.capture, enrages)
     ]
@@ -523,7 +676,10 @@ def main():
         "enrage_user_labels": sorted(set(enrages)),
         "phase_user_label": arguments.phase,
         "input_sent_by_calibration": any(
-            source["controlled_trial"] and source["controlled_trial"]["input_sent_by_calibration"]
+            any(
+                source[kind] and source[kind]["input_sent_by_calibration"]
+                for kind in ("controlled_trial", "anticipatory_trial")
+            )
             for source in sources
         ),
         "sources": sources,

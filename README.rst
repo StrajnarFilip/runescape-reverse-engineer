@@ -35,6 +35,9 @@ Current capabilities
   calibration; automatic flicking remains disabled pending validated deadlines.
   The opt-in controlled calibration runner records scripted Ctrl+F-key tests
   under Devotion; its findings are in ``docs/validation/telos-prayer-check-2026-11-11.json``.
+  A native four-tick predictor also powers a bounded opening test: the retuned
+  capture observed about 1.8s Soul Split / 0.6s Melee with both predicted hits
+  protected. Other phases and Magic cue classification remain unvalidated.
 
 Previously verified in live combat: Goblin **550/550 HP**, Giant spider
 **1000/1000 HP**, and Goblin **550 -> 326 HP** alongside the independently reported

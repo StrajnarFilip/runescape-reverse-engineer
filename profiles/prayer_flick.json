@@ -5,6 +5,8 @@
   "idle_prayer": "soul_split",
   "soul_split_live_validation": "observed_in_target_account_curse_flags_after_manual_Ctrl_F3",
   "calibration_report": "docs/validation/telos-prayer-calibration-2026-11-10.json",
+  "prayer_check_calibration_report": "docs/validation/telos-prayer-check-2026-11-11.json",
+  "opening_prediction_report": "docs/validation/telos-prayer-anticipatory-2026-11-11.json",
   "mode": "observe",
   "target_enrage_min": 300,
   "target_enrage_max": 4000,

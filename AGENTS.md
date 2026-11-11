@@ -82,6 +82,19 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
   auto cue (300%) and late returns at 408ms/452ms (2000%) and 516ms (300%).
   These are client-input observations, not a universal server deadline. Enrage
   labels are metadata and do not drive the isolated ordinary-auto delay.
+- The user also authorized a bounded predictive opening test: `--anticipate`
+  uses the C `rs3_prayer_predict_cycle` calculator (2400ms cadence, protection
+  requested 100ms before the next estimated cue). An initial 900ms-lead test
+  protected both autos but left only about one tick of Soul Split, so the user
+  requested a shorter protection interval. `--cycles` is capped at two
+  predicted autos after the Devotion control. The user stays in melee range
+  without stuns. Stage signatures only invalidate the forecast; they are not
+  a validated phase decoder. Magic styles are supported by the C calculator,
+  but unmapped live styles/actions terminate this melee-only opening test.
+  The retuned test observed about 1800/1810ms Soul Split and 610ms Melee, with
+  both predicted autos dealing 1 under the Devotion control. Evidence is in
+  `docs/validation/telos-prayer-anticipatory-2026-11-11.json`. The final handoff
+  leaves Melee active; do not interpret it as continuous multi-phase coverage.
 - Target Telos range: 300%-4000% enrage. The intended Soul Split account is ready;
   phase-1 opening autos have been captured at 300% and 2000%. Key-to-client-overhead timing and
   cue-to-hitmark timing do not establish server protection deadlines.
