@@ -19,7 +19,9 @@
     {"rva": "0xc3c206", "bytes": "e8f564fdff4889bfa00c0000488d057776970048898710030000"},
     {"rva": "0xc41056", "bytes": "8b81700900008bf283f8ff0f84c20000003b81a00a0000"},
     {"rva": "0xc13c9a", "bytes": "e881080000488b4528418bd42b9508010000ffc2488b48188991bc0000004489657c"},
-    {"rva": "0xc12fdb", "bytes": "488d938807000089442438448bce488d451f41b0014889442430488bcb488d450f48894424284489742420e805060000"}
+    {"rva": "0xc12fdb", "bytes": "488d938807000089442438448bce488d451f41b0014889442430488bcb488d450f48894424284489742420e805060000"},
+    {"rva": "0x40cc00", "bytes": "488d05c10c1001668997a0100000488907"},
+    {"rva": "0x36c400", "bytes": "0fb78188000000668902488bc266c742020200c3"}
   ],
   "combat_layout": {
     "version": "951-3",
@@ -30,7 +32,8 @@
     "npc_manager_vtable_rva": "0x1511f78",
     "npc_entity_vtable_rva": "0x15b3a88",
     "npc_animation_vtable_rva": "0x15b3890",
-    "npc_action_stamp_offset": "0xb14"
+    "npc_action_stamp_offset": "0xb14",
+    "player_actor_vtable_rva": "0x150d8c8"
   },
   "player_position": {
     "client_ptr_rva": "0x18df2c8",

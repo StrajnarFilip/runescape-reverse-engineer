@@ -1,8 +1,10 @@
 /*
  * Local player hit marks, read from the verified local player actor.
  *
- * Only the original executable has a verified actor layout. Hit marks never
- * identify their attacker, and an amount is not assumed to be damage.
+ * A profile reports this channel only when it pins the player actor vtable;
+ * otherwise the channel is unsupported. The actor lookup is shared with the
+ * player tile (position.h). Hit marks never identify their attacker, and an
+ * amount is not assumed to be damage.
  */
 #ifndef RS3_PLAYER_HITS_H
 #define RS3_PLAYER_HITS_H

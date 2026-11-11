@@ -4,86 +4,19 @@
 #include <string.h>
 
 #include "clock.h"
-#include "decode_utils.h"
 #include "event_ring.h"
 #include "memory.h"
 #include "npcs.h"
+#include "position.h"
 
 _Static_assert(sizeof(rs3_player_hit_info) == 24, "ABI player hit info layout");
 _Static_assert(sizeof(rs3_player_hit_event) == 96, "ABI player hit event layout");
 
-#define MAX_PLAYER_INDEX 65535
-#define MAX_PLAYER_SLOTS 65536u
-
 /**
- * Resolves the local player actor from the world state: the context override
- * when set, otherwise the player table slot of the context's player index.
- * The actor must have the profile's virtual table and carry the same index.
+ * Reads the actor's ring and verifies that the actor and ring are unchanged afterwards.
+ * The caller has checked that the profile pins the player actor vtable, so the
+ * actor lookup always verifies the actor's identity.
  */
-static int find_local_actor(rs3_context *context, uint64_t world_state, uint64_t *actor_address,
-                            uint32_t *player_index)
-{
-    uint64_t player_context;
-    uint64_t context_owner;
-    int32_t index;
-    if (!memory_read_pointer(context, world_state + LAYOUT_LOCAL_ACTOR_CONTEXT_OFFSET,
-                             &player_context) ||
-        player_context == 0 || !memory_read_pointer(context, player_context, &context_owner) ||
-        context_owner != world_state ||
-        !memory_read(context, player_context + LAYOUT_LOCAL_ACTOR_INDEX_OFFSET, &index,
-                     sizeof index) ||
-        index < 0 || index > MAX_PLAYER_INDEX ||
-        !memory_read_pointer(context, player_context + LAYOUT_LOCAL_ACTOR_OVERRIDE_OFFSET,
-                             actor_address))
-    {
-        return 0;
-    }
-
-    if (*actor_address == 0)
-    {
-        uint64_t player_table;
-        uint64_t slot_range[2]; /* [begin, end) of the slot pointer array. */
-        uint64_t player_slot;
-        if (!memory_read_pointer(context, world_state + LAYOUT_LOCAL_ACTOR_TABLE_OFFSET,
-                                 &player_table) ||
-            player_table == 0 ||
-            !memory_read(context, player_table + LAYOUT_LOCAL_ACTOR_RANGE_OFFSET, slot_range,
-                         sizeof slot_range) ||
-            !is_valid_remote_pointer(slot_range[0]) || slot_range[1] < slot_range[0])
-        {
-            return 0;
-        }
-        uint64_t range_bytes = slot_range[1] - slot_range[0];
-        uint64_t slot_count = range_bytes / sizeof player_slot;
-        if (range_bytes % sizeof player_slot != 0 || slot_count > MAX_PLAYER_SLOTS ||
-            (uint64_t)index >= slot_count ||
-            !memory_read_pointer(context, slot_range[0] + (uint64_t)index * sizeof player_slot,
-                                 &player_slot) ||
-            player_slot == 0 ||
-            !memory_read_pointer(context, player_slot + LAYOUT_LOCAL_ACTOR_SLOT_ENTITY_OFFSET,
-                                 actor_address))
-        {
-            return 0;
-        }
-    }
-
-    uint64_t actor_vtable;
-    uint16_t actor_index;
-    uint64_t expected_vtable =
-        context->target.module_base + context->target.profile->player_actor_vtable_rva;
-    if (*actor_address == 0 || !memory_read_pointer(context, *actor_address, &actor_vtable) ||
-        actor_vtable != expected_vtable ||
-        !memory_read(context, *actor_address + LAYOUT_LOCAL_ACTOR_RUNTIME_ID_OFFSET, &actor_index,
-                     sizeof actor_index) ||
-        actor_index != (uint32_t)index)
-    {
-        return 0;
-    }
-    *player_index = (uint32_t)index;
-    return 1;
-}
-
-/** Reads the actor's ring and verifies that the actor and ring are unchanged afterwards. */
 static int read_player_ring(rs3_context *context, uint64_t world_state, uint32_t logic_tick,
                             uint64_t *actor_address, uint32_t *player_index,
                             rs3_hit hits[MAX_HITS_PER_RING], uint32_t *hit_count)
@@ -92,11 +25,11 @@ static int read_player_ring(rs3_context *context, uint64_t world_state, uint32_t
     uint64_t actor_after;
     uint32_t player_index_after;
     uint64_t ring_after;
-    return find_local_actor(context, world_state, actor_address, player_index) &&
+    return position_find_local_actor(context, world_state, actor_address, player_index) &&
            memory_read_pointer(context, *actor_address + LAYOUT_LOCAL_ACTOR_HITMARKS_OFFSET,
                                &ring_address) &&
            npc_read_hit_ring(context, ring_address, logic_tick, hits, hit_count) &&
-           find_local_actor(context, world_state, &actor_after, &player_index_after) &&
+           position_find_local_actor(context, world_state, &actor_after, &player_index_after) &&
            actor_after == *actor_address && player_index_after == *player_index &&
            memory_read_pointer(context, *actor_address + LAYOUT_LOCAL_ACTOR_HITMARKS_OFFSET,
                                &ring_after) &&
