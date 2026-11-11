@@ -1,7 +1,7 @@
 S0b - Single runtime profile
 ============================
 
-:Status: in progress
+:Status: waiting for live session
 :Wave: 0
 :Branch: ``telos/S0b``
 :Kind: C (native DLL)
@@ -51,13 +51,54 @@ Fixture tests pass on both profiles, and on the chosen profile a live sample
 shows a valid tile and a player hit event in the same session. Choose whichever
 port is cheaper and say why in the report.
 
+Result so far
+-------------
+
+The chosen runtime profile is **Compatibility Mode** (``6ada3f59-1a86000``).
+It is the installed client, and it lacked only the player actor vtable
+(``0x150d8c8``), now pinned with two code signatures. The tile and the hit
+marks share one verified actor lookup in ``src/position.c``. Evidence and live
+counts are in ``docs/validation/profile-unification.json``. Fixture tests pass
+on both profiles.
+
 Needs the user
 --------------
 
-One short session on the chosen client: walk a few tiles, then take one hit
-from any NPC.
+Request 1 below must land first, so the shipped DLL reports both channels.
+Then one short session on the Compatibility Mode client (the installed
+launcher client):
+
+1. Log in and stand where an NPC can attack you.
+2. The agent starts a read-only ``Reader(worker_hz=100)`` sampler for about
+   60 seconds. It counts samples with ``position.valid``, samples with
+   ``player_hit_info.status == AVAILABLE``, distinct tiles, and the events from
+   ``drain_player_hit_events()`` with their loss count.
+3. Walk three to five tiles.
+4. Take one hit from any NPC.
+
+Pass: at least two distinct tiles, at least one player hit event in a sample
+with a valid tile, and zero lost events. The agent records the counts in the
+validation report and sets this track to done.
 
 Requests
 --------
 
-None yet.
+These files are outside this track's Owns list and owned by no other track;
+track L routes them.
+
+1. ``tools/generate_profile.py``: add ``"player_actor_vtable_rva"`` to
+   ``OPTIONAL_PROFILE_FIELDS``, so ``compatibility_addresses()`` emits
+   ``combat_layout.player_actor_vtable_rva``. Also reword the comment in
+   ``primary_addresses()`` that says only the original executable has a
+   verified local player actor. Checked on a scratch copy: the generated
+   table carries ``0x150d8c8u``, all ten CTest targets pass, and a live sample
+   showed both channels in all 729 samples. Once it lands, the fallback in
+   ``compatibility_profile()`` of ``tests/native/test_player_hits.c`` is unused.
+2. ``docs/prayer-flick.rst``, section "Local-player hitmarks": replace the
+   sentence saying the Compatibility Mode actor layout is unvalidated with the
+   S0b result and a link to ``validation/profile-unification.json``.
+3. ``docs/research-notes.rst``, section "Compatibility Mode build": add the
+   player actor vtable ``0x150d8c8``, its constructor ``0x40cc00`` and the
+   type-2 UID getter ``0x36c400``.
+4. ``AGENTS.md``: mention that Compatibility Mode is the runtime profile chosen
+   by S0b, where it says hit marks come from the original profile.
