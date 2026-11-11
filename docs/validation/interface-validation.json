@@ -1,0 +1,257 @@
+{
+  "schema_version": 1,
+  "track": "P5",
+  "date": "2026-11-11",
+  "status": "waiting_for_live_session",
+  "profile_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+  "acquisition": "C11 read-only DLL; per-frame selected variable cache and second pass; Python only copies and formats",
+  "abi": {
+    "interface_info_bytes": 32,
+    "interface_observation_bytes": 16,
+    "action_bar_slot_bytes": 232,
+    "ownership": "caller-owned copies; capacity check precedes copy; no remote pointers returned"
+  },
+  "action_bar": {
+    "displayed_rows": 5,
+    "slots_per_row": 14,
+    "stored_presets": 18,
+    "display_preset_source": {
+      "domain": "VarPlayer",
+      "id": 10160,
+      "bits": [
+        [
+          0,
+          4
+        ],
+        [
+          5,
+          9
+        ],
+        [
+          10,
+          14
+        ],
+        [
+          15,
+          19
+        ],
+        [
+          20,
+          24
+        ]
+      ],
+      "numbering": "one-based stored preset; zero or >18 is unknown"
+    },
+    "slot_source": "VarPlayer actionbarN_intS and actionbarN_objS names; first five presets have separate slots 13/14",
+    "layout_validation": {
+      "checked_cache_varbit_definitions": 504,
+      "packed_id_bits": [
+        4,
+        16
+      ],
+      "packed_type_bits": [
+        17,
+        23
+      ],
+      "all_18_by_14_slots_checked": true
+    },
+    "key_groups": [
+      [
+        2852,
+        2853,
+        2854,
+        2855
+      ],
+      [
+        4997,
+        4998,
+        4999,
+        5000
+      ],
+      [
+        5001,
+        5002,
+        5003,
+        5004
+      ],
+      [
+        5005,
+        5006,
+        5007,
+        5008
+      ],
+      [
+        5009,
+        5010,
+        6302,
+        6620
+      ]
+    ],
+    "modifier_variables": [
+      2859,
+      5011,
+      5012,
+      5013,
+      6303
+    ],
+    "packing": {
+      "keys": "four 8-bit game key codes per VarClient",
+      "modifiers": "fourteen 2-bit codes per VarClient; explicit code 2 maps to Ctrl",
+      "gap": "key groups 5-8 / modifier groups 2-3 are other main-bar controls, not Additional Bar 1"
+    },
+    "translated_keys": "F1-F12 only, with explicit modifier 0 or Ctrl. Other codes remain raw; missing modifier is not zero.",
+    "identity": "Item type 10 uses object var. Type 7 prayer IDs 38/39/49/40 resolve via local structs. Other supported ability types resolve only unique compact metadata matches; upgrades sharing IDs stay unresolved.",
+    "user_confirmation": "Preset 6 contains the four configured prayer icons; Ctrl+F1 Magic, Ctrl+F2 Ranged, Ctrl+F3 Soul Split, Ctrl+F4 Melee.",
+    "reference_observations": [
+      {
+        "preset": 6,
+        "display_bar": 2,
+        "slot": 1,
+        "prayer": "Deflect Magic",
+        "packed_var": 5265,
+        "native_type": 7,
+        "native_id": 38,
+        "struct_id": 14594,
+        "key_var": 4997,
+        "key_packed": 67305985,
+        "key_byte": 0,
+        "key_code": 1,
+        "modifier_var": 5011,
+        "modifier_packed": 6982314,
+        "modifier_code": 2,
+        "chord": "Ctrl+F1"
+      },
+      {
+        "preset": 6,
+        "display_bar": 2,
+        "slot": 2,
+        "prayer": "Deflect Ranged",
+        "packed_var": 5266,
+        "native_type": 7,
+        "native_id": 39,
+        "struct_id": 14595,
+        "key_var": 4997,
+        "key_packed": 67305985,
+        "key_byte": 1,
+        "key_code": 2,
+        "modifier_var": 5011,
+        "modifier_packed": 6982314,
+        "modifier_code": 2,
+        "chord": "Ctrl+F2"
+      },
+      {
+        "preset": 6,
+        "display_bar": 2,
+        "slot": 3,
+        "prayer": "Soul Split",
+        "packed_var": 5267,
+        "native_type": 7,
+        "native_id": 49,
+        "struct_id": 14607,
+        "key_var": 4997,
+        "key_packed": 67305985,
+        "key_byte": 2,
+        "key_code": 3,
+        "modifier_var": 5011,
+        "modifier_packed": 6982314,
+        "modifier_code": 2,
+        "chord": "Ctrl+F3"
+      },
+      {
+        "preset": 6,
+        "display_bar": 2,
+        "slot": 4,
+        "prayer": "Deflect Melee",
+        "packed_var": 5268,
+        "native_type": 7,
+        "native_id": 40,
+        "struct_id": 14596,
+        "key_var": 4997,
+        "key_packed": 67305985,
+        "key_byte": 3,
+        "key_code": 4,
+        "modifier_var": 5011,
+        "modifier_packed": 6982314,
+        "modifier_code": 2,
+        "chord": "Ctrl+F4"
+      }
+    ],
+    "native_dll_live_status": "pending; client closed before post-build verification",
+    "reference_decoder_status": "all four slot/prayer/key/code observations matched before client exit; profile/signature checks passed"
+  },
+  "interfaces": [
+    {
+      "kind": "instance",
+      "open": null,
+      "interface_id": null,
+      "visible_options": null,
+      "clickable_physical_pixels": null,
+      "status": "unmapped"
+    },
+    {
+      "kind": "enrage",
+      "open": null,
+      "interface_id": null,
+      "visible_options": null,
+      "clickable_physical_pixels": null,
+      "status": "unmapped"
+    },
+    {
+      "kind": "loot_claim_continue",
+      "open": null,
+      "interface_id": null,
+      "visible_options": null,
+      "clickable_physical_pixels": null,
+      "status": "unmapped"
+    },
+    {
+      "kind": "bank_preset",
+      "open": null,
+      "interface_id": null,
+      "visible_options": null,
+      "clickable_physical_pixels": null,
+      "status": "unmapped"
+    },
+    {
+      "kind": "death",
+      "open": null,
+      "interface_id": null,
+      "visible_options": null,
+      "clickable_physical_pixels": null,
+      "status": "unmapped"
+    }
+  ],
+  "interface_research": {
+    "tried": [
+      "Inspected the original executable Lua GetInterface/GetComponent registrations with Ghidra; no game functions were called.",
+      "Inspected older Windows 949-4 InterfaceManager/InterfaceList/component metadata as leads only.",
+      "Checked bounded current-world manager-pointer candidates against the older embedded vector shape. The candidate at world+0x19968 failed shared-pointer entry plausibility and was rejected."
+    ],
+    "result": "No guarded current open-interface registry or complete visibility/geometry chain established. Cached or loaded interface definitions are not reported as open."
+  },
+  "contracts": {
+    "WorldState.action_bar": "native per-slot observations with raw provenance and independent content/binding reasons",
+    "WorldState.ui.open": null,
+    "ui_completeness": false,
+    "automatic_input": false,
+    "source_freshness": "snapshot monotonic timestamp, PID, process creation time and scene_epoch remain in the containing WorldState"
+  },
+  "checks": {
+    "native_fixture_cases": 7,
+    "ctest_suites": 11,
+    "python_tests": 78,
+    "result": "passed"
+  },
+  "references": {
+    "ability_bindings_sha256": "64aa47ceeab40b88fa788a46c5340ba47a05ec7ee68fa476a851ef30668068ec",
+    "var_player_reference_sha256": "dff7edc3ac2f08911443f6f97aab420d98eae49c672f2bcbe8f5cab301d87595",
+    "varbit_player_reference_sha256": "fe93c721a201b7b87f4956ec936e1c8aa49623ba1eddf7415125cb340f49a911"
+  },
+  "limitations": [
+    "Complete open-interface state, visible options and physical click points remain unmapped; ui.open is null, never an empty closed list.",
+    "Main-bar extra controls are not exported as ability slots. Only five displayed rows are sampled, not all eighteen presets every frame.",
+    "No keyboard input, mouse clicks, game calls or memory writes occur. The existing configured prayer profile remains unchanged.",
+    "Compatibility Mode semantics are not enabled for this module.",
+    "No raw gameplay captures, binaries, cache catalogs or decompiler output are committed."
+  ]
+}

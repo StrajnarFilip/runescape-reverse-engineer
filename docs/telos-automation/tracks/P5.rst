@@ -1,7 +1,7 @@
 P5 - Interface state
 ====================
 
-:Status: in progress
+:Status: waiting for live session
 :Wave: 1
 :Branch: ``telos/P5``
 :Kind: C (native DLL)
@@ -56,10 +56,32 @@ pass.
 Needs the user
 --------------
 
-One session opening each dialog in turn: bank preset, the Telos instance and
-enrage prompts, the loot interface after a kill, and one deliberate death.
+The native action-bar collector and fixture checks are ready. The independent
+reference reads matched preset 6 and all four configured curse chords on
+2026-11-11. The client closed before post-build DLL verification.
+
+Next session, after confirming recording is active:
+
+* Log into a normal world with preset 6 displayed. Verify its four curse slots
+  decode to Ctrl+F1 Magic, Ctrl+F2 Ranged, Ctrl+F3 Soul Split and Ctrl+F4 Melee.
+* Move one curse to another slot and restore it; verify content follows the
+  slot while the physical display row keeps its binding.
+* Switch a displayed preset and restore it; verify the preset/slot mapping.
+
+The required dialogs, option text and click positions remain unmapped, as
+recorded in ``docs/validation/interface-validation.json``. A guarded native
+registry/visibility/geometry mapping is needed before requesting dialog trials.
+Do not perform a deliberate death for an unmapped decoder.
 
 Requests
 --------
 
-None yet.
+Integration: register the interface header/storage in ``src/context.h`` along
+with own shared wiring, following the minimal private-snapshot pattern used by
+P1/P2. No existing public structure was extended.
+
+D7 must continue treating ``WorldState.ui.open`` as unknown. Open instance,
+enrage, loot/claim/continue, bank preset and death interfaces, visible options
+and physical click points still need a guarded native decoder. Neither cached
+interface presence nor an old layout is sufficient evidence that a dialog is
+open. No input is sent by this track.

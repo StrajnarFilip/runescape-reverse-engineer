@@ -411,6 +411,62 @@ class Hit(ctypes.Structure):
     ]
 
 
+class InterfaceInfo(ctypes.Structure):
+    _fields_ = [
+        *(
+            (name, ctypes.c_uint32)
+            for name in (
+                "status",
+                "reason",
+                "interface_count",
+                "action_bar_count",
+                "open_complete",
+                "action_bar_complete",
+            )
+        ),
+        ("reserved", ctypes.c_uint32 * 2),
+    ]
+
+
+class InterfaceObservation(ctypes.Structure):
+    _fields_ = [
+        ("kind", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("interface_id", ctypes.c_int32),
+        ("open", ctypes.c_int32),
+    ]
+
+
+class ActionBarSlot(ctypes.Structure):
+    _fields_ = [
+        *(
+            (name, ctypes.c_uint32)
+            for name in (
+                "display_bar",
+                "preset_bar",
+                "slot",
+                "flags",
+                "reason",
+                "source_var",
+                "object_var",
+                "key_var",
+                "modifier_var",
+                "content_type",
+            )
+        ),
+        *((name, ctypes.c_int32) for name in ("content_id", "item_id", "ability_struct_id")),
+        *(
+            (name, ctypes.c_uint32)
+            for name in ("key_code", "modifier_code", "key_modifiers", "binding_reason", "reserved")
+        ),
+        *(
+            (name, ctypes.c_int64)
+            for name in ("raw_packed", "raw_object", "raw_key_packed", "raw_modifier_packed")
+        ),
+        ("name", ctypes.c_char * 128),
+    ]
+
+
 class PlayerHitInfo(ctypes.Structure):
     _fields_ = [
         ("status", ctypes.c_uint32),
@@ -594,6 +650,16 @@ def _function_prototypes():
             i32,
             [handle, u64, ctypes.POINTER(NPCActionEvent), u32, *cursor_outputs],
         ),
+        "interface_sizeof": (u32, [u32]),
+        "snapshot_interface_info": (i32, [handle, ctypes.POINTER(InterfaceInfo), u32]),
+        "snapshot_interfaces": (
+            i32,
+            [handle, ctypes.POINTER(InterfaceObservation), u32, ctypes.POINTER(u32)],
+        ),
+        "snapshot_action_bar": (
+            i32,
+            [handle, ctypes.POINTER(ActionBarSlot), u32, ctypes.POINTER(u32)],
+        ),
         "snapshot_player_hit_info": (i32, [handle, ctypes.POINTER(PlayerHitInfo), u32]),
         "snapshot_player_hits": (i32, [handle, ctypes.POINTER(Hit), u32, ctypes.POINTER(u32)]),
         "player_hit_events_since": (
@@ -614,6 +680,13 @@ def _function_prototypes():
 
 
 def _verify_layouts(library):
+    for structure_id, structure in (
+        (1, InterfaceInfo),
+        (2, InterfaceObservation),
+        (3, ActionBarSlot),
+    ):
+        if library.rs3_interface_sizeof(structure_id) != ctypes.sizeof(structure):
+            raise RuntimeError("C/Python interface layout mismatch for " + structure.__name__)
     for structure_id, structure in SIZED_STRUCTURES.items():
         if library.rs3_sizeof(structure_id) != ctypes.sizeof(structure):
             raise RuntimeError("C/Python layout mismatch for " + structure.__name__)
@@ -678,6 +751,9 @@ class Reader:
         self.npcs = (NPC * MAX_NPCS)()
         self.npc_animations = (NPCAnimation * MAX_NPCS)()
         self.hits = (Hit * MAX_HITS)()
+        self.interface_info = InterfaceInfo()
+        self.interfaces = (InterfaceObservation * 5)()
+        self.action_bar = (ActionBarSlot * 70)()
         self.player_hit_info = PlayerHitInfo()
         self.player_hits = (Hit * MAX_PLAYER_HITS)()
         self.inventory_info = InventoryInfo()
@@ -749,6 +825,9 @@ class Reader:
         copy_array(library.rs3_snapshot_npcs, self.npcs)
         copy_array(library.rs3_snapshot_npc_animations, self.npc_animations)
         copy_array(library.rs3_snapshot_hits, self.hits)
+        copy_record(library.rs3_snapshot_interface_info, self.interface_info)
+        copy_array(library.rs3_snapshot_interfaces, self.interfaces)
+        copy_array(library.rs3_snapshot_action_bar, self.action_bar)
         copy_record(library.rs3_snapshot_player_hit_info, self.player_hit_info)
         copy_array(library.rs3_snapshot_player_hits, self.player_hits)
         copy_record(library.rs3_snapshot_inventory_info, self.inventory_info)

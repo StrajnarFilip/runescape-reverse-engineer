@@ -43,6 +43,95 @@ def nanoseconds_to_milliseconds(nanoseconds, digits):
     return round(nanoseconds / 1e6, digits)
 
 
+INTERFACE_REASONS = (
+    None,
+    "unmapped",
+    "not_set",
+    "read_failed",
+    "unsupported_profile",
+    "content_unmapped",
+    "key_unmapped",
+    "frame_unavailable",
+)
+INTERFACE_KINDS = ("instance", "enrage", "loot", "bank_preset", "death")
+
+
+def interface_records(reader):
+    """Return native bindings and an explicitly unknown open-interface list."""
+    info = getattr(reader, "interface_info", None)
+    if info is None:
+        unknown = {"status": "unavailable", "reason": "module_unavailable"}
+        return dict(unknown, open=None), dict(unknown, entries=None)
+    entries = []
+    for slot in reader.action_bar[: info.action_bar_count]:
+        chord = None
+        if slot.flags & 256:
+            chord = ("Ctrl+" if slot.key_modifiers & 2 else "") + f"F{slot.key_code}"
+        entries.append(
+            {
+                "display_bar": slot.display_bar,
+                "bar": slot.preset_bar if slot.flags & 1 else None,
+                "slot": slot.slot,
+                "type": slot.content_type if slot.flags & 2 else None,
+                "content_id": slot.content_id if slot.flags & 2 else None,
+                "item_id": slot.item_id if slot.flags & 8 else None,
+                "ability_struct_id": slot.ability_struct_id if slot.flags & (16 | 32) else None,
+                "kind": (
+                    "item"
+                    if slot.flags & 8
+                    else "prayer" if slot.flags & 32 else "ability" if slot.flags & 16 else None
+                ),
+                "name": (decode_text(slot.name) or None) if slot.flags & (8 | 16 | 32) else None,
+                "key": chord,
+                "key_code": slot.key_code if slot.flags & 64 else None,
+                "modifier_code": slot.modifier_code if slot.flags & 128 else None,
+                "reason": INTERFACE_REASONS[slot.reason],
+                "binding_reason": INTERFACE_REASONS[slot.binding_reason],
+                "source": "native_memory",
+                "raw": {
+                    "source_var": slot.source_var or None,
+                    "object_var": slot.object_var or None,
+                    "key_var": slot.key_var or None,
+                    "modifier_var": slot.modifier_var or None,
+                    "packed": slot.raw_packed if slot.flags & 2 else None,
+                    "object": slot.raw_object if slot.flags & 4 else None,
+                    "keys": slot.raw_key_packed if slot.flags & 64 else None,
+                    "modifiers": slot.raw_modifier_packed if slot.flags & 128 else None,
+                },
+            }
+        )
+    ui = {
+        "status": "unavailable",
+        "open": None,
+        "complete": False,
+        "reason": (
+            "open_interface_registry_unmapped"
+            if info.interface_count
+            else INTERFACE_REASONS[info.reason]
+        ),
+        "source": "native_memory",
+        "required": [
+            {
+                "kind": INTERFACE_KINDS[item.kind - 1],
+                "open": None,
+                "interface_id": None,
+                "options": None,
+                "click_point": None,
+                "reason": INTERFACE_REASONS[item.reason],
+            }
+            for item in reader.interfaces[: info.interface_count]
+        ],
+    }
+    bars = {
+        "status": PLAYER_HIT_STATUS_NAMES.get(info.status, "unavailable"),
+        "entries": entries if info.action_bar_count else None,
+        "complete": bool(info.action_bar_complete),
+        "reason": None if info.action_bar_count else INTERFACE_REASONS[info.reason],
+        "source": "native_memory",
+    }
+    return ui, bars
+
+
 def combat_record(reader):
     """Return the overhead prayer state of the reader's current snapshot."""
     state = reader.combat
@@ -272,6 +361,7 @@ class NativeTelemetry:
             source="native_memory",
             read_duration_ms=native["sample_duration_ms"],
         )
+        record["ui"], record["action_bar"] = interface_records(self.reader)
         record["combat"] = combat_record(self.reader)
         record["player_hit_splats"] = player_hit_splats
         # Observations from earlier frames keep their own process and timestamp.
@@ -406,6 +496,7 @@ class NativeTelemetry:
                 "reason": "entity_mapping_pending",
             },
         }
+        record["ui"], record["action_bar"] = interface_records(reader)
         if include_raw:
             record["raw_variables"] = raw_variables
         return extend_record(record, reader)
