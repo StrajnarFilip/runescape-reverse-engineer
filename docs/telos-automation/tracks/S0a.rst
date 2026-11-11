@@ -1,7 +1,7 @@
 S0a - Contracts and replay
 ==========================
 
-:Status: in progress
+:Status: done
 :Wave: 0
 :Branch: ``telos/S0a``
 :Kind: Python
@@ -139,3 +139,20 @@ The five-row committed fixture and both golden logs are synthetic; they
 contain no gameplay capture. The example stack exercises the contract, not
 combat decisions. The tests also invoke the CLI with a nonexistent DLL path
 and assert that neither the native nor telemetry module was imported.
+
+Validation
+----------
+
+On 2026-11-11, rebased on ``telos/integration`` at ``665c547``:
+
+* Windows x64 native configure/build passed using the existing Ninja/Zig
+  toolchain. No C source or shared build registration was changed.
+* ``ctest --test-dir build -C Release --output-on-failure``: 10/10 suites
+  passed, including 78 Python tests. The 25 new contract/replay tests cover
+  unknown and partial data, immutable ownership, original event provenance,
+  snapshot ageing, deadlines, concurrent action categories, both golden
+  logs and the offline CLI/plugin path.
+* Black checks passed for all eight added Python files.
+
+No live session or game input was needed. Real backends, arbitration and
+combat policy remain with their assigned tracks.
