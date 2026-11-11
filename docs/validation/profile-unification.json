@@ -11,7 +11,7 @@
     "client_sha256": "7a60c69fcf11eda42a328732721f5e89e1c85a6bc919038ff3451d4643e42dbf",
     "channels": {
       "player_tile": "pinned before S0b; the tile now also checks the player actor vtable and runtime index",
-      "local_player_hitmarks": "enabled by combat_layout.player_actor_vtable_rva once the generator emits it (S0b request)"
+      "local_player_hitmarks": "enabled by combat_layout.player_actor_vtable_rva, which tools/generate_profile.py now emits"
     }
   },
   "why_this_port": [
@@ -70,7 +70,7 @@
       "note": "The player stood still and took no hits."
     },
     {
-      "method": "native DLL from this branch without the generator line",
+      "method": "native DLL from this branch before the generator line was applied",
       "duration_seconds": 3,
       "samples": 144,
       "tile_valid_samples": 144,
@@ -81,11 +81,11 @@
   "fixture_tests": {
     "native_player_hits": "Five hit mark tests on each profile, plus one Compatibility Mode test that reads a tile and a hit event from one actor and rejects a foreign vtable or index for both channels.",
     "native_lifecycle": "The Compatibility Mode tile test also gives its actor the player vtable and runtime index.",
-    "with_generator_line": "All ten CTest targets pass with the generated table carrying 0x150d8c8."
+    "with_generator_line": "All ten CTest targets pass with the generated table carrying 0x150d8c8; the tests now use the shipped profile."
   },
   "original_profile": "Keeps local-player hit marks without a tile. Its fixture tests still pass.",
   "remaining_for_done": [
-    "tools/generate_profile.py must emit combat_layout.player_actor_vtable_rva (S0b brief, Requests).",
+    "The final branch build has not been sampled live: the client was closed after the generator line was applied. The scratch build sampled above had the same generator line.",
     "One live session on the Compatibility Mode client: walk a few tiles, then take one hit. Pass: at least two distinct tiles, at least one player hit event in a sample with a valid tile, zero lost events."
   ],
   "limitations": [

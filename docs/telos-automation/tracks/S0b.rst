@@ -64,9 +64,8 @@ on both profiles.
 Needs the user
 --------------
 
-Request 1 below must land first, so the shipped DLL reports both channels.
-Then one short session on the Compatibility Mode client (the installed
-launcher client):
+The shipped DLL now reports both channels on Compatibility Mode. One short
+session on that client (the installed launcher client):
 
 1. Log in and stand where an NPC can attack you.
 2. The agent starts a read-only ``Reader(worker_hz=100)`` sampler for about
@@ -86,14 +85,10 @@ Requests
 These files are outside this track's Owns list and owned by no other track;
 track L routes them.
 
-1. ``tools/generate_profile.py``: add ``"player_actor_vtable_rva"`` to
-   ``OPTIONAL_PROFILE_FIELDS``, so ``compatibility_addresses()`` emits
-   ``combat_layout.player_actor_vtable_rva``. Also reword the comment in
-   ``primary_addresses()`` that says only the original executable has a
-   verified local player actor. Checked on a scratch copy: the generated
-   table carries ``0x150d8c8u``, all ten CTest targets pass, and a live sample
-   showed both channels in all 729 samples. Once it lands, the fallback in
-   ``compatibility_profile()`` of ``tests/native/test_player_hits.c`` is unused.
+1. Done on this branch with the user's approval (2026-11-11):
+   ``tools/generate_profile.py`` emits
+   ``combat_layout.player_actor_vtable_rva``, and the generated table carries
+   ``0x150d8c8u``.
 2. ``docs/prayer-flick.rst``, section "Local-player hitmarks": replace the
    sentence saying the Compatibility Mode actor layout is unvalidated with the
    S0b result and a link to ``validation/profile-unification.json``.
