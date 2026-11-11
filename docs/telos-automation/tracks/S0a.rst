@@ -1,7 +1,7 @@
 S0a - Contracts and replay
 ==========================
 
-:Status: open
+:Status: in progress
 :Wave: 0
 :Branch: ``telos/S0a``
 :Kind: Python
