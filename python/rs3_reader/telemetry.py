@@ -29,6 +29,11 @@ GCD_REASON_NAMES = {
     Reason.NOT_SET: "not_set",
     Reason.INCONSISTENT_CLOCK: "inconsistent_clock",
 }
+PLAYER_HIT_STATUS_NAMES = {
+    Status.AVAILABLE: "available",
+    Status.PARTIAL: "partial",
+    Status.UNAVAILABLE: "unavailable",
+}
 # Bits 21..23 of the packed Telos variable hold the stage; the mapping is unverified.
 TELOS_STAGE_SHIFT = 21
 TELOS_STAGE_MASK = 0x7
@@ -98,6 +103,39 @@ def event_record(event):
         config_id=None if event.config_id < 0 else event.config_id,
         name=decode_text(event.name) or None,
     )
+
+
+def player_hit_event_record(event):
+    """Return the JSON record of one newly observed local player hit with its provenance."""
+    return dict(
+        hit_record(event.hit),
+        event_sequence=event.sequence,
+        observed_ns=event.observed_ns,
+        sample_sequence=event.sample_sequence,
+        scene_epoch=event.scene_epoch,
+        pid=event.pid,
+        process_creation_time=event.process_creation_time,
+        instance_id=event.instance_id,
+        player_index=event.player_index,
+    )
+
+
+def player_hit_splats_record(reader, events, events_lost):
+    """Return the local player hitmark channel; attackers are never inferred."""
+    info = reader.player_hit_info
+    available = info.status == Status.AVAILABLE
+    return {
+        "status": PLAYER_HIT_STATUS_NAMES.get(info.status, "unavailable"),
+        "reason": info.reason,
+        "player_index": info.player_index if available else None,
+        "instance_id": info.instance_id,
+        "events_lost": events_lost,
+        "hits": [hit_record(hit) for hit in reader.player_hits[: info.hit_count]],
+        # Queued events keep their own process and timestamp across failed frames.
+        "newly_observed": [player_hit_event_record(event) for event in events],
+        "attacker_identity": None,
+        "source": "native_memory",
+    }
 
 
 def npc_health_record(npc):
@@ -216,7 +254,9 @@ class NativeTelemetry:
             ),
         }
 
-    def _without_player(self, info, native, position, new_events, events_lost, available):
+    def _without_player(
+        self, info, native, position, new_events, events_lost, player_hit_splats, available
+    ):
         """Return a record for a frame without player fields, such as a tile-only frame."""
         reason = decode_text(info.message) or (None if available else "Waiting for a native sample")
         record = self.unavailable(reason)
@@ -233,6 +273,7 @@ class NativeTelemetry:
             read_duration_ms=native["sample_duration_ms"],
         )
         record["combat"] = combat_record(self.reader)
+        record["player_hit_splats"] = player_hit_splats
         # Observations from earlier frames keep their own process and timestamp.
         record["hit_splats"] = {
             "status": "unavailable",
@@ -249,13 +290,19 @@ class NativeTelemetry:
         # Drain independently of frame availability so earlier observations survive.
         events, events_lost = reader.drain_events()
         new_events = [event_record(event) for event in events]
+        player_hit_events, player_hit_events_lost = reader.drain_player_hit_events()
+        player_hit_splats = player_hit_splats_record(
+            reader, player_hit_events, player_hit_events_lost
+        )
         native = self._native_diagnostics(info, events_lost)
         tile = reader.position
         position = {"x": tile.x, "y": tile.y, "plane": tile.plane} if tile.valid else None
 
         available = info.status in (Status.AVAILABLE, Status.PARTIAL)
         if not available or not player.prayer_base_level:
-            return self._without_player(info, native, position, new_events, events_lost, available)
+            return self._without_player(
+                info, native, position, new_events, events_lost, player_hit_splats, available
+            )
 
         raw_variables = {name: player.variable(index) for index, name in enumerate(VARIABLE_NAMES)}
         prayer_packed = raw_variables["prayer_packed"]
@@ -292,6 +339,7 @@ class NativeTelemetry:
             "read_duration_ms": native["sample_duration_ms"],
             "position": position,
             "combat": combat_record(reader),
+            "player_hit_splats": player_hit_splats,
             "freshness": {
                 "observed_at_ms": info.timestamp_ns // 1_000_000,
                 "client_logic_tick": info.logic_tick,

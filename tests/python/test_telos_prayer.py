@@ -1,14 +1,19 @@
 """Experimental Telos prayer trial, action-event filtering and manual key sampling."""
 
+import contextlib
+import io
+import json
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
+from rs3_reader import telos_prayer
 from rs3_reader.native import NPCActionEvent
 from rs3_reader.prayer import Prayer
 from rs3_reader.telos_prayer import (
     MELEE_AUTO_SEQUENCE,
-    VK_F1,
-    VK_F2,
+    VK_CONTROL,
+    VK_F3,
+    VK_F4,
     ManualPrayerKeys,
     PrayerTrial,
     telos_actions,
@@ -16,8 +21,8 @@ from rs3_reader.telos_prayer import (
 
 MILLISECOND_NS = 1_000_000
 TARGET = (1, 2, 3)
-VK_CONTROL = 0x11
 KEY_DOWN = -32768
+ARGUMENT_ERROR_EXIT_CODE = 2
 
 
 def ms(value):
@@ -25,6 +30,25 @@ def ms(value):
 
 
 class PrayerTrialTests(unittest.TestCase):
+    def test_unvalidated_live_trial_never_opens_a_reader(self):
+        for timing_validated, coverage_validated in ((False, False), (True, False), (False, True)):
+            profile = {
+                "prayer_check_deadline_validated": timing_validated,
+                "attack_coverage_validated": coverage_validated,
+            }
+            profile_path = Mock(read_text=Mock(return_value=json.dumps(profile)))
+            with self.subTest(timing=timing_validated, coverage=coverage_validated), patch(
+                "sys.argv", ["telos_prayer", "--trial"]
+            ), patch.object(telos_prayer, "PRAYER_FLICK_PROFILE", profile_path), patch.object(
+                telos_prayer, "Reader"
+            ) as reader, contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                with self.assertRaises(SystemExit) as error:
+                    telos_prayer.main()
+                self.assertEqual(error.exception.code, ARGUMENT_ERROR_EXIT_CODE)
+                reader.assert_not_called()
+
     def test_trial_waits_for_acknowledgement_and_repeats_the_600_ms_cycle(self):
         send_prayer = Mock(side_effect=[ms(time) + 1 for time in (1000, 1600, 2000, 2600)])
         trial = PrayerTrial(send_prayer)
@@ -157,7 +181,7 @@ class TelosActionTests(unittest.TestCase):
 
 
 class ManualPrayerKeyTests(unittest.TestCase):
-    def test_key_edges_are_unmodified_and_foreground_only(self):
+    def test_key_edges_require_control_and_the_foreground_game(self):
         keys = ManualPrayerKeys.__new__(ManualPrayerKeys)
         keys.focused_session_window = None
         keys.held_keys = set()
@@ -168,7 +192,7 @@ class ManualPrayerKeyTests(unittest.TestCase):
             return 123
 
         keys.get_window_thread_process_id = report_game_pid
-        held_keys = {VK_F1}
+        held_keys = {VK_F4, VK_CONTROL}
         keys.get_async_key_state = Mock(side_effect=lambda key: KEY_DOWN if key in held_keys else 0)
 
         def clock():
@@ -176,17 +200,22 @@ class ManualPrayerKeyTests(unittest.TestCase):
 
         self.assertEqual(keys.sample((4, 2, 3), clock), [])
         keys.get_async_key_state.assert_not_called()
-        self.assertEqual(keys.sample((1, 2, 3), clock), [])  # F1 held when focus is gained.
-        held_keys.clear()
+        # Ctrl+F4 held when focus is gained is a baseline.
         self.assertEqual(keys.sample((1, 2, 3), clock), [])
-        held_keys.add(VK_F1)
+        held_keys.remove(VK_F4)
+        self.assertEqual(keys.sample((1, 2, 3), clock), [])
+        held_keys.add(VK_F4)
         self.assertEqual(
             keys.sample((1, 2, 3), clock),
-            [{"key": "F1", "bound_prayer": "melee", "observed_ns": 1000}],
+            [{"key": "Ctrl+F4", "bound_prayer": "melee", "observed_ns": 1000}],
         )
         self.assertEqual(keys.sample((1, 2, 3), clock), [])  # No repeat while held.
-        held_keys.update((VK_F2, VK_CONTROL))
-        self.assertEqual(keys.sample((1, 2, 3), clock), [])  # Ctrl+F2 is a separate binding.
+        held_keys.remove(VK_CONTROL)
+        held_keys.add(VK_F3)
+        self.assertEqual(keys.sample((1, 2, 3), clock), [])  # Bare F3 is not the binding.
+        held_keys.add(VK_CONTROL)
+        # Adding Ctrl to an already held key is not a down edge.
+        self.assertEqual(keys.sample((1, 2, 3), clock), [])
 
 
 if __name__ == "__main__":

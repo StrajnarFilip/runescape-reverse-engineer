@@ -1,4 +1,4 @@
-"""Record C-collected prayer flags, NPC action events and raw animations. Sends no game input."""
+"""Record C-collected prayer flags, NPC actions, local hitmarks and prayer keys. Sends no input."""
 
 import argparse
 import json
@@ -10,8 +10,9 @@ from workspace import add_import_paths
 
 add_import_paths(package=True)
 
+from capture_local_combat import PrayerKeys, load_bindings  # noqa: E402
 from rs3_reader.native import NPCActionEvent, Reader, Variable, decode_text  # noqa: E402
-from rs3_reader.telemetry import combat_record  # noqa: E402
+from rs3_reader.telemetry import combat_record, hit_record  # noqa: E402
 
 POLL_SECONDS = 0.002
 HEARTBEAT_SECONDS = 1
@@ -36,6 +37,27 @@ def action_event_record(event):
     return {field_name: getattr(event, field_name) for field_name, _ in NPCActionEvent._fields_}
 
 
+def player_hit_event_record(event):
+    record = {
+        field_name: getattr(event, field_name)
+        for field_name, _ in event._fields_
+        if field_name != "hit"
+    }
+    record["hit"] = hit_record(event.hit)
+    return record
+
+
+def player_hitmarks_record(reader):
+    info = reader.player_hit_info
+    return {
+        "status": info.status,
+        "reason": info.reason,
+        "player_index": info.player_index,
+        "instance_id": info.instance_id,
+        "hits": [hit_record(hit) for hit in reader.player_hits[: info.hit_count]],
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--pid", type=int)
@@ -55,11 +77,17 @@ def main():
             flush=True,
         )
         deadline = time.monotonic() + arguments.duration
+        keys = PrayerKeys(reader.info.pid or arguments.pid, load_bindings())
         previous_signature, last_write, written_rows, previous_sequence = None, 0, 0, 0
         while time.monotonic() < deadline:
             info, player, npcs, _ = reader.sample()
             actions, lost = reader.drain_npc_action_events()
-            if info.sequence == previous_sequence and not actions and not lost:
+            hits, hits_lost = reader.drain_player_hit_events()
+            if info.pid:
+                keys.pid = info.pid
+            presses = keys.sample(reader.monotonic_ns)
+            new_observations = actions or lost or hits or hits_lost or presses
+            if info.sequence == previous_sequence and not new_observations:
                 time.sleep(POLL_SECONDS)
                 continue
             previous_sequence = info.sequence
@@ -71,13 +99,15 @@ def main():
                 "combat": combat_record(reader),
                 "animations": animation_records(reader, info, npcs),
                 "hp": player.variable(Variable.HEALTH),
+                "hp_changed_ns": player.hp_changed_ns,
                 "prayer_raw": player.variable(Variable.PRAYER_PACKED),
                 "telos_raw": player.variable(Variable.TELOS_PACKED),
                 "position": [tile.x, tile.y, tile.plane] if tile.valid else None,
+                "player_hitmarks": player_hitmarks_record(reader),
             }
             signature = json.dumps(payload, sort_keys=True)
             now = time.monotonic()
-            changed = actions or lost or signature != previous_signature
+            changed = new_observations or signature != previous_signature
             if changed or now - last_write >= HEARTBEAT_SECONDS:
                 payload.update(
                     sequence=info.sequence,
@@ -88,6 +118,9 @@ def main():
                     executable_sha256=info.executable_sha256.decode("ascii"),
                     npc_action_events=[action_event_record(event) for event in actions],
                     npc_action_events_lost=lost,
+                    manual_prayer_keys=presses,
+                    player_hit_events=[player_hit_event_record(event) for event in hits],
+                    player_hit_events_lost=hits_lost,
                 )
                 output.write(json.dumps(payload) + "\n")
                 output.flush()

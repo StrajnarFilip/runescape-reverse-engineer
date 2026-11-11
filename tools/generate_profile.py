@@ -61,6 +61,14 @@ LAYOUT_CONSTANTS = (
     ("LAYOUT_INVENTORY_MANAGER_OFFSET", ("inventory", "manager_offset")),
     ("LAYOUT_INVENTORY_BONE_SHIELD_VARP", ("inventory", "bone_shield_varp")),
     ("LAYOUT_INVENTORY_BONE_SHIELD_LSB", ("inventory", "bone_shield_lsb")),
+    ("LAYOUT_LOCAL_ACTOR_CONTEXT_OFFSET", ("local_actor", "context_offset")),
+    ("LAYOUT_LOCAL_ACTOR_INDEX_OFFSET", ("local_actor", "index_offset")),
+    ("LAYOUT_LOCAL_ACTOR_OVERRIDE_OFFSET", ("local_actor", "override_offset")),
+    ("LAYOUT_LOCAL_ACTOR_TABLE_OFFSET", ("local_actor", "table_offset")),
+    ("LAYOUT_LOCAL_ACTOR_RANGE_OFFSET", ("local_actor", "range_offset")),
+    ("LAYOUT_LOCAL_ACTOR_SLOT_ENTITY_OFFSET", ("local_actor", "slot_entity_offset")),
+    ("LAYOUT_LOCAL_ACTOR_RUNTIME_ID_OFFSET", ("local_actor", "uid_offset")),
+    ("LAYOUT_LOCAL_ACTOR_HITMARKS_OFFSET", ("local_actor", "hitmarks_offset")),
 )
 
 # Player tile layout of the Compatibility Mode executable: JSON key -> macro name.
@@ -154,6 +162,8 @@ def primary_addresses(primary):
         "client_vtable_rva": primary["client_vtable_rva"],
         "npc_manager_vtable_rva": primary["npcs"]["manager_vtable_rva"],
         "npc_entity_vtable_rva": primary["npcs"]["entity_vtable_rva"],
+        # Only the original executable has a verified local player actor layout.
+        "player_actor_vtable_rva": primary["local_actor"]["vtable_rva"],
     }
     if primary["npcs"].get("animation_layout_verified"):
         addresses["npc_animation_vtable_rva"] = primary["npcs"]["animation_vtable_rva"]

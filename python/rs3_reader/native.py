@@ -35,11 +35,15 @@ EQUIPMENT_SLOT_COUNT = 19
 HIT_EVENT_QUEUE_CAPACITY = 4096
 ITEM_EVENT_QUEUE_CAPACITY = 1024
 NPC_ACTION_EVENT_QUEUE_CAPACITY = 4096
+PLAYER_HIT_EVENT_QUEUE_CAPACITY = 4096
+# A hitmark ring holds at most this many records.
+MAX_PLAYER_HITS = 64
 
 # Batch sizes used when draining the native event queues.
 HIT_EVENT_BATCH = 256
 ITEM_EVENT_BATCH = 128
 NPC_ACTION_EVENT_BATCH = 256
+PLAYER_HIT_EVENT_BATCH = 256
 
 DEFAULT_RETRY_MS = 1000
 MAX_WORKER_HZ = 1000
@@ -158,6 +162,8 @@ class CombatStructure(IntEnum):
     STATE = 1
     ANIMATION = 2
     ACTION_EVENT = 3
+    PLAYER_HIT_INFO = 4
+    PLAYER_HIT_EVENT = 5
 
 
 class Container(IntEnum):
@@ -405,6 +411,30 @@ class Hit(ctypes.Structure):
     ]
 
 
+class PlayerHitInfo(ctypes.Structure):
+    _fields_ = [
+        ("status", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("player_index", ctypes.c_uint32),
+        ("hit_count", ctypes.c_uint32),
+        ("instance_id", ctypes.c_uint64),
+    ]
+
+
+class PlayerHitEvent(ctypes.Structure):
+    _fields_ = [
+        ("sequence", ctypes.c_uint64),
+        ("observed_ns", ctypes.c_uint64),
+        ("sample_sequence", ctypes.c_uint64),
+        ("scene_epoch", ctypes.c_uint64),
+        ("process_creation_time", ctypes.c_uint64),
+        ("instance_id", ctypes.c_uint64),
+        ("pid", ctypes.c_uint32),
+        ("player_index", ctypes.c_uint32),
+        ("hit", Hit),
+    ]
+
+
 class Event(ctypes.Structure):
     _fields_ = [
         ("sequence", ctypes.c_uint64),
@@ -509,6 +539,8 @@ SIZED_COMBAT_STRUCTURES = {
     CombatStructure.STATE: CombatState,
     CombatStructure.ANIMATION: NPCAnimation,
     CombatStructure.ACTION_EVENT: NPCActionEvent,
+    CombatStructure.PLAYER_HIT_INFO: PlayerHitInfo,
+    CombatStructure.PLAYER_HIT_EVENT: PlayerHitEvent,
 }
 
 
@@ -561,6 +593,12 @@ def _function_prototypes():
         "npc_action_events_since": (
             i32,
             [handle, u64, ctypes.POINTER(NPCActionEvent), u32, *cursor_outputs],
+        ),
+        "snapshot_player_hit_info": (i32, [handle, ctypes.POINTER(PlayerHitInfo), u32]),
+        "snapshot_player_hits": (i32, [handle, ctypes.POINTER(Hit), u32, ctypes.POINTER(u32)]),
+        "player_hit_events_since": (
+            i32,
+            [handle, u64, ctypes.POINTER(PlayerHitEvent), u32, *cursor_outputs],
         ),
         "combat_active_prayer": (u32, [ctypes.POINTER(CombatState)]),
         "set_prayer": (i32, [handle, u32, u32, u32]),
@@ -640,6 +678,8 @@ class Reader:
         self.npcs = (NPC * MAX_NPCS)()
         self.npc_animations = (NPCAnimation * MAX_NPCS)()
         self.hits = (Hit * MAX_HITS)()
+        self.player_hit_info = PlayerHitInfo()
+        self.player_hits = (Hit * MAX_PLAYER_HITS)()
         self.inventory_info = InventoryInfo()
         self.items = (Item * MAX_ITEMS)()
         self.abilities = (Ability * MAX_ABILITIES)()
@@ -650,6 +690,8 @@ class Reader:
         self.item_event_cursor = 0
         self.npc_action_events = (NPCActionEvent * NPC_ACTION_EVENT_BATCH)()
         self.npc_action_event_cursor = 0
+        self.player_hit_events = (PlayerHitEvent * PLAYER_HIT_EVENT_BATCH)()
+        self.player_hit_event_cursor = 0
         try:
             options = Options(ctypes.sizeof(Options), pid or 0, DEFAULT_RETRY_MS, 0)
             self.check_result(
@@ -707,6 +749,8 @@ class Reader:
         copy_array(library.rs3_snapshot_npcs, self.npcs)
         copy_array(library.rs3_snapshot_npc_animations, self.npc_animations)
         copy_array(library.rs3_snapshot_hits, self.hits)
+        copy_record(library.rs3_snapshot_player_hit_info, self.player_hit_info)
+        copy_array(library.rs3_snapshot_player_hits, self.player_hits)
         copy_record(library.rs3_snapshot_inventory_info, self.inventory_info)
         copy_array(library.rs3_snapshot_items, self.items, Container.ALL)
         copy_array(library.rs3_snapshot_abilities, self.abilities)
@@ -769,6 +813,17 @@ class Reader:
             self.npc_action_events,
             NPCActionEvent,
             NPC_ACTION_EVENT_QUEUE_CAPACITY // NPC_ACTION_EVENT_BATCH,
+        )
+        return events, lost
+
+    def drain_player_hit_events(self):
+        """Return (owned local player hit events, number of overwritten events)."""
+        events, lost, self.player_hit_event_cursor = self._drain(
+            self.library.rs3_player_hit_events_since,
+            self.player_hit_event_cursor,
+            self.player_hit_events,
+            PlayerHitEvent,
+            PLAYER_HIT_EVENT_QUEUE_CAPACITY // PLAYER_HIT_EVENT_BATCH,
         )
         return events, lost
 

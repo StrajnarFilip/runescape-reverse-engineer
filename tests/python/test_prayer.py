@@ -9,6 +9,10 @@ from rs3_reader.native import (
     CombatState,
     CombatStructure,
     NPCAnimation,
+    PlayerHitEvent,
+    PlayerHitInfo,
+    Reader,
+    Status,
     library_path,
     load_library,
 )
@@ -29,6 +33,8 @@ LIVE_FLAGS = FrameFlags.CONNECTED | FrameFlags.ACTIVE_KNOWN | FrameFlags.POINTS_
 ALL_FLAGS = LIVE_FLAGS | FrameFlags.COVERAGE_KNOWN
 PRAYER_POINTS = 840
 INCOMPLETE_COVERAGE_REASON = 9
+# A PID that never belongs to a running client.
+ABSENT_PID = 0xFFFFFFFF
 
 
 def load_settings():
@@ -59,6 +65,14 @@ class PrayerPlannerTests(unittest.TestCase):
         )
         self.assertEqual(
             library.rs3_combat_sizeof(CombatStructure.ANIMATION), ctypes.sizeof(NPCAnimation)
+        )
+        self.assertEqual(
+            library.rs3_combat_sizeof(CombatStructure.PLAYER_HIT_INFO),
+            ctypes.sizeof(PlayerHitInfo),
+        )
+        self.assertEqual(
+            library.rs3_combat_sizeof(CombatStructure.PLAYER_HIT_EVENT),
+            ctypes.sizeof(PlayerHitEvent),
         )
         with Planner(load_settings()) as planner:
             for structure_id, structure in PLANNER_STRUCTURES.items():
@@ -91,6 +105,13 @@ class PrayerPlannerTests(unittest.TestCase):
             now_ns = current_frame.now_ns
             unknown_attack = Threat(1, 42, now_ns, now_ns, Prayer.UNKNOWN, 0)
             self.assertEqual(planner.step(current_frame, [unknown_attack]).action, Action.BLOCKED)
+
+    def test_unavailable_player_hitmarks_are_not_stale_records(self):
+        with Reader(pid=ABSENT_PID, worker_hz=0) as reader:
+            reader.sample()
+            self.assertEqual(reader.player_hit_info.status, Status.UNAVAILABLE)
+            self.assertEqual(reader.player_hit_info.hit_count, 0)
+            self.assertEqual(reader.drain_player_hit_events(), ([], 0))
 
     def test_replaced_proposal_rejects_the_old_command_id(self):
         with Planner(load_settings()) as planner:

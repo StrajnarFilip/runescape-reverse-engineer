@@ -4,18 +4,18 @@ Prayer timing engine and native combat observations
 Status
 ------
 
-The C timing planner, native prayer/animation observations, Python observer and
-C/Python/Java consumers are implemented. The separate Telos script can repeat
-an experimental switch cycle. A calibrated automatic Telos flicker requires
-measured prayer-check windows and attack coverage.
+The C timing planner, native prayer/animation/player-hit observations, Python
+observer and C/Python/Java consumers are implemented. The first two live Telos
+captures cover 300% enrage, phase 1. Automatic flicking remains disabled until
+prayer-check windows and incoming-attack coverage have been measured.
 
 The intended account has Soul Split. ``profiles/prayer_flick.json`` enables it
 and records the user's bindings: Ctrl+F1 Magic, Ctrl+F2 Ranged, Ctrl+F3 Soul Split,
-Ctrl+F4 Melee. Soul Split could not be live-validated on the calibration account,
-which has not unlocked it. Both healing and protection transitions are covered
-by deterministic replay tests.
-The requested Telos range is 300%-4000% enrage. The user is preparing that
-account and will signal when it is available for live calibration.
+Ctrl+F4 Melee. All four curses were observed on the intended account on
+2026-11-10. Six Soul Split/Melee changes using Ctrl+F3/Ctrl+F4 were matched to
+client overhead transitions. Both healing and protection transitions are also
+covered by deterministic replay tests. The requested Telos range is 300%-4000%
+enrage; other phases and higher enrages still need calibration.
 
 Layout follows the current repository:
 
@@ -23,14 +23,18 @@ Layout follows the current repository:
 * ``include/rs3/prayer.h``: language-neutral planner API and documented layouts.
 * ``src/combat.c``: C acquisition of the numeric overhead prayer flags.
 * ``src/npc_animation.c``: raw NPC animation sequences and NPC action events.
+* ``src/player_hits.c``: guarded local-player hitmark snapshots and event queue.
 * ``src/input.c``: the explicit, opt-in ``rs3_set_prayer`` key chord.
 * ``include/rs3/combat.h``: additive snapshot accessors and explicit prayer input.
 * ``python/rs3_reader/prayer.py``: ctypes binding; policy remains in C.
 * ``python/rs3_reader/prayer_flick.py``: observer and synthetic replay runner.
-* ``python/rs3_reader/telos_prayer.py``: Telos timing capture and experimental trial.
+* ``python/rs3_reader/telos_prayer.py``: Telos timing capture and the gated trial.
 * ``profiles/prayer_flick.json``: intended-account availability, bindings, margins.
-* ``tests/native/test_prayer_planner.c``, ``tests/native/test_combat.c`` and
-  ``tests/python/test_prayer.py``: policy, acquisition and FFI checks.
+* ``work/capture_local_combat.py`` and ``work/analyze_telos_calibration.py``:
+  reference-decoder hitmark research and compact calibration reports.
+* ``tests/native/test_prayer_planner.c``, ``tests/native/test_combat.c``,
+  ``tests/native/test_player_hits.c`` and ``tests/python/test_prayer.py``:
+  policy, acquisition and FFI checks.
 
 Running it
 ----------
@@ -79,7 +83,7 @@ using the player's identification. Run it during manual practice::
     python -m rs3_reader.telos_prayer --duration 180 --enrage 300 --record-keys --output work/prayer_research/telos-practice.jsonl
 
 Set ``--enrage`` to the enrage actually played. The optional key sampler
-timestamps manual, unmodified F1 (melee protection) and F2 (Soul Split) down
+timestamps manual Ctrl+F4 (melee protection) and Ctrl+F3 (Soul Split) down
 edges while the attached RuneScape process has focus. The observed overhead
 comes from the native prayer flags. An unknown overhead is JSON null, and a
 sampled key press is recorded separately from any observed prayer transition.
@@ -90,24 +94,55 @@ points and native sample times. Compare a cue, key press, overhead transition
 and resulting hit across multiple attacks. An HP change alone cannot establish
 the server's prayer check or distinguish overlapping hits.
 
-To try the requested 600 ms rule on successive melee autos::
+The old fixed-600ms ``PrayerTrial`` prototype remains available for replay tests.
+The CLI rejects ``--trial`` before opening the reader while either
+``attack_coverage_validated`` or ``prayer_check_deadline_validated`` is false.
+Both are false in the shipped profile. Changing those flags alone would not
+calibrate the prototype. The 600ms delay describes neither a verified protection
+window nor a safe Soul Split return deadline. No automatic input was sent during
+the captures below.
 
-    python -m rs3_reader.telos_prayer --trial
+First live calibration: 2026-11-10
+----------------------------------
 
-With the game in the foreground, the trial waits for a fresh ``28929`` event
-from Telos. It presses F1 if melee protection is inactive and waits to observe
-melee protection. It attempts F2 on the first fresh sample at least 600 ms after
-the cue when melee protection has been confirmed. It skips F2 if Soul Split is
-already active. Another matching cue before the return restarts the 600 ms
-interval. The trial runs until Ctrl+C unless ``--duration`` sets a limit.
+``validation/telos-prayer-calibration-2026-11-10.json`` contains compact results
+and SHA-256 hashes of the two local captures. Raw gameplay records stay local.
+The player labelled both encounters as 300% phase 1, and confirmed the first
+special order as tendrils, uppercut, then Hold Still. The observed associations
+apply to that context:
 
-The trial waits up to 1.2 seconds for the game to report the requested overhead.
-A cue received while Soul Split is pending can start the next cycle if it is
-still fresh when Soul Split appears. A timed-out key, input failure or loss of
-reliable observations skips the affected cycle. The trial waits for a fresh
-cue and a known overhead before starting another. The trace records key
-dispatch, overhead acknowledgement and skipped cycles separately. The 600 ms
-interval is an experimental setting supplied by the player.
+=========  ====================================
+Sequence   Observed association
+=========  ====================================
+28929      Ordinary melee auto (25 cues total)
+28931      Tendrils
+28938      Uppercut
+28935      Hold Still composite special
+=========  ====================================
+
+Telos NPC forms 22891 (active) and 22892 (dormant) were observed. Sequence 28932
+also appeared after tendrils but remains unlabelled. These associations are not
+a complete phase/style classifier or a prayer-check schedule.
+
+The second capture contains 22 native player-hit events and no event-queue
+losses. Six damage hitmarks paired with ordinary-auto cues appeared roughly
+510-600ms later (median 600.125ms); seven miss hitmarks appeared around the cue.
+Misses are summarized separately so their near-zero delay does not distort the
+damage timing. Tiny negative differences can arise from separate observation
+times within one acquisition cycle. The hitmarks do not identify their attacker;
+these pairs rely on the isolated phase-1 context. Random damage amounts alone
+do not establish successful or failed protection.
+
+The six matched manual Ctrl+F3/Ctrl+F4 changes took 259-760ms from sampled key
+down to observed client overhead (median 429.011ms). Key polling intervals were
+about 15-16ms. These are client observations, not precise Windows event times or
+server-side prayer activation times. The observed variation prevents treating
+an animation cue followed by a fixed 600ms delay as a validated flick policy.
+Anticipation, acknowledgement and protection deadlines need further measurement.
+
+To reproduce the compact report from the local recordings::
+
+    python work/analyze_telos_calibration.py --capture work/prayer_research/telos-session-2026-11-10.jsonl work/prayer_research/telos-session-native-hits-2026-11-10.jsonl --enrage 300 --phase 1 --session-date 2026-11-10 --output docs/validation/telos-prayer-calibration-2026-11-10.json
 
 Directly available data
 -----------------------
@@ -124,9 +159,11 @@ Variable          Bits                    Meaning from local definitions
 5859              17                      Necromancy deflection
 ================  ======================  ===============================
 
-The observed protection transitions used VARP 3272 values 64, 128 and 256.
-The other rows above are definition-derived and fixture-tested, with their live
-validation still outstanding. The selected prayer book is not inferred from the
+The earlier account's protection transitions used VARP 3272 values 64, 128 and
+256. On the intended account, the 2026-11-10 baseline positively observed VARP
+3275 values 128 (Magic), 256 (Ranged), 262144 (Soul Split) and 512 (Melee), with
+VARP 3272 zero. Necromancy rows remain definition-derived and fixture-tested;
+their live validation is outstanding. The selected prayer book is not inferred from the
 user's key labels. An absent sparse entry remains unknown. A positively observed
 single overhead can be identified even if other flag containers are absent;
 claiming that every overhead is off requires complete known masks. Conflicting
@@ -195,6 +232,40 @@ zero queue loss. Two observations kept the same sequence ID around NPC config
 changes. Fixtures exercise repeated IDs, torn reads, scene changes and queue
 overflow. See ``validation/npc-action-validation.json`` for the capture summary.
 
+Local-player hitmarks
+---------------------
+
+``rs3_snapshot_player_hit_info`` returns a 24-byte status/identity record;
+``rs3_snapshot_player_hits`` copies caller-owned ``rs3_hit`` records. The
+independent ``rs3_player_hit_events_since`` queue holds 4096 observations with
+an explicit cursor and overwritten-event count. Its 96-byte records carry the
+process creation time, scene epoch, local-player instance, native observation
+time and sample sequence. Verify layouts with ``rs3_combat_sizeof(4)`` and
+``rs3_combat_sizeof(5)`` before binding from another language.
+
+The original executable's world context exposes the local index at ``+0x48``
+and an optional actor override at ``+0x58``. Without an override, the collector
+uses the player table at world ``+0x19968`` and slot ``+0x38``. It validates the
+world-context owner, actor vtable RVA ``0x15367e0`` and actor UID at ``+0x88``
+before decoding the hitmark ring at actor ``+0xf18``. It rechecks identity and
+ring fields after the read. The profile hash/signature checks still apply.
+The Compatibility Mode local-player actor layout has not been validated, so
+this optional channel reports unsupported there.
+
+An initial active ring establishes a baseline instead of replaying old hits as
+new events. Failed reads and scene changes invalidate this baseline. Scheduled
+records remain visible in the snapshot but enter the event queue only when
+observed active. A valid empty ring is an empty observation, not proof of complete
+incoming-attack coverage. A failed optional read does not discard player HP or
+NPC observations. There is no attacker field in these records.
+
+Python exposes ``Reader.player_hit_info``, ``Reader.player_hits`` and
+``Reader.drain_player_hit_events()``. JSON telemetry adds ``player_hit_splats``
+independently of the NPC list. ``work/capture_prayer.py`` records these native
+observations and configured foreground prayer-key down edges. The separate
+``work/capture_local_combat.py`` is a research/reference diagnostic, not the
+runtime acquisition engine.
+
 Planner contract
 ----------------
 
@@ -247,10 +318,10 @@ User-held modifiers cause rejection. Input calls should be serialized by their
 caller. An accepted key does not establish a correct action-bar mapping or an
 unlocked prayer; confirm the actual resulting overhead.
 
-The sampler and general prayer observer only collect data. The explicit
-``telos_prayer.py --trial`` mode uses this function for experimental switch cycles.
-An input failure abandons the cycle and applies the same cooldown as an
-unconfirmed key before the trial considers another cue.
+The sampler and general prayer observer only collect data. The experimental
+``telos_prayer.py --trial`` path is blocked by the unvalidated coverage/deadline
+flags in the shipped profile. Its bindings are Ctrl+F4 Melee and Ctrl+F3 Soul
+Split, matching the intended account; it has not been run during calibration.
 
 CMake builds ``prayer_example`` from ``examples/prayer.c``. Python replay is
 shown above. The Java 22+ FFM example verifies layouts before invoking C::
@@ -274,8 +345,9 @@ Before enabling live flicking, the remaining native observations are:
 * Prayer-check deadlines, including projectile travel and paired/scheduled hits;
   an animation start or a recorded hitsplat is not automatically that deadline.
 * Complete relevant incoming-attack coverage, including golems and phase changes.
-* Measured key-to-observed-overhead latency, tick alignment and live Soul Split
-  acknowledgement on the intended account.
+* More key-to-observed-overhead measurements under combat load and server-tick
+  alignment. The initial keyboard baseline confirms Soul Split acknowledgement
+  on the intended account, but does not establish worst-case dispatch latency.
 
 A manual Telos practice capture should label melee-range autos, out-of-range
 magic autos and specials separately. Record enrage, phase, whether Telos

@@ -110,6 +110,10 @@ thread. ctypes CDLL calls release the GIL; the native worker does not acquire it
 Existing profile and executable hashes are checked before returning game data.
 Both pinned executable profiles provide combat, inventory and ability telemetry.
 The ``6ada3f59-1a86000`` profile also provides player tiles.
+The original executable additionally provides optional local-player hitmarks
+through ``rs3/combat.h``, with an independent event cursor and explicit overflow
+count. See `Prayer timing <prayer-flick.rst#local-player-hitmarks>`_ for layouts,
+identity guards, Python accessors and limitations.
 
 C example from the Visual Studio build::
 
@@ -297,6 +301,9 @@ exporting a testing or injection interface. Each area is its own CTest executabl
   item-event queue gaps;
 * ``native_combat``: overhead flags, raw animations, scene epochs and NPC action
   events;
+* ``native_player_hits``: local player actor resolution through the context
+  override and the player table, torn and invalid rings, attachment and gap
+  baselines, and player hit queue overflow;
 * ``native_input``: minimap projection, input guards and key chords;
 * ``native_prayer_planner``: deterministic prayer planner replays.
 

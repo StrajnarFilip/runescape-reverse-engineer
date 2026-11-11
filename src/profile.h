@@ -39,6 +39,7 @@ typedef struct client_profile
     uint32_t npc_entity_vtable_rva;    /**< Virtual table of an NPC actor. */
     uint32_t npc_animation_vtable_rva; /**< Animation component; 0 when unverified. */
     uint32_t npc_action_stamp_offset;  /**< Actor action application stamp; 0 when absent. */
+    uint32_t player_actor_vtable_rva;  /**< Local player actor; 0 when unverified. */
     int has_position;                  /**< Nonzero when the player tile layout is verified. */
 } client_profile;
 

@@ -1,9 +1,10 @@
 {
   "schema_version": 1,
-  "prayer_book": "not_validated",
+  "prayer_book": "curses_observed_in_varp_3275",
   "available_prayers": ["magic", "ranged", "melee", "soul_split"],
   "idle_prayer": "soul_split",
-  "soul_split_live_validation": "requires_the_target_account_with_soul_split_unlocked",
+  "soul_split_live_validation": "observed_in_target_account_curse_flags_after_manual_Ctrl_F3",
+  "calibration_report": "docs/validation/telos-prayer-calibration-2026-11-10.json",
   "mode": "observe",
   "target_enrage_min": 300,
   "target_enrage_max": 4000,
@@ -20,7 +21,13 @@
     "ack_timeout_ms": 1200,
     "max_age_ms": 150
   },
-  "timing_status": "initial_conservative_settings_not_live_calibrated",
-  "attack_rules": [],
-  "attack_coverage_validated": false
+  "timing_status": "keyboard_latency_measured_but_prayer_check_deadlines_and_safe_windows_unvalidated",
+  "attack_rules": [
+    {"sequence_id": 28929, "label": "ordinary_melee", "phase": 1, "observed_enrage": 300, "prayer_check_validated": false},
+    {"sequence_id": 28931, "label": "tendrils", "phase": 1, "observed_enrage": 300, "prayer_check_validated": false},
+    {"sequence_id": 28938, "label": "uppercut", "phase": 1, "observed_enrage": 300, "prayer_check_validated": false},
+    {"sequence_id": 28935, "label": "hold_still", "phase": 1, "observed_enrage": 300, "prayer_check_validated": false}
+  ],
+  "attack_coverage_validated": false,
+  "prayer_check_deadline_validated": false
 }

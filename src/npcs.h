@@ -39,6 +39,14 @@ hit_decode_result npc_decode_hit(const unsigned char *record, uint32_t logic_tic
                                  rs3_hit *hit);
 
 /**
+ * Reads an actor's hit mark ring. The records are read twice and the ring
+ * header is re-read, so a torn ring is never reported as hits. A null ring has
+ * no hits. *hit_count receives the number of active or scheduled records.
+ */
+int npc_read_hit_ring(rs3_context *context, uint64_t ring_address, uint32_t logic_tick,
+                      rs3_hit hits[MAX_HITS_PER_RING], uint32_t *hit_count);
+
+/**
  * Decodes the loaded NPC list into the snapshot.
  *
  * runtime_ids receives the listed IDs (RS3_MAX_NPCS capacity), *listed_count

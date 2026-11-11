@@ -66,6 +66,7 @@ add_library(rs3_objects OBJECT
     src/npc_animation.c
     src/npcs.c
     src/player.c
+    src/player_hits.c
     src/position.c
     src/prayer.c
     src/process.c
@@ -118,6 +119,7 @@ if(BUILD_TESTING)
     rs3_add_native_test(native_lifecycle tests/native/test_lifecycle.c ${RS3_FIXTURE_SOURCES})
     rs3_add_native_test(native_inventory tests/native/test_inventory.c ${RS3_FIXTURE_SOURCES})
     rs3_add_native_test(native_combat tests/native/test_combat.c ${RS3_FIXTURE_SOURCES})
+    rs3_add_native_test(native_player_hits tests/native/test_player_hits.c ${RS3_FIXTURE_SOURCES})
     rs3_add_native_test(native_input tests/native/test_input.c ${RS3_FIXTURE_SOURCES})
     rs3_add_native_test(native_prayer_planner tests/native/test_prayer_planner.c)
 

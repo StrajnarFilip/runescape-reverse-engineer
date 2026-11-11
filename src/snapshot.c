@@ -93,6 +93,27 @@ int32_t rs3_snapshot_combat(const rs3_snapshot *snapshot, rs3_combat_state *out,
     return copy_record(&snapshot->combat, sizeof *out, out, out_size);
 }
 
+int32_t rs3_snapshot_player_hit_info(const rs3_snapshot *snapshot, rs3_player_hit_info *out,
+                                     uint32_t out_size)
+{
+    if (snapshot == NULL || out == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    return copy_record(&snapshot->player_hit_info, sizeof *out, out, out_size);
+}
+
+int32_t rs3_snapshot_player_hits(const rs3_snapshot *snapshot, rs3_hit *out, uint32_t capacity,
+                                 uint32_t *required)
+{
+    if (snapshot == NULL || required == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    return copy_records(snapshot->player_hits, snapshot->player_hit_info.hit_count, sizeof *out,
+                        out, capacity, required);
+}
+
 int32_t rs3_snapshot_inventory_info(const rs3_snapshot *snapshot, rs3_inventory_info *out,
                                     uint32_t out_size)
 {

@@ -9,6 +9,8 @@ ColumnLimit: 100
 BreakBeforeBraces: Allman
 InsertBraces: true
 IndentCaseLabels: true
+# Declarations inside extern "C" { } in the public headers stay at column 0.
+IndentExternBlock: NoIndent
 PointerAlignment: Right
 AlignAfterOpenBracket: Align
 AlignConsecutiveMacros: Consecutive

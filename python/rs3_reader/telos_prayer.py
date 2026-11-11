@@ -1,8 +1,8 @@
-"""Record Telos prayer timing, or try repeated experimental F1/F2 prayer switches.
+"""Record Telos prayer timing using the configured Ctrl+function-key chords.
 
-The trial is opt-in and experimental: Telos attack classification and prayer
-check deadlines are not calibrated. Each switch needs a newer observed sample
-to acknowledge it.
+The trial is opt-in and refuses to start until profiles/prayer_flick.json marks
+prayer-check deadlines and attack coverage as validated. Each switch needs a
+newer observed sample to acknowledge it.
 
 Usage::
 
@@ -22,19 +22,23 @@ from contextlib import nullcontext
 from ctypes import wintypes
 from pathlib import Path
 
-from .native import NPCActionFlags, Reader, Variable, decode_text
+from .native import REPOSITORY_ROOT, NPCActionFlags, Reader, Variable, decode_text
 from .prayer import Prayer
 from .telemetry import combat_record
 
 # Action sequence the user labeled as a Telos melee auto-attack.
 MELEE_AUTO_SEQUENCE = 28929
-VK_F1 = 0x70
-VK_F2 = 0x71
-# Bound keys: virtual key -> (label, bound prayer).
-PRAYER_KEYS = {VK_F1: ("F1", Prayer.MELEE), VK_F2: ("F2", Prayer.SOUL_SPLIT)}
+VK_F3 = 0x72
+VK_F4 = 0x73
+VK_CONTROL = 0x11
+# Bound keys, all pressed with Ctrl: virtual key -> (label, bound prayer).
+PRAYER_KEYS = {VK_F3: ("Ctrl+F3", Prayer.SOUL_SPLIT), VK_F4: ("Ctrl+F4", Prayer.MELEE)}
 TRIAL_KEYS = {prayer: virtual_key for virtual_key, (_, prayer) in PRAYER_KEYS.items()}
+# RS3_KEY_CTRL from include/rs3/prayer.h.
+PRAYER_MODIFIERS = 1
 # Shift, Ctrl, Alt and both Windows keys.
-MODIFIER_KEYS = (0x10, 0x11, 0x12, 0x5B, 0x5C)
+MODIFIER_KEYS = (0x10, VK_CONTROL, 0x12, 0x5B, 0x5C)
+PRAYER_FLICK_PROFILE = REPOSITORY_ROOT / "profiles" / "prayer_flick.json"
 POLL_SECONDS = 0.01
 HEARTBEAT_SECONDS = 1
 DEFAULT_CAPTURE_SECONDS = 300
@@ -46,7 +50,7 @@ TELOS_NAME = "telos"
 
 
 class ManualPrayerKeys:
-    """Samples F1/F2 down edges while the verified game process is in the foreground."""
+    """Samples Ctrl+F3/F4 down edges while the verified game process is in the foreground."""
 
     def __init__(self):
         user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -82,14 +86,17 @@ class ManualPrayerKeys:
         self.held_keys.clear()
 
     def sample(self, session, clock):
-        """Return the unmodified F1/F2 presses since the previous sample."""
+        """Return the Ctrl+F3/F4 presses since the previous sample."""
         window = self.game_window(session)
         if window is None:
             self._lose_focus()
             return []
 
         held_keys = {key for key in PRAYER_KEYS if self.get_async_key_state(key) < 0}
-        modifier_held = any(self.get_async_key_state(key) < 0 for key in MODIFIER_KEYS)
+        other_modifier_held = any(
+            self.get_async_key_state(key) < 0 for key in MODIFIER_KEYS if key != VK_CONTROL
+        )
+        control_held = self.get_async_key_state(VK_CONTROL) < 0
         observed_ns = clock()
         if self.get_foreground_window() != window:
             self._lose_focus()
@@ -103,7 +110,7 @@ class ManualPrayerKeys:
             pressed_keys = set()
         self.focused_session_window = focused_session_window
         self.held_keys = held_keys
-        if modifier_held:
+        if other_modifier_held or not control_held:
             return []
         return [
             {
@@ -287,7 +294,9 @@ def observe(reader, duration, output, enrage, keys, trial_window=None):
     """Write changed observations until the duration elapses. Returns completed cycles."""
 
     def send_prayer(prayer):
-        result = reader.library.rs3_set_prayer(reader.snapshot, prayer, TRIAL_KEYS[prayer], 0)
+        result = reader.library.rs3_set_prayer(
+            reader.snapshot, prayer, TRIAL_KEYS[prayer], PRAYER_MODIFIERS
+        )
         reader.check_result(result)
         return reader.monotonic_ns()
 
@@ -367,10 +376,14 @@ def parse_arguments():
     parser.add_argument("--enrage", type=int, help="Manually entered enrage for this capture")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
-        "--record-keys", action="store_true", help="Timestamp manual F1/F2 presses in RuneScape"
+        "--record-keys",
+        action="store_true",
+        help="Timestamp manual Ctrl+F3/F4 presses in RuneScape",
     )
     mode.add_argument(
-        "--trial", action="store_true", help="Repeat experimental F1/F2 cycles on fresh Telos cues"
+        "--trial",
+        action="store_true",
+        help="Requires validated prayer-check timing and attack coverage",
     )
     parser.add_argument(
         "--output", type=Path, help="Write a new local JSONL file instead of standard output"
@@ -382,6 +395,15 @@ def parse_arguments():
         parser.error("--duration must be finite and positive")
     if arguments.enrage is not None and not 0 <= arguments.enrage <= MAX_ENRAGE:
         parser.error(f"--enrage must be between 0 and {MAX_ENRAGE}")
+    if arguments.trial:
+        # Checked before any reader opens: unvalidated timing never sends a key.
+        profile = json.loads(PRAYER_FLICK_PROFILE.read_text(encoding="utf-8"))
+        timing_validated = profile.get("prayer_check_deadline_validated")
+        if not profile.get("attack_coverage_validated") or not timing_validated:
+            parser.error(
+                "Automatic trial is unavailable until prayer-check timing and attack "
+                "coverage are validated; use --record-keys"
+            )
     return parser, arguments
 
 

@@ -167,17 +167,17 @@ hit_decode_result npc_decode_hit(const unsigned char *record, uint32_t logic_tic
     return HIT_DECODED;
 }
 
-/** Appends the NPC's current hit records to the snapshot hit array. */
-static int decode_npc_hits(rs3_context *context, uint64_t ring_address, rs3_snapshot *snapshot,
-                           rs3_npc *npc)
+int npc_read_hit_ring(rs3_context *context, uint64_t ring_address, uint32_t logic_tick,
+                      rs3_hit hits[MAX_HITS_PER_RING], uint32_t *hit_count)
 {
+    *hit_count = 0;
     if (ring_address == 0)
     {
         return 1;
     }
     unsigned char header[HIT_RING_HEADER_BYTES];
-    unsigned char records[MAX_HITS_PER_NPC * HIT_RECORD_BYTES];
-    unsigned char records_again[MAX_HITS_PER_NPC * HIT_RECORD_BYTES];
+    unsigned char records[MAX_HITS_PER_RING * HIT_RECORD_BYTES];
+    unsigned char records_again[MAX_HITS_PER_RING * HIT_RECORD_BYTES];
     unsigned char count_and_data_again[16];
     if (!memory_read(context, ring_address, header, sizeof header))
     {
@@ -186,10 +186,10 @@ static int decode_npc_hits(rs3_context *context, uint64_t ring_address, rs3_snap
     uint64_t record_count = decode_u64(header + HIT_RING_COUNT_OFFSET);
     uint64_t record_data = decode_u64(header + HIT_RING_DATA_OFFSET);
     uint32_t ring_capacity = decode_u32(header + HIT_RING_CAPACITY_OFFSET);
-    if (record_count > ring_capacity || ring_capacity > MAX_HITS_PER_NPC ||
+    if (record_count > ring_capacity || ring_capacity > MAX_HITS_PER_RING ||
         (record_count != 0 && record_data == 0))
     {
-        return context_fail(context, RS3_READ_FAILED, "Invalid NPC hitmark ring");
+        return context_fail(context, RS3_READ_FAILED, "Invalid hitmark ring");
     }
 
     /* Read the records twice and the header tail again: a torn ring is never a hit. */
@@ -205,24 +205,38 @@ static int decode_npc_hits(rs3_context *context, uint64_t ring_address, rs3_snap
         memcmp(count_and_data_again, header + HIT_RING_COUNT_OFFSET, sizeof count_and_data_again) !=
             0)
     {
-        return context_fail(context, RS3_READ_FAILED, "NPC hitmark ring changed during read");
+        return context_fail(context, RS3_READ_FAILED, "Hitmark ring changed during read");
     }
 
     for (uint32_t slot = 0; slot < record_count; slot++)
     {
-        rs3_hit hit;
-        hit_decode_result result = npc_decode_hit(records + slot * HIT_RECORD_BYTES,
-                                                  snapshot->info.logic_tick, slot, &hit);
+        hit_decode_result result =
+            npc_decode_hit(records + slot * HIT_RECORD_BYTES, logic_tick, slot, &hits[*hit_count]);
         if (result == HIT_INVALID)
         {
             return context_fail(context, RS3_READ_FAILED, "Invalid hitmark record");
         }
         if (result == HIT_DECODED)
         {
-            snapshot->hits[snapshot->info.hit_count++] = hit;
-            npc->hit_count++;
+            (*hit_count)++;
         }
     }
+    return 1;
+}
+
+/** Appends the NPC's current hit records to the snapshot hit array. */
+static int decode_npc_hits(rs3_context *context, uint64_t ring_address, rs3_snapshot *snapshot,
+                           rs3_npc *npc)
+{
+    rs3_hit hits[MAX_HITS_PER_RING];
+    uint32_t hit_count;
+    if (!npc_read_hit_ring(context, ring_address, snapshot->info.logic_tick, hits, &hit_count))
+    {
+        return 0;
+    }
+    memcpy(&snapshot->hits[snapshot->info.hit_count], hits, hit_count * sizeof hits[0]);
+    snapshot->info.hit_count += hit_count;
+    npc->hit_count = hit_count;
     return 1;
 }
 

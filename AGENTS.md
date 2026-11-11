@@ -56,12 +56,16 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
   castability are not established merely by inventory IDs or published guides.
 - Prayer timing code is in `src/prayer.c`, with additive APIs in
   `include/rs3/prayer.h` and `include/rs3/combat.h`; see `docs/prayer-flick.rst`.
-  The target profile includes Soul Split even though the current calibration
-  account lacks it. Preserve the user's Ctrl+F1 Magic, Ctrl+F2 Ranged,
+  The intended account now has Soul Split; all four configured curses and six
+  Ctrl+F3/Ctrl+F4 switches were observed on 2026-11-10. Preserve Ctrl+F1 Magic, Ctrl+F2 Ranged,
   Ctrl+F3 Soul Split, Ctrl+F4 Melee bindings in `profiles/prayer_flick.json`.
-- Raw NPC animation IDs and overhead flags are available, but Telos attack
-  classification, prayer-check deadlines and complete incoming-attack coverage
-  remain uncalibrated. The observer must not present itself as a live flicker.
+- Raw NPC animation IDs, overhead flags and original-profile player hitmarks
+  are available. Two 300% phase-1 captures associate 28929 with melee autos,
+  28931 with tendrils, 28938 with uppercut and 28935 with Hold Still. See
+  `docs/validation/telos-prayer-calibration-2026-11-10.json`. Other phases/styles,
+  prayer-check deadlines and complete incoming-attack coverage remain
+  uncalibrated. The observer must not present itself as a live flicker.
   Do not send automatic prayer toggles on unvalidated or stale timing evidence.
-- Target Telos range: 300%-4000% enrage. The user is preparing the intended
-  Soul Split account and will say when it is ready for manual calibration.
+- Target Telos range: 300%-4000% enrage. The intended Soul Split account is ready;
+  only 300% phase 1 has been captured. Key-to-client-overhead timing and
+  cue-to-hitmark timing do not establish server protection deadlines.

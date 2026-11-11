@@ -52,6 +52,10 @@ uint32_t rs3_combat_sizeof(uint32_t structure)
             return sizeof(rs3_npc_animation);
         case RS3_COMBAT_SIZE_ACTION_EVENT:
             return sizeof(rs3_npc_action_event);
+        case RS3_COMBAT_SIZE_PLAYER_HIT_INFO:
+            return sizeof(rs3_player_hit_info);
+        case RS3_COMBAT_SIZE_PLAYER_HIT_EVENT:
+            return sizeof(rs3_player_hit_event);
         default:
             return 0;
     }

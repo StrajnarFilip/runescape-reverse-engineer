@@ -74,6 +74,10 @@ static void copy_frame(rs3_snapshot *destination, const rs3_snapshot *source)
     destination->profile = source->profile;
     destination->position = source->position;
     destination->combat = source->combat;
+    destination->player_hit_info = source->player_hit_info;
+    destination->player_actor_address = source->player_actor_address;
+    memcpy(destination->player_hits, source->player_hits,
+           source->player_hit_info.hit_count * sizeof(rs3_hit));
     memcpy(destination->npc_animations, source->npc_animations,
            source->info.npc_count * sizeof(rs3_npc_animation));
     memcpy(destination->npcs, source->npcs, source->info.npc_count * sizeof(rs3_npc));
@@ -106,10 +110,15 @@ static void clear_unavailable_frame(rs3_context *context, rs3_snapshot *snapshot
     snapshot->combat.status = RS3_UNAVAILABLE;
     snapshot->combat.reason = context->failure_reason;
 
-    /* Without a decoded frame there is no freshness baseline either. */
+    memset(&snapshot->player_hit_info, 0, sizeof snapshot->player_hit_info);
+    snapshot->player_hit_info.status = RS3_UNAVAILABLE;
+    snapshot->player_hit_info.reason = context->failure_reason;
+
+    /* Without a decoded frame there is no freshness or adjacency baseline either. */
     context->player_changes.valid_mask = 0;
     context->player_changes.clock_world_state = 0;
     context->combat.world_state = 0;
+    context->player_hits.sample_sequence = 0;
 }
 
 /** Ensures the context is attached, honouring the retry back-off. */
@@ -151,6 +160,8 @@ static void sample_and_publish(rs3_context *context, rs3_snapshot *snapshot)
     memset(&snapshot->player, 0, sizeof snapshot->player);
     snapshot->position = (rs3_position){0};
     memset(&snapshot->combat, 0, sizeof snapshot->combat);
+    memset(&snapshot->player_hit_info, 0, sizeof snapshot->player_hit_info);
+    snapshot->player_actor_address = 0;
     memset(&snapshot->inventory_info, 0, sizeof snapshot->inventory_info);
     snapshot->info.abi_version = RS3_ABI_VERSION;
     snapshot->info.sequence = ++context->sample_sequence;
@@ -335,13 +346,15 @@ int32_t rs3_create(const rs3_options *options, rs3_context **out)
     context->read_memory_user_data = context;
     context->hit_events = calloc(HIT_EVENT_CAPACITY, sizeof(rs3_event));
     context->npc_action_events = calloc(NPC_ACTION_EVENT_CAPACITY, sizeof(rs3_npc_action_event));
+    context->player_hit_events = calloc(PLAYER_HIT_EVENT_CAPACITY, sizeof(rs3_player_hit_event));
     context->npcs.identities = calloc(RS3_MAX_NPCS, sizeof(npc_identity));
     context->working_frame = calloc(1, sizeof(rs3_snapshot));
     context->latest_frame = calloc(1, sizeof(rs3_snapshot));
     context->inventory = inventory_create();
     if (context->hit_events == NULL || context->npc_action_events == NULL ||
-        context->npcs.identities == NULL || context->working_frame == NULL ||
-        context->latest_frame == NULL || context->inventory == NULL)
+        context->player_hit_events == NULL || context->npcs.identities == NULL ||
+        context->working_frame == NULL || context->latest_frame == NULL ||
+        context->inventory == NULL)
     {
         rs3_destroy(context);
         return RS3_E_MEMORY;
@@ -431,6 +444,7 @@ void rs3_destroy(rs3_context *context)
     }
     free(context->hit_events);
     free(context->npc_action_events);
+    free(context->player_hit_events);
     free(context->npcs.identities);
     free(context->working_frame);
     free(context->latest_frame);

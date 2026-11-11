@@ -28,10 +28,12 @@
 #define HIT_EVENT_CAPACITY 4096u
 /** Capacity of the NPC action event queue. */
 #define NPC_ACTION_EVENT_CAPACITY 4096u
+/** Capacity of the local-player hit event queue. */
+#define PLAYER_HIT_EVENT_CAPACITY 4096u
 /** Exclusive upper bound of valid tile coordinates. */
 #define MAX_TILE_COORDINATE 12800
-/** Hit mark slots retained per NPC identity. */
-#define MAX_HITS_PER_NPC 64u
+/** Capacity of one actor's hit mark ring. */
+#define MAX_HITS_PER_RING 64u
 /** Number of distinct NPC runtime IDs (16-bit). */
 #define NPC_RUNTIME_ID_COUNT 65536u
 /** Capacity of failure messages. */
@@ -56,6 +58,9 @@ struct rs3_snapshot
     rs3_player player;
     rs3_position position;
     rs3_combat_state combat;
+    rs3_player_hit_info player_hit_info;
+    rs3_hit player_hits[MAX_HITS_PER_RING];         /**< Prefix of player_hit_info.hit_count. */
+    uint64_t player_actor_address;                  /**< Verified local actor, or 0. */
     rs3_npc_animation npc_animations[RS3_MAX_NPCS]; /**< Parallel to npcs. */
     rs3_npc npcs[RS3_MAX_NPCS];
     rs3_hit hits[RS3_MAX_HITS];
@@ -74,7 +79,7 @@ typedef struct npc_identity
     /** Bit i validates last_reported_hits[i]. */
     uint64_t reported_hit_slots;
     /** Last hit record reported for each ring slot, used for deduplication. */
-    rs3_hit last_reported_hits[MAX_HITS_PER_NPC];
+    rs3_hit last_reported_hits[MAX_HITS_PER_RING];
     /** Sample, scene and action state of the previous valid animation sample. */
     uint64_t action_sample_sequence;
     uint64_t action_scene_epoch;
@@ -92,6 +97,22 @@ typedef struct player_change_tracker
     int64_t values[TRACKED_PLAYER_VALUE_COUNT];
     uint64_t changed_ns[TRACKED_PLAYER_VALUE_COUNT];
 } player_change_tracker;
+
+/** Identity and deduplication state of the local player's hit mark ring. */
+typedef struct player_hit_tracker
+{
+    /** Actor, scene and process that instance_id belongs to. */
+    uint64_t actor_address;
+    uint64_t scene_epoch;
+    uint64_t process_creation_time;
+    uint32_t player_index;
+    uint64_t instance_id;
+    /** Last committed sample; 0 means there is no adjacent baseline. */
+    uint64_t sample_sequence;
+    /** Bit i validates last_reported_hits[i]. */
+    uint64_t reported_hit_slots;
+    rs3_hit last_reported_hits[MAX_HITS_PER_RING];
+} player_hit_tracker;
 
 /** NPC identities and per-frame staging that must survive until the frame commits. */
 typedef struct npc_tracker
@@ -186,6 +207,9 @@ struct rs3_context
     uint64_t hit_event_sequence;
     rs3_npc_action_event *npc_action_events;
     uint64_t npc_action_event_sequence;
+    player_hit_tracker player_hits;
+    rs3_player_hit_event *player_hit_events;
+    uint64_t player_hit_event_sequence;
 
     inventory_state *inventory;
 };

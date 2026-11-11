@@ -32,7 +32,7 @@ Module              Responsibility
 =================== =========================================================
 ``context``         Lifecycle, native worker, sampling and frame publication
 ``snapshot``        Public snapshot allocation and accessors
-``event_queues``    Public readers of the hit, item and NPC action queues
+``event_queues``    Public readers of the hit, item, NPC action and player hit queues
 ``event_ring``      Bounded ring buffer with independent consumer cursors
 ``frame``           Decoding of one frame and its consistency checks
 ``process``         Client discovery, attachment and fingerprinting
@@ -43,6 +43,7 @@ Module              Responsibility
 ``npcs``            NPC registry, identities, health, hit marks and hit events
 ``npc_animation``   Raw NPC animations and NPC action events
 ``combat``          Overhead prayer flags and scene epochs
+``player_hits``     Local player actor, its hit marks and player hit events
 ``catalog``         ``rs3_catalog.bin`` loading and validation
 ``inventory``       Backpack/equipment slots, item identities and item events
 ``abilities``       Ability cooldown timers and weapon requirement checks

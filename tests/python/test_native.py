@@ -3,16 +3,20 @@
 import ctypes
 import time
 import unittest
+from unittest.mock import patch
 
 from rs3_reader.native import (
     SIZED_STRUCTURES,
     Ability,
     Event,
+    Hit,
+    HitState,
     Info,
     Item,
     ItemEvent,
     NPC,
     Player,
+    PlayerHitEvent,
     Position,
     Reader,
     Result,
@@ -66,6 +70,42 @@ class NativeLibraryTests(unittest.TestCase):
         telemetry.close()
         with self.assertRaises(RuntimeError):
             telemetry.sample()
+
+    def test_queued_player_hit_preserves_identity_after_frame_failure(self):
+        telemetry = NativeTelemetry(pid=ABSENT_PID, worker_hz=0)
+        event = PlayerHitEvent(
+            sequence=7,
+            observed_ns=123456,
+            sample_sequence=9,
+            scene_epoch=3,
+            process_creation_time=100,
+            instance_id=4,
+            pid=22,
+            player_index=5,
+            hit=Hit(type_id=133, amount=224, state=HitState.ACTIVE),
+        )
+        try:
+            with patch.object(
+                telemetry.reader, "drain_player_hit_events", return_value=([event], 2)
+            ):
+                record = telemetry.sample()
+            channel = record["player_hit_splats"]
+            self.assertEqual(channel["status"], "unavailable")
+            self.assertEqual(channel["hits"], [])
+            self.assertEqual(channel["events_lost"], 2)
+            self.assertIsNone(channel["attacker_identity"])
+            hit = channel["newly_observed"][0]
+            provenance = (
+                hit["pid"],
+                hit["process_creation_time"],
+                hit["instance_id"],
+                hit["scene_epoch"],
+            )
+            self.assertEqual(provenance, (22, 100, 4, 3))
+            timing = (hit["observed_ns"], hit["sample_sequence"], hit["amount"])
+            self.assertEqual(timing, (123456, 9, 224))
+        finally:
+            telemetry.close()
 
     def test_synchronous_sampling_and_the_worker_are_exclusive(self):
         with Reader(pid=ABSENT_PID, worker_hz=0) as reader:

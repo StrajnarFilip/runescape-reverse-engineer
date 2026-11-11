@@ -9,6 +9,7 @@
 #include "memory.h"
 #include "npcs.h"
 #include "player.h"
+#include "player_hits.h"
 #include "position.h"
 #include "variables.h"
 
@@ -110,6 +111,7 @@ int frame_decode(rs3_context *context, rs3_snapshot *snapshot)
     inventory_stage(context, snapshot, contexts.player_address, contexts.client_address,
                     contexts.world_state);
     combat_stage(context, snapshot, contexts.player_address, contexts.world_state);
+    player_hits_stage(context, snapshot, contexts.world_state);
 
     if (!contexts_unchanged(context, &contexts))
     {
@@ -117,6 +119,7 @@ int frame_decode(rs3_context *context, rs3_snapshot *snapshot)
     }
 
     combat_commit(context, snapshot, contexts.world_state);
+    player_hits_commit(context, snapshot);
     if (npcs_decoded)
     {
         npc_commit_frame(context, snapshot, runtime_ids, listed_count, npc_manager,

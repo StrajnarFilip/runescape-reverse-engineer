@@ -1,0 +1,279 @@
+{
+  "client_session_date": "2026-11-10",
+  "enrage_user_label": 300,
+  "phase_user_label": 1,
+  "input_sent_by_calibration": false,
+  "sources": [
+    {
+      "capture_sha256": "f998a1f4903e8e7eef08471bbd8f3e81e9769b44cfda626708dac8b94314b66c",
+      "summary": {
+        "retained_rows": 1389,
+        "player_hit_data_present": false,
+        "executable_sha256_values": [
+          "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45"
+        ],
+        "observed_curse_raw_values": [
+          0,
+          128,
+          256,
+          512,
+          262144
+        ],
+        "action_sequence_counts": {
+          "28962": 1,
+          "28929": 12,
+          "28931": 1,
+          "28932": 1,
+          "28938": 1,
+          "28935": 1
+        },
+        "player_hit_events": 0,
+        "hit_type_counts": {},
+        "cue_hit_pairs": [],
+        "cue_to_observed_damage_delay": {
+          "count": 0
+        },
+        "cue_to_observed_miss_delay": {
+          "count": 0
+        },
+        "manual_key_events": 0,
+        "matched_keyboard_changes": [],
+        "sampled_key_to_overhead_delay": {
+          "count": 0
+        },
+        "npc_action_events_lost": 0,
+        "player_hit_events_lost": null
+      }
+    },
+    {
+      "capture_sha256": "37c9c4c99481db3f73bcb355174523cb7b2aba02a7815fd1f9e243004410af23",
+      "summary": {
+        "retained_rows": 719,
+        "player_hit_data_present": true,
+        "executable_sha256_values": [
+          "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45"
+        ],
+        "observed_curse_raw_values": [
+          0,
+          512,
+          545,
+          262144,
+          262177
+        ],
+        "action_sequence_counts": {
+          "28962": 1,
+          "28929": 13,
+          "28931": 1,
+          "28932": 1,
+          "28938": 1,
+          "28935": 1
+        },
+        "player_hit_events": 22,
+        "hit_type_counts": {
+          "133": 10,
+          "482": 7,
+          "144": 3,
+          "143": 2
+        },
+        "cue_hit_pairs": [
+          {
+            "cue_event": 2,
+            "hit_event": 1,
+            "cue_to_observed_hit_ms": 510.119,
+            "hit_type": 133,
+            "amount": 670,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 3,
+            "hit_event": 2,
+            "cue_to_observed_hit_ms": 600.155,
+            "hit_type": 133,
+            "amount": 589,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 4,
+            "hit_event": 3,
+            "cue_to_observed_hit_ms": -30.446,
+            "hit_type": 482,
+            "amount": 0,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 5,
+            "hit_event": 4,
+            "cue_to_observed_hit_ms": -0.006,
+            "hit_type": 482,
+            "amount": 0,
+            "prayer_near_hit_observation": "soul_split"
+          },
+          {
+            "cue_event": 6,
+            "hit_event": 5,
+            "cue_to_observed_hit_ms": 600.17,
+            "hit_type": 133,
+            "amount": 609,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 7,
+            "hit_event": 6,
+            "cue_to_observed_hit_ms": -0.006,
+            "hit_type": 482,
+            "amount": 0,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 8,
+            "hit_event": 7,
+            "cue_to_observed_hit_ms": -0.006,
+            "hit_type": 482,
+            "amount": 0,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 11,
+            "hit_event": 11,
+            "cue_to_observed_hit_ms": -10.065,
+            "hit_type": 482,
+            "amount": 0,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 12,
+            "hit_event": 12,
+            "cue_to_observed_hit_ms": 600.408,
+            "hit_type": 133,
+            "amount": 1009,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 14,
+            "hit_event": 14,
+            "cue_to_observed_hit_ms": -0.008,
+            "hit_type": 482,
+            "amount": 0,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 15,
+            "hit_event": 16,
+            "cue_to_observed_hit_ms": -10.067,
+            "hit_type": 482,
+            "amount": 0,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 17,
+            "hit_event": 19,
+            "cue_to_observed_hit_ms": 600.051,
+            "hit_type": 133,
+            "amount": 582,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 18,
+            "hit_event": 21,
+            "cue_to_observed_hit_ms": 600.094,
+            "hit_type": 133,
+            "amount": 829,
+            "prayer_near_hit_observation": "melee"
+          }
+        ],
+        "cue_to_observed_damage_delay": {
+          "count": 6,
+          "min_ms": 510.119,
+          "median_ms": 600.125,
+          "max_ms": 600.408
+        },
+        "cue_to_observed_miss_delay": {
+          "count": 7,
+          "min_ms": -30.446,
+          "median_ms": -0.008,
+          "max_ms": -0.006
+        },
+        "manual_key_events": 7,
+        "matched_keyboard_changes": [
+          {
+            "prayer": "soul_split",
+            "virtual_key": 114,
+            "modifiers": 1,
+            "sampled_key_to_overhead_ms": 294.264,
+            "key_poll_interval_ms": 15.642
+          },
+          {
+            "prayer": "melee",
+            "virtual_key": 115,
+            "modifiers": 1,
+            "sampled_key_to_overhead_ms": 431.292,
+            "key_poll_interval_ms": 15.302
+          },
+          {
+            "prayer": "soul_split",
+            "virtual_key": 114,
+            "modifiers": 1,
+            "sampled_key_to_overhead_ms": 426.73,
+            "key_poll_interval_ms": 15.625
+          },
+          {
+            "prayer": "melee",
+            "virtual_key": 115,
+            "modifiers": 1,
+            "sampled_key_to_overhead_ms": 759.972,
+            "key_poll_interval_ms": 15.628
+          },
+          {
+            "prayer": "soul_split",
+            "virtual_key": 114,
+            "modifiers": 1,
+            "sampled_key_to_overhead_ms": 259.292,
+            "key_poll_interval_ms": 15.345
+          },
+          {
+            "prayer": "melee",
+            "virtual_key": 115,
+            "modifiers": 1,
+            "sampled_key_to_overhead_ms": 461.32,
+            "key_poll_interval_ms": 15.754
+          }
+        ],
+        "sampled_key_to_overhead_delay": {
+          "count": 6,
+          "min_ms": 259.292,
+          "median_ms": 429.011,
+          "max_ms": 759.972
+        },
+        "npc_action_events_lost": 0,
+        "player_hit_events_lost": 0
+      }
+    }
+  ],
+  "user_labelled_cues": {
+    "28929": "ordinary melee auto in the isolated phase-1 melee context",
+    "28931": "tendrils",
+    "28938": "uppercut",
+    "28935": "Hold Still"
+  },
+  "observed_npc_forms": {
+    "22891": "Telos active",
+    "22892": "Telos dormant"
+  },
+  "hitmark_symbol_leads": {
+    "133": "melee_damage_parent",
+    "143": "heal_splat_parent",
+    "144": "damage_parent",
+    "482": "miss_parent"
+  },
+  "automatic_flick_ready": false,
+  "prayer_check_deadline_validated": false,
+  "limitations": [
+    "Only 300% phase 1 has been captured; range, other phases and higher enrages remain unvalidated.",
+    "Cue-to-hit observation is not the server prayer-check deadline.",
+    "Overhead flags are observed client state, not proof of server-side activation timing.",
+    "Keyboard timestamps are sampled down edges with the recorded polling interval.",
+    "Player hitmarks do not identify the attacker; pairing uses the isolated phase-1 context.",
+    "No early/late protection outcome is inferred from a random damage amount alone.",
+    "Complete incoming-attack coverage and safe Soul Split windows are not established."
+  ]
+}
