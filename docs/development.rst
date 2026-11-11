@@ -24,6 +24,11 @@ Repository layout
 See `Arduino Leonardo serial keyboard <arduino-keyboard.rst>`_ for the sketch's
 build instructions and serial protocol.
 
+The `PVME melee Telos runner <pvme-telos-runner.rst>`_ documents
+``rs3_reader.pvme_telos`` and ``rs3_reader.rotation_keys``: an editable guide
+recipe with SendInput/Leonardo transports, manual checkpoints and a track-L
+validation gate. It is separate from the roadmap's autonomous decision engine.
+
 The `Telos automation roadmap <telos-automation/README.rst>`_ splits the
 remaining work into one brief per agent under ``docs/telos-automation/tracks/``.
 New decision code goes in ``python/rs3_reader/bot/``.

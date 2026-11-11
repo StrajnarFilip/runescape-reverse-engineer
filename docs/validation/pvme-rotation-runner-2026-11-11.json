@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "kind": "implementation_check",
+  "date": "2026-11-11",
+  "status": "offline_checks_passed_live_calibration_pending",
+  "source": "https://pvme.io/pvme-guides/rs3-full-boss-guides/telos/melee/",
+  "scope": "Supervised configurable keyboard recipe, default SendInput, optional Leonardo serial",
+  "checks": {
+    "windows_x64_configure": "passed",
+    "release_build": "passed",
+    "ctest_suites_passed": 10,
+    "ctest_suites_failed": 0,
+    "python_tests_passed": 106,
+    "new_runner_tests_passed": 28,
+    "ruff_changed_python_files": "passed",
+    "black_changed_python_files": "passed",
+    "plan_without_device_access": "passed",
+    "default_live_preflight_rejects_missing_configuration": "passed"
+  },
+  "live_status": {
+    "input_sent": false,
+    "arduino_hardware_tested": false,
+    "game_casts_confirmed": false,
+    "kills_completed": 0,
+    "ladder_rungs_enabled": [],
+    "binding_source": "unset; screenshot insufficient for complete identification",
+    "timing_source": "guide order and explicit relative delays; no new live calibration"
+  },
+  "remaining": [
+    "Verify key bindings, weapon switches and actual stored EoF special.",
+    "Measure action/channel/consumable delays and the checkpoint cue anchors.",
+    "Complete track L validation before live automatic rotation input.",
+    "Validate SendInput and Arduino timing independently.",
+    "Phase, target, movement, font and stall checkpoints remain manual."
+  ],
+  "raw_gameplay_committed": false
+}
