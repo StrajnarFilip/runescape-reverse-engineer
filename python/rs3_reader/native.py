@@ -411,6 +411,31 @@ class Hit(ctypes.Structure):
     ]
 
 
+class EffectsInfo(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_uint32) for name in ("status", "reason", "count", "complete")]
+
+
+class Effect(ctypes.Structure):
+    _fields_ = [
+        *(
+            (name, ctypes.c_uint32)
+            for name in (
+                "effect_id",
+                "flags",
+                "reason",
+                "source",
+                "expiry_var",
+                "stacks_var",
+                "active_var",
+                "raw_valid_mask",
+            )
+        ),
+        *((name, ctypes.c_int64) for name in ("raw_expiry", "raw_stacks", "raw_active")),
+        *((name, ctypes.c_int32) for name in ("active", "stacks", "remaining_ms")),
+        ("reserved", ctypes.c_uint32),
+    ]
+
+
 class PlayerHitInfo(ctypes.Structure):
     _fields_ = [
         ("status", ctypes.c_uint32),
@@ -594,6 +619,9 @@ def _function_prototypes():
             i32,
             [handle, u64, ctypes.POINTER(NPCActionEvent), u32, *cursor_outputs],
         ),
+        "effects_sizeof": (u32, [u32]),
+        "snapshot_effects_info": (i32, [handle, ctypes.POINTER(EffectsInfo), u32]),
+        "snapshot_effects": (i32, [handle, ctypes.POINTER(Effect), u32, ctypes.POINTER(u32)]),
         "snapshot_player_hit_info": (i32, [handle, ctypes.POINTER(PlayerHitInfo), u32]),
         "snapshot_player_hits": (i32, [handle, ctypes.POINTER(Hit), u32, ctypes.POINTER(u32)]),
         "player_hit_events_since": (
@@ -614,6 +642,9 @@ def _function_prototypes():
 
 
 def _verify_layouts(library):
+    for structure_id, structure in ((1, EffectsInfo), (2, Effect)):
+        if library.rs3_effects_sizeof(structure_id) != ctypes.sizeof(structure):
+            raise RuntimeError("C/Python effect layout mismatch for " + structure.__name__)
     for structure_id, structure in SIZED_STRUCTURES.items():
         if library.rs3_sizeof(structure_id) != ctypes.sizeof(structure):
             raise RuntimeError("C/Python layout mismatch for " + structure.__name__)
@@ -678,6 +709,8 @@ class Reader:
         self.npcs = (NPC * MAX_NPCS)()
         self.npc_animations = (NPCAnimation * MAX_NPCS)()
         self.hits = (Hit * MAX_HITS)()
+        self.effects_info = EffectsInfo()
+        self.effects = (Effect * 14)()
         self.player_hit_info = PlayerHitInfo()
         self.player_hits = (Hit * MAX_PLAYER_HITS)()
         self.inventory_info = InventoryInfo()
@@ -749,6 +782,8 @@ class Reader:
         copy_array(library.rs3_snapshot_npcs, self.npcs)
         copy_array(library.rs3_snapshot_npc_animations, self.npc_animations)
         copy_array(library.rs3_snapshot_hits, self.hits)
+        copy_record(library.rs3_snapshot_effects_info, self.effects_info)
+        copy_array(library.rs3_snapshot_effects, self.effects)
         copy_record(library.rs3_snapshot_player_hit_info, self.player_hit_info)
         copy_array(library.rs3_snapshot_player_hits, self.player_hits)
         copy_record(library.rs3_snapshot_inventory_info, self.inventory_info)

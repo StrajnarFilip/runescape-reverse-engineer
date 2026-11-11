@@ -43,6 +43,72 @@ def nanoseconds_to_milliseconds(nanoseconds, digits):
     return round(nanoseconds / 1e6, digits)
 
 
+EFFECT_NAMES = (
+    "berserk",
+    "bloodlust",
+    "overload",
+    "adrenaline_renewal",
+    "anima_virus",
+    "stun",
+    "bind",
+    "resonance",
+    "anticipation",
+    "freedom",
+    "devotion",
+    "barricade",
+    "immortality",
+    "disruption_shield",
+)
+EFFECT_REASONS = (
+    None,
+    "unmapped",
+    "unvalidated_source",
+    "not_set",
+    "read_failed",
+    "unsupported_profile",
+    "frame_unavailable",
+    "effect_presence_unmapped",
+)
+
+
+def effects_record(reader):
+    """Keep uncalibrated native candidates out of semantic effect fields."""
+    info = getattr(reader, "effects_info", None)
+    if info is None:
+        return {"status": "unavailable", "entries": None, "reason": "module_unavailable"}
+    entries = []
+    for effect in reader.effects[: info.count]:
+        candidate = {
+            "domain": {1: "varplayer", 2: "varclient"}.get(effect.source),
+            "expiry_var": effect.expiry_var or None,
+            "stacks_var": effect.stacks_var or None,
+            "active_var": effect.active_var or None,
+            "raw_expiry": effect.raw_expiry if effect.raw_valid_mask & 1 else None,
+            "raw_stacks": effect.raw_stacks if effect.raw_valid_mask & 2 else None,
+            "raw_active": effect.raw_active if effect.raw_valid_mask & 4 else None,
+            "expiry_validated": bool(effect.flags & 4),
+            "presence_validated": bool(effect.flags & 1),
+        }
+        entries.append(
+            {
+                "id": EFFECT_NAMES[effect.effect_id - 1],
+                "active": bool(effect.active) if effect.flags & 1 else None,
+                "stacks": effect.stacks if effect.flags & 2 else None,
+                "remaining_ms": effect.remaining_ms if effect.flags & 4 else None,
+                "reason": EFFECT_REASONS[effect.reason],
+                "source": "native_memory",
+                "candidate": candidate,
+            }
+        )
+    return {
+        "status": PLAYER_HIT_STATUS_NAMES.get(info.status, "unavailable"),
+        "entries": entries if info.count else None,
+        "complete": bool(info.complete),
+        "reason": EFFECT_REASONS[info.reason],
+        "source": "native_memory",
+    }
+
+
 def combat_record(reader):
     """Return the overhead prayer state of the reader's current snapshot."""
     state = reader.combat
@@ -272,6 +338,7 @@ class NativeTelemetry:
             source="native_memory",
             read_duration_ms=native["sample_duration_ms"],
         )
+        record.setdefault("player", {})["effects"] = effects_record(self.reader)
         record["combat"] = combat_record(self.reader)
         record["player_hit_splats"] = player_hit_splats
         # Observations from earlier frames keep their own process and timestamp.
@@ -406,6 +473,7 @@ class NativeTelemetry:
                 "reason": "entity_mapping_pending",
             },
         }
+        record.setdefault("player", {})["effects"] = effects_record(reader)
         if include_raw:
             record["raw_variables"] = raw_variables
         return extend_record(record, reader)

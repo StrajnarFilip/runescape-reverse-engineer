@@ -210,3 +210,24 @@ int32_t rs3_snapshot_items(const rs3_snapshot *snapshot, uint32_t container_id, 
     }
     return RS3_OK;
 }
+
+int32_t rs3_snapshot_effects_info(const rs3_snapshot *snapshot, rs3_effects_info *out,
+                                  uint32_t out_size)
+{
+    if (snapshot == NULL || out == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    return copy_record(&snapshot->effects_info, sizeof *out, out, out_size);
+}
+
+int32_t rs3_snapshot_effects(const rs3_snapshot *snapshot, rs3_effect *out, uint32_t capacity,
+                             uint32_t *required)
+{
+    if (snapshot == NULL || required == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    return copy_records(snapshot->effects, snapshot->effects_info.count, sizeof *out,
+                        out, capacity, required);
+}

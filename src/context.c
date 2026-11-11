@@ -12,6 +12,7 @@
 
 #include "clock.h"
 #include "frame.h"
+#include "effects.h"
 #include "inventory.h"
 #include "memory.h"
 #include "position.h"
@@ -71,6 +72,9 @@ static void copy_frame(rs3_snapshot *destination, const rs3_snapshot *source)
         source->inventory_info.backpack_count + source->inventory_info.equipment_count;
     destination->info = source->info;
     destination->player = source->player;
+    destination->effects_info = source->effects_info;
+    memcpy(destination->effects, source->effects,
+           source->effects_info.count * sizeof(rs3_effect));
     destination->profile = source->profile;
     destination->position = source->position;
     destination->combat = source->combat;
@@ -101,6 +105,7 @@ static void clear_unavailable_frame(rs3_context *context, rs3_snapshot *snapshot
 
     memset(&snapshot->player, 0, sizeof snapshot->player);
     snapshot->player.gcd_reason = RS3_NOT_SET;
+    effects_clear(snapshot);
 
     memset(&snapshot->inventory_info, 0, sizeof snapshot->inventory_info);
     snapshot->inventory_info.status = RS3_UNAVAILABLE;
@@ -158,6 +163,7 @@ static void sample_and_publish(rs3_context *context, rs3_snapshot *snapshot)
     uint64_t started_ns = clock_monotonic_ns();
     memset(&snapshot->info, 0, sizeof snapshot->info);
     memset(&snapshot->player, 0, sizeof snapshot->player);
+    effects_clear(snapshot);
     snapshot->position = (rs3_position){0};
     memset(&snapshot->combat, 0, sizeof snapshot->combat);
     memset(&snapshot->player_hit_info, 0, sizeof snapshot->player_hit_info);

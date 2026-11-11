@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "combat.h"
+#include "effects.h"
 #include "inventory.h"
 #include "memory.h"
 #include "npcs.h"
@@ -112,6 +113,7 @@ int frame_decode(rs3_context *context, rs3_snapshot *snapshot)
                     contexts.world_state);
     combat_stage(context, snapshot, contexts.player_address, contexts.world_state);
     player_hits_stage(context, snapshot, contexts.world_state);
+    effects_stage(context, snapshot, contexts.player_address, contexts.client_address);
 
     if (!contexts_unchanged(context, &contexts))
     {
