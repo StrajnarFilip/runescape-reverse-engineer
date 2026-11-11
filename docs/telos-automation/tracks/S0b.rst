@@ -1,7 +1,7 @@
 S0b - Single runtime profile
 ============================
 
-:Status: open
+:Status: in progress
 :Wave: 0
 :Branch: ``telos/S0b``
 :Kind: C (native DLL)
