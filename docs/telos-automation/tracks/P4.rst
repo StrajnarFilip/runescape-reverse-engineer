@@ -1,0 +1,60 @@
+P4 - Scene hazards
+==================
+
+:Status: open
+:Wave: 2
+:Branch: ``telos/P4``
+:Kind: C (native DLL)
+
+Shared rules and procedure: ``../README.rst``.
+
+Goal
+----
+
+Read the arena objects the fight depends on, with tiles: the green, black and
+red beams, the phase 4 fonts, falling rocks, tendrils, the anima bomb,
+projectiles, and golem identities.
+
+Read first
+----------
+
+* ``docs/telos-melee-research.rst``, section "Telos encounter model".
+* ``docs/spatial.rst`` and ``include/rs3/spatial.h`` from P1.
+* ``src/npcs.c``, ``src/npc_animation.c``.
+
+Owns
+----
+
+* ``src/hazards.c``, ``src/hazards.h``, ``include/rs3/hazards.h``
+* ``tests/native/test_hazards.c``
+* ``docs/validation/hazards-validation.json``
+* Own registration lines in the shared wiring files.
+
+Depends on
+----------
+
+P1 (tiles and actor layouts).
+
+Delivers
+--------
+
+``WorldState.hazards[]``: kind, tile or area, start time and expected end when
+the client exposes one. Golems appear as NPCs with a role (which font or meter
+they affect) when that can be verified.
+
+Done when
+---------
+
+Each hazard is validated live or reported as unmapped with what was tried.
+Fixture tests cover appearance, disappearance and scene changes.
+
+Needs the user
+--------------
+
+One session per hazard group across manual kills: stand in each beam, let
+tendrils and rocks spawn, reach phase 4 fonts and phase 5 golems.
+
+Requests
+--------
+
+None yet.

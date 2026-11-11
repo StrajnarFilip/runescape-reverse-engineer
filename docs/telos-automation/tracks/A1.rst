@@ -1,0 +1,64 @@
+A1 - Actuator backends
+======================
+
+:Status: open
+:Wave: 1
+:Branch: ``telos/A1``
+:Kind: Python (Arduino sketch if needed)
+
+Shared rules and procedure: ``../README.rst``.
+
+Goal
+----
+
+Implement the S0a ``Actuator`` interface twice: over the existing foreground
+input functions in the DLL, and over the Arduino Leonardo serial protocol,
+which has a sketch but no host-side driver.
+
+Read first
+----------
+
+* ``python/rs3_reader/bot/actuator.py`` from S0a.
+* ``include/rs3/rs3.h`` (foreground input section), ``include/rs3/combat.h``
+  (``rs3_set_prayer``), ``src/input.c``, ``tests/native/test_input.c``.
+* ``docs/arduino-keyboard.rst``, ``arduino/serial_keyboard/serial_keyboard.ino``.
+
+Owns
+----
+
+* ``python/rs3_reader/bot/actuator_sendinput.py``
+* ``python/rs3_reader/bot/actuator_serial.py``
+* ``arduino/serial_keyboard/``, ``docs/arduino-keyboard.rst``
+* ``tests/python/test_bot_actuator.py``
+
+Depends on
+----------
+
+S0a.
+
+Delivers
+--------
+
+Two interchangeable backends with: a serialized queue, a per-tick action
+budget, rejection of intents whose deadline has passed or whose snapshot is
+stale, and release of every held key on fault or shutdown. The serial sketch is
+keyboard-only today; state in the brief's Requests what pointer support the
+movement track (A2) will need rather than guessing.
+
+Done when
+---------
+
+Both backends pass the same test suite against a fake device and a fake DLL,
+including the fault path, without the game running. The serial driver uses the
+standard library only.
+
+Needs the user
+--------------
+
+Nothing for the tests. One two-minute check with the board plugged in: a tap
+arrives in a text editor.
+
+Requests
+--------
+
+None yet.

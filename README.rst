@@ -149,6 +149,9 @@ creation and actual log output were checked. This change does not claim visual Q
 Research tools and synchronization
 ----------------------------------
 
+The `Telos automation roadmap <docs/telos-automation/README.rst>`_ lists the
+remaining work as one self-contained brief per agent.
+
 `Melee Telos research <docs/telos-melee-research.rst>`_ covers encounter mechanics,
 PVME rotation assumptions, prayer timing, consumables, EoF contents and Lunar
 defensives. It distinguishes published guidance from live-validated telemetry

@@ -1,0 +1,65 @@
+D5 - Mechanics and movement
+===========================
+
+:Status: open
+:Wave: 2
+:Branch: ``telos/D5``
+:Kind: Python
+
+Shared rules and procedure: ``../README.rst``.
+
+Goal
+----
+
+Handle what each phase demands beyond attacking and praying: where to stand,
+when to move, and what to target.
+
+* Phase 1: tendrils, melee distance, green beam.
+* Phase 2: black beam, Onslaught, virus.
+* Phase 3: red beam, golems and the meter.
+* Phase 4: the three fonts, golems, target switches.
+* Phase 5: golems, beam choice, rocks, the final bomb.
+
+Read first
+----------
+
+* ``docs/telos-melee-research.rst``, section "Telos encounter model".
+* ``docs/blindfold-telos.md`` for historical context only.
+* ``include/rs3/hazards.h`` from P4, ``python/rs3_reader/bot/movement.py``
+  from A2, ``encounter_tracker.py`` from D1.
+
+Owns
+----
+
+* ``python/rs3_reader/bot/mechanics/`` (one module per phase plus shared arena
+  geometry)
+* ``tests/python/test_bot_mechanics.py``
+
+Depends on
+----------
+
+P4 (hazards) and A2 (movement). Phase 1 can start as soon as P1 and A2 are done.
+
+Delivers
+--------
+
+Movement and targeting intents at the third priority, each naming the hazard
+that caused it. Arena positions are expressed relative to observed arena
+anchors, not absolute coordinates, because the fight is instanced.
+
+Done when
+---------
+
+Each phase handler has scenario tests built from recorded hazard sequences, and
+an unknown hazard state produces no movement rather than a guess.
+
+Needs the user
+--------------
+
+Nothing in this track beyond the captures P4 already needs. Live use starts at
+rung 5 of track L.
+
+Requests
+--------
+
+None yet.

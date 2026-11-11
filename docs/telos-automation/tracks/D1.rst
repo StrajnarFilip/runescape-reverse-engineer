@@ -1,0 +1,65 @@
+D1 - Encounter tracker
+======================
+
+:Status: open
+:Wave: 1
+:Branch: ``telos/D1``
+:Kind: Python
+
+Shared rules and procedure: ``../README.rst``.
+
+Goal
+----
+
+A state machine that turns the event stream into an encounter picture: current
+phase, attack index within the cycle, the next expected attack, and the list of
+pending incoming threats with their prayer-check windows.
+
+Read first
+----------
+
+* ``python/rs3_reader/bot/world_state.py`` and ``replay.py`` from S0a.
+* ``include/rs3/prayer.h``: ``rs3_prayer_threat`` and
+  ``rs3_prayer_frame.coverage_until_ns``.
+* ``docs/prayer-flick.rst``, sections "NPC action event stream" and "Planner
+  contract".
+* ``docs/telos-melee-research.rst``, section "Telos encounter model".
+* ``profiles/telos_attacks.json`` once P6 has produced it.
+
+Owns
+----
+
+* ``python/rs3_reader/bot/encounter_tracker.py``
+* ``tests/python/test_bot_encounter_tracker.py``
+
+Depends on
+----------
+
+S0a. Loads P6's attack table; until it exists, use only the four sequences in
+``docs/validation/telos-prayer-calibration-2026-11-10.json``. Uses P2's phase
+when present and otherwise reports phase as unknown.
+
+Delivers
+--------
+
+``EncounterState``: phase, attack index, next attack and confidence, pending
+threats in the shape ``rs3_prayer_threat`` needs, and ``coverage_until``. An
+unknown sequence, an event-queue gap or a scene change drops coverage to
+unknown instead of guessing.
+
+Done when
+---------
+
+Replaying the two existing 300% phase 1 captures yields a threat before every
+labelled damaging attack, no threat is fabricated from an unlabelled sequence,
+and gap and scene-change cases are covered by tests.
+
+Needs the user
+--------------
+
+Nothing. The two local captures under ``work/prayer_research/`` are the input.
+
+Requests
+--------
+
+None yet.
