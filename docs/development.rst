@@ -12,7 +12,7 @@ Repository layout
     profiles/             Version-pinned client profiles and ability bindings
     python/rs3_reader/    Python package: ctypes binding, telemetry, CLIs
     python/rs3_reader/tracker/  Desktop tracker (Tkinter)
-    arduino/serial_keyboard/  Leonardo USB serial-to-keyboard sketch
+    arduino/serial_keyboard/  Leonardo USB serial-to-keyboard and mouse sketch
     tests/native/         Deterministic C fixture tests, one executable per area
     tests/python/         Python unit tests, including DLL ABI checks
     examples/             C, Python and Java consumers
@@ -21,8 +21,8 @@ Repository layout
                           Python reference decoder used for parity checks
     cmake/                CMake package configuration template
 
-See `Arduino Leonardo serial keyboard <arduino-keyboard.rst>`_ for the sketch's
-build instructions and serial protocol.
+See `Arduino Leonardo serial keyboard and mouse <arduino-keyboard.rst>`_ for
+build instructions, the serial protocol and the foreground game capture tool.
 
 The `PVME melee Telos runner <pvme-telos-runner.rst>`_ documents
 ``rs3_reader.pvme_telos`` and ``rs3_reader.rotation_keys``: an editable guide

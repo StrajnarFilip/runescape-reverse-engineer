@@ -1,9 +1,13 @@
 #include <Arduino.h>
 #include <Keyboard.h>
+#include <Mouse.h>
+#include <stdlib.h>
 #include <string.h>
 
 static constexpr unsigned long serialBaud = 115200;
-static constexpr size_t lineCapacity = sizeof("RELEASE_ALL\r");
+static constexpr size_t lineCapacity = sizeof("MOVE -127 -127\r");
+static constexpr long mouseDeltaLimit = 127;
+static constexpr unsigned long mouseClickMillis = 25;
 static constexpr uint8_t firstKeyUsage = 0x04;
 static constexpr uint8_t lastKeyUsage = 0x73;
 static constexpr uint8_t firstModifierUsage = 0xE0;
@@ -61,6 +65,51 @@ static void releaseAllKeys()
     memset(heldKeys, 0, sizeof(heldKeys));
 }
 
+static bool parseMouseDelta(const char *argument, char **end, long *value)
+{
+    *value = strtol(argument, end, 10);
+    return *end != argument && *value >= -mouseDeltaLimit && *value <= mouseDeltaLimit;
+}
+
+static const __FlashStringHelper *moveMouse(const char *argument)
+{
+    long horizontal;
+    long vertical;
+    char *end;
+    if (!parseMouseDelta(argument, &end, &horizontal) || *end != ' ' ||
+        !parseMouseDelta(end + 1, &end, &vertical) || *end != '\0')
+    {
+        return F("ERR MOUSE");
+    }
+    Mouse.move(horizontal, vertical, 0);
+    return F("OK");
+}
+
+static const __FlashStringHelper *clickMouse(const char *argument)
+{
+    uint8_t button;
+    if (strcmp(argument, "L") == 0)
+    {
+        button = MOUSE_LEFT;
+    }
+    else if (strcmp(argument, "R") == 0)
+    {
+        button = MOUSE_RIGHT;
+    }
+    else if (strcmp(argument, "M") == 0)
+    {
+        button = MOUSE_MIDDLE;
+    }
+    else
+    {
+        return F("ERR MOUSE");
+    }
+    Mouse.press(button);
+    delay(mouseClickMillis);
+    Mouse.release(button);
+    return F("OK");
+}
+
 static const __FlashStringHelper *runCommand()
 {
     if (strcmp(commandLine, "RELEASE_ALL") == 0)
@@ -76,6 +125,26 @@ static const __FlashStringHelper *runCommand()
     }
     *argument = '\0';
     ++argument;
+
+    if (strcmp(commandLine, "MOVE") == 0)
+    {
+        return moveMouse(argument);
+    }
+    if (strcmp(commandLine, "CLICK") == 0)
+    {
+        return clickMouse(argument);
+    }
+    if (strcmp(commandLine, "WHEEL") == 0)
+    {
+        long delta;
+        char *end;
+        if (!parseMouseDelta(argument, &end, &delta) || *end != '\0')
+        {
+            return F("ERR MOUSE");
+        }
+        Mouse.move(0, 0, delta);
+        return F("OK");
+    }
 
     const bool isPress = strcmp(commandLine, "PRESS") == 0;
     const bool isRelease = strcmp(commandLine, "RELEASE") == 0;
@@ -125,11 +194,12 @@ static const __FlashStringHelper *runCommand()
     return F("OK");
 }
 
-/// Initialize the Leonardo's native USB serial and keyboard interfaces.
+/// Initialize the Leonardo's native USB serial and HID interfaces.
 void setup()
 {
     Serial.begin(serialBaud);
     Keyboard.begin();
+    Mouse.begin();
 }
 
 /// Read serial commands while DTR is asserted and clear keyboard state on close.
