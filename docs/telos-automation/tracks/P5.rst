@@ -1,7 +1,7 @@
 P5 - Interface state
 ====================
 
-:Status: waiting for live session
+:Status: in progress
 :Wave: 1
 :Branch: ``telos/P5``
 :Kind: C (native DLL)
