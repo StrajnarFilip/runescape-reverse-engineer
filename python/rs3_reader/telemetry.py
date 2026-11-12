@@ -57,7 +57,7 @@ INTERFACE_KINDS = ("instance", "enrage", "loot", "bank_preset", "death")
 
 
 def interface_records(reader):
-    """Return native bindings and an explicitly unknown open-interface list."""
+    """Return native bindings and partial, individually validated interface state."""
     info = getattr(reader, "interface_info", None)
     if info is None:
         unknown = {"status": "unavailable", "reason": "module_unavailable"}
@@ -100,27 +100,46 @@ def interface_records(reader):
                 },
             }
         )
-    ui = {
-        "status": "unavailable",
-        "open": None,
-        "complete": False,
-        "reason": (
-            "open_interface_registry_unmapped"
-            if info.interface_count
-            else INTERFACE_REASONS[info.reason]
-        ),
-        "source": "native_memory",
-        "required": [
+    required = []
+    for item in reader.interfaces[: info.interface_count]:
+        known = item.reason == 0 and item.open in (0, 1)
+        required.append(
             {
                 "kind": INTERFACE_KINDS[item.kind - 1],
-                "open": None,
-                "interface_id": None,
+                "open": bool(item.open) if known else None,
+                "interface_id": item.interface_id if known else None,
+                "scope": (
+                    {2: "initial_enrage_choice", 4: "bank_root_attachment"}.get(item.kind)
+                    if known
+                    else None
+                ),
+                "heading": (
+                    "Choose initial enrage." if known and item.kind == 2 and item.open else None
+                ),
+                "visible": None,
+                "preset_controls_visible": None,
                 "options": None,
                 "click_point": None,
                 "reason": INTERFACE_REASONS[item.reason],
+                "source": "native_memory",
             }
-            for item in reader.interfaces[: info.interface_count]
-        ],
+        )
+    any_known = any(item["open"] is not None for item in required)
+    ui = {
+        "status": "partial" if any_known else "unavailable",
+        "open": [dict(item) for item in required if item["open"] is True] if any_known else None,
+        "complete": False,
+        "reason": (
+            "other_interfaces_visibility_and_options_unmapped"
+            if any_known
+            else (
+                "open_interface_registry_unmapped"
+                if info.interface_count
+                else INTERFACE_REASONS[info.reason]
+            )
+        ),
+        "source": "native_memory",
+        "required": required,
     }
     bars = {
         "status": PLAYER_HIT_STATUS_NAMES.get(info.status, "unavailable"),

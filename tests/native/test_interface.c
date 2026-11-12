@@ -14,6 +14,103 @@
 #define MODIFIER_NODE         (KEY_NODE + FIXTURE_VARIABLE_NODE_BYTES)
 #define FIRST_ADDITIONAL_SLOT RS3_ACTION_BAR_SLOTS
 
+#define UI_MANAGER            0xb10000ull
+#define UI_CACHE              0xb20000ull
+#define UI_RECORDS            0xb30000ull
+#define UI_NODE               0xb40000ull
+#define UI_VALUE              0xb40100ull
+#define UI_BUCKETS            0xb50000ull
+#define UI_CACHE_RECORD_COUNT 1478u
+#define UI_BANK_KEY           ((1477u << 16) | 706u)
+#define UI_ENRAGE_KEY         ((1477u << 16) | 748u)
+#define UI_COMPONENTS         0xb60000ull
+#define UI_HEADING            0xb70000ull
+#define UI_TEXT_HEAP          0xb80000ull
+
+static fixture *prayer_bar_fixture(void);
+
+/** Add independently pinned instruction fixtures and an attached bank root. */
+static fixture *bank_fixture(void)
+{
+    fixture *test_fixture = prayer_bar_fixture();
+    static const unsigned char thunk[] = {0x48, 0x83, 0xc1, 0x28, 0xe9, 0xc7, 0x90, 0x8a, 0};
+    static const unsigned char getter[] = {0x48, 0x83, 0xec, 0x28, 0x4c, 0x8b, 0x41, 0x18,
+                                           0x48, 0x8b, 0x41, 0x20, 0x49, 0x2b, 0xc0, 0x48,
+                                           0xc1, 0xf8, 0x04, 0x3b, 0xd0, 0x7d, 0x11, 0x48,
+                                           0x63, 0xc2, 0x48, 0xc1, 0xe0, 0x04, 0x49, 0x03};
+    static const unsigned char buckets[] = {0x41, 0x8b, 0x8e, 0x10, 0x01, 0, 0,
+                                            0x4d, 0x8b, 0x8e, 0x08, 0x01, 0, 0};
+    static const unsigned char child[] = {0x8b, 0x50, 0x0c};
+    const unsigned char *code[] = {thunk, getter, buckets, child};
+    const uint32_t addresses[] = {0x3c7f90, 0xc71060, 0x3ca949, 0x3ca9a7};
+    const size_t sizes[] = {sizeof thunk, sizeof getter, sizeof buckets, sizeof child};
+    for (unsigned index = 0; index < 4; index++)
+    {
+        uint64_t address = FIXTURE_MODULE_BASE + addresses[index];
+        fixture_add_block(test_fixture, address, sizes[index]);
+        memcpy(fixture_bytes(test_fixture, address, sizes[index]), code[index], sizes[index]);
+    }
+    fixture_add_block(test_fixture, UI_MANAGER, 0x160);
+    fixture_add_block(test_fixture, UI_CACHE, UI_CACHE_RECORD_COUNT * 16);
+    fixture_add_block(test_fixture, UI_RECORDS, 0x300);
+    fixture_add_block(test_fixture, UI_NODE, 0x100);
+    fixture_add_block(test_fixture, UI_VALUE, 0x100);
+    fixture_add_block(test_fixture, UI_BUCKETS, 4 * 8);
+    fixture_put_u64(test_fixture, FIXTURE_WORLD + 0x19910, UI_MANAGER);
+    fixture_put_u64(test_fixture, UI_MANAGER, FIXTURE_MODULE_BASE + 0x15382c8);
+    fixture_put_u64(test_fixture, UI_MANAGER + 0x10, FIXTURE_MODULE_BASE + 0x15382e8);
+    fixture_put_u64(test_fixture, UI_MANAGER + 0x50, UI_CACHE);
+    fixture_put_u64(test_fixture, UI_MANAGER + 0x58, UI_CACHE + UI_CACHE_RECORD_COUNT * 16);
+    fixture_put_u64(test_fixture, UI_CACHE + 1477 * 16 + 8, UI_RECORDS);
+    fixture_put_u32(test_fixture, UI_RECORDS, 1477);
+    fixture_put_u64(test_fixture, UI_CACHE + 517 * 16 + 8, UI_RECORDS + 0x100);
+    fixture_put_u32(test_fixture, UI_RECORDS + 0x100, 517);
+    fixture_put_u32(test_fixture, UI_MANAGER + 0xf8, 1477);
+    fixture_put_u64(test_fixture, UI_MANAGER + 0x118, UI_BUCKETS);
+    fixture_put_u64(test_fixture, UI_MANAGER + 0x120, 3);
+    fixture_put_u64(test_fixture, UI_MANAGER + 0x128, 1);
+    fixture_put_u64(test_fixture, UI_BUCKETS + (UI_BANK_KEY % 3) * 8, UI_NODE);
+    fixture_put_u64(test_fixture, UI_BUCKETS + 3 * 8, UINT64_MAX);
+    fixture_put_u32(test_fixture, UI_NODE, UI_BANK_KEY);
+    fixture_put_u64(test_fixture, UI_NODE + 16, UI_VALUE);
+    fixture_put_u32(test_fixture, UI_VALUE + 12, 517);
+    return test_fixture;
+}
+
+/** Write an observed small-string representation without a game call. */
+static void set_heading(fixture *test_fixture, const char *text)
+{
+    size_t size = strlen(text);
+    assert(size <= 23);
+    unsigned char *field = fixture_bytes(test_fixture, UI_HEADING + 0x190, 24);
+    memset(field, 0, 24);
+    memcpy(field, text, size);
+    field[23] = (unsigned char)(23 - size);
+}
+
+static fixture *enrage_fixture(void)
+{
+    fixture *test_fixture = bank_fixture();
+    fixture_add_block(test_fixture, UI_COMPONENTS, 46 * 24);
+    fixture_add_block(test_fixture, UI_HEADING, 0x1a8);
+    fixture_add_block(test_fixture, UI_TEXT_HEAP, 65);
+    fixture_put_u64(test_fixture, UI_CACHE + 720 * 16 + 8, UI_RECORDS + 0x200);
+    fixture_put_u32(test_fixture, UI_RECORDS + 0x200, 720);
+    fixture_put_u64(test_fixture, UI_RECORDS + 0x208, UI_COMPONENTS);
+    fixture_put_u64(test_fixture, UI_RECORDS + 0x210, UI_COMPONENTS + 46 * 24);
+    fixture_put_u64(test_fixture, UI_COMPONENTS + 3 * 24 + 16, UI_HEADING);
+    fixture_put_u64(test_fixture, UI_HEADING, FIXTURE_MODULE_BASE + 0x1530678);
+    fixture_put_u32(test_fixture, UI_HEADING + 0x18, 3u << 16 | 720u);
+    set_heading(test_fixture, "Choose initial enrage.");
+    assert(UI_BANK_KEY % 3 == UI_ENRAGE_KEY % 3);
+    fixture_put_u64(test_fixture, UI_NODE + 24, UI_NODE + 0x80);
+    fixture_put_u32(test_fixture, UI_NODE + 0x80, UI_ENRAGE_KEY);
+    fixture_put_u64(test_fixture, UI_NODE + 0x80 + 16, UI_VALUE + 0x80);
+    fixture_put_u32(test_fixture, UI_VALUE + 0x80 + 12, 720);
+    fixture_put_u64(test_fixture, UI_MANAGER + 0x128, 2);
+    return test_fixture;
+}
+
 static fixture *prayer_bar_fixture(void)
 {
     fixture *test_fixture = fixture_create_inventory();
@@ -135,7 +232,10 @@ static void ui_unknown_and_frame_reset(void)
     {
         assert(snapshot->interfaces[index].open == -1);
         assert(snapshot->interfaces[index].interface_id == -1);
-        assert(snapshot->interfaces[index].reason == RS3_UI_UNMAPPED);
+        assert(snapshot->interfaces[index].reason ==
+               (index == RS3_UI_BANK_PRESET - 1 || index == RS3_UI_ENRAGE - 1
+                    ? RS3_UI_UNSUPPORTED_PROFILE
+                    : RS3_UI_UNMAPPED));
     }
     interface_clear(test_fixture->snapshot);
     assert(snapshot->interface_info.action_bar_count == 0);
@@ -146,6 +246,119 @@ static void ui_unknown_and_frame_reset(void)
     interface_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_PLAYER, FIXTURE_CLIENT);
     assert(test_fixture->snapshot->interface_info.reason == RS3_UI_UNSUPPORTED_PROFILE);
     assert(test_fixture->snapshot->interface_info.action_bar_count == 0);
+    fixture_destroy(test_fixture);
+}
+
+static void bank_attachment_is_distinct_from_cached_presence(void)
+{
+    fixture *test_fixture = bank_fixture();
+    assert(fixture_decode(test_fixture));
+    const rs3_interface_observation *bank =
+        &test_fixture->snapshot->interfaces[RS3_UI_BANK_PRESET - 1];
+    assert(bank->interface_id == 517 && bank->open == 1 && bank->reason == RS3_UI_CONFIRMED);
+    assert(test_fixture->snapshot->interface_info.open_complete == 0);
+    /* Keep the bank loaded in the cache, but remove its actual attachment. */
+    fixture_put_u64(test_fixture, UI_BUCKETS + (UI_BANK_KEY % 3) * 8, 0);
+    fixture_put_u64(test_fixture, UI_MANAGER + 0x128, 0);
+    assert(fixture_decode(test_fixture));
+    assert(bank->interface_id == 517 && bank->open == 0 && bank->reason == RS3_UI_CONFIRMED);
+    fixture_destroy(test_fixture);
+}
+
+static void bank_rejects_torn_cycles_and_reused_manager(void)
+{
+    fixture *test_fixture = bank_fixture();
+    fixture_mutate_on_read(test_fixture, UI_VALUE, 2, UI_VALUE + 12, 518);
+    interface_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_PLAYER, FIXTURE_CLIENT);
+    const rs3_interface_observation *bank =
+        &test_fixture->snapshot->interfaces[RS3_UI_BANK_PRESET - 1];
+    assert(bank->open == -1 && bank->reason == RS3_UI_READ_FAILED);
+    fixture_clear_mutation(test_fixture);
+    fixture_put_u32(test_fixture, UI_VALUE + 12, 517);
+    fixture_put_u64(test_fixture, UI_NODE + 24, UI_NODE);
+    interface_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_PLAYER, FIXTURE_CLIENT);
+    assert(bank->open == -1 && bank->reason == RS3_UI_READ_FAILED);
+    fixture_put_u64(test_fixture, UI_NODE + 24, 0);
+    fixture_mutate_on_read(test_fixture, FIXTURE_WORLD + 0x19910, 2, FIXTURE_WORLD + 0x19910, 0);
+    interface_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_PLAYER, FIXTURE_CLIENT);
+    assert(bank->open == -1 && bank->reason == RS3_UI_READ_FAILED);
+    fixture_destroy(test_fixture);
+}
+
+static void bank_requires_guards_root_and_bounded_complete_graph(void)
+{
+    fixture *test_fixture = bank_fixture();
+    const rs3_interface_observation *bank =
+        &test_fixture->snapshot->interfaces[RS3_UI_BANK_PRESET - 1];
+    fixture_put_u64(test_fixture, UI_MANAGER + 0x128, 513);
+    interface_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_PLAYER, FIXTURE_CLIENT);
+    assert(bank->open == -1 && bank->reason == RS3_UI_READ_FAILED);
+    fixture_put_u64(test_fixture, UI_MANAGER + 0x128, 2); /* Count mismatch, not absence. */
+    interface_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_PLAYER, FIXTURE_CLIENT);
+    assert(bank->open == -1 && bank->reason == RS3_UI_READ_FAILED);
+    fixture_put_u64(test_fixture, UI_MANAGER + 0x128, 1);
+    fixture_put_u32(test_fixture, UI_MANAGER + 0xf8, 999);
+    interface_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_PLAYER, FIXTURE_CLIENT);
+    assert(bank->open == -1 && bank->reason == RS3_UI_UNMAPPED);
+    fixture_put_u32(test_fixture, UI_MANAGER + 0xf8, 1477);
+    fixture_put_u32(test_fixture, FIXTURE_MODULE_BASE + 0x3c7f90, 0);
+    interface_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_PLAYER, FIXTURE_CLIENT);
+    assert(bank->open == -1 && bank->reason == RS3_UI_UNSUPPORTED_PROFILE);
+    fixture_destroy(test_fixture);
+}
+
+static void enrage_requires_heading_not_just_generic_dialog_id(void)
+{
+    fixture *test_fixture = enrage_fixture();
+    assert(fixture_decode(test_fixture));
+    const rs3_interface_observation *enrage =
+        &test_fixture->snapshot->interfaces[RS3_UI_ENRAGE - 1];
+    assert(enrage->open == 1 && enrage->interface_id == 720 && enrage->reason == RS3_UI_CONFIRMED);
+    set_heading(test_fixture, "Another choice menu");
+    assert(fixture_decode(test_fixture));
+    assert(enrage->open == -1 && enrage->reason == RS3_UI_UNMAPPED);
+    /* A cached dialog does not remain open after its attachment is removed. */
+    set_heading(test_fixture, "Choose initial enrage.");
+    fixture_put_u64(test_fixture, UI_NODE + 24, 0);
+    fixture_put_u64(test_fixture, UI_MANAGER + 0x128, 1);
+    assert(fixture_decode(test_fixture));
+    assert(enrage->open == 0 && enrage->reason == RS3_UI_CONFIRMED);
+    fixture_destroy(test_fixture);
+}
+
+static void enrage_rejects_torn_and_oversized_heading(void)
+{
+    fixture *test_fixture = enrage_fixture();
+    fixture_mutate_on_read(test_fixture, UI_HEADING + 0x190, 2, UI_HEADING + 0x190, 0);
+    interface_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_PLAYER, FIXTURE_CLIENT);
+    const rs3_interface_observation *enrage =
+        &test_fixture->snapshot->interfaces[RS3_UI_ENRAGE - 1];
+    assert(enrage->open == -1 && enrage->reason == RS3_UI_READ_FAILED);
+    fixture_clear_mutation(test_fixture);
+    const char *heading = "Choose initial enrage.";
+    memcpy(fixture_bytes(test_fixture, UI_TEXT_HEAP, strlen(heading)), heading, strlen(heading));
+    fixture_put_u64(test_fixture, UI_HEADING + 0x190, UI_TEXT_HEAP);
+    fixture_put_u64(test_fixture, UI_HEADING + 0x198, strlen(heading));
+    fixture_put_u64(test_fixture, UI_HEADING + 0x1a0, 0x8000000000000040ull);
+    assert(fixture_decode(test_fixture));
+    assert(enrage->open == 1 && enrage->reason == RS3_UI_CONFIRMED);
+    fixture_put_u64(test_fixture, UI_HEADING + 0x198, 65);
+    assert(fixture_decode(test_fixture));
+    assert(enrage->open == -1 && enrage->reason == RS3_UI_READ_FAILED);
+    fixture_destroy(test_fixture);
+}
+
+static void ui_rejects_duplicate_keys_and_changing_vtable(void)
+{
+    fixture *test_fixture = enrage_fixture();
+    fixture_put_u32(test_fixture, UI_NODE + 0x80, UI_BANK_KEY);
+    interface_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_PLAYER, FIXTURE_CLIENT);
+    assert(test_fixture->snapshot->interfaces[RS3_UI_BANK_PRESET - 1].open == -1);
+    fixture_put_u32(test_fixture, UI_NODE + 0x80, UI_ENRAGE_KEY);
+    fixture_mutate_on_read(test_fixture, UI_MANAGER, 2, UI_MANAGER, 0);
+    interface_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_PLAYER, FIXTURE_CLIENT);
+    assert(test_fixture->snapshot->interfaces[RS3_UI_BANK_PRESET - 1].open == -1);
+    assert(test_fixture->snapshot->interfaces[RS3_UI_ENRAGE - 1].open == -1);
     fixture_destroy(test_fixture);
 }
 
@@ -181,5 +394,11 @@ int main(void)
     RUN_TEST(oversized_packed_values_are_rejected);
     RUN_TEST(ui_unknown_and_frame_reset);
     RUN_TEST(caller_owned_copy_contract);
+    RUN_TEST(bank_attachment_is_distinct_from_cached_presence);
+    RUN_TEST(bank_rejects_torn_cycles_and_reused_manager);
+    RUN_TEST(bank_requires_guards_root_and_bounded_complete_graph);
+    RUN_TEST(enrage_requires_heading_not_just_generic_dialog_id);
+    RUN_TEST(enrage_rejects_torn_and_oversized_heading);
+    RUN_TEST(ui_rejects_duplicate_keys_and_changing_vtable);
     return 0;
 }

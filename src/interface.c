@@ -6,6 +6,7 @@
 
 #include "decode_utils.h"
 #include "inventory.h"
+#include "memory.h"
 #include "variables.h"
 
 _Static_assert(sizeof(rs3_interface_info) == 32, "ABI interface info layout");
@@ -26,6 +27,389 @@ _Static_assert(offsetof(rs3_action_bar_slot, raw_packed) == 72, "ABI action bar 
 #define GAME_MODIFIER_CONTROL       2u
 #define FIRST_FUNCTION_KEY          1u
 #define LAST_FUNCTION_KEY           12u
+
+/* Original 951-3 only. These are attachment records, not the loaded-interface cache. */
+#define UI_MANAGER_OFFSET           0x19910u
+#define UI_MANAGER_VTABLE_RVA       0x15382c8u
+#define UI_LOOKUP_VTABLE_OFFSET     0x10u
+#define UI_LOOKUP_VTABLE_RVA        0x15382e8u
+#define UI_CACHE_HEADER_OFFSET      0x50u
+#define UI_ROOT_OFFSET              0xf8u
+#define UI_ATTACHMENT_HEADER_OFFSET 0x118u
+#define UI_ATTACHMENT_NODE_BYTES    32u
+#define UI_ATTACHMENT_VALUE_BYTES   16u
+#define UI_ATTACHMENT_VALUE_OFFSET  16u
+#define UI_ATTACHMENT_NEXT_OFFSET   24u
+#define UI_CHILD_ID_OFFSET          12u
+#define UI_MAX_BUCKETS              1024u
+#define UI_MAX_ATTACHMENTS          512u
+#define UI_MAX_CACHED_INTERFACES    8192u
+#define UI_DESKTOP_ROOT             1477u
+#define UI_BANK_INTERFACE           517u
+#define UI_BANK_PARENT_COMPONENT    706u
+#define UI_ENRAGE_INTERFACE         720u
+#define UI_ENRAGE_PARENT_COMPONENT  748u
+#define UI_ENRAGE_HEADING_COMPONENT 3u
+#define UI_TEXT_VTABLE_RVA          0x1530678u
+#define UI_TEXT_OFFSET              0x190u
+#define UI_COMPONENT_ID_OFFSET      0x18u
+#define UI_HEADING_MAX_BYTES        64u
+#define UI_MAX_COMPONENTS           4096u
+
+static const char enrage_heading[] = "Choose initial enrage.";
+
+typedef struct ui_code_guard
+{
+    uint32_t rva;
+    uint32_t size;
+    unsigned char bytes[32];
+} ui_code_guard;
+
+/* GetInterface thunk/body, attachment bucket lookup and child-ID load. */
+static const ui_code_guard ui_guards[] = {
+    {0x3c7f90, 9, {0x48, 0x83, 0xc1, 0x28, 0xe9, 0xc7, 0x90, 0x8a, 0x00}},
+    {0xc71060, 32, {0x48, 0x83, 0xec, 0x28, 0x4c, 0x8b, 0x41, 0x18, 0x48, 0x8b, 0x41,
+                    0x20, 0x49, 0x2b, 0xc0, 0x48, 0xc1, 0xf8, 0x04, 0x3b, 0xd0, 0x7d,
+                    0x11, 0x48, 0x63, 0xc2, 0x48, 0xc1, 0xe0, 0x04, 0x49, 0x03}},
+    {0x3ca949,
+     14,
+     {0x41, 0x8b, 0x8e, 0x10, 0x01, 0x00, 0x00, 0x4d, 0x8b, 0x8e, 0x08, 0x01, 0x00, 0x00}},
+    {0x3ca9a7, 3, {0x8b, 0x50, 0x0c}}};
+
+typedef struct ui_attachment_read
+{
+    uint64_t address;
+    uint64_t value_address;
+    unsigned char node[UI_ATTACHMENT_NODE_BYTES];
+    unsigned char value[UI_ATTACHMENT_VALUE_BYTES];
+} ui_attachment_read;
+
+/** Check loaded instructions as well as the executable profile checked at attachment. */
+static int ui_code_matches(rs3_context *context)
+{
+    unsigned char bytes[32];
+    for (unsigned index = 0; index < sizeof ui_guards / sizeof *ui_guards; index++)
+    {
+        const ui_code_guard *guard = &ui_guards[index];
+        if (!memory_read(context, context->target.module_base + guard->rva, bytes, guard->size) ||
+            memcmp(bytes, guard->bytes, guard->size) != 0)
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/** Validate an interface cache record without mistaking cached presence for open state. */
+static int ui_cache_has_id(rs3_context *context, const unsigned char *cache_header, uint32_t id)
+{
+    uint64_t begin = decode_u64(cache_header);
+    uint64_t end = decode_u64(cache_header + 8);
+    if (!is_valid_remote_pointer(begin) || end < begin || (end - begin) % 16 != 0 ||
+        (end - begin) / 16 > UI_MAX_CACHED_INTERFACES || id >= (end - begin) / 16)
+    {
+        return 0;
+    }
+    unsigned char pair[16];
+    unsigned char pair_after[16];
+    uint32_t observed_id;
+    return memory_read(context, begin + id * 16ull, pair, sizeof pair) &&
+           is_valid_remote_pointer(decode_u64(pair + 8)) &&
+           memory_read(context, decode_u64(pair + 8), &observed_id, sizeof observed_id) &&
+           observed_id == id &&
+           memory_read(context, begin + id * 16ull, pair_after, sizeof pair_after) &&
+           memcmp(pair, pair_after, sizeof pair) == 0;
+}
+
+/**
+ * Read the labelled heading of generic interface 720. Return 1 for the exact
+ * enrage heading, 0 for another heading, -1 for an unreadable/torn record.
+ * No game string or component getter is called.
+ */
+static int enrage_heading_matches(rs3_context *context, const unsigned char *cache_header)
+{
+    uint64_t cache = decode_u64(cache_header);
+    unsigned char pair[16];
+    unsigned char vector[16];
+    unsigned char entry[24];
+    unsigned char component[32];
+    unsigned char text_header[24];
+    if (!memory_read(context, cache + UI_ENRAGE_INTERFACE * 16ull, pair, sizeof pair))
+    {
+        return -1;
+    }
+    uint64_t interface_record = decode_u64(pair + 8);
+    if (!memory_read(context, interface_record + 8, vector, sizeof vector))
+    {
+        return -1;
+    }
+    uint64_t begin = decode_u64(vector);
+    uint64_t end = decode_u64(vector + 8);
+    if (!is_valid_remote_pointer(begin) || end < begin || (end - begin) % 24 != 0 ||
+        (end - begin) / 24 > UI_MAX_COMPONENTS ||
+        UI_ENRAGE_HEADING_COMPONENT >= (end - begin) / 24 ||
+        !memory_read(context, begin + UI_ENRAGE_HEADING_COMPONENT * 24ull, entry, sizeof entry))
+    {
+        return -1;
+    }
+    uint64_t object = decode_u64(entry + 16);
+    if (!memory_read(context, object, component, sizeof component) ||
+        decode_u64(component) != context->target.module_base + UI_TEXT_VTABLE_RVA ||
+        decode_u32(component + UI_COMPONENT_ID_OFFSET) !=
+            (UI_ENRAGE_HEADING_COMPONENT << 16 | UI_ENRAGE_INTERFACE) ||
+        !memory_read(context, object + UI_TEXT_OFFSET, text_header, sizeof text_header))
+    {
+        return -1;
+    }
+    unsigned char text[UI_HEADING_MAX_BYTES + 1];
+    uint64_t length;
+    int heap = (text_header[23] & 128) != 0;
+    if (heap)
+    {
+        length = decode_u64(text_header + 8);
+        if (length > UI_HEADING_MAX_BYTES ||
+            !memory_read(context, decode_u64(text_header), text, (size_t)length))
+        {
+            return -1;
+        }
+    }
+    else
+    {
+        if (text_header[23] > 23)
+        {
+            return -1;
+        }
+        length = 23 - text_header[23];
+        memcpy(text, text_header, (size_t)length);
+    }
+    unsigned char after[32];
+    unsigned char text_after[UI_HEADING_MAX_BYTES + 1];
+    if (!memory_read(context, object + UI_TEXT_OFFSET, after, sizeof text_header) ||
+        memcmp(after, text_header, sizeof text_header) != 0 ||
+        (heap && (!memory_read(context, decode_u64(text_header), text_after, (size_t)length) ||
+                  memcmp(text_after, text, (size_t)length) != 0)) ||
+        !memory_read(context, object, after, sizeof component) ||
+        memcmp(after, component, sizeof component) != 0 ||
+        !memory_read(context, begin + UI_ENRAGE_HEADING_COMPONENT * 24ull, after, sizeof entry) ||
+        memcmp(after, entry, sizeof entry) != 0 ||
+        !memory_read(context, interface_record + 8, after, sizeof vector) ||
+        memcmp(after, vector, sizeof vector) != 0 ||
+        !memory_read(context, cache + UI_ENRAGE_INTERFACE * 16ull, after, sizeof pair) ||
+        memcmp(after, pair, sizeof pair) != 0 || !is_valid_utf8(text, (uint32_t)length))
+    {
+        return -1;
+    }
+    return entry[0] == 0 && length == sizeof enrage_heading - 1 &&
+           memcmp(text, enrage_heading, (size_t)length) == 0;
+}
+
+/**
+ * Read every attachment, then re-read all nodes, payloads, buckets and identities.
+ * Bank root and the initial-enrage chooser were labelled live. Attachment
+ * does not prove a subpanel/button is visible, unobstructed or clickable.
+ */
+static void stage_ui_roots(rs3_context *context, rs3_snapshot *snapshot, uint64_t client_address)
+{
+    rs3_interface_observation *bank = &snapshot->interfaces[RS3_UI_BANK_PRESET - 1];
+    rs3_interface_observation *enrage = &snapshot->interfaces[RS3_UI_ENRAGE - 1];
+    bank->reason = RS3_UI_READ_FAILED;
+    enrage->reason = RS3_UI_READ_FAILED;
+    if (!ui_code_matches(context))
+    {
+        bank->reason = RS3_UI_UNSUPPORTED_PROFILE;
+        enrage->reason = RS3_UI_UNSUPPORTED_PROFILE;
+        return;
+    }
+    uint64_t world;
+    uint64_t manager;
+    uint64_t vtable;
+    uint64_t lookup_vtable;
+    uint32_t scene_state;
+    uint32_t root;
+    if (!memory_read_pointer(context, client_address + LAYOUT_STATE_POINTER_OFFSET, &world) ||
+        !memory_read(context, world + LAYOUT_GAME_STATE_OFFSET, &scene_state, sizeof scene_state) ||
+        scene_state != LAYOUT_IN_GAME_STATE ||
+        !memory_read_pointer(context, world + UI_MANAGER_OFFSET, &manager) || manager == 0 ||
+        !memory_read_pointer(context, manager, &vtable) ||
+        vtable != context->target.module_base + UI_MANAGER_VTABLE_RVA ||
+        !memory_read_pointer(context, manager + UI_LOOKUP_VTABLE_OFFSET, &lookup_vtable) ||
+        lookup_vtable != context->target.module_base + UI_LOOKUP_VTABLE_RVA ||
+        !memory_read(context, manager + UI_ROOT_OFFSET, &root, sizeof root))
+    {
+        return;
+    }
+    if (root != UI_DESKTOP_ROOT)
+    {
+        bank->reason = RS3_UI_UNMAPPED;
+        enrage->reason = RS3_UI_UNMAPPED;
+        return;
+    }
+    unsigned char cache_header[16];
+    unsigned char header[24];
+    if (!memory_read(context, manager + UI_CACHE_HEADER_OFFSET, cache_header,
+                     sizeof cache_header) ||
+        !ui_cache_has_id(context, cache_header, root) ||
+        !memory_read(context, manager + UI_ATTACHMENT_HEADER_OFFSET, header, sizeof header))
+    {
+        return;
+    }
+    uint64_t bucket_address = decode_u64(header);
+    uint64_t bucket_count = decode_u64(header + 8);
+    uint64_t expected_count = decode_u64(header + 16);
+    if (!is_valid_remote_pointer(bucket_address) || bucket_count == 0 ||
+        bucket_count > UI_MAX_BUCKETS || expected_count > UI_MAX_ATTACHMENTS)
+    {
+        return;
+    }
+    uint64_t buckets[UI_MAX_BUCKETS + 1];
+    uint64_t buckets_after[UI_MAX_BUCKETS + 1];
+    size_t bucket_bytes = (size_t)(bucket_count + 1) * sizeof(uint64_t);
+    if (!memory_read(context, bucket_address, buckets, bucket_bytes))
+    {
+        return;
+    }
+    uint64_t sentinel = buckets[bucket_count];
+    ui_attachment_read reads[UI_MAX_ATTACHMENTS];
+    unsigned read_count = 0;
+    int bank_attached = 0;
+    int other_bank_parent = 0;
+    int enrage_attached = 0;
+    int other_enrage_parent = 0;
+    for (uint64_t bucket_index = 0; bucket_index < bucket_count; bucket_index++)
+    {
+        uint64_t node = buckets[bucket_index];
+        while (node != 0 && node != sentinel)
+        {
+            if (read_count == UI_MAX_ATTACHMENTS)
+            {
+                return;
+            }
+            for (unsigned index = 0; index < read_count; index++)
+            {
+                if (reads[index].address == node)
+                {
+                    return;
+                }
+            }
+            ui_attachment_read *read = &reads[read_count++];
+            read->address = node;
+            if (!memory_read(context, node, read->node, sizeof read->node))
+            {
+                return;
+            }
+            uint32_t key = decode_u32(read->node);
+            for (unsigned index = 0; index + 1 < read_count; index++)
+            {
+                if (decode_u32(reads[index].node) == key)
+                {
+                    return;
+                }
+            }
+            read->value_address = decode_u64(read->node + UI_ATTACHMENT_VALUE_OFFSET);
+            if (key % bucket_count != bucket_index ||
+                !memory_read(context, read->value_address, read->value, sizeof read->value))
+            {
+                return;
+            }
+            int32_t child = decode_i32(read->value + UI_CHILD_ID_OFFSET);
+            if (child < 0 || child >= (int32_t)UI_MAX_CACHED_INTERFACES)
+            {
+                return;
+            }
+            if (child == (int32_t)UI_BANK_INTERFACE)
+            {
+                if (key == (UI_DESKTOP_ROOT << 16 | UI_BANK_PARENT_COMPONENT))
+                {
+                    bank_attached = 1;
+                }
+                else
+                {
+                    other_bank_parent = 1;
+                }
+            }
+            if (child == (int32_t)UI_ENRAGE_INTERFACE)
+            {
+                if (key == (UI_DESKTOP_ROOT << 16 | UI_ENRAGE_PARENT_COMPONENT))
+                {
+                    enrage_attached = 1;
+                }
+                else
+                {
+                    other_enrage_parent = 1;
+                }
+            }
+            node = decode_u64(read->node + UI_ATTACHMENT_NEXT_OFFSET);
+        }
+    }
+    if (read_count != expected_count ||
+        (bank_attached && !ui_cache_has_id(context, cache_header, UI_BANK_INTERFACE)) ||
+        (enrage_attached && !ui_cache_has_id(context, cache_header, UI_ENRAGE_INTERFACE)))
+    {
+        return;
+    }
+    unsigned char bytes[UI_ATTACHMENT_NODE_BYTES];
+    for (unsigned index = 0; index < read_count; index++)
+    {
+        const ui_attachment_read *read = &reads[index];
+        if (!memory_read(context, read->address, bytes, sizeof read->node) ||
+            memcmp(bytes, read->node, sizeof read->node) != 0 ||
+            !memory_read(context, read->value_address, bytes, sizeof read->value) ||
+            memcmp(bytes, read->value, sizeof read->value) != 0)
+        {
+            return;
+        }
+    }
+    int heading = enrage_attached ? enrage_heading_matches(context, cache_header) : 1;
+    if (!memory_read(context, bucket_address, buckets_after, bucket_bytes) ||
+        memcmp(buckets, buckets_after, bucket_bytes) != 0 ||
+        !memory_read(context, manager + UI_ATTACHMENT_HEADER_OFFSET, bytes, sizeof header) ||
+        memcmp(bytes, header, sizeof header) != 0 ||
+        !memory_read(context, manager + UI_CACHE_HEADER_OFFSET, bytes, sizeof cache_header) ||
+        memcmp(bytes, cache_header, sizeof cache_header) != 0)
+    {
+        return;
+    }
+    uint64_t world_after;
+    uint64_t manager_after;
+    uint32_t scene_after;
+    uint32_t root_after;
+    uint64_t vtable_after;
+    uint64_t lookup_after;
+    if (!memory_read_pointer(context, client_address + LAYOUT_STATE_POINTER_OFFSET, &world_after) ||
+        world_after != world ||
+        !memory_read_pointer(context, world + UI_MANAGER_OFFSET, &manager_after) ||
+        manager_after != manager ||
+        !memory_read(context, world + LAYOUT_GAME_STATE_OFFSET, &scene_after, sizeof scene_after) ||
+        scene_after != scene_state ||
+        !memory_read(context, manager + UI_ROOT_OFFSET, &root_after, sizeof root_after) ||
+        root_after != root || !memory_read_pointer(context, manager, &vtable_after) ||
+        vtable_after != vtable ||
+        !memory_read_pointer(context, manager + UI_LOOKUP_VTABLE_OFFSET, &lookup_after) ||
+        lookup_after != lookup_vtable)
+    {
+        return;
+    }
+    if (other_bank_parent)
+    {
+        bank->reason = RS3_UI_UNMAPPED;
+    }
+    else
+    {
+        bank->interface_id = UI_BANK_INTERFACE;
+        bank->open = bank_attached;
+        bank->reason = RS3_UI_CONFIRMED;
+    }
+    if (other_enrage_parent || heading == 0)
+    {
+        enrage->reason = RS3_UI_UNMAPPED;
+    }
+    else if (heading > 0)
+    {
+        enrage->interface_id = UI_ENRAGE_INTERFACE;
+        enrage->open = enrage_attached;
+        enrage->reason = RS3_UI_CONFIRMED;
+    }
+}
 
 /* Bases are from the compact gamevals names, checked against local VarBit definitions. */
 static const uint32_t packed_bases[STORED_BAR_COUNT] = {739,  751,   763,   775,   787,   5265,
@@ -413,7 +797,9 @@ void interface_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t play
         return;
     }
     info->status = RS3_PARTIAL;
-    info->reason = RS3_UI_UNMAPPED; /* The open-interface registry is still unmapped. */
+    info->reason =
+        RS3_UI_UNMAPPED; /* Other dialogs, preset visibility and options remain unmapped. */
+    stage_ui_roots(context, snapshot, client_address);
     uint64_t headers[2] = {player_address + LAYOUT_PLAYER_VARIABLE_TABLE_OFFSET,
                            client_address + LAYOUT_CLIENT_VARIABLE_TABLE_OFFSET};
     interface_variables variables[2] = {0};

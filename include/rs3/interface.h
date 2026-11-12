@@ -30,9 +30,9 @@ enum rs3_interface_reason
 enum rs3_interface_kind
 {
     RS3_UI_INSTANCE = 1,
-    RS3_UI_ENRAGE,
+    RS3_UI_ENRAGE, /**< Initial-enrage choice page only; custom input remains unmapped. */
     RS3_UI_LOOT,
-    RS3_UI_BANK_PRESET,
+    RS3_UI_BANK_PRESET, /**< Bank root only; preset subpanel visibility/options remain unknown. */
     RS3_UI_DEATH
 };
 
@@ -61,7 +61,14 @@ typedef struct rs3_interface_info
     uint32_t reserved[2];
 } rs3_interface_info;
 
-/** Unknown open state is -1. Unknown interface ID is -1, not interface zero. */
+/**
+ * Unknown open state is -1. Unknown interface ID is -1, not interface zero.
+ * BANK_PRESET currently reports the labelled bank-root attachment (517), not
+ * preset-button visibility, enabled state, option text or a click position.
+ * ENRAGE reports interface 720 only with its exact initial-enrage heading;
+ * this generic interface must not be classified from ID alone. A zero means
+ * the mapped page is not attached, not that every setup page is closed.
+ */
 typedef struct rs3_interface_observation
 {
     uint32_t kind;
