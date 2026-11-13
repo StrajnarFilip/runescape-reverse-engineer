@@ -87,6 +87,7 @@ static void copy_frame(rs3_snapshot *destination, const rs3_snapshot *source)
     destination->spatial = source->spatial;
     memcpy(destination->npc_spatial, source->npc_spatial,
            source->spatial.npc_count * sizeof(rs3_actor_spatial));
+    destination->encounter = source->encounter;
     destination->player_hit_info = source->player_hit_info;
     destination->player_actor_address = source->player_actor_address;
     memcpy(destination->player_hits, source->player_hits,
@@ -128,6 +129,9 @@ static void clear_unavailable_frame(rs3_context *context, rs3_snapshot *snapshot
     memset(&snapshot->spatial, 0, sizeof snapshot->spatial);
     snapshot->spatial.status = RS3_UNAVAILABLE;
     snapshot->spatial.reason = context->failure_reason;
+    memset(&snapshot->encounter, 0, sizeof snapshot->encounter);
+    snapshot->encounter.status = RS3_UNAVAILABLE;
+    snapshot->encounter.reason = context->failure_reason;
 
     memset(&snapshot->player_hit_info, 0, sizeof snapshot->player_hit_info);
     snapshot->player_hit_info.status = RS3_UNAVAILABLE;
@@ -181,6 +185,7 @@ static void sample_and_publish(rs3_context *context, rs3_snapshot *snapshot)
     snapshot->position = (rs3_position){0};
     memset(&snapshot->combat, 0, sizeof snapshot->combat);
     memset(&snapshot->spatial, 0, sizeof snapshot->spatial);
+    memset(&snapshot->encounter, 0, sizeof snapshot->encounter);
     memset(&snapshot->player_hit_info, 0, sizeof snapshot->player_hit_info);
     snapshot->player_actor_address = 0;
     memset(&snapshot->inventory_info, 0, sizeof snapshot->inventory_info);

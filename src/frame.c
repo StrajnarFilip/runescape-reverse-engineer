@@ -7,6 +7,7 @@
 #include "combat.h"
 #include "interface.h"
 #include "hazards.h"
+#include "encounter.h"
 #include "inventory.h"
 #include "memory.h"
 #include "npcs.h"
@@ -117,6 +118,7 @@ int frame_decode(rs3_context *context, rs3_snapshot *snapshot)
     player_hits_stage(context, snapshot, contexts.world_state);
     interface_stage(context, snapshot, contexts.player_address, contexts.client_address);
     spatial_stage(context, snapshot, contexts.world_state);
+    encounter_stage(context, snapshot, contexts.player_address);
 
     if (!contexts_unchanged(context, &contexts))
     {
@@ -133,6 +135,7 @@ int frame_decode(rs3_context *context, rs3_snapshot *snapshot)
     inventory_commit(context, snapshot, contexts.world_state);
     spatial_commit(context, snapshot);
     hazards_commit(context, snapshot, npcs_decoded);
+    encounter_commit(context, snapshot);
     player_track_changes(context, snapshot, contexts.world_state);
     return 1;
 }
