@@ -324,9 +324,12 @@ class Supervisor:
         raw = world.raw.get("encounter_result")
         if not isinstance(raw, dict) and not hasattr(raw, "get"):
             return
-        observation = Observation(
-            raw.get("value"), raw.get("age_ms"), raw.get("source"), raw.get("reason")
-        )
+        age = raw.get("age_ms")
+        captured_age = world.raw.get("native", {}).get("snapshot_age_ms")
+        captured_age = captured_age if type(captured_age) in (int, float) else 0
+        if type(age) in (int, float):
+            age += max(0, (world.now_ns - world.observed_ns) / NS_PER_MS - captured_age)
+        observation = Observation(raw.get("value"), age, raw.get("source"), raw.get("reason"))
         if not self._fresh(observation, now, world):
             return
         result = observation.value

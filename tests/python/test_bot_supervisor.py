@@ -8,7 +8,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -57,6 +56,18 @@ class HeldRecordingDevice(RecordingActuator):
 
 
 class SupervisorTests(unittest.TestCase):
+    def test_delayed_replay_does_not_make_old_result_fresh_again(self):
+        record = row()
+        record["encounter_result"] = {
+            "value": {"kind": "kill", "id": "old", "validated": True},
+            "age_ms": 100,
+            "source": "synthetic_result",
+        }
+        value = WorldState.from_telemetry(record, now_ns=1100 * MS)
+        controller, device = self.make()
+        controller.step(value)
+        self.assertEqual(controller.kills, 0)
+
     def make(self, **kwargs):
         device = HeldRecordingDevice()
         controller = Supervisor(actuator=device, **kwargs)
@@ -214,6 +225,8 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(controller.deaths, 1)
 
     def test_assist_full_and_nonrecording_shadow_backends_are_blocked(self):
+        with self.assertRaises(ValueError):
+            load_producers(("unmapped_producer",))
         for mode in ("assist", "full"):
             with self.assertRaisesRegex(ValueError, "track L"):
                 Supervisor(mode=mode)

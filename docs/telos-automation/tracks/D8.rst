@@ -85,10 +85,12 @@ per-frame proposals, a compact session report and verified per-kill summaries.
 Normal caps do not count as watchdog failures. No game success is inferred
 from a recording-fake acceptance.
 
-Sixteen D8 tests trip the watchdogs, verify fake held-key release, exercise
+Seventeen D8 tests trip the watchdogs, verify fake held-key release, exercise
 caps/results and run shadow CLI/replay without native imports. The real legacy
 capture has a golden no-input log and correctly trips on missing queue data.
-The Windows x64 Release build and all 10 CTest suites pass (94 Python tests).
+The Windows x64 Release build and all 10 CTest suites pass (95 Python tests).
+Delayed replay ages nested result envelopes too; an old result does not
+become fresh simply because a newer frame is being evaluated.
 
 Requests
 --------
