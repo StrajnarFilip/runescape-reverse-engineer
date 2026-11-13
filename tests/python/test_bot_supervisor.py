@@ -307,6 +307,33 @@ class SupervisorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             create_shadow_supervisor(arbitrate=True, actuator=RecordingActuator())
 
+    def test_encounter_runs_before_consumers_and_forwards_same_frame_state(self):
+        observer = SimpleNamespace(state=None)
+        calls = []
+
+        def observe(value):
+            observer.state = value.sample_sequence
+            return ()
+
+        observer.step = observe
+        prayer = SimpleNamespace(encounter_provider=None)
+        prayer.step = lambda value: calls.append(("prayer", prayer.encounter_provider())) or ()
+        survival = SimpleNamespace(
+            step=lambda value, encounter=None: calls.append(("survival", encounter)) or (),
+            can_send=lambda intent, value: True,
+        )
+        controller = create_shadow_supervisor(
+            producers={
+                "survival": survival,
+                "prayer": prayer,
+                "encounter": observer,
+            }
+        )
+        self.addCleanup(controller.close)
+        controller.step(world(sequence=7))
+        self.assertEqual(calls, [("survival", 7), ("prayer", 7)])
+        self.assertIs(controller.producers["survival"].can_send(None, None), True)
+
     def test_arbitrated_CLI_is_recording_only_or_reports_missing_D6(self):
         with tempfile.TemporaryDirectory() as directory:
             capture = Path(directory) / "synthetic.jsonl"

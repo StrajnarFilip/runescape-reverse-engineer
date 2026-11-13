@@ -440,6 +440,19 @@ class Supervisor:
         return report
 
 
+class _EncounterConsumer:
+    """Pass same-frame D1 state to a consumer while preserving its D6 hooks."""
+
+    def __init__(self, producer, observer):
+        self.producer, self.observer = producer, observer
+
+    def step(self, world):
+        return self.producer.step(world, encounter=self.observer.state)
+
+    def __getattr__(self, name):
+        return getattr(self.producer, name)
+
+
 def create_shadow_supervisor(*, arbitrate=False, **options):
     """Compose optional D6 logging with one recording actuator and dispatch disabled.
 
@@ -451,6 +464,19 @@ def create_shadow_supervisor(*, arbitrate=False, **options):
         raise ValueError("Shadow arbitration must be an explicit boolean")
     if arbitrate and any(name in options for name in ("actuator", "arbiter")):
         raise ValueError("Shadow composition owns one recording actuator and arbiter")
+    producers = dict(options.get("producers") or {})
+    observer = producers.get("encounter")
+    if observer is not None:
+        producers = {
+            "encounter": observer,
+            **{name: producer for name, producer in producers.items() if name != "encounter"},
+        }
+        prayer = producers.get("prayer")
+        if prayer is not None and hasattr(prayer, "encounter_provider"):
+            prayer.encounter_provider = lambda: observer.state
+        if "survival" in producers:
+            producers["survival"] = _EncounterConsumer(producers["survival"], observer)
+    options["producers"] = producers
     supervisor = Supervisor(**options)
     if arbitrate:
         try:
