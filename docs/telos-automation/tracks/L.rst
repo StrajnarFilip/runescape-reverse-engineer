@@ -66,4 +66,21 @@ Present for every rung, with the kill switch within reach.
 Requests
 --------
 
-None yet.
+* D8: expose optional D6 composition in the shadow CLI. It must share the
+  RecordingActuator, keep dispatch disabled, preserve the watchdogs and report
+  arbitration decisions without pretending input was accepted. The existing
+  CLI loads producers but does not connect its optional arbiter automatically.
+* P1/P2/P3/P6: unfinished perception/timing scope stays explicit. Merging the
+  software is not live acceptance; unknown target, tick, castability, phase-5
+  and protection-check data must continue blocking dependent actions.
+* A1/A2/P5: native target/minimap/view evidence and serialized pointer dispatch
+  remain required before safe-area movement acceptance. No extra Telos fight
+  is requested while these dependencies are being connected.
+* D4: intended-account rotation rules/bindings and complete castability remain
+  unconfigured. A successful module merge is not a demonstrated optimal rotation.
+* P4/D5: respect the user's deferred earlier beam/rock research. Phase-5 beams
+  remain a later supervised task; no missing hazard channel is marked complete.
+* S0b: newer commits contain a separate experimental zero-enrage controller,
+  screenshot helpers and Arduino mouse extensions beyond the completed runtime
+  foundation. Review that distinct control path before adopting it into L;
+  do not merge its whole branch as though it were only profile-unification data.

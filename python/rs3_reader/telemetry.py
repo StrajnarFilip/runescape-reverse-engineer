@@ -17,6 +17,7 @@ from .native import (
     HitState,
     HazardFlags,
     NPCFlags,
+    NPCActionFlags,
     Reader,
     Reason,
     Status,
@@ -273,6 +274,28 @@ def npc_animation_record(animation):
         "movement_sequence": animation.movement_sequence if animation.valid else None,
         "reason": None if animation.valid else "animation_layout_unavailable_or_changed",
         "classification": None,
+    }
+
+
+def npc_action_event_record(event):
+    """Keep the native queue identity/time; never label an animation as an attack."""
+    return {
+        "sequence": event.sequence,
+        "observed_ns": event.observed_ns,
+        "sample_sequence": event.sample_sequence,
+        "scene_epoch": event.scene_epoch,
+        "process_creation_time": event.process_creation_time,
+        "instance_id": event.instance_id,
+        "pid": event.pid,
+        "runtime_id": event.runtime_id,
+        "config_id": event.config_id if event.config_id >= 0 else None,
+        "previous_action_sequence": event.previous_action_sequence,
+        "action_sequence": event.action_sequence,
+        "client_logic_tick": event.logic_tick,
+        "application_stamp": (
+            event.application_stamp if event.flags & NPCActionFlags.HAS_APPLICATION_STAMP else None
+        ),
+        "flags": event.flags,
     }
 
 
@@ -576,6 +599,8 @@ class NativeTelemetry:
         # Drain independently of frame availability so earlier observations survive.
         events, events_lost = reader.drain_events()
         new_events = [event_record(event) for event in events]
+        npc_actions, npc_actions_lost = reader.drain_npc_action_events()
+        npc_action_records = [npc_action_event_record(event) for event in npc_actions]
         player_hit_events, player_hit_events_lost = reader.drain_player_hit_events()
         player_hit_splats = player_hit_splats_record(
             reader, player_hit_events, player_hit_events_lost
@@ -586,9 +611,12 @@ class NativeTelemetry:
 
         available = info.status in (Status.AVAILABLE, Status.PARTIAL)
         if not available or not player.prayer_base_level:
-            return self._without_player(
+            record = self._without_player(
                 info, native, position, new_events, events_lost, player_hit_splats, available
             )
+            record["npc_action_events"] = npc_action_records
+            record["npc_action_events_lost"] = npc_actions_lost
+            return record
 
         raw_variables = {name: player.variable(index) for index, name in enumerate(VARIABLE_NAMES)}
         prayer_packed = raw_variables["prayer_packed"]
@@ -697,4 +725,6 @@ class NativeTelemetry:
         if include_raw:
             record["raw_variables"] = raw_variables
         record["hazards"] = hazards_record(reader)
+        record["npc_action_events"] = npc_action_records
+        record["npc_action_events_lost"] = npc_actions_lost
         return extend_record(record, reader)
