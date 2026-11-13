@@ -22,6 +22,7 @@
 
 #include "rs3/rs3.h"
 #include "rs3/combat.h"
+#include "rs3/interface.h"
 #include "profile.h"
 
 /** Capacity of the hit observation queue. */
@@ -56,6 +57,9 @@ struct rs3_snapshot
     rs3_info info;
     const client_profile *profile;
     rs3_player player;
+    rs3_interface_info interface_info;
+    rs3_interface_observation interfaces[RS3_REQUIRED_INTERFACES];
+    rs3_action_bar_slot action_bar[RS3_MAX_ACTION_BAR_SLOTS];
     rs3_position position;
     rs3_combat_state combat;
     rs3_player_hit_info player_hit_info;

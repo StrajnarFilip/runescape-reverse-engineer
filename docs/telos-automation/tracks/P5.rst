@@ -1,7 +1,7 @@
 P5 - Interface state
 ====================
 
-:Status: open
+:Status: done
 :Wave: 1
 :Branch: ``telos/P5``
 :Kind: C (native DLL)
@@ -56,10 +56,40 @@ pass.
 Needs the user
 --------------
 
-One session opening each dialog in turn: bank preset, the Telos instance and
-enrage prompts, the loot interface after a kill, and one deliberate death.
+No further action is needed for the 2026-11-12 session. The C collector
+confirmed the four configured curse chords, Magic moving slot 1 -> 10 -> 1,
+and preset changes 1 -> 18 -> 1 and 6 -> 18 -> 6. An initial capture selected
+another client; that capture was excluded and the tests repeated with PID 32504.
+
+The C DLL also confirmed bank-root attachment open/closed transitions and the
+initial-enrage chooser opening and closing. Interface 720 is generic: its exact
+native heading, "Choose initial enrage.", is required before classifying it.
+All 11 test suites pass (13 interface fixture cases and 78 Python tests).
+
+The brief's acceptance criterion is met: requested interface coverage is either
+validated or explicitly reported unmapped in
+``docs/validation/interface-validation.json``. This is not complete UI coverage:
+instance creation, custom-enrage input, loot/claim/continue, death, option export,
+preset-subpanel visibility and click positions remain unmapped. Do not ask for
+a deliberate death until a guarded decoder exists for that interface.
 
 Requests
 --------
 
-None yet.
+Integration: register the interface header/storage in ``src/context.h`` along
+with own shared wiring, following the minimal private-snapshot pattern used by
+P1/P2. No existing public structure was extended.
+
+D7 must treat ``WorldState.ui.open`` as a partial list. A missing entry does
+not mean closed. Bank/preset observations cover bank root 517 only; enrage
+observations cover the heading-guarded initial-choice page 720 only. Neither
+observation establishes visible options, preset controls or a physical click
+point. No input is sent by this track.
+
+Follow-up work needs a guarded visibility/geometry/option decoder and mappings
+for the remaining dialogs. Letter chords also need calibration: the slot the
+user called Shift+F exposed raw game key 51 / modifier code 2, so the runtime
+keeps its translated chord unknown. Preserve the confirmed four Ctrl+F chords.
+
+When several clients exist, pass the intended PID explicitly. The collector's
+sample identity and age remain mandatory for downstream use.

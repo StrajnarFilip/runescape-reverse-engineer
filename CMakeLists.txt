@@ -59,6 +59,7 @@ add_library(rs3_objects OBJECT
     src/decode_utils.c
     src/event_queues.c
     src/event_ring.c
+    src/interface.c
     src/frame.c
     src/input.c
     src/inventory.c
@@ -118,6 +119,7 @@ if(BUILD_TESTING)
     rs3_add_native_test(native_npcs tests/native/test_npcs.c ${RS3_FIXTURE_SOURCES})
     rs3_add_native_test(native_lifecycle tests/native/test_lifecycle.c ${RS3_FIXTURE_SOURCES})
     rs3_add_native_test(native_inventory tests/native/test_inventory.c ${RS3_FIXTURE_SOURCES})
+    rs3_add_native_test(native_interface tests/native/test_interface.c ${RS3_FIXTURE_SOURCES})
     rs3_add_native_test(native_combat tests/native/test_combat.c ${RS3_FIXTURE_SOURCES})
     rs3_add_native_test(native_player_hits tests/native/test_player_hits.c ${RS3_FIXTURE_SOURCES})
     rs3_add_native_test(native_input tests/native/test_input.c ${RS3_FIXTURE_SOURCES})

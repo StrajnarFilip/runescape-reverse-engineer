@@ -1,0 +1,456 @@
+{
+  "schema_version": 1,
+  "track": "P5",
+  "date": "2026-11-12",
+  "status": "done",
+  "profile_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+  "acquisition": "C11 read-only DLL; per-frame selected variable cache and second pass; Python only copies and formats",
+  "abi": {
+    "interface_info_bytes": 32,
+    "interface_observation_bytes": 16,
+    "action_bar_slot_bytes": 232,
+    "ownership": "caller-owned copies; capacity check precedes copy; no remote pointers returned"
+  },
+  "action_bar": {
+    "displayed_rows": 5,
+    "slots_per_row": 14,
+    "stored_presets": 18,
+    "display_preset_source": {
+      "domain": "VarPlayer",
+      "id": 10160,
+      "bits": [
+        [
+          0,
+          4
+        ],
+        [
+          5,
+          9
+        ],
+        [
+          10,
+          14
+        ],
+        [
+          15,
+          19
+        ],
+        [
+          20,
+          24
+        ]
+      ],
+      "numbering": "one-based stored preset; zero or >18 is unknown"
+    },
+    "slot_source": "VarPlayer actionbarN_intS and actionbarN_objS names; first five presets have separate slots 13/14",
+    "layout_validation": {
+      "checked_cache_varbit_definitions": 504,
+      "packed_id_bits": [
+        4,
+        16
+      ],
+      "packed_type_bits": [
+        17,
+        23
+      ],
+      "all_18_by_14_slots_checked": true
+    },
+    "key_groups": [
+      [
+        2852,
+        2853,
+        2854,
+        2855
+      ],
+      [
+        4997,
+        4998,
+        4999,
+        5000
+      ],
+      [
+        5001,
+        5002,
+        5003,
+        5004
+      ],
+      [
+        5005,
+        5006,
+        5007,
+        5008
+      ],
+      [
+        5009,
+        5010,
+        6302,
+        6620
+      ]
+    ],
+    "modifier_variables": [
+      2859,
+      5011,
+      5012,
+      5013,
+      6303
+    ],
+    "packing": {
+      "keys": "four 8-bit game key codes per VarClient",
+      "modifiers": "fourteen 2-bit codes per VarClient; explicit code 2 maps to Ctrl",
+      "gap": "key groups 5-8 / modifier groups 2-3 are other main-bar controls, not Additional Bar 1"
+    },
+    "translated_keys": "F1-F12 only, with explicit modifier 0 or Ctrl. Other codes remain raw; missing modifier is not zero.",
+    "identity": "Item type 10 uses object var. Type 7 prayer IDs 38/39/49/40 resolve via local structs. Other supported ability types resolve only unique compact metadata matches; upgrades sharing IDs stay unresolved.",
+    "user_confirmation": "Preset 6 contains the four configured prayer icons; Ctrl+F1 Magic, Ctrl+F2 Ranged, Ctrl+F3 Soul Split, Ctrl+F4 Melee.",
+    "reference_observations": [
+      {
+        "preset": 6,
+        "display_bar": 2,
+        "slot": 1,
+        "prayer": "Deflect Magic",
+        "packed_var": 5265,
+        "native_type": 7,
+        "native_id": 38,
+        "struct_id": 14594,
+        "key_var": 4997,
+        "key_packed": 67305985,
+        "key_byte": 0,
+        "key_code": 1,
+        "modifier_var": 5011,
+        "modifier_packed": 6982314,
+        "modifier_code": 2,
+        "chord": "Ctrl+F1"
+      },
+      {
+        "preset": 6,
+        "display_bar": 2,
+        "slot": 2,
+        "prayer": "Deflect Ranged",
+        "packed_var": 5266,
+        "native_type": 7,
+        "native_id": 39,
+        "struct_id": 14595,
+        "key_var": 4997,
+        "key_packed": 67305985,
+        "key_byte": 1,
+        "key_code": 2,
+        "modifier_var": 5011,
+        "modifier_packed": 6982314,
+        "modifier_code": 2,
+        "chord": "Ctrl+F2"
+      },
+      {
+        "preset": 6,
+        "display_bar": 2,
+        "slot": 3,
+        "prayer": "Soul Split",
+        "packed_var": 5267,
+        "native_type": 7,
+        "native_id": 49,
+        "struct_id": 14607,
+        "key_var": 4997,
+        "key_packed": 67305985,
+        "key_byte": 2,
+        "key_code": 3,
+        "modifier_var": 5011,
+        "modifier_packed": 6982314,
+        "modifier_code": 2,
+        "chord": "Ctrl+F3"
+      },
+      {
+        "preset": 6,
+        "display_bar": 2,
+        "slot": 4,
+        "prayer": "Deflect Melee",
+        "packed_var": 5268,
+        "native_type": 7,
+        "native_id": 40,
+        "struct_id": 14596,
+        "key_var": 4997,
+        "key_packed": 67305985,
+        "key_byte": 3,
+        "key_code": 4,
+        "modifier_var": 5011,
+        "modifier_packed": 6982314,
+        "modifier_code": 2,
+        "chord": "Ctrl+F4"
+      }
+    ],
+    "native_dll_live_status": "passed on original 951-3, PID 32504, explicitly selected after detecting a second client",
+    "reference_decoder_status": "Reference observations from 2026-11-11 agree with the 2026-11-12 C collector.",
+    "move_validation": {
+      "source": "C collector, pinned PID 32504",
+      "magic_path": [
+        {
+          "display_bar": 2,
+          "preset": 6,
+          "slot": 1,
+          "key": "Ctrl+F1"
+        },
+        {
+          "display_bar": 2,
+          "preset": 6,
+          "slot": 10,
+          "key": null,
+          "raw_game_key_code": 51,
+          "raw_modifier_code": 2
+        },
+        {
+          "display_bar": 2,
+          "preset": 6,
+          "slot": 1,
+          "key": "Ctrl+F1"
+        }
+      ],
+      "preset_changes": {
+        "main_display": [
+          1,
+          18,
+          1
+        ],
+        "prayer_display": [
+          6,
+          18,
+          6
+        ]
+      },
+      "letter_chord_caveat": "The user described the destination as Shift+F. Letter/modifier translation there is not validated; the collector returns raw codes and key=null. Do not extend the confirmed F-key modifier mapping to letter chords on this evidence."
+    }
+  },
+  "interfaces": [
+    {
+      "kind": "instance",
+      "open": null,
+      "interface_id": null,
+      "visible_options": null,
+      "clickable_physical_pixels": null,
+      "status": "unmapped"
+    },
+    {
+      "kind": "enrage",
+      "open": false,
+      "interface_id": 720,
+      "visible_options": null,
+      "clickable_physical_pixels": null,
+      "status": "validated_initial_choice_only",
+      "scope": "initial_enrage_choice",
+      "parent_interface": 1477,
+      "parent_component": 748,
+      "heading_component": 3,
+      "heading": "Choose initial enrage.",
+      "custom_enrage_input": null
+    },
+    {
+      "kind": "loot_claim_continue",
+      "open": null,
+      "interface_id": null,
+      "visible_options": null,
+      "clickable_physical_pixels": null,
+      "status": "unmapped"
+    },
+    {
+      "kind": "bank_preset",
+      "open": false,
+      "interface_id": 517,
+      "visible_options": null,
+      "clickable_physical_pixels": null,
+      "status": "validated_bank_root_only",
+      "scope": "bank_root_attachment",
+      "parent_interface": 1477,
+      "parent_component": 706,
+      "preset_controls_visible": null
+    },
+    {
+      "kind": "death",
+      "open": null,
+      "interface_id": null,
+      "visible_options": null,
+      "clickable_physical_pixels": null,
+      "status": "unmapped"
+    }
+  ],
+  "interface_research": {
+    "result": "Located and guarded the current original-profile UI manager and its attachment hash table. Bank-root and initial-enrage-choice attachment states are native observations. Cached presence is never treated as open; full visibility/options/physical geometry remain unmapped.",
+    "previous_attempts_2026_11_11": [
+      "Inspected the original executable Lua GetInterface/GetComponent registrations with Ghidra; no game functions were called.",
+      "Inspected older Windows 949-4 InterfaceManager/InterfaceList/component metadata as leads only.",
+      "Checked bounded current-world manager-pointer candidates against the older embedded vector shape. The candidate at world+0x19968 failed shared-pointer entry plausibility and was rejected.",
+      "Followed original-profile world manager displacements 0x19960/0x19968/0x19970/0x199c0/0x199d0/0x199d8/0x199f0 through targeted Ghidra decompilation. None established a guarded open-interface/visibility chain.",
+      "The 0x19968 uses at RVAs 0x75580 and 0x34840 dereference indexed objects via manager+0x10; they do not establish the older InterfaceList vector shape.",
+      "Lua GetInterface registration binds a virtual slot +0x30 through RVA 0x9d3f94; the concrete current manager identity and backing registry remain unresolved."
+    ],
+    "current_sources": {
+      "world_manager_offset": "0x19910",
+      "manager_vtable_rva": "0x15382c8",
+      "lookup_interface_vtable_rva": "0x15382e8",
+      "root_interface_offset": "0xf8",
+      "loaded_cache_header_offset": "0x50",
+      "attachment_table_header_offset": "0x118",
+      "attachment_node": {
+        "bytes": 32,
+        "parent_uid_offset": 0,
+        "payload_pointer_offset": 16,
+        "next_pointer_offset": 24,
+        "payload_bytes": 16,
+        "child_interface_id_offset": 12
+      },
+      "cache_record": "16-byte control/object pair indexed by interface ID; record begins with matching uint32 ID",
+      "heading_component": {
+        "vector_begin_end_offsets": [
+          8,
+          16
+        ],
+        "entry_bytes": 24,
+        "object_pointer_offset": 16,
+        "text_component_vtable_rva": "0x1530678",
+        "packed_interface_component_id_offset": "0x18",
+        "string_offset": "0x190",
+        "string_bytes": 24,
+        "max_heading_bytes": 64,
+        "identity": "Exact native heading required; generic interface ID 720 alone is insufficient."
+      },
+      "loaded_code_guards": [
+        {
+          "rva": "0x3c7f90",
+          "bytes": "4883c128e9c7908a00"
+        },
+        {
+          "rva": "0xc71060",
+          "bytes": "4883ec284c8b4118488b4120492bc048c1f8043bd07d114863c248c1e0044903"
+        },
+        {
+          "rva": "0x3ca949",
+          "bytes": "418b8e100100004d8b8e08010000"
+        },
+        {
+          "rva": "0x3ca9a7",
+          "bytes": "8b500c"
+        }
+      ],
+      "bounds": {
+        "buckets": 1024,
+        "attachments": 512,
+        "cache_ids": 8192,
+        "components_per_interface": 4096
+      }
+    },
+    "consistency": "Second reads of nodes, payloads, bucket array, table/cache headers, world/manager identities, root/scene state and vtables; reject cycles, duplicate keys, count mismatch, wrong text identity, torn strings and exceeded bounds."
+  },
+  "contracts": {
+    "WorldState.action_bar": "native per-slot observations with raw provenance and independent content/binding reasons",
+    "WorldState.ui.open": "Partial list of individually validated bank-root and initial-enrage-page observations. It can be empty while other interfaces remain unknown; complete is always false.",
+    "ui_completeness": false,
+    "automatic_input": false,
+    "source_freshness": "snapshot monotonic timestamp, PID, process creation time and scene_epoch remain in the containing WorldState"
+  },
+  "checks": {
+    "native_fixture_cases": 13,
+    "ctest_suites": 11,
+    "python_tests": 78,
+    "result": "passed",
+    "world_state_age_and_partial_collection_checks": "passed live"
+  },
+  "references": {
+    "ability_bindings_sha256": "64aa47ceeab40b88fa788a46c5340ba47a05ec7ee68fa476a851ef30668068ec",
+    "var_player_reference_sha256": "dff7edc3ac2f08911443f6f97aab420d98eae49c672f2bcbe8f5cab301d87595",
+    "varbit_player_reference_sha256": "fe93c721a201b7b87f4956ec936e1c8aa49623ba1eddf7415125cb340f49a911"
+  },
+  "limitations": [
+    "Instance creation, loot/claim/continue and death interfaces remain unmapped. The user-labelled instance page in this session was the initial-enrage chooser, identified from native text.",
+    "Bank presence covers root 517 only. Preset subpanel visibility, enabled state, option text and click points are not established.",
+    "Enrage presence covers choice page 720 with an exact heading; custom numeric input and other setup pages remain unmapped.",
+    "Complete interface visibility, runtime option export and physical click points remain unmapped. ui.open is a partial list, never a complete all-closed assertion.",
+    "Only explicitly present F1-F12 chords with no modifier or Ctrl are translated. Letter chords remain raw, including the destination the user called Shift+F.",
+    "With multiple clients, select the verified PID explicitly. Automatic discovery is not a statement about which window the user intends.",
+    "Five displayed rows are sampled, not all eighteen stored presets every frame. Missing sparse entries are unknown, not empty.",
+    "Compatibility Mode semantics are not enabled. No automatic inputs, game calls, memory writes, raw captures, cache catalogs or decompiler output are included."
+  ],
+  "acceptance": "All requested interfaces are individually validated or explicitly reported unmapped; all four configured curse chords match live C output; fixture tests pass. This does not establish complete UI coverage or authorize input.",
+  "live_session_2026_11_12": {
+    "pid": 32504,
+    "profile_checks": "Executable SHA-256, base loaded-code signatures and four added UI instruction guards passed.",
+    "capture_metrics": [
+      {
+        "capture": "p5-interface-manual-2026-11-12-02",
+        "sha256": "508248a1e95b80a0322562a49cd724222d1552f1dafae1ab007f468d157df55c",
+        "committed": false,
+        "frames": 10288,
+        "pid_count": 1,
+        "native_hz": 99.996,
+        "consumer_hz": 16.09,
+        "sample_ms_median": 1.841,
+        "sample_ms_p95": 2.197,
+        "recorded_hit_events_lost": 0
+      },
+      {
+        "capture": "p5-native-ui-2026-11-12-03",
+        "sha256": "df5fc20095ca464a2530fc7d6117d57ff630a8f4d5194911e8a1147826356d8e",
+        "committed": false,
+        "frames": 6742,
+        "pid_count": 1,
+        "native_hz": 99.993,
+        "consumer_hz": 12.654,
+        "sample_ms_median": 2.154,
+        "sample_ms_p95": 2.48,
+        "recorded_hit_events_lost": 0
+      },
+      {
+        "capture": "p5-native-ui-2026-11-12-04",
+        "sha256": "ef4cd1a837b375aa5781af6560656e9be6cd7ccc8f0af70e020a0739ecee2543",
+        "committed": false,
+        "frames": 588,
+        "pid_count": 1,
+        "native_hz": 99.952,
+        "consumer_hz": 12.7,
+        "sample_ms_median": 2.047,
+        "sample_ms_p95": 2.463,
+        "recorded_hit_events_lost": 0
+      }
+    ],
+    "excluded_capture": {
+      "capture": "p5-interface-manual-2026-11-12-01",
+      "reason": "Automatic discovery selected a second client (PID 49040), which did not contain preset 6. Excluded from move/preset validation; repeated with explicit PID."
+    },
+    "bank": {
+      "reference_sequence": [
+        "absent",
+        "open",
+        "closed",
+        "open",
+        "closed"
+      ],
+      "native_sequence": [
+        "open",
+        "closed"
+      ],
+      "loaded_bank_cache_is_not_open_evidence": true
+    },
+    "enrage": {
+      "native_sequence": [
+        "open_with_exact_heading",
+        "closed_after_Cancel"
+      ],
+      "research_choice_labels": [
+        "0%",
+        "100%",
+        "250%",
+        "500%",
+        "1000%",
+        "2000%",
+        "4000%",
+        "300% (last used)",
+        "Select custom enrage",
+        "Cancel"
+      ],
+      "runtime_options_exported": false,
+      "point_geometry_exported": false
+    },
+    "WorldState": {
+      "partial_ui_complete": false,
+      "observed_monotonic_time_present": true,
+      "stale_after_2_seconds_with_500ms_limit": true
+    },
+    "automatic_input": false,
+    "recorders_stopped": true
+  }
+}

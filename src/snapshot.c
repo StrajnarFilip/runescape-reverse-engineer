@@ -210,3 +210,35 @@ int32_t rs3_snapshot_items(const rs3_snapshot *snapshot, uint32_t container_id, 
     }
     return RS3_OK;
 }
+
+int32_t rs3_snapshot_interface_info(const rs3_snapshot *snapshot, rs3_interface_info *out,
+                                    uint32_t out_size)
+{
+    if (snapshot == NULL || out == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    return copy_record(&snapshot->interface_info, sizeof *out, out, out_size);
+}
+
+int32_t rs3_snapshot_interfaces(const rs3_snapshot *snapshot, rs3_interface_observation *out,
+                                uint32_t capacity, uint32_t *required)
+{
+    if (snapshot == NULL || required == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    return copy_records(snapshot->interfaces, snapshot->interface_info.interface_count,
+                        sizeof *out, out, capacity, required);
+}
+
+int32_t rs3_snapshot_action_bar(const rs3_snapshot *snapshot, rs3_action_bar_slot *out,
+                                uint32_t capacity, uint32_t *required)
+{
+    if (snapshot == NULL || required == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    return copy_records(snapshot->action_bar, snapshot->interface_info.action_bar_count,
+                        sizeof *out, out, capacity, required);
+}
