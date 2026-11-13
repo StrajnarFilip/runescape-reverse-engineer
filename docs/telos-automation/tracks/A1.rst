@@ -1,7 +1,7 @@
 A1 - Actuator backends
 ======================
 
-:Status: open
+:Status: done
 :Wave: 1
 :Branch: ``telos/A1``
 :Kind: Python (Arduino sketch if needed)
@@ -55,10 +55,32 @@ standard library only.
 Needs the user
 --------------
 
-Nothing for the tests. One two-minute check with the board plugged in: a tap
-arrives in a text editor.
+No user input was needed for software acceptance. The Release build and all
+10 CTest suites passed on 2026-11-13 (97 Python tests, including 19 A1 tests).
+Both backends were exercised with fake devices; the actual sketch also passed
+host compilation/parser/DTR/watchdog tests. No game input was sent.
+
+Optional hardware validation remains: compile/upload for Arduino Leonardo,
+open a text editor, assert DTR and send HELLO, TAP 04, then RELEASE_ALL. Confirm
+one key arrives and disconnecting clears held keys. Actual AVR compilation
+and physical USB delivery have not been tested. Instructions and guarantees
+are in ``docs/arduino-keyboard.rst``.
 
 Requests
 --------
 
-None yet.
+* Native input owner: add an additive, guarded, balanced key-tap API accepting
+  modifiers and a fresh snapshot, with existing partial-input cleanup. The
+  current DLL exposes modified prayer and unmodified ability input only.
+  Generic item and modified ability intents explicitly reject in the native
+  backend until this API lands. No C files were changed by A1.
+* P2/L: provide a fresh verified server-tick index in WorldState. A1's budgets
+  reject unknown tick identity; the 20 ms client clock is not a replacement.
+* A2: pointer operations require calibrated client coordinates, visible-window
+  and bounds checks, and a mouse-capable serial protocol/device or a declared
+  native-pointer route. The Leonardo sketch remains keyboard-only and both A1
+  backends reject pointer intents. Do not encode movement as guessed keys.
+* P5/D6: translate game modifier codes to the native Ctrl=1/Shift=2/Alt=4 mask
+  and pass fresh, validated account-specific bindings. Letter/digit HID usages
+  require keyboard-layout calibration. D3/D4/D6 retain castability and cooldown
+  policy; accepted device input needs later observation to acknowledge it.

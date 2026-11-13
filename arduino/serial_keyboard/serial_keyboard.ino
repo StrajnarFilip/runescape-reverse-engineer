@@ -15,6 +15,8 @@ static char commandLine[lineCapacity];
 static size_t lineLength;
 static bool discardLine;
 static bool portWasOpen;
+static constexpr unsigned long heldTimeoutMs = 1000;
+static unsigned long lastCommandMs;
 static uint8_t heldKeys[lastModifierUsage / bitsPerByte + 1];
 
 static int hexDigit(char digit)
@@ -63,6 +65,15 @@ static void releaseAllKeys()
 
 static const __FlashStringHelper *runCommand()
 {
+    if (strcmp(commandLine, "HELLO") == 0)
+    {
+        return F("RS3_KEYBOARD 1");
+    }
+    if (strcmp(commandLine, "PING") == 0)
+    {
+        lastCommandMs = millis();
+        return F("OK");
+    }
     if (strcmp(commandLine, "RELEASE_ALL") == 0)
     {
         releaseAllKeys();
@@ -89,6 +100,8 @@ static const __FlashStringHelper *runCommand()
     {
         return F("ERR KEY");
     }
+
+    lastCommandMs = millis();
 
     // Use raw HID positions, avoiding the library's ASCII layout and implicit modifiers.
     const uint8_t key = usage >= firstModifierUsage ? KEY_LEFT_CTRL + usage - firstModifierUsage
@@ -148,6 +161,18 @@ void loop()
         return;
     }
     portWasOpen = true;
+
+    bool keysAreHeld = false;
+    for (uint8_t heldByte : heldKeys)
+    {
+        keysAreHeld = keysAreHeld || heldByte != 0;
+    }
+    if (keysAreHeld && millis() - lastCommandMs >= heldTimeoutMs)
+    {
+        releaseAllKeys();
+        lineLength = 0;
+        discardLine = false;
+    }
 
     const int received = Serial.read();
     if (received == '\n')
