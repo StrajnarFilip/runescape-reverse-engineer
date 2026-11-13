@@ -101,9 +101,12 @@ Requests
   disabled. Frame logs include D6 decisions, without simulated acceptance or
   native/serial input imports. Missing D6 is an explicit error. Existing
   non-arbitrated logs retain their format. The clock follows the supervisor's
-  native clock even after a live observer installs it. Owner checks ran 98
+  native clock even after a live observer installs it. D1 runs before consumers;
+  D2 receives its provider and D3 receives the same-frame encounter state without
+  losing their D6 callbacks. Owner checks ran 99
   Python tests; one local-raw-capture test was skipped in this isolated worktree.
-  Three new cases cover composition, missing D6 and the offline CLI boundary.
+  Four new cases cover composition, dependency order, missing D6 and the offline
+  CLI boundary.
 * L: provide reviewed live authorization and actual A1/D6 composition before
   enabling assist/full. Those modes are deliberately refused for now; the user
   explicitly reserved L for their return. Validate the physical stop hotkey
