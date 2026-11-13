@@ -1,7 +1,7 @@
 L - Integration ladder
 ======================
 
-:Status: open
+:Status: in progress
 :Wave: 3
 :Branch: ``telos/integration``
 :Kind: Integration and live validation
