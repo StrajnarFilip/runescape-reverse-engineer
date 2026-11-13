@@ -1,0 +1,214 @@
+{
+  "schema_version": 1,
+  "track": "P3",
+  "date": "2026-11-11",
+  "status": "waiting_for_live_session",
+  "profile_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+  "runtime": "C11 read-only DLL; ctypes copies; no Python runtime acquisition",
+  "abi": {
+    "effects_info_bytes": 16,
+    "effect_bytes": 72,
+    "accessors": [
+      "rs3_effects_sizeof",
+      "rs3_snapshot_effects_info",
+      "rs3_snapshot_effects"
+    ]
+  },
+  "scope": {
+    "complete_effect_list": false,
+    "effect_presence": null,
+    "effect_stacks": null,
+    "eof_stored_special": null,
+    "compatibility_profile_semantics": null,
+    "expiry_remaining_ms": [
+      "overload"
+    ]
+  },
+  "sources": [
+    {
+      "effect": "berserk",
+      "domain": "VarPlayer",
+      "variables": [
+        12657,
+        12656
+      ],
+      "state": "candidate_unvalidated",
+      "tries": "Sparse table read twice; table header checked. Symbol names are leads, not semantic proof."
+    },
+    {
+      "effect": "bloodlust",
+      "domain": "VarPlayer",
+      "variables": [
+        12655,
+        12640
+      ],
+      "state": "candidate_unvalidated",
+      "tries": "Sparse table read twice; table header checked. Symbol names are leads, not semantic proof."
+    },
+    {
+      "effect": "overload",
+      "domain": "VarClient",
+      "variables": [
+        3732
+      ],
+      "state": "expiry_observed_presence_unmapped",
+      "tries": "Sparse table read twice; table header checked. Symbol names are leads, not semantic proof."
+    },
+    {
+      "effect": "adrenaline_renewal",
+      "domain": null,
+      "variables": [],
+      "state": "unmapped",
+      "tries": "No distinct source identified in VarPlayer/VarClient/VarBit symbol references."
+    },
+    {
+      "effect": "anima_virus",
+      "domain": null,
+      "variables": [],
+      "state": "unmapped",
+      "tries": "No distinct source identified in VarPlayer/VarClient/VarBit symbol references."
+    },
+    {
+      "effect": "stun",
+      "domain": "VarClient",
+      "variables": [
+        3748
+      ],
+      "state": "candidate_unvalidated",
+      "tries": "Sparse table read twice; table header checked. Symbol names are leads, not semantic proof."
+    },
+    {
+      "effect": "bind",
+      "domain": "VarClient",
+      "variables": [
+        3749
+      ],
+      "state": "candidate_unvalidated",
+      "tries": "Sparse table read twice; table header checked. Symbol names are leads, not semantic proof."
+    },
+    {
+      "effect": "resonance",
+      "domain": "VarClient",
+      "variables": [
+        3741
+      ],
+      "state": "labelled_source_duration_and_presence_unmapped",
+      "tries": "Sparse table read twice; table header checked. Symbol names are leads, not semantic proof."
+    },
+    {
+      "effect": "anticipation",
+      "domain": "VarClient",
+      "variables": [
+        3736
+      ],
+      "state": "labelled_source_duration_and_presence_unmapped",
+      "tries": "Sparse table read twice; table header checked. Symbol names are leads, not semantic proof."
+    },
+    {
+      "effect": "freedom",
+      "domain": "VarClient",
+      "variables": [
+        3733
+      ],
+      "state": "labelled_source_duration_and_presence_unmapped",
+      "tries": "Sparse table read twice; table header checked. Symbol names are leads, not semantic proof."
+    },
+    {
+      "effect": "devotion",
+      "domain": "VarClient",
+      "variables": [
+        3901
+      ],
+      "state": "candidate_unvalidated",
+      "tries": "Sparse table read twice; table header checked. Symbol names are leads, not semantic proof."
+    },
+    {
+      "effect": "barricade",
+      "domain": "VarClient",
+      "variables": [
+        3735
+      ],
+      "state": "candidate_unvalidated",
+      "tries": "Sparse table read twice; table header checked. Symbol names are leads, not semantic proof."
+    },
+    {
+      "effect": "immortality",
+      "domain": "VarClient",
+      "variables": [
+        3734
+      ],
+      "state": "candidate_unvalidated",
+      "tries": "Sparse table read twice; table header checked. Symbol names are leads, not semantic proof."
+    },
+    {
+      "effect": "disruption_shield",
+      "domain": "VarPlayer",
+      "variables": [
+        4
+      ],
+      "state": "candidate_unvalidated",
+      "tries": "Sparse table read twice; table header checked. Symbol names are leads, not semantic proof."
+    }
+  ],
+  "live": {
+    "raw_capture_committed": false,
+    "capture_sha256": "6aa52636ee2d63d6c32043c049270e3c21a84d0238837594c610f69fbbe813d4",
+    "frame_counts": {
+      "partial": 7477,
+      "unavailable": 1037
+    },
+    "user_order": [
+      "Anticipation; waited for expiry",
+      "Freedom",
+      "Resonance immediately after Freedom",
+      "one overload dose"
+    ],
+    "changes_observed": {
+      "berserk": 4,
+      "bloodlust": 4,
+      "overload": 14,
+      "adrenaline_renewal": 4,
+      "anima_virus": 4,
+      "stun": 4,
+      "bind": 4,
+      "resonance": 5,
+      "anticipation": 5,
+      "freedom": 5,
+      "devotion": 4,
+      "barricade": 4,
+      "immortality": 4,
+      "disruption_shield": 7
+    },
+    "expiry_evidence": {
+      "overload": {
+        "reference_clock": 19397,
+        "source_endpoint": 20207,
+        "computed_remaining_seconds": 16.2,
+        "user_display": "less than a minute",
+        "dose_source_first_observed_timestamp_ms": 1794426091811,
+        "countdown_reference_timestamp_ms": 1794426435571,
+        "elapsed_plus_remaining_ms": 359960,
+        "interpretation": "The labelled dose plus independently read clock/endpoint predicts expiry about six minutes after its source appeared; active presence still unproven."
+      },
+      "defensives": "Separate end_effect candidates appeared in the stated order. Their use of the existing 20 ms client clock is inferred from the common VarClient expiry representation; exact durations and early consumption still need controlled checks."
+    },
+    "sample_duration_ms": {
+      "median": 0.78,
+      "p95": 1.065
+    }
+  },
+  "limitations": [
+    "Active state and stacks remain null even for observed expiry timers. Zero remaining means the client timer expired; it does not establish buff absence.",
+    "Resonance consumption, dispels, stun/bind and anima virus require labelled combat captures.",
+    "Devotion end_effect 3901 is not its cooldown pair 3893/3894. Immortality 3734 is a heroism symbol lead.",
+    "Disruption Shield Varbit 9 decodes to VarPlayer 4 bit 13 in the local cache; whole VarPlayer 4 is research data only.",
+    "Berserk/Bloodlust modernisation variables were absent; no older cooldown is substituted for a buff.",
+    "No code writes game memory or sends input."
+  ],
+  "checks": {
+    "native_fixture_cases": 6,
+    "ctest_suites": 11,
+    "python_tests": 78,
+    "result": "passed"
+  }
+}

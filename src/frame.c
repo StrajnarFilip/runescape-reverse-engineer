@@ -8,6 +8,7 @@
 #include "interface.h"
 #include "hazards.h"
 #include "encounter.h"
+#include "effects.h"
 #include "inventory.h"
 #include "memory.h"
 #include "npcs.h"
@@ -119,6 +120,7 @@ int frame_decode(rs3_context *context, rs3_snapshot *snapshot)
     interface_stage(context, snapshot, contexts.player_address, contexts.client_address);
     spatial_stage(context, snapshot, contexts.world_state);
     encounter_stage(context, snapshot, contexts.player_address);
+    effects_stage(context, snapshot, contexts.player_address, contexts.client_address);
 
     if (!contexts_unchanged(context, &contexts))
     {

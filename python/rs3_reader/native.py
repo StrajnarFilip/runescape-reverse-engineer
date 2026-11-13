@@ -772,6 +772,29 @@ class EncounterState(ctypes.Structure):
 
 SIZED_ENCOUNTER_STRUCTURES = {1: EncounterValue, 2: EncounterRaw, 3: GameTick, 4: EncounterState}
 
+class EffectsInfo(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_uint32) for name in ("status", "reason", "count", "complete")]
+
+class Effect(ctypes.Structure):
+    _fields_ = [
+        *(
+            (name, ctypes.c_uint32)
+            for name in (
+                "effect_id",
+                "flags",
+                "reason",
+                "source",
+                "expiry_var",
+                "stacks_var",
+                "active_var",
+                "raw_valid_mask",
+            )
+        ),
+        *((name, ctypes.c_int64) for name in ("raw_expiry", "raw_stacks", "raw_active")),
+        *((name, ctypes.c_int32) for name in ("active", "stacks", "remaining_ms")),
+        ("reserved", ctypes.c_uint32),
+    ]
+
 # Structures checked against rs3_sizeof() and rs3_combat_sizeof().
 SIZED_STRUCTURES = {
     Structure.OPTIONS: Options,
@@ -864,6 +887,9 @@ def _function_prototypes():
         "snapshot_client_version": (ctypes.c_char_p, [handle]),
         "snapshot_player": (i32, [handle, ctypes.POINTER(Player), u32]),
         "snapshot_position": (i32, [handle, ctypes.POINTER(Position), u32]),
+        "effects_sizeof": (u32, [u32]),
+        "snapshot_effects_info": (i32, [handle, ctypes.POINTER(EffectsInfo), u32]),
+        "snapshot_effects": (i32, [handle, ctypes.POINTER(Effect), u32, ctypes.POINTER(u32)]),
         "encounter_sizeof": (u32, [u32]),
         "snapshot_encounter": (i32, [handle, ctypes.POINTER(EncounterState), u32]),
         "combat_sizeof": (u32, [u32]),
@@ -906,6 +932,9 @@ def _function_prototypes():
 
 
 def _verify_layouts(library):
+    for structure_id, structure in ((1, EffectsInfo), (2, Effect)):
+        if library.rs3_effects_sizeof(structure_id) != ctypes.sizeof(structure):
+            raise RuntimeError("C/Python effect layout mismatch for " + structure.__name__)
     for structure_id, structure in SIZED_ENCOUNTER_STRUCTURES.items():
         if library.rs3_encounter_sizeof(structure_id) != ctypes.sizeof(structure):
             raise RuntimeError("C/Python encounter layout mismatch: " + structure.__name__)
@@ -980,6 +1009,8 @@ class Reader:
         self.worker_hz = worker_hz
         # Reusable output buffers sized for the ABI limits.
         self.info = Info()
+        self.effects_info = EffectsInfo()
+        self.effects = (Effect * 14)()
         self.encounter = EncounterState()
         self.hazard_info = HazardInfo()
         self.hazards = (Hazard * MAX_HAZARDS)()
@@ -1059,6 +1090,8 @@ class Reader:
             )
 
         copy_record(library.rs3_snapshot_info, self.info)
+        copy_record(library.rs3_snapshot_effects_info, self.effects_info)
+        copy_array(library.rs3_snapshot_effects, self.effects)
         copy_record(library.rs3_snapshot_encounter, self.encounter)
         copy_record(library.rs3_snapshot_hazard_info, self.hazard_info)
         copy_array(library.rs3_snapshot_hazards, self.hazards)

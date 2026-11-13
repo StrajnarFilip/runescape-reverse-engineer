@@ -26,6 +26,7 @@
 #include "rs3/spatial.h"
 #include "rs3/hazards.h"
 #include "rs3/encounter.h"
+#include "rs3/effects.h"
 #include "profile.h"
 
 /** Capacity of the hit observation queue. */
@@ -65,6 +66,8 @@ struct rs3_snapshot
     rs3_interface_info interface_info;
     rs3_interface_observation interfaces[RS3_REQUIRED_INTERFACES];
     rs3_action_bar_slot action_bar[RS3_MAX_ACTION_BAR_SLOTS];
+    rs3_effects_info effects_info;
+    rs3_effect effects[RS3_EFFECT_COUNT];
     rs3_position position;
     rs3_combat_state combat;
     rs3_spatial_info spatial;

@@ -1,7 +1,7 @@
 P3 - Player effects
 ===================
 
-:Status: open
+:Status: waiting for live session
 :Wave: 1
 :Branch: ``telos/P3``
 :Kind: C (native DLL)
@@ -55,10 +55,29 @@ pass, and the report lists the source variable or structure of every effect.
 Needs the user
 --------------
 
-One session triggering each effect in turn out of combat where possible, and
-taking a stun and a virus during a Telos attempt.
+The 2026-11-11 session labelled Anticipation, Freedom, Resonance and overload.
+See ``docs/validation/effects-validation.json``. The overload expiry countdown is available; the three defensive sources were
+labelled but their durations remain unvalidated. Presence, stacks and early
+cancellation remain unknown.
+
+Next controlled checks (only when recording is confirmed active):
+
+* Repeat Anticipation and Freedom separately, reporting each displayed duration.
+* Cast Resonance, then consume it with one ordinary incoming hit before expiry.
+* Trigger Berserk, Bloodlust, adrenaline renewal, Devotion, Barricade and
+  Immortality individually when available; label casts and expiry/consumption.
+* Cast Disruption Shield, then take one hit; label shield consumption.
+* During a manual Telos attempt label a stun, bind and anima virus.
+
+Do not infer a buff from an ability's cooldown. No automated input is enabled.
 
 Requests
 --------
 
-None yet.
+Integration: register the effect header/storage in ``src/context.h`` along with
+own shared wiring. This is the same minimal private-snapshot registration pattern
+used by P1/P2; no existing public struct was extended. No other track files changed.
+
+A complete native buff-list decoder and EoF stored-special identity are still
+unmapped. Downstream decision tracks must require effect flags and must not use
+a positive end timer as proof that a defensive is active.
