@@ -49,21 +49,11 @@
 /** A vtable that belongs to no player actor. */
 #define FOREIGN_VTABLE_RVA 0x10u
 
-/**
- * Returns the Compatibility Mode profile with its player actor vtable. The
- * generated table carries it only once tools/generate_profile.py emits the
- * field (see the S0b brief, Requests); until then the profile value stands in.
- */
+/** Returns the shipped Compatibility Mode profile after checking that it pins the player actor. */
 static const client_profile *compatibility_profile(void)
 {
-    static client_profile profile;
-    profile = profile_compatibility;
-    if (profile.player_actor_vtable_rva == 0)
-    {
-        profile.player_actor_vtable_rva = COMPATIBILITY_PLAYER_ACTOR_VTABLE_RVA;
-    }
-    assert(profile.player_actor_vtable_rva == COMPATIBILITY_PLAYER_ACTOR_VTABLE_RVA);
-    return &profile;
+    assert(profile_compatibility.player_actor_vtable_rva == COMPATIBILITY_PLAYER_ACTOR_VTABLE_RVA);
+    return &profile_compatibility;
 }
 
 /** Writes the fake actor's tile fields at the profile-independent actor layout. */

@@ -3,7 +3,7 @@
   "track": "S0b",
   "date": "2026-11-11",
   "source": "static_inspection_and_read_only_live_memory_samples",
-  "status": "waiting_for_live_session",
+  "status": "done",
   "chosen_runtime_profile": {
     "name": "Compatibility Mode",
     "version": "6ada3f59-1a86000",
@@ -11,7 +11,7 @@
     "client_sha256": "7a60c69fcf11eda42a328732721f5e89e1c85a6bc919038ff3451d4643e42dbf",
     "channels": {
       "player_tile": "pinned before S0b; the tile now also checks the player actor vtable and runtime index",
-      "local_player_hitmarks": "enabled by combat_layout.player_actor_vtable_rva once the generator emits it (S0b request)"
+      "local_player_hitmarks": "enabled by combat_layout.player_actor_vtable_rva, which tools/generate_profile.py now emits"
     }
   },
   "why_this_port": [
@@ -70,24 +70,40 @@
       "note": "The player stood still and took no hits."
     },
     {
-      "method": "native DLL from this branch without the generator line",
+      "method": "native DLL from this branch before the generator line was applied",
       "duration_seconds": 3,
       "samples": 144,
       "tile_valid_samples": 144,
       "hit_channel_available_samples": 0,
       "hit_channel_reason": "RS3_UNSUPPORTED_CLIENT"
+    },
+    {
+      "method": "native DLL from this branch (generator line applied), Reader(worker_hz=100), during the user's session: walk, then take hits from an NPC",
+      "duration_seconds": 75,
+      "samples": 3648,
+      "frames_available": 3648,
+      "tile_valid_samples": 3648,
+      "hit_channel_available_samples": 3648,
+      "tile_and_hit_channel_in_same_sample": 3648,
+      "unique_tiles": 53,
+      "planes": [0],
+      "player_hit_events": 19,
+      "player_hit_events_in_samples_with_a_valid_tile": 19,
+      "player_hit_events_lost": 0,
+      "player_hit_event_type_id_counts": {"133": 11, "143": 1, "144": 3, "482": 4},
+      "note": "Raw hitmark type IDs only. Type 482 arrived with amount 0. No type is interpreted as damage, a miss or healing here."
     }
   ],
   "fixture_tests": {
     "native_player_hits": "Five hit mark tests on each profile, plus one Compatibility Mode test that reads a tile and a hit event from one actor and rejects a foreign vtable or index for both channels.",
     "native_lifecycle": "The Compatibility Mode tile test also gives its actor the player vtable and runtime index.",
-    "with_generator_line": "All ten CTest targets pass with the generated table carrying 0x150d8c8."
+    "with_generator_line": "All ten CTest targets pass with the generated table carrying 0x150d8c8; the tests now use the shipped profile."
   },
   "original_profile": "Keeps local-player hit marks without a tile. Its fixture tests still pass.",
-  "remaining_for_done": [
-    "tools/generate_profile.py must emit combat_layout.player_actor_vtable_rva (S0b brief, Requests).",
-    "One live session on the Compatibility Mode client: walk a few tiles, then take one hit. Pass: at least two distinct tiles, at least one player hit event in a sample with a valid tile, zero lost events."
-  ],
+  "done_when": {
+    "criterion": "Fixture tests pass on both profiles, and on the chosen profile one live session shows at least two distinct tiles, at least one player hit event in a sample with a valid tile, and zero lost events.",
+    "result": "Met: ten CTest targets pass; the 75-second session shows 53 tiles and 19 hit events, all in samples with a valid tile, with zero lost events."
+  },
   "limitations": [
     "Hit marks carry no attacker, and an empty ring is not proof of complete incoming-attack coverage.",
     "The meaning of the player context's actor override is not validated. An override actor must carry the player vtable and the player index, otherwise neither channel reports.",
