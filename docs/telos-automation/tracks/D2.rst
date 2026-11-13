@@ -1,7 +1,7 @@
 D2 - Prayer executor
 ====================
 
-:Status: open
+:Status: in progress
 :Wave: 2
 :Branch: ``telos/D2``
 :Kind: Python
