@@ -104,6 +104,20 @@ not mean full arena coverage: all mechanic/area/timer coverage remains incomplet
 and automated movement is not enabled. The unresolved acquisition work below
 must be completed before those mechanics can drive unattended kills.
 
+User prioritization (2026-11-13)
+--------------------------------
+
+The user asked to defer beam and falling-rock work while the intended melee
+rotation is developed. Their strategy expectation is that earlier beams need
+no response and rocks are avoided when the rotation succeeds. Treat this as a
+user-supplied strategy assumption, not a measured guarantee or a complete-hazard
+claim. Do not require additional beam/rock encounters for the present work.
+
+Phase 5 beams remain planned for a later supervised session together, once the
+automation can reach phase 5. Retain the unknown coverage flags and revisit
+deferred sources if actual encounters show the rotation needs them. Progress
+on movement, targeting, rotation and staged integration can proceed separately.
+
 Requests
 --------
 

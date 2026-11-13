@@ -8,6 +8,16 @@
   "automatic_game_inputs_sent": false,
   "other_account_gameplay_captured": false,
   "scope": "native_snapshot_npc_candidates_with_P1_pose_provenance",
+  "user_prioritization": {
+    "date": "2026-11-13",
+    "defer": ["earlier-phase beam responses", "falling-rock acquisition"],
+    "reason": "user expects the intended melee rotation to avoid needing those responses",
+    "evidence_level": "user_strategy_assumption_not_live_rotation_validation",
+    "phase_5_beams": "planned later supervised calibration once the automation reaches phase 5",
+    "revisit_when": "actual encounters demonstrate a need or phase 5 work begins",
+    "unknown_coverage_flags_preserved": true,
+    "other_tracks_may_proceed": true
+  },
   "implementation": {
     "acquisition": "existing C NPC registry and P1 actor poses; no additional remote reads",
     "publication": "committed frame after parent-context consistency checks",
