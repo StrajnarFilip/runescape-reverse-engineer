@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "scope": "D3 intent proposals only; live enablement belongs to track L",
+  "maximum_age_ms": 150,
+  "intent_lifetime_ms": 100,
+  "acknowledgement_timeout_ms": 1800,
+  "thresholds": {
+    "food_health_fraction": 0.60,
+    "brew_health_fraction": 0.40,
+    "critical_health_fraction": 0.25,
+    "restore_prayer_fraction": 0.30,
+    "heavy_hit_health_fraction": 0.50,
+    "defensive_lookahead_ms": 1200
+  },
+  "policy_source": "Configurable conservative defaults; not live-calibrated optimal thresholds",
+  "potion_priority": ["restore", "brew"],
+  "critical_potion_priority": ["brew", "restore"],
+  "item_roles": [
+    {"role": "food", "operation": "eat", "family_ids": [], "undosed": true, "required_effects": ["heals"], "source": "native catalog food effect tag"},
+    {"role": "brew", "operation": "drink", "family_ids": [19], "undosed": false, "required_effects": ["heals"], "source": "local catalog family 19; Saradomin brew vial/flask dose chains"},
+    {"role": "restore", "operation": "drink", "family_ids": [23, 74], "undosed": false, "required_effects": ["restores_prayer"], "source": "local catalog super restore family 23 and mix family 74"}
+  ],
+  "defensives": [
+    {"role": "freedom", "ability_id": 14711, "trigger": "stun_or_bind", "lane": "gcd", "exclusive_effects": [], "requires_protection": false},
+    {"role": "anticipation", "ability_id": 14710, "trigger": "predicted", "lane": "gcd", "exclusive_effects": ["anticipation"], "requires_protection": false},
+    {"role": "resonance", "ability_id": 14713, "trigger": "predicted", "lane": "gcd", "exclusive_effects": ["resonance", "disruption_shield"], "requires_protection": false},
+    {"role": "devotion", "ability_id": 25028, "trigger": "predicted", "lane": "gcd", "exclusive_effects": ["devotion"], "requires_protection": true},
+    {"role": "barricade", "ability_id": 14719, "trigger": "predicted", "lane": "gcd", "exclusive_effects": ["barricade"], "requires_protection": false},
+    {"role": "immortality", "ability_id": 14721, "trigger": "predicted", "lane": "gcd", "exclusive_effects": ["immortality"], "requires_protection": false},
+    {"role": "disruption_shield", "ability_id": null, "trigger": "predicted", "lane": "off_gcd", "exclusive_effects": ["disruption_shield", "resonance"], "requires_protection": false}
+  ],
+  "defensive_binding_source": "profiles/ability_bindings_951_3.json; identity only. Every cast still requires fresh castable=true and a known ready timer.",
+  "exit": {"ability_id": null, "validated": false, "source": null},
+  "guide_leads": [
+    {"role": "prayer_renewal", "family_ids": [44], "validated": false, "source": "docs/telos-melee-research.rst", "reason": "over-time restoration; active effect/timer and combination rules pending"},
+    {"role": "adrenaline_renewal", "family_ids": [], "validated": false, "source": "docs/telos-melee-research.rst", "reason": "shared potion timer and family calibration pending"},
+    {"role": "disruption_shield", "validated": false, "source": "docs/telos-melee-research.rst", "reason": "spell identity/unlock/runes/cooldown and one-hit interaction pending"},
+    {"role": "virus_cleanse", "validated": false, "source": "docs/telos-melee-research.rst", "reason": "requires P4 validated cleanse target and option; never inferred from names"}
+  ]
+}
