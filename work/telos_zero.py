@@ -528,8 +528,19 @@ def run(reader, args, board):
                 phase_one.observe(actions)
                 time.sleep(POLL_SECONDS)
                 continue
-        if phase not in (1, 2) or not hp_known:
+        if phase not in (1, 2, 3) or not hp_known:
             raise RuntimeError("Encounter phase unavailable or outside the calibrated range")
+        if phase == 3:
+            if (
+                not args.continue_phase_two
+                or encounter_checkpoint(phase, npc_health_record(boss)) is None
+            ):
+                raise RuntimeError("Unexpected phase 3 checkpoint")
+            log("phase_three_observed", boss_hp=boss.health_current, player_hp=hp)
+            if args.observe_transition:
+                board.close()
+                observe(reader, max(0, deadline - time.monotonic()))
+            return 2
         if phase == 2:
             if encounter_checkpoint(phase, npc_health_record(boss)) is None:
                 raise RuntimeError("Phase 2 bits disagree with the observed boss HP")
@@ -537,6 +548,9 @@ def run(reader, args, board):
             if first_phase_two_sample:
                 log("phase_two_observed", boss_hp=boss.health_current, phase=phase, player_hp=hp)
                 phase_two_at = now
+                if args.continue_phase_two:
+                    # No P1 forecast or pending input is evidence in the new arena.
+                    phase_one = PhaseOne()
             if first_phase_two_sample or actions or hits or hits_lost:
                 log(
                     "observation",
@@ -584,11 +598,13 @@ def run(reader, args, board):
                         "phase_two_reacquire_skipped",
                         reason="No fresh melee cue with Deflect Melee",
                     )
-            if args.observe_transition:
-                board.close()
-                observe(reader, max(0, deadline - time.monotonic()))
-            return 2
-        if boss.health_current <= PHASE_TWO_HP:
+            if not args.continue_phase_two:
+                if args.observe_transition:
+                    board.close()
+                    observe(reader, max(0, deadline - time.monotonic()))
+                return 2
+        phase_boundary = PHASE_TWO_HP if phase == 1 else PHASE_THREE_HP
+        if boss.health_current <= phase_boundary:
             time.sleep(POLL_SECONDS)
             continue
 
@@ -617,6 +633,7 @@ def run(reader, args, board):
                 expected_after=phase_one.expected_after,
                 player_hp=hp,
                 boss_hp=boss.health_current,
+                phase=phase,
                 sample_ns=info.monotonic_ns,
                 tile=tile,
                 overhead=prayer.name.lower(),
@@ -676,6 +693,11 @@ def main():
     parser.add_argument("--hurricane", default="8")
     parser.add_argument("--surge", help="Optional Surge binding for experimental movement")
     parser.add_argument(
+        "--continue-phase-two",
+        action="store_true",
+        help="Try shared defenses against observed specials through phase 2",
+    )
+    parser.add_argument(
         "--reacquire",
         nargs=2,
         metavar=("TARGET_CYCLE", "BASIC_ATTACK"),
@@ -684,6 +706,8 @@ def main():
     args = parser.parse_args()
     if args.replay and args.port:
         parser.error("Replay does not open the Arduino")
+    if args.continue_phase_two and args.reacquire:
+        parser.error("Choose either phase 2 defenses or the one-shot target cycle trial")
     if not 0 < args.duration <= MAX_PRACTICE_SECONDS:
         parser.error(f"Duration must be between 1 and {MAX_PRACTICE_SECONDS} seconds")
     if args.port and not all((args.frame, args.approach, args.melee, args.practice_0_confirmed)):
