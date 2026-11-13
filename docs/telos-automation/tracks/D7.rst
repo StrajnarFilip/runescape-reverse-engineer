@@ -1,7 +1,7 @@
 D7 - Out-of-fight loop
 ======================
 
-:Status: open
+:Status: in progress
 :Wave: 2
 :Branch: ``telos/D7``
 :Kind: Python
