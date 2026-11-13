@@ -1,7 +1,7 @@
 D5 - Mechanics and movement
 ===========================
 
-:Status: open
+:Status: waiting for live session
 :Wave: 2
 :Branch: ``telos/D5``
 :Kind: Python
@@ -59,7 +59,53 @@ Needs the user
 Nothing in this track beyond the captures P4 already needs. Live use starts at
 rung 5 of track L.
 
+Offline implementation (2026-11-13)
+-----------------------------------
+
+The user explicitly requested offline implementation before P4/A2 calibration.
+There is one phase module plus shared geometry and MechanicsEngine. Default
+phase rules are unvalidated guide leads and cannot authorize any movement.
+Calibrated rules require an exact client SHA-256 and enrage band; they do not
+transfer across builds or enrage. No current real strategy is enabled.
+
+Movement requires a fresh same-session calibrated arena anchor, observed
+orientation/bounds, relative safe tiles, known player tile and complete
+validated hazard data. Unknown hazard types/states or missing geometry block
+the engine. No absolute instanced-arena coordinates are embedded. Candidate
+tiles exclude observed danger and require a positive fresh A2 path verdict;
+entering a beam is distinct from moving out of a dangerous area. Target and
+font/cleanse interactions require known entity/options and an A2 verdict.
+Unmapped NPC HP cannot establish a living target.
+
+can_send rechecks the same current response. note_sent waits for a newer native
+position/target or explicit hazard resolution. Selecting an object does not
+prove a font was charged or a virus cleansed. Unknown/partial omission does
+not acknowledge an interaction. Timeouts and changed sessions latch faults.
+
+Sixteen tests pass, including synthetic sequences for all five phase handlers,
+relative-anchor rotation, build/enrage scope, missing A2, stale/unknown data,
+font/target validation and postconditions. The legacy capture has a golden
+no-movement log because it lacks P4/A2 data. All 10 CTest suites pass in the
+Windows x64 Release build (94 Python tests). These tests are not recorded P4
+hazard validation; that acceptance requirement remains outstanding.
+
 Requests
 --------
 
-None yet.
+* P4: provide the recorded, validated hazard/arena fields before completing
+  live acceptance. P4 and its C headers were not implemented or changed here.
+  Proposed adapter contract: raw arena envelope (value, age, source, reason),
+  with validated anchor Tile, quarter_turns, bounds, safe_tiles and original
+  session; hazards carry id/kind/phase/active/dangerous/tiles/source/validated,
+  optional entity/options and explicit resolved state. Review this contract
+  when the actual P4 API lands; never mark placeholders complete.
+* A2: inject path_validator(world, geometry, destination) and
+  interaction_validator(world, target, option), returning fresh
+  Observation[bool]. Path proof includes the whole route, not only the endpoint.
+  No movement backend or pointer execution was added.
+* Live/P4: replace guide leads with recorded exact-scope rules, including
+  meter/beam/golem/font/virus/rock/bomb behavior. All five handler scenarios
+  currently use clearly synthetic observations; phase-5 tactics are unvalidated.
+* L/D6: wire can_send, note_sent, note_rejected and confirm; honor faults and
+  keep unvalidated strategies disabled. Actual P4, A2 and L work remains for
+  the user's return, as requested.
