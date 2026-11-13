@@ -1,7 +1,7 @@
 A1 - Actuator backends
 ======================
 
-:Status: open
+:Status: in progress
 :Wave: 1
 :Branch: ``telos/A1``
 :Kind: Python (Arduino sketch if needed)
