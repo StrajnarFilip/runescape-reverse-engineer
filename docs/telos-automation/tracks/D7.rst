@@ -1,7 +1,7 @@
 D7 - Out-of-fight loop
 ======================
 
-:Status: in progress
+:Status: waiting for live session
 :Wave: 2
 :Branch: ``telos/D7``
 :Kind: Python
@@ -56,7 +56,63 @@ Needs the user
 The route, preset and loot policy written once into ``profiles/trip.json``.
 Live use starts at rung 6 of track L.
 
+Offline implementation (2026-11-13)
+-----------------------------------
+
+TripLoop implements observed bank/preset/close-bank/travel/setup/entry/fight/
+loot/return/death states. It proposes only MECHANICS-priority pointer intents.
+The shipped profile is explicitly unconfigured: route, preset signature,
+practice mode, targets and loot choice remain unknown. No default guesses a
+teleport, UI coordinate, bank preset or loot action while the user is away.
+
+Every accepted input waits for a newer declared postcondition; failed preset
+loads/dialog opens stop on timeout without repeated clicks. Fresh full backpack
+contents, required equipment IDs and resource fractions are checked before
+entry. Extra/missing/ambiguous slots and partial inventory cannot prove the
+preset ready. Quantities and dose-specific IDs are checked, not display names.
+Selecting a preset is not proof it loaded.
+
+P5 attachment alone is insufficient: controls require known visibility,
+validated role/value/target/option and an A2 verdict. Enrage/practice setup
+requires mapped observed values, not a cached heading or configured default.
+Route nodes can walk or interact with a calibrated observed arrival tile;
+new legs reset their waypoint cursor. Scene handovers are recognized only on
+the exact pending arrival/fight postcondition with unchanged process/build.
+Unexpected changes stop. L must still manage backend reattachment safely.
+
+Kills/deaths require fresh explicit validated result IDs. Results are deduped;
+despawn or unknown phase never counts as success. Loot/recovery confirmation
+is result-specific. Continuing requires known next enrage, streak allowance
+and unchanged adequate supplies; otherwise a configured claim is chosen.
+The kill cap is applied after verified claiming. Death recovery is explicit;
+the default death policy stops. Wall, enrage, streak and result-time caps are
+observed and bounded. Delayed replay also ages nested setup/result envelopes.
+
+Nineteen tests pass, covering the normal trip, failed preset/dialog, death and
+recovery, continuation guards, every policy cap, scene changes, partial data,
+cursor reset and deterministic no-input replay of a real legacy capture.
+The Windows x64 Release build and all 10 CTest suites pass (97 Python tests).
+All functional UI/route scenarios are synthetic; no live trip is claimed.
+
 Requests
 --------
 
-None yet.
+* Later account session: fill the validated outbound/return routes, preset and
+  equipment signatures, practice/loot policy and calibrated target selectors.
+  No input is requested while the user is away. Unconfigured profile fields
+  remain null/empty and produce no actions.
+* P5: map visible controls/options, selected instance enrage/practice and
+  result-specific loot/recovery completion. Current bank/enrage attachment
+  observations do not establish these. Proposed control entries carry
+  role/value/target/option/visible/validated/source inside the known panel.
+* P2/P5: provide fresh instance_setup and encounter_result envelopes, plus
+  loot_claimed/recovered/next_instance_enrage tied to the original result ID.
+  These are explicit adapter contracts, not claims that current telemetry
+  already supplies them. Streak unknown never defaults to zero.
+* A2/L: inject validated route/interaction checks, exact target resolution,
+  safe expected-scene transitions and backend handover. D8/D6 intentionally
+  stop on unapproved changes. No movement primitives or L integration were
+  implemented; these remain reserved for the user's return.
+* Preset item/equipment IDs do not prove EoF contents, charges, unlocks or
+  complete castability. Those remain the relevant combat/perception owners'
+  responsibilities, not optimistic trip postconditions.
