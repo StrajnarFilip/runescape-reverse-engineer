@@ -6,12 +6,14 @@
 
 #include "combat.h"
 #include "interface.h"
+#include "hazards.h"
 #include "inventory.h"
 #include "memory.h"
 #include "npcs.h"
 #include "player.h"
 #include "player_hits.h"
 #include "position.h"
+#include "spatial.h"
 #include "variables.h"
 
 /** Context addresses captured at the start of a frame and verified at its end. */
@@ -114,6 +116,7 @@ int frame_decode(rs3_context *context, rs3_snapshot *snapshot)
     combat_stage(context, snapshot, contexts.player_address, contexts.world_state);
     player_hits_stage(context, snapshot, contexts.world_state);
     interface_stage(context, snapshot, contexts.player_address, contexts.client_address);
+    spatial_stage(context, snapshot, contexts.world_state);
 
     if (!contexts_unchanged(context, &contexts))
     {
@@ -128,6 +131,8 @@ int frame_decode(rs3_context *context, rs3_snapshot *snapshot)
                          contexts.world_state);
     }
     inventory_commit(context, snapshot, contexts.world_state);
+    spatial_commit(context, snapshot);
+    hazards_commit(context, snapshot, npcs_decoded);
     player_track_changes(context, snapshot, contexts.world_state);
     return 1;
 }

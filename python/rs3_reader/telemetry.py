@@ -7,6 +7,7 @@ tracker. Unknown values are ``None`` with a reason, never an assumed zero.
 from __future__ import annotations
 
 import time
+import ctypes
 
 from .inventory_records import extend_record
 from .native import (
@@ -14,11 +15,14 @@ from .native import (
     PRAYER_POINTS_MASK,
     VARIABLE_NAMES,
     HitState,
+    HazardFlags,
     NPCFlags,
     Reader,
     Reason,
     Status,
     decode_text,
+    ScreenPoint,
+    SpatialFlags,
 )
 from .prayer import Prayer
 
@@ -276,6 +280,10 @@ def npc_records(reader, info, npcs, hits):
     """Return (entity records, active hit records) of the loaded NPCs."""
     entities, active_hits = [], []
     identity_keys = ("runtime_id", "instance_id", "config_id", "name")
+    spatial = {
+        reader.npc_spatial[index].instance_id: reader.npc_spatial[index]
+        for index in range(reader.spatial.npc_count)
+    }
     for index in range(info.npc_count):
         npc = npcs[index]
         entity = {
@@ -287,6 +295,9 @@ def npc_records(reader, info, npcs, hits):
             "hit_splats": [],
         }
         entity["animation"] = npc_animation_record(reader.npc_animations[index])
+        pose = spatial.get(npc.instance_id)
+        if pose is not None:
+            entity.update(spatial_actor_record(reader, pose))
         # Each NPC references a slice of the snapshot's shared hit buffer.
         for hit_index in range(npc.hit_offset, npc.hit_offset + npc.hit_count):
             hit = hit_record(hits[hit_index])
@@ -304,6 +315,71 @@ def npc_records(reader, info, npcs, hits):
     return entities, active_hits
 
 
+def spatial_actor_record(reader, actor):
+    """Serialize C spatial observations; unknown targets do not mean no target."""
+    age = (
+        nanoseconds_to_milliseconds(max(0, reader.monotonic_ns() - actor.observed_ns), 3)
+        if actor.observed_ns
+        else None
+    )
+
+    def field(value, reason):
+        return {
+            "value": value,
+            "age_ms": age,
+            "source": "native_spatial",
+            "reason": (
+                None
+                if value is not None
+                else {
+                    0: "not_observed",
+                    2: "read_failed",
+                    3: "unsupported_profile",
+                    100: "unmapped",
+                }.get(reason or reader.spatial.reason, "spatial_reason_" + str(reason))
+            ),
+        }
+
+    result = {
+        "tile": field(
+            (
+                {"x": actor.tile.x, "y": actor.tile.y, "plane": actor.tile.plane}
+                if actor.valid_mask & SpatialFlags.TILE
+                else None
+            ),
+            actor.tile_reason,
+        ),
+        "facing": field(
+            (
+                {"angle": actor.facing_degrees, "unit": "degrees"}
+                if actor.valid_mask & SpatialFlags.FACING
+                else None
+            ),
+            actor.facing_reason,
+        ),
+        "target": field(None, actor.target_reason),
+    }
+    if actor.valid_mask & SpatialFlags.FINE_POSITION:
+        point = ScreenPoint()
+        reader.check_result(
+            reader.library.rs3_project_actor(
+                ctypes.byref(reader.spatial.camera),
+                ctypes.byref(actor),
+                0,
+                ctypes.byref(point),
+                ctypes.sizeof(point),
+            )
+        )
+        result["screen_point"] = {
+            "x": point.x if point.valid else None,
+            "y": point.y if point.valid else None,
+            "valid": bool(point.valid),
+            "reason": point.reason,
+            "units": "physical_screen_pixels",
+        }
+    return result
+
+
 def changing_value(value, changed_ns, sample_monotonic_ns):
     """Return a value with the age of its last observed change."""
     return {
@@ -314,6 +390,105 @@ def changing_value(value, changed_ns, sample_monotonic_ns):
             if value is None
             else nanoseconds_to_milliseconds(max(0, sample_monotonic_ns - changed_ns), 1)
         ),
+    }
+
+
+def hazards_record(reader):
+    """Serialize C candidates; identity/pose evidence does not validate a mechanic."""
+    info = reader.hazard_info
+    kinds = (
+        "unknown",
+        "green_beam",
+        "black_beam",
+        "red_beam",
+        "font",
+        "falling_rock",
+        "tendrils",
+        "anima_bomb",
+        "projectile",
+        "golem",
+    )
+    variants = (None, "pure", "corrupt", "volcanic")
+    reasons = {
+        0: None,
+        400: "hazard_channel_unmapped",
+        401: "hazard_identity_unmapped",
+        402: "hazard_spatial_unavailable",
+        403: "hazard_wrong_scene",
+        404: "hazard_candidate_overflow",
+        405: "hazard_mechanics_need_calibration",
+    }
+
+    def reason_name(reason):
+        return reasons.get(reason, "native_reason_" + str(reason))
+
+    available = info.status in (Status.AVAILABLE, Status.PARTIAL)
+    age_ms = (
+        max(0, reader.monotonic_ns() - info.observed_ns) / 1e6
+        if available and info.observed_ns
+        else None
+    )
+    entries = []
+    for hazard in reader.hazards[: info.count] if available else ():
+        flags = HazardFlags(hazard.flags)
+        entries.append(
+            {
+                "id": "npc:" + str(hazard.instance_id),
+                "instance_id": hazard.instance_id,
+                "runtime_id": hazard.runtime_id,
+                "config_id": hazard.config_id if hazard.config_id >= 0 else None,
+                "kind": kinds[hazard.kind] if hazard.kind < len(kinds) else "unknown",
+                "variant": variants[hazard.variant] if hazard.variant < len(variants) else None,
+                "identity_validated": bool(flags & HazardFlags.IDENTITY),
+                "validated": bool(flags & HazardFlags.MECHANICS_VALIDATED),
+                "present": True,
+                "presence_scope": "loaded_npc_registry",
+                "same_world": True if flags & HazardFlags.TILE else None,
+                "active": None,
+                "dangerous": None,
+                "tile": (
+                    {"x": hazard.tile.x, "y": hazard.tile.y, "plane": hazard.tile.plane}
+                    if flags & HazardFlags.TILE
+                    else None
+                ),
+                "tile_reason": reason_name(hazard.tile_reason),
+                "actor_footprint_size": (
+                    hazard.footprint_size if flags & HazardFlags.FOOTPRINT else None
+                ),
+                "area": None,
+                "start_client_tick": (
+                    hazard.start_client_tick if flags & HazardFlags.CLIENT_START else None
+                ),
+                "end_client_tick": (
+                    hazard.end_client_tick if flags & HazardFlags.CLIENT_END else None
+                ),
+                "timing_reason": reason_name(hazard.timing_reason),
+                "role": None,
+                "role_reason": reason_name(hazard.role_reason),
+                "age_ms": age_ms,
+                "reason": reason_name(hazard.reason),
+                "source": "native_memory",
+            }
+        )
+    return {
+        "status": PLAYER_HIT_STATUS_NAMES.get(info.status, "unavailable"),
+        "entries": entries,
+        "complete": False,
+        "scope": "loaded_npc_registry_candidates",
+        "observed_channels": info.observed_channels,
+        "complete_channels": info.complete_channels,
+        "unmapped_channels": info.unmapped_channels,
+        "candidate_count": info.candidate_count,
+        "dropped_count": info.dropped_count,
+        "unlocated_count": info.unlocated_count,
+        "sample_sequence": info.sample_sequence,
+        "observed_ns": info.observed_ns,
+        "pid": info.pid,
+        "process_creation_time": info.process_creation_time,
+        "scene_epoch": info.scene_epoch,
+        "age_ms": age_ms,
+        "source": "native_memory",
+        "reason": reason_name(info.reason),
     }
 
 
@@ -382,7 +557,9 @@ class NativeTelemetry:
         )
         record["ui"], record["action_bar"] = interface_records(self.reader)
         record["combat"] = combat_record(self.reader)
+        record["player"] = spatial_actor_record(self.reader, self.reader.spatial.player)
         record["player_hit_splats"] = player_hit_splats
+        record["hazards"] = hazards_record(self.reader)
         # Observations from earlier frames keep their own process and timestamp.
         record["hit_splats"] = {
             "status": "unavailable",
@@ -448,6 +625,7 @@ class NativeTelemetry:
             "read_duration_ms": native["sample_duration_ms"],
             "position": position,
             "combat": combat_record(reader),
+            "player": spatial_actor_record(reader, reader.spatial.player),
             "player_hit_splats": player_hit_splats,
             "freshness": {
                 "observed_at_ms": info.timestamp_ns // 1_000_000,
@@ -518,4 +696,5 @@ class NativeTelemetry:
         record["ui"], record["action_bar"] = interface_records(reader)
         if include_raw:
             record["raw_variables"] = raw_variables
+        record["hazards"] = hazards_record(reader)
         return extend_record(record, reader)

@@ -13,6 +13,7 @@
 #include "clock.h"
 #include "frame.h"
 #include "interface.h"
+#include "hazards.h"
 #include "inventory.h"
 #include "memory.h"
 #include "position.h"
@@ -68,6 +69,9 @@ int context_reserve_buckets(rs3_context *context, uint64_t bucket_count)
 /** Copies a frame. Only the populated array prefixes are copied. */
 static void copy_frame(rs3_snapshot *destination, const rs3_snapshot *source)
 {
+    destination->hazard_info = source->hazard_info;
+    memcpy(destination->hazards, source->hazards,
+           source->hazard_info.count * sizeof(rs3_hazard));
     uint32_t item_count =
         source->inventory_info.backpack_count + source->inventory_info.equipment_count;
     destination->info = source->info;
@@ -80,6 +84,9 @@ static void copy_frame(rs3_snapshot *destination, const rs3_snapshot *source)
     destination->profile = source->profile;
     destination->position = source->position;
     destination->combat = source->combat;
+    destination->spatial = source->spatial;
+    memcpy(destination->npc_spatial, source->npc_spatial,
+           source->spatial.npc_count * sizeof(rs3_actor_spatial));
     destination->player_hit_info = source->player_hit_info;
     destination->player_actor_address = source->player_actor_address;
     memcpy(destination->player_hits, source->player_hits,
@@ -98,6 +105,8 @@ static void copy_frame(rs3_snapshot *destination, const rs3_snapshot *source)
 static void clear_unavailable_frame(rs3_context *context, rs3_snapshot *snapshot)
 {
     snapshot->info.status = RS3_UNAVAILABLE;
+    hazards_commit(context, snapshot, 0);
+    snapshot->hazard_info.reason = context->failure_reason;
     snapshot->info.reason = context->failure_reason;
     snapshot->info.npc_count = 0;
     snapshot->info.hit_count = 0;
@@ -116,6 +125,9 @@ static void clear_unavailable_frame(rs3_context *context, rs3_snapshot *snapshot
     memset(&snapshot->combat, 0, sizeof snapshot->combat);
     snapshot->combat.status = RS3_UNAVAILABLE;
     snapshot->combat.reason = context->failure_reason;
+    memset(&snapshot->spatial, 0, sizeof snapshot->spatial);
+    snapshot->spatial.status = RS3_UNAVAILABLE;
+    snapshot->spatial.reason = context->failure_reason;
 
     memset(&snapshot->player_hit_info, 0, sizeof snapshot->player_hit_info);
     snapshot->player_hit_info.status = RS3_UNAVAILABLE;
@@ -168,6 +180,7 @@ static void sample_and_publish(rs3_context *context, rs3_snapshot *snapshot)
     interface_clear(snapshot);
     snapshot->position = (rs3_position){0};
     memset(&snapshot->combat, 0, sizeof snapshot->combat);
+    memset(&snapshot->spatial, 0, sizeof snapshot->spatial);
     memset(&snapshot->player_hit_info, 0, sizeof snapshot->player_hit_info);
     snapshot->player_actor_address = 0;
     memset(&snapshot->inventory_info, 0, sizeof snapshot->inventory_info);

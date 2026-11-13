@@ -61,6 +61,27 @@ int32_t rs3_snapshot_info(const rs3_snapshot *snapshot, rs3_info *out, uint32_t 
     return copy_record(&snapshot->info, sizeof *out, out, out_size);
 }
 
+int32_t rs3_snapshot_hazard_info(const rs3_snapshot *snapshot, rs3_hazard_info *out,
+                                uint32_t out_size)
+{
+    if (snapshot == NULL || out == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    return copy_record(&snapshot->hazard_info, sizeof *out, out, out_size);
+}
+
+int32_t rs3_snapshot_hazards(const rs3_snapshot *snapshot, rs3_hazard *out, uint32_t capacity,
+                            uint32_t *required)
+{
+    if (snapshot == NULL || required == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    return copy_records(snapshot->hazards, snapshot->hazard_info.count, sizeof *out, out,
+                        capacity, required);
+}
+
 const char *rs3_snapshot_client_version(const rs3_snapshot *snapshot)
 {
     return snapshot != NULL && snapshot->profile != NULL ? snapshot->profile->version : "";
@@ -82,6 +103,26 @@ int32_t rs3_snapshot_position(const rs3_snapshot *snapshot, rs3_position *out, u
         return RS3_E_ARGUMENT;
     }
     return copy_record(&snapshot->position, sizeof *out, out, out_size);
+}
+
+int32_t rs3_snapshot_spatial(const rs3_snapshot *snapshot, rs3_spatial_info *out, uint32_t out_size)
+{
+    if (snapshot == NULL || out == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    return copy_record(&snapshot->spatial, sizeof *out, out, out_size);
+}
+
+int32_t rs3_snapshot_npc_spatial(const rs3_snapshot *snapshot, rs3_actor_spatial *out,
+                                 uint32_t capacity, uint32_t *required)
+{
+    if (snapshot == NULL || required == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    return copy_records(snapshot->npc_spatial, snapshot->spatial.npc_count, sizeof *out,
+                        out, capacity, required);
 }
 
 int32_t rs3_snapshot_combat(const rs3_snapshot *snapshot, rs3_combat_state *out, uint32_t out_size)

@@ -23,6 +23,8 @@
 #include "rs3/rs3.h"
 #include "rs3/combat.h"
 #include "rs3/interface.h"
+#include "rs3/spatial.h"
+#include "rs3/hazards.h"
 #include "profile.h"
 
 /** Capacity of the hit observation queue. */
@@ -54,6 +56,8 @@ typedef struct inventory_state inventory_state;
 /** One published frame. Array prefixes are defined by the counts in info and inventory_info. */
 struct rs3_snapshot
 {
+    rs3_hazard_info hazard_info;
+    rs3_hazard hazards[RS3_MAX_HAZARDS];
     rs3_info info;
     const client_profile *profile;
     rs3_player player;
@@ -62,6 +66,8 @@ struct rs3_snapshot
     rs3_action_bar_slot action_bar[RS3_MAX_ACTION_BAR_SLOTS];
     rs3_position position;
     rs3_combat_state combat;
+    rs3_spatial_info spatial;
+    rs3_actor_spatial npc_spatial[RS3_MAX_NPCS];
     rs3_player_hit_info player_hit_info;
     rs3_hit player_hits[MAX_HITS_PER_RING];         /**< Prefix of player_hit_info.hit_count. */
     uint64_t player_actor_address;                  /**< Verified local actor, or 0. */
