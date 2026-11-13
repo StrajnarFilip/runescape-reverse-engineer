@@ -1,0 +1,290 @@
+{
+  "schema_version": 1,
+  "track": "P6",
+  "date": "2026-11-13",
+  "status": "waiting_for_phase_5_live_capture",
+  "automatic_flick_ready": false,
+  "prayer_check_deadline_validated": false,
+  "input_sent_by_calibration": false,
+  "catalogue": "profiles/telos_attacks.json",
+  "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+  "capture_sources": [
+    {
+      "capture_sha256": "f998a1f4903e8e7eef08471bbd8f3e81e9769b44cfda626708dac8b94314b66c",
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "annotation_reference": "docs/validation/telos-prayer-calibration-2026-11-10.json: two user-labelled 300% phase-1 attempts",
+      "phase_sources": [
+        "user"
+      ],
+      "unique_telos_cues": 17,
+      "npc_action_events_lost": 0,
+      "player_hit_events_lost": null
+    },
+    {
+      "capture_sha256": "37c9c4c99481db3f73bcb355174523cb7b2aba02a7815fd1f9e243004410af23",
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "annotation_reference": "docs/validation/telos-prayer-calibration-2026-11-10.json: two user-labelled 300% phase-1 attempts",
+      "phase_sources": [
+        "user"
+      ],
+      "unique_telos_cues": 18,
+      "npc_action_events_lost": 0,
+      "player_hit_events_lost": 0
+    },
+    {
+      "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "annotation_reference": {
+        "commit": "754b7cc86df6904d04f4ef4e9d82da8e02f8d2fe",
+        "path": "docs/validation/encounter-validation.json",
+        "sha256": "3780c957e22118dea8d18d2119b4409a5bbccc8452721003ab0142d18a57ff89",
+        "guards": [
+          "exact original executable SHA-256",
+          "exactly one active Telos config 22891",
+          "VARP 6359 bit 29 set",
+          "stage 0..3 only",
+          "enrage 300 or 500"
+        ],
+        "boundary_exclusion_ms": 100
+      },
+      "phase_sources": [
+        "P2_live_report"
+      ],
+      "unique_telos_cues": 68,
+      "npc_action_events_lost": 0,
+      "player_hit_events_lost": 0
+    },
+    {
+      "capture_sha256": "5ce4223c413a357b71b082acd9718d3083eb9e3d4e4e1a4c5fff4d67d6039d29",
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "annotation_reference": {
+        "user_label": "300% manual practice; reached second font of phase 4; manual prayers",
+        "phase_intervals": "not labelled; cues remain unassigned",
+        "reason": "Recorder lacks VARP 6359 active-encounter guard; no per-phase user timestamps"
+      },
+      "phase_sources": [],
+      "unique_telos_cues": 61,
+      "npc_action_events_lost": 0,
+      "player_hit_events_lost": 0
+    }
+  ],
+  "phase_300_coverage": [
+    {
+      "phase": 1,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sample_count": 47,
+      "observed_sequences": [
+        28929,
+        28931,
+        28932,
+        28935,
+        28938,
+        28962,
+        28963
+      ],
+      "unlabelled_sequences": [
+        28929,
+        28931,
+        28932,
+        28962,
+        28963
+      ],
+      "complete": false,
+      "status": "observed_partial"
+    },
+    {
+      "phase": 2,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sample_count": 13,
+      "observed_sequences": [
+        28929,
+        28930,
+        28959,
+        28963
+      ],
+      "unlabelled_sequences": [
+        28929,
+        28930,
+        28959,
+        28963
+      ],
+      "complete": false,
+      "status": "observed_partial"
+    },
+    {
+      "phase": 3,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sample_count": 10,
+      "observed_sequences": [
+        28930,
+        28959,
+        28963
+      ],
+      "unlabelled_sequences": [
+        28930,
+        28959,
+        28963
+      ],
+      "complete": false,
+      "status": "observed_partial"
+    },
+    {
+      "phase": 4,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sample_count": 5,
+      "observed_sequences": [
+        28929,
+        28930,
+        28931
+      ],
+      "unlabelled_sequences": [
+        28929,
+        28930,
+        28931
+      ],
+      "complete": false,
+      "status": "observed_partial"
+    },
+    {
+      "phase": 5,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sample_count": 0,
+      "observed_sequences": [],
+      "unlabelled_sequences": [],
+      "complete": false,
+      "status": "not_captured"
+    }
+  ],
+  "enrage_500_sequences": [
+    28929,
+    28930,
+    28931,
+    28932,
+    28935,
+    28938,
+    28963
+  ],
+  "unassigned_sequences": {
+    "28962": 3,
+    "28963": 8,
+    "28929": 23,
+    "28931": 3,
+    "28932": 1,
+    "28930": 3,
+    "28959": 14,
+    "28935": 2,
+    "28928": 3,
+    "28938": 2,
+    "28966": 2
+  },
+  "phase_annotation_reference": {
+    "commit": "754b7cc86df6904d04f4ef4e9d82da8e02f8d2fe",
+    "path": "docs/validation/encounter-validation.json",
+    "sha256": "3780c957e22118dea8d18d2119b4409a5bbccc8452721003ab0142d18a57ff89",
+    "guards": [
+      "exact original executable SHA-256",
+      "exactly one active Telos config 22891",
+      "VARP 6359 bit 29 set",
+      "stage 0..3 only",
+      "enrage 300 or 500"
+    ],
+    "boundary_exclusion_ms": 100
+  },
+  "notes": [
+    "P2 raw captures predate semantic decoding; only the exact validated original-profile guards from the committed P2 report were applied as offline annotations.",
+    "Old melee labels apply only to the isolated phase-1 melee context, not to neutral context rows from P2.",
+    "No raw gameplay records, account names or process memory are published.",
+    "Event counts are unique cues, not polling sample counts.",
+    "No phase-5 capture; no complete incoming-attack or protection-deadline calibration."
+  ],
+  "live_session": {
+    "capture_sha256": "5ce4223c413a357b71b082acd9718d3083eb9e3d4e4e1a4c5fff4d67d6039d29",
+    "enrage_user_label": 300,
+    "furthest_phase_user_label": 4,
+    "furthest_mechanic_user_label": "second font",
+    "prayers": "manual Ctrl+function-key bindings",
+    "duration_seconds": 365.246,
+    "summary": {
+      "retained_rows": 626,
+      "cue_hit_pairing_scope": "disabled_attacker_unidentified",
+      "player_hit_data_present": true,
+      "executable_sha256_values": [
+        "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45"
+      ],
+      "observed_curse_raw_values": [
+        0,
+        33,
+        161,
+        512,
+        545,
+        262177
+      ],
+      "action_sequence_counts": {
+        "28962": 1,
+        "28929": 23,
+        "28931": 3,
+        "28932": 1,
+        "28963": 7,
+        "28930": 3,
+        "28959": 14,
+        "28935": 2,
+        "28928": 3,
+        "28938": 2,
+        "28966": 2
+      },
+      "player_hit_events": 194,
+      "hit_type_counts": {
+        "133": 68,
+        "482": 34,
+        "144": 22,
+        "139": 9,
+        "143": 61
+      },
+      "cue_to_observed_damage_delay": {
+        "count": 0
+      },
+      "cue_to_observed_miss_delay": {
+        "count": 0
+      },
+      "manual_key_events": 13,
+      "sampled_key_to_overhead_delay": {
+        "count": 10,
+        "min_ms": 200.479,
+        "median_ms": 334.505,
+        "max_ms": 731.449
+      },
+      "npc_action_events_lost": 0,
+      "player_hit_events_lost": 0
+    },
+    "raw_stage_poll_counts": {
+      "0": 75,
+      "1": 74,
+      "2": 115,
+      "3": 187
+    },
+    "per_phase_assignment_confirmed": false,
+    "raw_stage_reason": "Native stage is retained as a lead. No 6359 active guard or per-phase user time labels in this recorder format; all new cues remain unassigned.",
+    "phase_5_captured": false
+  },
+  "checks": {
+    "windows_x64_release_build": "passed",
+    "ctest_suites_passed": 10,
+    "python_tests_passed": 91,
+    "native_structures_changed": false
+  }
+}
