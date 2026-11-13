@@ -34,6 +34,7 @@ PHASE_MASK = 7
 OPENING_AUTOS = 7
 LOOP_AUTOS = 3
 HOLD_STILL_PREP_AUTOS = 2
+HOLD_STILL_FORECAST_WINDOW_NS = 2_400_000_000
 PHASE_TWO_HP = 300_000
 PHASE_THREE_HP = 200_000
 PHASE_FOUR_HP = 100_000
@@ -67,6 +68,7 @@ class PhaseOne:
 
     def __init__(self):
         self.autos = 0
+        self.last_auto_ns = None
         self.opening = True
         self.expected = TENDRILS
         self.special = None
@@ -91,6 +93,7 @@ class PhaseOne:
             sequence = action["action_sequence"]
             if sequence == MELEE_AUTO_SEQUENCE:
                 self.autos += 1
+                self.last_auto_ns = action["observed_ns"]
             elif sequence == TENDRILS_RELEASE and self.special == TENDRILS:
                 self.autos += 1
                 self.special = None
@@ -114,7 +117,7 @@ class PhaseOne:
             if (cooldowns.get(ability) or 0) > 0:
                 self.cast_result = (ability, True)
                 self.pending = None
-            elif now >= deadline or (self.special == HOLD_STILL and ability != "Freedom"):
+            elif now >= deadline or (self.special == HOLD_STILL and ability == "Anticipation"):
                 self.cast_result = (ability, False)
                 self.pending = None
             else:
@@ -141,6 +144,8 @@ class PhaseOne:
         if (
             self.expected == HOLD_STILL
             and self.autos == HOLD_STILL_PREP_AUTOS
+            and self.last_auto_ns is not None
+            and 0 <= now - self.last_auto_ns < HOLD_STILL_FORECAST_WINDOW_NS
             and prayer == Prayer.MELEE
             and "Anticipation" in cooldowns
             and not cooldowns["Anticipation"]

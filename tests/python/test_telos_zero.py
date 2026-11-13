@@ -72,6 +72,23 @@ class PhaseOneTests(unittest.TestCase):
         phase.observe([event(2, RELEASE)])
         self.assertIsNone(phase.next_action(2 * SECOND_NS, timers, 0, Prayer.MELEE))
 
+    def test_stale_auto_count_cannot_trigger_anticipation(self):
+        phase = PhaseOne()
+        phase.observe([event(1, UPPERCUT), event(2, AUTO), event(3, AUTO)])
+        self.assertIsNone(phase.next_action(6 * SECOND_NS, {"Anticipation": None}, 0, Prayer.MELEE))
+
+    def test_hold_still_surge_keeps_its_acknowledgement_window(self):
+        phase = PhaseOne()
+        phase.observe([event(1, HOLD_STILL)])
+        now = 4 * SECOND_NS
+        action = phase.next_action(now, {"Surge": 0}, 0, Prayer.MELEE)
+        self.assertEqual(action.ability, "Surge")
+        phase.sent(action, now)
+        self.assertIsNone(phase.next_action(now + 1, {"Surge": 0}, 0, Prayer.MELEE))
+        self.assertIsNone(phase.cast_result)
+        phase.next_action(now + 2, {"Surge": 10000}, 0, Prayer.MELEE)
+        self.assertEqual(phase.cast_result, ("Surge", True))
+
 
 class PracticeRunTests(unittest.TestCase):
     def test_phase_and_font_candidates_require_matching_health(self):

@@ -17,6 +17,8 @@ The next Tendrils after Hold Still also followed two separate `28929` applicatio
 
 The same P1 melee and special IDs were seen in the isolated 300% captures. The 0% client-to-hitmark intervals are observations. The exact safe movement and prayer switching times still need separate trials. [300% calibration report](../../../docs/validation/telos-prayer-calibration-2026-11-10.json)
 
+In the defensive capture, Hold Still began about 1.29 seconds after the second separately animated melee auto following Uppercut. The script expires that Anticipation forecast 2.4 seconds after the second auto. This is a practice trial cutoff for stale counts. The actual Hold Still animation can still trigger Freedom after the forecast expires.
+
 ## Replay and practice controller
 
 From the repository root in PowerShell, set `$telosTrace` to an existing local capture made with `rs3_reader.telos_prayer`. To record later phases without input, run the script without `--port`.
