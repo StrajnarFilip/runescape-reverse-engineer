@@ -12,7 +12,7 @@ import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Optional, Tuple
+from typing import Mapping, Optional
 
 from .intents import ActionLane, Evidence, Intent, Priority, SetPrayer
 from .world_state import Observation, WorldState, freeze
@@ -122,6 +122,7 @@ class NativePrayerPlanner:
         self.planner = Planner(settings, library)
 
     def step(self, frame, threats):
+        """Convert plain mappings to the checked C ABI and return its decision."""
         decision = self.planner.step(
             self.Frame(**frame), [self.Threat(**threat) for threat in threats]
         )
@@ -143,12 +144,15 @@ class NativePrayerPlanner:
         }
 
     def note_sent(self, command_id, sent_ns):
+        """Record accepted input only; C still awaits an observed overhead."""
         self.planner.note_sent(command_id, sent_ns)
 
     def reset(self):
+        """Reset the underlying planner after explicit re-observation."""
         self.planner.reset()
 
     def close(self):
+        """Release the owned C planner handle."""
         self.planner.close()
 
 
