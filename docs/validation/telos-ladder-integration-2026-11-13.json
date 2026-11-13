@@ -1,0 +1,251 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-13",
+  "track": "L",
+  "status": "in_progress",
+  "stage": "serial_integration_and_shadow_preparation",
+  "target_branch": "telos/integration",
+  "integration_baseline": "30589759d4d278dc7cdc16f7137035c08a33e747",
+  "integrated_source_checkpoint": "44843670ac1c5f12088fb4b0b057a95db208bf6c",
+  "integrated_modules": {
+    "S0a": {
+      "source_commit": "f91de994673075c573e4775871e42a795be1c019",
+      "brief_status": "done"
+    },
+    "S0b": {
+      "source_commit": "d9e496c9bbe0952a9fd88f4981c5479937f469c4",
+      "brief_status": "done"
+    },
+    "P1": {
+      "source_commit": "5dd80c019d347d11f6de230b9a88495c3cb93e35",
+      "brief_status": "waiting for live session"
+    },
+    "P2": {
+      "source_commit": "754b7cc86df6904d04f4ef4e9d82da8e02f8d2fe",
+      "brief_status": "waiting for live session"
+    },
+    "P3": {
+      "source_commit": "316a9660a0c10778a30ced75528a875df19705a7",
+      "brief_status": "waiting for live session"
+    },
+    "P4": {
+      "source_commit": "d8d698f2699c1f8969ffb74543b7b7083d580e81",
+      "brief_status": "done"
+    },
+    "P5": {
+      "source_commit": "b0cff8fbadd1d466723fb4853daf86e9726592c9",
+      "brief_status": "done"
+    },
+    "P6": {
+      "source_commit": "566c50e80b15f3ffdcba471432d853346ce530ac",
+      "brief_status": "waiting for live session"
+    },
+    "A1": {
+      "source_commit": "8f15305afb04efdd06f7e4ab69f1b3893c1a6a7f",
+      "brief_status": "done"
+    },
+    "A2": {
+      "source_commit": "5612b6dc6364d541de23485e924b411bab3eb4c0",
+      "brief_status": "waiting for live session"
+    },
+    "D1": {
+      "source_commit": "45be6fa79101baaeefa0d84f3309736be61c4601",
+      "brief_status": "done"
+    },
+    "D2": {
+      "source_commit": "1c6d5b8111b704a1b82993cc5c25f71153fabdd0",
+      "brief_status": "waiting for live session"
+    },
+    "D3": {
+      "source_commit": "758e0cee34b55dbed6e1abde1305c61d1010835f",
+      "brief_status": "done"
+    },
+    "D4": {
+      "source_commit": "bf070378c7a770161e46f43a3f1261513a2b0765",
+      "brief_status": "done"
+    },
+    "D5": {
+      "source_commit": "eea96d2b39bc26b722a8e6b9df67e1f87b9a8e0e",
+      "brief_status": "waiting for live session"
+    },
+    "D6": {
+      "source_commit": "d8f37bd3a9b24df8448a4c4fa52ba485fbabfb24",
+      "brief_status": "done"
+    },
+    "D7": {
+      "source_commit": "0545a099bfe8a1c2e55a43c72a499d4248f60fba",
+      "brief_status": "waiting for live session"
+    },
+    "D8": {
+      "source_commit": "f8653dafd4be300517a252c78227916cf2d6a8c8",
+      "brief_status": "done"
+    }
+  },
+  "integration_changes": [
+    "Preserve the union of native module stages, snapshot storage, clear/copy paths and additive accessors.",
+    "Combine Python ctypes layouts, ABI-size assertions, reader storage and telemetry registrations.",
+    "Install all eight public headers, including the effects and interface headers.",
+    "Preserve P3 effects when P1 player telemetry is serialized.",
+    "Publish the native NPC-action queue exactly once per sample, including unavailable frames, with original event identity/time and explicit losses.",
+    "Compose all six producers with disabled D6 arbitration and one RecordingActuator.",
+    "Update D1 before D2/D3 and provide the same-frame encounter state without losing producer callbacks."
+  ],
+  "excluded_work": {
+    "track": "S0b",
+    "included_foundation_commit": "d9e496c9bbe0952a9fd88f4981c5479937f469c4",
+    "reason": "Later zero-enrage controller, screenshot helpers and mouse-protocol experiments are a separate control path requiring review.",
+    "later_experiments_merged": false
+  },
+  "checks": {
+    "windows_x64_release_configure": "passed_existing_Ninja_Zig_toolchain",
+    "windows_x64_release_build": "passed",
+    "ctest_targets_passed": 15,
+    "ctest_targets_failed": 0,
+    "python_tests_passed": 271,
+    "d8_new_composition_cases": 4,
+    "d8_isolated_owner_tests": {
+      "run": 99,
+      "skipped_local_capture_only": 1
+    },
+    "all_integrated_python_tests_skipped": 0,
+    "firmware_host_stub_test": "Passed with Zig c++; the full final CTest run included all 271 Python tests without skips. This does not validate a physical Arduino board.",
+    "installation": "passed_with_all_eight_public_headers",
+    "telemetry_queue_wiring": "Synthetic single-drain/unavailable-frame regression passed; original event identity and application-stamp availability were preserved.",
+    "new_telemetry_function_black_check": "passed"
+  },
+  "historical_full_stack_replays": [
+    {
+      "capture": "p4-hazards-manual-2026-11-13-01.jsonl",
+      "exit_code": 0,
+      "dispatch_enabled": false,
+      "input_sent": false,
+      "kill_reports": [],
+      "kind": "session_report",
+      "missing_producers": [],
+      "mode": "shadow",
+      "samples": 1,
+      "schema_version": 1,
+      "shadow_arbitration": true,
+      "stop_reason": "event_queue_loss_or_unknown:inventory_changes",
+      "verified_deaths": 0,
+      "verified_kills": 0,
+      "watchdog_trips": [
+        "event_queue_loss_or_unknown:inventory_changes"
+      ],
+      "interpretation": "Font-specific historical recording omitted the inventory queue. Its loss count is unknown, not evidence of an actual loss. No missing channel was backfilled."
+    },
+    {
+      "capture": "p2-encounter-manual-2026-11-11-01.jsonl",
+      "exit_code": 0,
+      "dispatch_enabled": false,
+      "input_sent": false,
+      "kill_reports": [],
+      "kind": "session_report",
+      "missing_producers": [],
+      "mode": "shadow",
+      "samples": 336,
+      "schema_version": 1,
+      "shadow_arbitration": true,
+      "stop_reason": "encounter_evidence_gap:encounter",
+      "verified_deaths": 0,
+      "verified_kills": 0,
+      "watchdog_trips": [
+        "encounter_evidence_gap:encounter"
+      ],
+      "encounter_reasons_at_stop": [
+        "phase_unknown",
+        "telos_not_observed_or_ambiguous",
+        "event_sequence_gap",
+        "incoming_attack_coverage_uncalibrated"
+      ],
+      "interpretation": "Repeated replay reproduced the same evidence-gap stop. This is not a clean shadow kill."
+    }
+  ],
+  "native_baseline": {
+    "worker_hz": 100,
+    "approximate_output_hz": 20,
+    "output_samples": 30,
+    "frame_statuses": [
+      "partial"
+    ],
+    "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+    "distinct_process_identities": 1,
+    "all_queue_channels_present": true,
+    "queue_losses": {
+      "npc_actions": 0,
+      "npc_hits": 0,
+      "player_hits": 0,
+      "inventory": 0
+    },
+    "new_snapshot_fields": {
+      "player": true,
+      "encounter": true,
+      "game_tick": true,
+      "hazards": true,
+      "ui": true,
+      "action_bar": true,
+      "npc_action_events": true
+    },
+    "native_sample_duration_median_ms": 3.932,
+    "native_sample_duration_maximum_ms": 5.705,
+    "supervisor_stop_reason": "window_focus_lost_or_unknown",
+    "limitation": "Thirty acquisition samples only; the supervisor stopped on foreground ownership and did not accept thirty clean frames. This is not a combat performance benchmark."
+  },
+  "physical_stop_check": {
+    "kill_key": "Ctrl+Shift+F12",
+    "windows_hotkey_received": true,
+    "game_focused_at_key": true,
+    "user_confirmed_done": true,
+    "supervisor_samples": 93,
+    "supervisor_stop_reason": "kill_switch",
+    "recorded_acceptances": 0,
+    "dispatch_enabled": false,
+    "input_sent": false,
+    "is_combat_rung_trial": false,
+    "scope": "User pressed the registered Windows hotkey; the read-only helper latched the supervisor stop and closed the recording backend. No held hardware keys or combat actions were tested.",
+    "previous_pause_attempt": "Expired without foreground/key evidence; not counted as passed.",
+    "future_live_cli_option": "--kill-key Ctrl+Shift+F12"
+  },
+  "runtime_scope": {
+    "selected_foundation_profile": "Compatibility Mode / 6ada3f59-1a86000",
+    "selected_foundation_sha256": "7a60c69fcf11eda42a328732721f5e89e1c85a6bc919038ff3451d4643e42dbf",
+    "foundation_movement_plus_hit_validation": "Completed in docs/validation/profile-unification.json: 53 tiles, 19 player hit events and zero player-hit losses in one 75-second session.",
+    "active_smoke_profile": "Original 951-3",
+    "p1_compatibility_pose_port": "pending",
+    "original_legacy_position_for_a2": "not_populated_by_the_P1_pose_reader",
+    "cross_profile_attack_or_encounter_validation": false
+  },
+  "readiness": {
+    "p6_rows": 28,
+    "p6_timing_validated_rows": 0,
+    "automatic_flick_ready": false,
+    "server_tick_mapped": false,
+    "rotation_profiles_live_validated": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    "trip_profile_configured": false,
+    "remaining_dependencies": [
+      "Align the selected runtime with P1 poses, legacy movement position and exact-profile encounter/attack semantics.",
+      "Map server-tick identity, player target identity and complete ability castability.",
+      "Measure exact-scope protection windows, cycle anchors and complete incoming coverage; four-tick cadence is not a measured deadline.",
+      "Calibrate intended-account rotation constraints and bindings.",
+      "Provide current minimap/view geometry, route validation and serialized pointer dispatch before movement.",
+      "Map instance/result/control postconditions and configure trip routes/presets/policy before unattended repetition.",
+      "Collect phase-5 mechanics and beams in a later supervised session."
+    ],
+    "strategy_scope": "Earlier-phase beam/rock research is deferred at the user request. The intended rotation remains a strategy assumption, not hazard-completeness evidence."
+  },
+  "ladder": {
+    "rung_1": "preparation_only_not_passed",
+    "clean_integrated_manual_combat_runs": 0,
+    "verified_kills_in_this_validation": 0,
+    "rungs_2_through_7_enabled": false,
+    "automatic_input_enabled": false
+  },
+  "input_sent": false,
+  "raw_gameplay_committed": false
+}

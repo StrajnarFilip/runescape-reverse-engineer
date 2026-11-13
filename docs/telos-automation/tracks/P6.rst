@@ -115,7 +115,8 @@ Requests
 * P2/S0b: original-profile observations do not validate attack semantics or
   phase mapping for a different executable hash. New runtime profiles require
   labelled captures before catalogue reuse.
-* P2/L: include guarded encounter telemetry in the recorder after serial
-  integration, or obtain explicit bounded manual phase callouts. The current
-  integration branch lacks P2's semantic accessor. Packed stage alone is not
-  a replacement for the documented encounter guard.
+* P2/L integration update, 2026-11-13: P2's guarded semantic accessor is now
+  merged and published by native telemetry. Its original-profile phase 1-4
+  scope remains unchanged; phase 5 and Compatibility Mode need evidence.
+  Use these guarded observations or explicit bounded manual phase callouts
+  in later recordings. Packed stage alone is not a replacement for the guard.
