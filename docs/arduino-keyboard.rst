@@ -41,9 +41,11 @@ Command             Effect
 ``PRESS <key>``     Hold a key. A repeated press of a held key has no effect.
 ``RELEASE <key>``   Release a key. A release of an idle key has no effect.
 ``TAP <key>``       Press and immediately release a key.
-``RELEASE_ALL``     Release all keys and modifiers held by this sketch.
+``RELEASE_ALL``     Release all keys, modifiers and mouse buttons.
 ``MOVE <dx> <dy>``  Send a relative mouse report. Positive is right or down.
 ``CLICK <button>``  Click the left (``L``), right (``R``) or middle (``M``) button.
+``DOWN <button>``   Hold a mouse button.
+``UP <button>``     Release a mouse button.
 ``WHEEL <steps>``   Scroll up for positive values and down for negative values.
 =================== =================================================================
 
@@ -57,7 +59,7 @@ a NUL byte. ``ERR HELD`` means a tap was rejected because that key was already
 held. ``ERR ROLLOVER`` means all six regular key slots were occupied.
 ``ERR MOUSE`` signals an invalid mouse button or delta. The
 supported usage ranges are ``04`` through ``73`` for regular keys and ``E0``
-through ``E7`` for modifiers. The sketch also releases held keys when it sees
+through ``E7`` for modifiers. The sketch releases held input when it sees
 DTR go low and discards any unfinished command. Send ``RELEASE_ALL`` before
 closing the port to explicitly clear held keys.
 
@@ -87,6 +89,7 @@ observed Windows cursor position to correct relative HID movement.
     python work/game_console.py --port COM8 move $frame 250 300
     python work/game_console.py --port COM8 click $frame 250 300 --button R
     python work/game_console.py --port COM8 wheel $frame 250 300 -2
+    python work/game_console.py --port COM8 drag $frame 250 300 350 450
     python work/game_console.py --port COM8 key Escape
 
 Use the port assigned after flashing. Coordinates are pixels in the saved PNG.

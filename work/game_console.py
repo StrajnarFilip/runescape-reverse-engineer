@@ -147,6 +147,10 @@ def perform_action(window, args):
         chord = parse_chord(args.chord)
     else:
         bounds, target = frame_target(window, args.frame, args.x, args.y)
+        if args.action == "drag":
+            end_bounds, end = frame_target(window, args.frame, args.end_x, args.end_y)
+            if end_bounds != bounds:
+                raise RuntimeError("RuneScape moved while mapping the drag endpoints")
     board = ArduinoBackend(args.port)
     try:
         if args.action == "key":
@@ -157,6 +161,10 @@ def perform_action(window, args):
                 board.command(f"CLICK {args.button}", window.check_focus)
             elif args.action == "wheel":
                 board.command(f"WHEEL {args.steps}", window.check_focus)
+            elif args.action == "drag":
+                board.command("DOWN L", window.check_focus)
+                move_pointer(board, window, bounds, end)
+                board.command("UP L", window.check_focus)
     finally:
         board.close()
 
@@ -169,7 +177,7 @@ def main():
     shot = actions.add_parser("shot", help="save a PNG of the foreground game client")
     shot.add_argument("frame")
     shot.add_argument("--height", type=int, default=1000)
-    for action in ("move", "click", "wheel"):
+    for action in ("move", "click", "wheel", "drag"):
         pointer = actions.add_parser(action)
         pointer.add_argument("frame")
         pointer.add_argument("x", type=int)
@@ -178,6 +186,9 @@ def main():
             pointer.add_argument("--button", choices=("L", "R", "M"), default="L")
         elif action == "wheel":
             pointer.add_argument("steps", type=int)
+        elif action == "drag":
+            pointer.add_argument("end_x", type=int)
+            pointer.add_argument("end_y", type=int)
     actions.add_parser("key").add_argument("chord")
     args = parser.parse_args()
     try:

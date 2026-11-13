@@ -89,6 +89,16 @@ comes from the native prayer flags. An unknown overhead is JSON null, and a
 sampled key press is recorded separately from any observed prayer transition.
 Very short key presses can fall between samples.
 
+For practice calibration, ``--shadow-trial`` logs the prototype's decisions,
+manual key presses, actual overhead changes and native player hitmarks together::
+
+    python -m rs3_reader.telos_prayer --duration 300 --enrage 0 --shadow-trial --output outputs/telos/practice.jsonl
+
+The ``shadow_updates`` field describes hypothetical switches. An acknowledgement
+in this field means the requested overhead was later observed, such as after
+a manual key press. Shadow mode sends no input and the live trial gate still
+requires validated attack coverage and protection deadlines.
+
 Rows include all observed Telos action applications, current animation, life
 points and native sample times. Compare a cue, key press, overhead transition
 and resulting hit across multiple attacks. An HP change alone cannot establish

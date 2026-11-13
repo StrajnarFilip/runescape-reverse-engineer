@@ -7,6 +7,7 @@ newer observed sample to acknowledge it.
 Usage::
 
     python -m rs3_reader.telos_prayer --duration 180 --enrage 300 --record-keys --output out.jsonl
+    python -m rs3_reader.telos_prayer --duration 180 --enrage 0 --shadow-trial --output out.jsonl
     python -m rs3_reader.telos_prayer --trial
 """
 
@@ -24,7 +25,7 @@ from pathlib import Path
 
 from .native import REPOSITORY_ROOT, NPCActionFlags, Reader, Variable, decode_text
 from .prayer import Prayer
-from .telemetry import combat_record
+from .telemetry import combat_record, player_hit_splats_record
 
 # Action sequence the user labeled as a Telos melee auto-attack.
 MELEE_AUTO_SEQUENCE = 28929
@@ -290,16 +291,19 @@ def telos_records(reader, info, npcs):
     return records
 
 
-def observe(reader, duration, output, enrage, keys, trial_window=None):
+def observe(reader, duration, output, enrage, keys, trial_window=None, *, shadow=False):
     """Write changed observations until the duration elapses. Returns completed cycles."""
 
     def send_prayer(prayer):
-        result = reader.library.rs3_set_prayer(
-            reader.snapshot, prayer, TRIAL_KEYS[prayer], PRAYER_MODIFIERS
-        )
-        reader.check_result(result)
+        if not shadow:
+            result = reader.library.rs3_set_prayer(
+                reader.snapshot, prayer, TRIAL_KEYS[prayer], PRAYER_MODIFIERS
+            )
+            reader.check_result(result)
         return reader.monotonic_ns()
 
+    # In shadow mode, real manual overhead changes may acknowledge a hypothetical
+    # input. A shadow update records the decision time without sending a chord.
     trial = PrayerTrial(send_prayer) if trial_window else None
     end_time = math.inf if duration is None else time.monotonic() + duration
     previous_state, last_write = None, 0
@@ -311,6 +315,7 @@ def observe(reader, duration, output, enrage, keys, trial_window=None):
         session = (info.pid, info.process_creation_time, combat["scene_epoch"])
         presses = keys.sample(session, reader.monotonic_ns) if keys else []
         events, lost = reader.drain_npc_action_events()
+        hits, hits_lost = reader.drain_player_hit_events()
         telos = telos_records(reader, info, npcs)
         telos_instance_ids = {npc["instance_id"] for npc in telos}
         actions = telos_actions(events, session, info.sequence, telos_instance_ids)
@@ -327,7 +332,12 @@ def observe(reader, duration, output, enrage, keys, trial_window=None):
                 default=None,
             )
             updates = trial.step(
-                target, active_prayer, info.monotonic_ns, reader.monotonic_ns(), cue_ns, lost
+                target,
+                active_prayer,
+                info.monotonic_ns,
+                reader.monotonic_ns(),
+                cue_ns,
+                lost + hits_lost,
             )
 
         tile = reader.position
@@ -343,8 +353,11 @@ def observe(reader, duration, output, enrage, keys, trial_window=None):
             "telos_raw": player.variable(Variable.TELOS_PACKED),
             "position": [tile.x, tile.y, tile.plane] if tile.valid else None,
             "telos": telos,
+            "player_hitmarks": player_hit_splats_record(reader, [], 0),
         }
-        changed = state != previous_state or actions or lost or presses or updates
+        changed = (
+            state != previous_state or actions or lost or presses or updates or hits or hits_lost
+        )
         if changed or started - last_write >= HEARTBEAT_SECONDS:
             row = dict(
                 state,
@@ -357,8 +370,14 @@ def observe(reader, duration, output, enrage, keys, trial_window=None):
                 npc_action_events_lost=lost,
                 manual_prayer_presses=presses,
             )
+            if hits or hits_lost:
+                row["player_hitmarks"] = player_hit_splats_record(reader, hits, hits_lost)
             if trial:
-                row["trial_updates"] = updates
+                if shadow:
+                    row["shadow_updates"] = updates
+                    row["input_sent"] = False
+                else:
+                    row["trial_updates"] = updates
             print(json.dumps(row), file=output, flush=True)
             previous_state, last_write = state, started
         time.sleep(max(0, started + POLL_SECONDS - time.monotonic()))
@@ -379,6 +398,11 @@ def parse_arguments():
         "--record-keys",
         action="store_true",
         help="Timestamp manual Ctrl+F3/F4 presses in RuneScape",
+    )
+    mode.add_argument(
+        "--shadow-trial",
+        action="store_true",
+        help="Log hypothetical melee/Soul Split decisions alongside real manual keys and hits",
     )
     mode.add_argument(
         "--trial",
@@ -410,7 +434,11 @@ def parse_arguments():
 def main():
     parser, arguments = parse_arguments()
     try:
-        keys = ManualPrayerKeys() if arguments.record_keys or arguments.trial else None
+        keys = (
+            ManualPrayerKeys()
+            if arguments.record_keys or arguments.trial or arguments.shadow_trial
+            else None
+        )
         with Reader(pid=arguments.pid, worker_hz=0) as reader:
             if arguments.output:
                 arguments.output.parent.mkdir(parents=True, exist_ok=True)
@@ -420,6 +448,8 @@ def main():
             with output_context as output:
                 if arguments.trial:
                     message = "Trial armed. Waiting for a fresh 28929 cue in foreground RuneScape."
+                elif arguments.shadow_trial:
+                    message = "Shadow trial: recording hypothetical decisions. Sends no game input."
                 else:
                     message = "Recording Telos prayer timing. Switch prayers manually."
                 print(message, file=sys.stderr, flush=True)
@@ -432,8 +462,9 @@ def main():
                     duration,
                     output,
                     arguments.enrage,
-                    keys if arguments.record_keys else None,
-                    keys.game_window if arguments.trial else None,
+                    keys if arguments.record_keys or arguments.shadow_trial else None,
+                    keys.game_window if arguments.trial or arguments.shadow_trial else None,
+                    shadow=arguments.shadow_trial,
                 )
                 if arguments.trial:
                     print(

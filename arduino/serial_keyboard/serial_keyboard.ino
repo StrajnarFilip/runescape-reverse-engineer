@@ -59,10 +59,11 @@ static int parseUsage(const char *argument)
     return -1;
 }
 
-static void releaseAllKeys()
+static void releaseAllInput()
 {
     Keyboard.releaseAll();
     memset(heldKeys, 0, sizeof(heldKeys));
+    Mouse.release(MOUSE_ALL);
 }
 
 static bool parseMouseDelta(const char *argument, char **end, long *value)
@@ -85,28 +86,42 @@ static const __FlashStringHelper *moveMouse(const char *argument)
     return F("OK");
 }
 
-static const __FlashStringHelper *clickMouse(const char *argument)
+static uint8_t parseMouseButton(const char *argument)
 {
-    uint8_t button;
     if (strcmp(argument, "L") == 0)
     {
-        button = MOUSE_LEFT;
+        return MOUSE_LEFT;
     }
-    else if (strcmp(argument, "R") == 0)
+    if (strcmp(argument, "R") == 0)
     {
-        button = MOUSE_RIGHT;
+        return MOUSE_RIGHT;
     }
-    else if (strcmp(argument, "M") == 0)
+    if (strcmp(argument, "M") == 0)
     {
-        button = MOUSE_MIDDLE;
+        return MOUSE_MIDDLE;
     }
-    else
+    return 0;
+}
+
+static const __FlashStringHelper *mouseButtonCommand(const char *argument, bool press, bool release)
+{
+    const uint8_t button = parseMouseButton(argument);
+    if (button == 0)
     {
         return F("ERR MOUSE");
     }
-    Mouse.press(button);
-    delay(mouseClickMillis);
-    Mouse.release(button);
+    if (press)
+    {
+        Mouse.press(button);
+    }
+    if (press && release)
+    {
+        delay(mouseClickMillis);
+    }
+    if (release)
+    {
+        Mouse.release(button);
+    }
     return F("OK");
 }
 
@@ -114,7 +129,7 @@ static const __FlashStringHelper *runCommand()
 {
     if (strcmp(commandLine, "RELEASE_ALL") == 0)
     {
-        releaseAllKeys();
+        releaseAllInput();
         return F("OK");
     }
 
@@ -132,7 +147,15 @@ static const __FlashStringHelper *runCommand()
     }
     if (strcmp(commandLine, "CLICK") == 0)
     {
-        return clickMouse(argument);
+        return mouseButtonCommand(argument, true, true);
+    }
+    if (strcmp(commandLine, "DOWN") == 0)
+    {
+        return mouseButtonCommand(argument, true, false);
+    }
+    if (strcmp(commandLine, "UP") == 0)
+    {
+        return mouseButtonCommand(argument, false, true);
     }
     if (strcmp(commandLine, "WHEEL") == 0)
     {
@@ -202,14 +225,14 @@ void setup()
     Mouse.begin();
 }
 
-/// Read serial commands while DTR is asserted and clear keyboard state on close.
+/// Read serial commands while DTR is asserted and release input on close.
 void loop()
 {
     if (!USBDevice.configured() || !Serial.dtr())
     {
         if (portWasOpen)
         {
-            releaseAllKeys();
+            releaseAllInput();
             lineLength = 0;
             discardLine = false;
             portWasOpen = false;
