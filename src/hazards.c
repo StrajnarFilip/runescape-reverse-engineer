@@ -9,7 +9,7 @@ _Static_assert(sizeof(rs3_hazard_info) == 80, "ABI hazard info");
 #define MAX_HAZARD_PLANE    3
 #define MAX_ACTOR_FOOTPRINT 64u
 
-/** Identity evidence: original-profile manual 300% capture, 2026-11-11. */
+/** Identity evidence: original-profile manual captures, 2026-11-11 and 2026-11-13. */
 typedef struct captured_npc_identity
 {
     int32_t config_id;
@@ -23,9 +23,16 @@ static const captured_npc_identity captured_identities[] = {
     {22894, "Volcanic Anima Font", RS3_HAZARD_FONT, RS3_HAZARD_VOLCANIC},
     {22895, "Corrupt Anima Font", RS3_HAZARD_FONT, RS3_HAZARD_CORRUPT},
     {22896, "Pure Anima Font", RS3_HAZARD_FONT, RS3_HAZARD_PURE},
+    {22897, "Volcanic Anima Font", RS3_HAZARD_FONT, RS3_HAZARD_VOLCANIC},
+    {22899, "Pure Anima Font", RS3_HAZARD_FONT, RS3_HAZARD_PURE},
+    {22900, "Volcanic Anima Font", RS3_HAZARD_FONT, RS3_HAZARD_VOLCANIC},
+    {22902, "Pure Anima Font", RS3_HAZARD_FONT, RS3_HAZARD_PURE},
     {22905, "Pure anima-golem", RS3_HAZARD_GOLEM, RS3_HAZARD_PURE},
+    {22905, "*Pure anima-golem", RS3_HAZARD_GOLEM, RS3_HAZARD_PURE},
     {22906, "Corrupt anima-golem", RS3_HAZARD_GOLEM, RS3_HAZARD_CORRUPT},
+    {22906, "*Corrupt anima-golem", RS3_HAZARD_GOLEM, RS3_HAZARD_CORRUPT},
     {22907, "Volcanic anima-golem", RS3_HAZARD_GOLEM, RS3_HAZARD_VOLCANIC},
+    {22907, "*Volcanic anima-golem", RS3_HAZARD_GOLEM, RS3_HAZARD_VOLCANIC},
     {22918, "Anima-golem", RS3_HAZARD_GOLEM, RS3_HAZARD_VARIANT_UNKNOWN},
 };
 

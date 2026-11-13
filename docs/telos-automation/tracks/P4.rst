@@ -1,7 +1,7 @@
 P4 - Scene hazards
 ==================
 
-:Status: waiting for live session
+:Status: done
 :Wave: 2
 :Branch: ``telos/P4``
 :Kind: C (native DLL)
@@ -56,16 +56,21 @@ into the intended account on 2026-11-13; recording was started after explicitly
 selecting that client among two processes. No gameplay capture was started on
 the other account. Recheck process identity before every subsequent capture.
 
-* First session: a manual 300% practice encounter. Reach phase 4 if possible;
-  report each font reached and the named golems seen. The native recorder must
-  retain NPC IDs, instance IDs, P1 poses, phase labels and hazard records.
-* Confirm font/golem tile positions through controlled movement and font changes.
-  The previous capture has their identities but no P1 poses. It cannot validate
-  tile positions, damage areas, font order, golem effects or lifetimes.
-* Later sessions: phase 5 golems and each beam/rock/tendril/bomb/projectile group.
-  Those scene channels still need native layouts before requesting a targeted
-  encounter for their geometry; the current NPC recorder cannot capture them.
-* Keep gameplay manual. No automatic input or prayer timing changes are enabled.
+The capture is now stopped. The user reported phase 4, second font. The 7,904
+records include 8,680 font/golem observations with native tiles and no reported
+event loss or candidate overflow. No further attempt is needed for the recorded
+NPC identity changes. The actual enrage was not supplied; the requested 300%
+practice setup is not recorded as a confirmed label.
+
+Future calibration requests, after the missing native sources are implemented:
+
+* Independently check font/golem marker positions. Current tile evidence is a
+  consistent C/P1 memory observation, not an independent visual coordinate check.
+* Label font form meanings, golem effects, and phase 5 identities in a later
+  manual encounter. The current data does not establish damage or interaction areas.
+* Capture each beam/rock/tendril/bomb/projectile group once its native container
+  is mapped. The current NPC recorder cannot acquire those non-NPC scene sources.
+* Keep gameplay manual until the integration ladder validates the relevant inputs.
 
 Implementation and evidence
 ---------------------------
@@ -75,13 +80,29 @@ Implementation and evidence
 * C builds candidates from committed NPC identities and P1 poses, after the
   parent frame's final context check. It issues no additional remote reads and
   caches nothing across frames. Process/scene/sample mismatches invalidate tiles.
-* Eight ID/name pairs were observed in the original-profile P2 capture. Matching
+* Fifteen ID/name pairs across twelve IDs have now been observed in original-profile
+  captures, including four additional font forms and three exact starred golem
+  names. Arbitrary prefixes are not stripped. Matching
   names or IDs alone remain unknown candidates. Font/golem kind and variant
   identify the actor; mechanics validation, areas, roles and timers remain unknown.
 * ``WorldState.hazards`` receives partial candidate records through the existing
   telemetry adapter. Coverage is never complete, including a zero-entry result.
-* Full checks: 12 CTest targets passed, including 78 Python tests and ten native
+* Full checks: 12 CTest targets passed, including 78 Python tests and twelve native
   hazard test cases. ``docs/validation/hazards-validation.json`` records limits.
+* A C replay of all 7,904 new records recognizes all 8,680 candidates after the
+  identity update. The older capture still recognizes 1,974 candidates and keeps
+  all its unrecorded positions unknown. No replay invents complete coverage,
+  mechanic validation or client timer bounds.
+
+Acceptance scope
+----------------
+
+This track meets the brief's validated-or-explicitly-unmapped acceptance rule.
+NPC identities and native tile observations are recorded; every missing hazard
+source is listed with the research tried in the validation report. ``done`` does
+not mean full arena coverage: all mechanic/area/timer coverage remains incomplete,
+and automated movement is not enabled. The unresolved acquisition work below
+must be completed before those mechanics can drive unattended kills.
 
 Requests
 --------

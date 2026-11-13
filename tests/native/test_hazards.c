@@ -5,17 +5,22 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define PURE_FONT_ID           22893
-#define ACTIVE_PURE_FONT_ID    22896
-#define PURE_GOLEM_ID          22905
-#define UNKNOWN_FONT_ID        999999
-#define TEST_TILE_X            3000
-#define TEST_TILE_Y            3001
-#define TEST_SCENE             7ull
-#define TEST_INSTANCE          9ull
-#define INLINE_STRING_CAPACITY 23u
-#define CLIENT_STRING_BYTES    24u
-#define NPC_CONFIG_ID_OFFSET   8u
+#define PURE_FONT_ID                 22893
+#define NEXT_PURE_FONT_ID            22896
+#define PURE_GOLEM_ID                22905
+#define UNKNOWN_FONT_ID              999999
+#define SECOND_PURE_FONT_FORM_ID     22899
+#define THIRD_PURE_FONT_FORM_ID      22902
+#define FIRST_VOLCANIC_FONT_FORM_ID  22894
+#define SECOND_VOLCANIC_FONT_FORM_ID 22897
+#define THIRD_VOLCANIC_FONT_FORM_ID  22900
+#define TEST_TILE_X                  3000
+#define TEST_TILE_Y                  3001
+#define TEST_SCENE                   7ull
+#define TEST_INSTANCE                9ull
+#define INLINE_STRING_CAPACITY       23u
+#define CLIENT_STRING_BYTES          24u
+#define NPC_CONFIG_ID_OFFSET         8u
 
 /** Install a synthetic same-frame P1 pose; these coordinates are fixture values. */
 static void put_candidate(fixture *test_fixture, uint32_t index, int32_t config_id,
@@ -98,9 +103,9 @@ static void tracks_appearance_disappearance_and_identity_changes(void)
     hazards_commit(test_fixture->context, snapshot, 1);
     assert(snapshot->hazards[0].config_id == PURE_FONT_ID);
     /* A captured config change on the same actor preserves its native lifetime. */
-    snapshot->npcs[0].config_id = ACTIVE_PURE_FONT_ID;
+    snapshot->npcs[0].config_id = NEXT_PURE_FONT_ID;
     hazards_commit(test_fixture->context, snapshot, 1);
-    assert(snapshot->hazards[0].config_id == ACTIVE_PURE_FONT_ID);
+    assert(snapshot->hazards[0].config_id == NEXT_PURE_FONT_ID);
     assert(snapshot->hazards[0].instance_id == TEST_INSTANCE);
     put_candidate(test_fixture, 0, PURE_GOLEM_ID, "Pure anima-golem");
     hazards_commit(test_fixture->context, snapshot, 1);
@@ -128,6 +133,62 @@ static void scene_changes_never_reuse_old_tiles(void)
     hazards_commit(test_fixture->context, snapshot, 1);
     assert(snapshot->hazards[0].tile.x == TEST_TILE_X + 1);
     assert(snapshot->hazard_info.scene_epoch == TEST_SCENE + 1);
+    fixture_destroy(test_fixture);
+}
+
+/** Replay captured font form transitions without inferring charging/completion. */
+static void keeps_font_identity_through_recorded_config_transitions(void)
+{
+    fixture *test_fixture = hazard_fixture();
+    rs3_snapshot *snapshot = test_fixture->snapshot;
+    const int32_t pure_forms[] = {PURE_FONT_ID, NEXT_PURE_FONT_ID, SECOND_PURE_FONT_FORM_ID,
+                                  THIRD_PURE_FONT_FORM_ID};
+    const int32_t volcanic_forms[] = {FIRST_VOLCANIC_FONT_FORM_ID, SECOND_VOLCANIC_FONT_FORM_ID,
+                                      THIRD_VOLCANIC_FONT_FORM_ID};
+    for (size_t index = 0; index < sizeof pure_forms / sizeof pure_forms[0]; index++)
+    {
+        snapshot->npcs[0].config_id = pure_forms[index];
+        hazards_commit(test_fixture->context, snapshot, 1);
+        const rs3_hazard *hazard = &snapshot->hazards[0];
+        assert(hazard->kind == RS3_HAZARD_FONT && hazard->variant == RS3_HAZARD_PURE);
+        assert(hazard->instance_id == TEST_INSTANCE && hazard->config_id == pure_forms[index]);
+        assert(hazard->flags & RS3_HAZARD_IDENTITY);
+        assert(!(hazard->flags & RS3_HAZARD_MECHANICS_VALIDATED));
+        assert(hazard->timing_reason == RS3_HAZARD_UNMAPPED);
+    }
+    for (size_t index = 0; index < sizeof volcanic_forms / sizeof volcanic_forms[0]; index++)
+    {
+        put_candidate(test_fixture, 0, volcanic_forms[index], "Volcanic Anima Font");
+        hazards_commit(test_fixture->context, snapshot, 1);
+        assert(snapshot->hazards[0].kind == RS3_HAZARD_FONT);
+        assert(snapshot->hazards[0].variant == RS3_HAZARD_VOLCANIC);
+        assert(snapshot->hazards[0].instance_id == TEST_INSTANCE);
+        assert(snapshot->hazards[0].role == 0);
+    }
+    fixture_destroy(test_fixture);
+}
+
+/** The prefix is an observed exact name, not a normalization or a combat role. */
+static void accepts_observed_starred_names_without_stripping_arbitrary_prefixes(void)
+{
+    fixture *test_fixture = hazard_fixture();
+    rs3_snapshot *snapshot = test_fixture->snapshot;
+    put_candidate(test_fixture, 0, PURE_GOLEM_ID, "Pure anima-golem");
+    hazards_commit(test_fixture->context, snapshot, 1);
+    assert(snapshot->hazards[0].kind == RS3_HAZARD_GOLEM);
+    put_candidate(test_fixture, 0, PURE_GOLEM_ID, "*Pure anima-golem");
+    hazards_commit(test_fixture->context, snapshot, 1);
+    assert(snapshot->hazards[0].kind == RS3_HAZARD_GOLEM);
+    assert(snapshot->hazards[0].instance_id == TEST_INSTANCE);
+    assert(snapshot->hazards[0].role_reason == RS3_HAZARD_UNMAPPED);
+    assert(!(snapshot->hazards[0].flags & RS3_HAZARD_MECHANICS_VALIDATED));
+    put_candidate(test_fixture, 0, PURE_GOLEM_ID, "**Pure anima-golem");
+    hazards_commit(test_fixture->context, snapshot, 1);
+    assert(snapshot->hazards[0].kind == RS3_HAZARD_UNKNOWN);
+    assert(!(snapshot->hazards[0].flags & RS3_HAZARD_IDENTITY));
+    put_candidate(test_fixture, 0, UNKNOWN_FONT_ID, "*Pure anima-golem");
+    hazards_commit(test_fixture->context, snapshot, 1);
+    assert(snapshot->hazards[0].kind == RS3_HAZARD_UNKNOWN);
     fixture_destroy(test_fixture);
 }
 
@@ -331,6 +392,8 @@ int main(void)
     RUN_TEST(recognizes_captured_identity_without_inventing_mechanics);
     RUN_TEST(tracks_appearance_disappearance_and_identity_changes);
     RUN_TEST(scene_changes_never_reuse_old_tiles);
+    RUN_TEST(keeps_font_identity_through_recorded_config_transitions);
+    RUN_TEST(accepts_observed_starred_names_without_stripping_arbitrary_prefixes);
     RUN_TEST(rejects_stale_foreign_and_invalid_poses);
     RUN_TEST(requires_both_id_and_name_and_original_profile);
     RUN_TEST(failed_npc_reads_clear_all_candidates);
