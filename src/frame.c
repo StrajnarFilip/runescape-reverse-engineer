@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "combat.h"
+#include "hazards.h"
 #include "inventory.h"
 #include "memory.h"
 #include "npcs.h"
@@ -129,6 +130,7 @@ int frame_decode(rs3_context *context, rs3_snapshot *snapshot)
     }
     inventory_commit(context, snapshot, contexts.world_state);
     spatial_commit(context, snapshot);
+    hazards_commit(context, snapshot, npcs_decoded);
     player_track_changes(context, snapshot, contexts.world_state);
     return 1;
 }

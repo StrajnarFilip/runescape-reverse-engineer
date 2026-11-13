@@ -15,6 +15,7 @@ from .native import (
     PRAYER_POINTS_MASK,
     VARIABLE_NAMES,
     HitState,
+    HazardFlags,
     NPCFlags,
     Reader,
     Reason,
@@ -284,6 +285,105 @@ def changing_value(value, changed_ns, sample_monotonic_ns):
     }
 
 
+def hazards_record(reader):
+    """Serialize C candidates; identity/pose evidence does not validate a mechanic."""
+    info = reader.hazard_info
+    kinds = (
+        "unknown",
+        "green_beam",
+        "black_beam",
+        "red_beam",
+        "font",
+        "falling_rock",
+        "tendrils",
+        "anima_bomb",
+        "projectile",
+        "golem",
+    )
+    variants = (None, "pure", "corrupt", "volcanic")
+    reasons = {
+        0: None,
+        400: "hazard_channel_unmapped",
+        401: "hazard_identity_unmapped",
+        402: "hazard_spatial_unavailable",
+        403: "hazard_wrong_scene",
+        404: "hazard_candidate_overflow",
+        405: "hazard_mechanics_need_calibration",
+    }
+
+    def reason_name(reason):
+        return reasons.get(reason, "native_reason_" + str(reason))
+
+    available = info.status in (Status.AVAILABLE, Status.PARTIAL)
+    age_ms = (
+        max(0, reader.monotonic_ns() - info.observed_ns) / 1e6
+        if available and info.observed_ns
+        else None
+    )
+    entries = []
+    for hazard in reader.hazards[: info.count] if available else ():
+        flags = HazardFlags(hazard.flags)
+        entries.append(
+            {
+                "id": "npc:" + str(hazard.instance_id),
+                "instance_id": hazard.instance_id,
+                "runtime_id": hazard.runtime_id,
+                "config_id": hazard.config_id if hazard.config_id >= 0 else None,
+                "kind": kinds[hazard.kind] if hazard.kind < len(kinds) else "unknown",
+                "variant": variants[hazard.variant] if hazard.variant < len(variants) else None,
+                "identity_validated": bool(flags & HazardFlags.IDENTITY),
+                "validated": bool(flags & HazardFlags.MECHANICS_VALIDATED),
+                "present": True,
+                "presence_scope": "loaded_npc_registry",
+                "same_world": True if flags & HazardFlags.TILE else None,
+                "active": None,
+                "dangerous": None,
+                "tile": (
+                    {"x": hazard.tile.x, "y": hazard.tile.y, "plane": hazard.tile.plane}
+                    if flags & HazardFlags.TILE
+                    else None
+                ),
+                "tile_reason": reason_name(hazard.tile_reason),
+                "actor_footprint_size": (
+                    hazard.footprint_size if flags & HazardFlags.FOOTPRINT else None
+                ),
+                "area": None,
+                "start_client_tick": (
+                    hazard.start_client_tick if flags & HazardFlags.CLIENT_START else None
+                ),
+                "end_client_tick": (
+                    hazard.end_client_tick if flags & HazardFlags.CLIENT_END else None
+                ),
+                "timing_reason": reason_name(hazard.timing_reason),
+                "role": None,
+                "role_reason": reason_name(hazard.role_reason),
+                "age_ms": age_ms,
+                "reason": reason_name(hazard.reason),
+                "source": "native_memory",
+            }
+        )
+    return {
+        "status": PLAYER_HIT_STATUS_NAMES.get(info.status, "unavailable"),
+        "entries": entries,
+        "complete": False,
+        "scope": "loaded_npc_registry_candidates",
+        "observed_channels": info.observed_channels,
+        "complete_channels": info.complete_channels,
+        "unmapped_channels": info.unmapped_channels,
+        "candidate_count": info.candidate_count,
+        "dropped_count": info.dropped_count,
+        "unlocated_count": info.unlocated_count,
+        "sample_sequence": info.sample_sequence,
+        "observed_ns": info.observed_ns,
+        "pid": info.pid,
+        "process_creation_time": info.process_creation_time,
+        "scene_epoch": info.scene_epoch,
+        "age_ms": age_ms,
+        "source": "native_memory",
+        "reason": reason_name(info.reason),
+    }
+
+
 class NativeTelemetry:
     """Samples a native Reader and returns schema-version-1 records."""
 
@@ -350,6 +450,7 @@ class NativeTelemetry:
         record["combat"] = combat_record(self.reader)
         record["player"] = spatial_actor_record(self.reader, self.reader.spatial.player)
         record["player_hit_splats"] = player_hit_splats
+        record["hazards"] = hazards_record(self.reader)
         # Observations from earlier frames keep their own process and timestamp.
         record["hit_splats"] = {
             "status": "unavailable",
@@ -485,4 +586,5 @@ class NativeTelemetry:
         }
         if include_raw:
             record["raw_variables"] = raw_variables
+        record["hazards"] = hazards_record(reader)
         return extend_record(record, reader)

@@ -61,6 +61,27 @@ int32_t rs3_snapshot_info(const rs3_snapshot *snapshot, rs3_info *out, uint32_t 
     return copy_record(&snapshot->info, sizeof *out, out, out_size);
 }
 
+int32_t rs3_snapshot_hazard_info(const rs3_snapshot *snapshot, rs3_hazard_info *out,
+                                uint32_t out_size)
+{
+    if (snapshot == NULL || out == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    return copy_record(&snapshot->hazard_info, sizeof *out, out, out_size);
+}
+
+int32_t rs3_snapshot_hazards(const rs3_snapshot *snapshot, rs3_hazard *out, uint32_t capacity,
+                            uint32_t *required)
+{
+    if (snapshot == NULL || required == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    return copy_records(snapshot->hazards, snapshot->hazard_info.count, sizeof *out, out,
+                        capacity, required);
+}
+
 const char *rs3_snapshot_client_version(const rs3_snapshot *snapshot)
 {
     return snapshot != NULL && snapshot->profile != NULL ? snapshot->profile->version : "";

@@ -12,6 +12,7 @@
 
 #include "clock.h"
 #include "frame.h"
+#include "hazards.h"
 #include "inventory.h"
 #include "memory.h"
 #include "position.h"
@@ -67,6 +68,9 @@ int context_reserve_buckets(rs3_context *context, uint64_t bucket_count)
 /** Copies a frame. Only the populated array prefixes are copied. */
 static void copy_frame(rs3_snapshot *destination, const rs3_snapshot *source)
 {
+    destination->hazard_info = source->hazard_info;
+    memcpy(destination->hazards, source->hazards,
+           source->hazard_info.count * sizeof(rs3_hazard));
     uint32_t item_count =
         source->inventory_info.backpack_count + source->inventory_info.equipment_count;
     destination->info = source->info;
@@ -95,6 +99,8 @@ static void copy_frame(rs3_snapshot *destination, const rs3_snapshot *source)
 static void clear_unavailable_frame(rs3_context *context, rs3_snapshot *snapshot)
 {
     snapshot->info.status = RS3_UNAVAILABLE;
+    hazards_commit(context, snapshot, 0);
+    snapshot->hazard_info.reason = context->failure_reason;
     snapshot->info.reason = context->failure_reason;
     snapshot->info.npc_count = 0;
     snapshot->info.hit_count = 0;

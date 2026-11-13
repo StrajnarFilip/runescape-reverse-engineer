@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "track": "P4",
+  "date": "2026-11-13",
+  "status": "waiting_for_live_session",
+  "images_used": false,
+  "automatic_game_inputs_sent": false,
+  "other_account_gameplay_captured": false,
+  "scope": "native_snapshot_npc_candidates_with_P1_pose_provenance",
+  "implementation": {
+    "acquisition": "existing C NPC registry and P1 actor poses; no additional remote reads",
+    "publication": "committed frame after parent-context consistency checks",
+    "dependency": "unchanged telos/P1 at 5dd80c0 merged into telos/P4 with user approval",
+    "snapshot_storage_exception": "user approved P4 include and two fields in src/context.h",
+    "abi": {
+      "header": "include/rs3/hazards.h",
+      "calling_convention": "Windows x64 C; default alignment; opaque snapshots; caller-owned output",
+      "info_bytes": 80,
+      "entry_bytes": 88,
+      "capacity": 128,
+      "sizes_export": "rs3_hazards_sizeof",
+      "accessors": ["rs3_snapshot_hazard_info", "rs3_snapshot_hazards"],
+      "overflow": "candidate_count and dropped_count; short output buffer returns RS3_E_BUFFER and required count",
+      "bindings": "Python ctypes with runtime structure-size checks; the same copy-out ABI is usable from Java FFI"
+    },
+    "clearance": "no persistent cache; failure clears candidates; stale process/scene/sample or mismatched lifetime invalidates pose",
+    "complete_channels": 0,
+    "mechanics_validated": false,
+    "timing": "spawn, expiry and server ticks are not inferred from the sample observation time"
+  },
+  "identity_evidence": {
+    "capture": "p2-encounter-manual-2026-11-11-01.jsonl (local only)",
+    "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+    "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+    "rows": 8706,
+    "candidate_observations": 1974,
+    "distinct_actor_keys": 7,
+    "pairs": [
+      {"config_id": 22893, "name": "Pure Anima Font", "observations": 312},
+      {"config_id": 22894, "name": "Volcanic Anima Font", "observations": 481},
+      {"config_id": 22895, "name": "Corrupt Anima Font", "observations": 481},
+      {"config_id": 22896, "name": "Pure Anima Font", "observations": 169},
+      {"config_id": 22905, "name": "Pure anima-golem", "observations": 169},
+      {"config_id": 22906, "name": "Corrupt anima-golem", "observations": 169},
+      {"config_id": 22907, "name": "Volcanic anima-golem", "observations": 169},
+      {"config_id": 22918, "name": "Anima-golem", "observations": 24}
+    ],
+    "same_actor_config_change": [22893, 22896],
+    "interpretation": "NPC identity only. No inference of active font, correct font order, phase-5 identity or meter effects.",
+    "positions_in_capture": "not recorded; original native capture predates P1 poses",
+    "new_runtime_capture": "intended-account recorder started; waiting for manual encounter and labels"
+  },
+  "hazard_groups": {
+    "green_beam": {"status": "unmapped", "missing": "native source, area, appearance and expiry"},
+    "black_beam": {"status": "unmapped", "missing": "native source, area, appearance and expiry"},
+    "red_beam": {"status": "unmapped", "missing": "native source, area, appearance and expiry"},
+    "fonts": {"status": "identity_only", "missing": "live tile check, effects, intermission/order, area and timing"},
+    "falling_rocks": {"status": "unmapped", "missing": "native scene/projectile source, impact tiles and timing"},
+    "tendrils": {"status": "unmapped", "missing": "native hazard entity/area; attack animation 28931 does not establish geometry"},
+    "anima_bomb": {"status": "unmapped", "missing": "native entity/area and lifetime; no animation-only inference"},
+    "projectiles": {"status": "unmapped", "missing": "bounded native container, IDs, positions and client timers"},
+    "golems": {"status": "identity_only", "missing": "live tile checks, meter/font roles and labelled phase-5 capture"}
+  },
+  "research_attempts": [
+    "Read P1 actor layout, world-ownership checks, native NPC registry and animation decoders; reuse the existing C pose reader.",
+    "Reinspected all 8706 local P2 capture rows for font/golem names, config IDs, actor lifetimes and config changes. No scene-object or projectile records were present.",
+    "Inspected P6 capture schema: it records Telos actions and player hitmarks, not arena object lists; it cannot backfill missing geometry.",
+    "Searched original executable strings and static xrefs: SpotAnims at 0x1415de4e0 is referenced by 0x140011db0; ChangeLocationRequest at 0x1415dcde8 by 0x1400110c0. These are allocation/name leads, not validated scene containers.",
+    "LocTypeProxy at 0x14153bcf0 is referenced by registration function 0x140467b20. A cached definition proxy does not establish a live placed-object list.",
+    "Did not memory-scan or record the user's other account for arena calibration. Non-NPC geometry remains explicitly unmapped."
+  ],
+  "runtime_profile_limit": {
+    "chosen_integration_runtime": "6ada3f59-1a86000",
+    "chosen_runtime_sha256": "7a60c69fcf11eda42a328732721f5e89e1c85a6bc919038ff3451d4643e42dbf",
+    "P1_compatibility_pose_support": false,
+    "P4_compatibility_identity_calibration": false,
+    "behavior": "unvalidated profiles retain raw ID/name candidates with unknown kind and no mechanics validation; unsupported P1 leaves tiles unknown",
+    "installed_executable_disk_check": "original profile hash on 2026-11-13; not a substitute for the native attach-time signature checks"
+  },
+  "checks": {
+    "build": "Release, Windows x64 C11, Ninja/Zig",
+    "ctest_targets_passed": 12,
+    "python_tests_passed": 78,
+    "native_hazard_cases_passed": 10,
+    "covered": [
+      "captured identity versus unvalidated mechanics",
+      "appearance, disappearance and same-actor config change",
+      "scene changes without cached poses",
+      "foreign process, stale sample and mismatched NPC lifetime",
+      "invalid coordinates, footprint and unavailable P1 channel",
+      "exact ID/name pair and profile scope",
+      "NPC read failure invalidation",
+      "explicit overflow and short caller buffers",
+      "additive ABI size/argument/caller-ownership checks",
+      "frame wiring after NPC lifetime assignment",
+      "unavailable sample and latest-frame publication"
+    ],
+    "absent_process_binding_check": "Python loads C layouts (80/88 bytes); missing PID yields unavailable, no entries, complete false and all 511 channel bits unmapped"
+  },
+  "offline_C_replay": {
+    "method": "local test-only driver linked to the same compiled hazards.c object; captured NPC records passed as caller-owned fixture data, without game attachment",
+    "frames": 8706,
+    "identified_candidate_observations": 1974,
+    "font_observations": 1443,
+    "golem_observations": 531,
+    "observations_correctly_without_tiles": 1974,
+    "frames_claimed_complete": 0,
+    "mechanics_claimed_validated": 0,
+    "dropped_candidates": 0,
+    "remote_reads": 0,
+    "classifier_total_nanoseconds": 2800400,
+    "performance_limit": "CPU classification only, mostly empty frames; excludes P1 reads, live acquisition and JSON. Not a full combat performance benchmark.",
+    "raw_capture_and_fixture_binary_published": false
+  },
+  "live_session": {
+    "status": "capture_in_progress",
+    "local_filename": "p4-hazards-manual-2026-11-13-01.jsonl",
+    "process_selection": "explicit PID and creation-time pin; intended client has base Prayer 99, other client base Prayer 84",
+    "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+    "native_hz": 100,
+    "output_hz": 20,
+    "duration_limit_seconds": 1200,
+    "baseline_player_tile_available": true,
+    "baseline_npc_action_events_lost": 0,
+    "inputs_enabled": false,
+    "live_font_or_golem_positions_validated": false
+  },
+  "not_established": [
+    "A complete hazard set or safe area",
+    "Hazard damage geometry from an NPC footprint",
+    "Spawn/end times from first/last observation",
+    "Any server protection deadline",
+    "Font order or golem effects from names alone",
+    "Compatibility Mode pose or identity calibration",
+    "Full unattended kill readiness"
+  ]
+}

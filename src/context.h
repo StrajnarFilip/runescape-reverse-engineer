@@ -23,6 +23,7 @@
 #include "rs3/rs3.h"
 #include "rs3/combat.h"
 #include "rs3/spatial.h"
+#include "rs3/hazards.h"
 #include "profile.h"
 
 /** Capacity of the hit observation queue. */
@@ -54,6 +55,8 @@ typedef struct inventory_state inventory_state;
 /** One published frame. Array prefixes are defined by the counts in info and inventory_info. */
 struct rs3_snapshot
 {
+    rs3_hazard_info hazard_info;
+    rs3_hazard hazards[RS3_MAX_HAZARDS];
     rs3_info info;
     const client_profile *profile;
     rs3_player player;

@@ -1,7 +1,7 @@
 P4 - Scene hazards
 ==================
 
-:Status: in progress
+:Status: waiting for live session
 :Wave: 2
 :Branch: ``telos/P4``
 :Kind: C (native DLL)
@@ -51,16 +51,47 @@ Fixture tests cover appearance, disappearance and scene changes.
 Needs the user
 --------------
 
-One session per hazard group across manual kills: stand in each beam, let
-tendrils and rocks spawn, reach phase 4 fonts and phase 5 golems.
+The native NPC candidate collector and JSON telemetry are ready. The user logged
+into the intended account on 2026-11-13; recording was started after explicitly
+selecting that client among two processes. No gameplay capture was started on
+the other account. Recheck process identity before every subsequent capture.
+
+* First session: a manual 300% practice encounter. Reach phase 4 if possible;
+  report each font reached and the named golems seen. The native recorder must
+  retain NPC IDs, instance IDs, P1 poses, phase labels and hazard records.
+* Confirm font/golem tile positions through controlled movement and font changes.
+  The previous capture has their identities but no P1 poses. It cannot validate
+  tile positions, damage areas, font order, golem effects or lifetimes.
+* Later sessions: phase 5 golems and each beam/rock/tendril/bomb/projectile group.
+  Those scene channels still need native layouts before requesting a targeted
+  encounter for their geometry; the current NPC recorder cannot capture them.
+* Keep gameplay manual. No automatic input or prayer timing changes are enabled.
+
+Implementation and evidence
+---------------------------
+
+* ``rs3/hazards.h`` documents the additive copy-out ABI: info 80 bytes, entry
+  88 bytes, explicit validity/reasons, bounded capacity and dropped counts.
+* C builds candidates from committed NPC identities and P1 poses, after the
+  parent frame's final context check. It issues no additional remote reads and
+  caches nothing across frames. Process/scene/sample mismatches invalidate tiles.
+* Eight ID/name pairs were observed in the original-profile P2 capture. Matching
+  names or IDs alone remain unknown candidates. Font/golem kind and variant
+  identify the actor; mechanics validation, areas, roles and timers remain unknown.
+* ``WorldState.hazards`` receives partial candidate records through the existing
+  telemetry adapter. Coverage is never complete, including a zero-entry result.
+* Full checks: 12 CTest targets passed, including 78 Python tests and ten native
+  hazard test cases. ``docs/validation/hazards-validation.json`` records limits.
 
 Requests
 --------
 
-* Reuse the unchanged P1 branch as a dependency on this branch, without merging
-  into ``telos/integration`` or marking P1's remaining calibration complete.
-  The integration base does not yet contain its public actor-pose API.
-* Add only ``#include "rs3/hazards.h"``, ``rs3_hazard_info hazard_info`` and
-  ``rs3_hazard hazards[RS3_MAX_HAZARDS]`` to ``src/context.h``. Snapshot storage
-  is necessary for atomic publication; that file is omitted from the shared
-  wiring list. The earlier registration exception was specific to P1/P2.
+* Approved by the user on 2026-11-13: reuse the unchanged P1 branch on P4 and
+  add only P4's header include and two snapshot storage fields in ``src/context.h``.
+  P1 at ``5dd80c0`` is included as a dependency. No integration branch was changed.
+* P1: validate/port NPC poses on the selected Compatibility Mode runtime before
+  integration enables spatial consumers there. P1 remains explicitly unsupported
+  on that executable. P4 does not edit its decoder or mark its calibration done.
+* P4 follow-up: map the non-NPC scene/spot-animation/projectile containers with
+  version signatures and live evidence. Current candidates cover recorded NPC
+  identities only. A guide's beam shape is not a substitute for this acquisition.

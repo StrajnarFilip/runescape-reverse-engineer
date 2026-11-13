@@ -26,6 +26,7 @@ ABI_VERSION = 1
 # Capacities of the public C ABI.
 VARIABLE_COUNT = 10
 MAX_NPCS = 1024
+MAX_HAZARDS = 128
 MAX_HITS = 65536
 NAME_CAPACITY = 520
 MAX_ITEMS = 47
@@ -602,6 +603,66 @@ class ScreenPoint(ctypes.Structure):
 
 SIZED_SPATIAL_STRUCTURES = {1: ActorSpatial, 2: Camera, 3: SpatialInfo, 4: ScreenPoint}
 
+
+class HazardFlags(IntFlag):
+    """Validity bits from rs3/hazards.h; actor identity is separate from mechanics."""
+
+    IDENTITY = 1
+    TILE = 2
+    FOOTPRINT = 4
+    CLIENT_START = 8
+    CLIENT_END = 16
+    MECHANICS_VALIDATED = 32
+
+
+class Hazard(ctypes.Structure):
+    """Caller-owned rs3_hazard. Consult flags before using numeric fields."""
+
+    _fields_ = [
+        ("instance_id", ctypes.c_uint64),
+        ("observed_ns", ctypes.c_uint64),
+        ("runtime_id", ctypes.c_uint32),
+        ("config_id", ctypes.c_int32),
+        ("kind", ctypes.c_uint32),
+        ("variant", ctypes.c_uint32),
+        ("flags", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("tile", Position),
+        ("footprint_size", ctypes.c_uint32),
+        ("tile_reason", ctypes.c_uint32),
+        ("start_client_tick", ctypes.c_uint32),
+        ("end_client_tick", ctypes.c_uint32),
+        ("timing_reason", ctypes.c_uint32),
+        ("role_reason", ctypes.c_uint32),
+        ("role", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32),
+    ]
+
+
+class HazardInfo(ctypes.Structure):
+    """Coverage/provenance of the snapshot's bounded P4 array."""
+
+    _fields_ = [
+        ("observed_ns", ctypes.c_uint64),
+        ("sample_sequence", ctypes.c_uint64),
+        ("scene_epoch", ctypes.c_uint64),
+        ("process_creation_time", ctypes.c_uint64),
+        ("pid", ctypes.c_uint32),
+        ("status", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("count", ctypes.c_uint32),
+        ("observed_channels", ctypes.c_uint32),
+        ("complete_channels", ctypes.c_uint32),
+        ("unmapped_channels", ctypes.c_uint32),
+        ("candidate_count", ctypes.c_uint32),
+        ("dropped_count", ctypes.c_uint32),
+        ("unlocated_count", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32 * 2),
+    ]
+
+
+SIZED_HAZARD_STRUCTURES = {1: HazardInfo, 2: Hazard}
+
 # Structures checked against rs3_sizeof() and rs3_combat_sizeof().
 SIZED_STRUCTURES = {
     Structure.OPTIONS: Options,
@@ -688,6 +749,9 @@ def _function_prototypes():
         "stop": (i32, [handle]),
         "copy_latest": (i32, [handle, handle]),
         "snapshot_info": (i32, [handle, ctypes.POINTER(Info), u32]),
+        "hazards_sizeof": (u32, [u32]),
+        "snapshot_hazard_info": (i32, [handle, ctypes.POINTER(HazardInfo), u32]),
+        "snapshot_hazards": (i32, [handle, ctypes.POINTER(Hazard), u32, ctypes.POINTER(u32)]),
         "snapshot_client_version": (ctypes.c_char_p, [handle]),
         "snapshot_player": (i32, [handle, ctypes.POINTER(Player), u32]),
         "snapshot_position": (i32, [handle, ctypes.POINTER(Position), u32]),
@@ -721,6 +785,9 @@ def _function_prototypes():
 
 
 def _verify_layouts(library):
+    for structure_id, structure in SIZED_HAZARD_STRUCTURES.items():
+        if library.rs3_hazards_sizeof(structure_id) != ctypes.sizeof(structure):
+            raise RuntimeError("C/Python layout mismatch for " + structure.__name__)
     for structure_id, structure in SIZED_SPATIAL_STRUCTURES.items():
         if library.rs3_spatial_sizeof(structure_id) != ctypes.sizeof(structure):
             raise RuntimeError("C/Python spatial layout mismatch: " + structure.__name__)
@@ -782,6 +849,8 @@ class Reader:
         self.worker_hz = worker_hz
         # Reusable output buffers sized for the ABI limits.
         self.info = Info()
+        self.hazard_info = HazardInfo()
+        self.hazards = (Hazard * MAX_HAZARDS)()
         self.player = Player()
         self.position = Position()
         self.combat = CombatState()
@@ -855,6 +924,8 @@ class Reader:
             )
 
         copy_record(library.rs3_snapshot_info, self.info)
+        copy_record(library.rs3_snapshot_hazard_info, self.hazard_info)
+        copy_array(library.rs3_snapshot_hazards, self.hazards)
         copy_record(library.rs3_snapshot_player, self.player)
         copy_record(library.rs3_snapshot_position, self.position)
         copy_record(library.rs3_snapshot_combat, self.combat)
