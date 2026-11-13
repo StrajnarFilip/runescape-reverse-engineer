@@ -130,7 +130,7 @@ class PracticeRunTests(unittest.TestCase):
         reader.abilities = []
         reader.drain_npc_action_events.return_value = ([], 0)
         reader.drain_player_hit_events.return_value = ([], 0)
-        reader.active_prayer.side_effect = [Prayer.NONE, Prayer.MELEE, Prayer.MELEE, Prayer.MELEE]
+        reader.active_prayer.side_effect = [Prayer.NONE, Prayer.NONE] + [Prayer.MELEE] * 4
         clock = 10 * SECOND_NS
         reader.monotonic_ns.return_value = clock
         info = SimpleNamespace(
@@ -138,7 +138,7 @@ class PracticeRunTests(unittest.TestCase):
         )
         player = Mock(clock_stalled_ns=0, gcd_reason=Reason.NONE, gcd_remaining_ms=0)
         player.variable.side_effect = {Variable.PRAYER_PACKED: 990}.__getitem__
-        dormant = SimpleNamespace(config_id=22892)
+        dormant = SimpleNamespace(config_id=22892, instance_id=3)
         active = SimpleNamespace(
             config_id=22891,
             instance_id=4,
@@ -149,6 +149,8 @@ class PracticeRunTests(unittest.TestCase):
         phase_two = SimpleNamespace(**vars(active))
         phase_two.health_current = 300_000
         samples = [
+            (info, player, dormant, None, 9900),
+            (info, player, dormant, None, 9900),
             (info, player, dormant, None, 9900),
             (info, player, dormant, None, 9900),
             (info, player, dormant, None, 9900),
@@ -189,6 +191,15 @@ class PracticeRunTests(unittest.TestCase):
         self.assertEqual([call.args[0] for call in board.command.call_args_list], ["CLICK L"] * 2)
         self.assertEqual(mock_globals["log"].call_args.args[0], "phase_two_observed")
         board.tap.assert_not_called()
+
+        board.reset_mock()
+        reader.active_prayer.side_effect = [Prayer.MELEE, Prayer.NONE]
+        mock_globals["boss_sample"].side_effect = samples[:3]
+        with patch.dict(sys.modules, {"game_console": console}), patch("time.sleep"):
+            with patch.dict(run.__globals__, mock_globals):
+                with self.assertRaisesRegex(RuntimeError, "Deflect Melee changed"):
+                    run(reader, args, board)
+        board.command.assert_not_called()
 
 
 if __name__ == "__main__":

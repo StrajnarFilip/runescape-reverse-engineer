@@ -349,6 +349,9 @@ def run(reader, args, board):
     keys = ManualPrayerKeys()
     phase_one = PhaseOne()
     initial, _, _, _, _ = boss_sample(reader)
+    if initial.status not in (Status.AVAILABLE, Status.PARTIAL):
+        reason = initial.message.decode(errors="replace")
+        raise RuntimeError(f"Cannot start in the current client scene ({reason})")
     identity = (initial.pid, initial.process_creation_time, reader.combat.scene_epoch)
     window = keys.game_window(identity)
     if not window:
@@ -360,13 +363,43 @@ def run(reader, args, board):
         if keys.game_window(identity) != window:
             raise RuntimeError("RuneScape lost foreground focus")
 
-    def click_frame(x, y):
-        game = GameWindow()
-        bounds, target = frame_target(game, args.frame, x, y)
+    game = GameWindow()
+    if args.approach == args.melee:
+        raise ValueError("Approach and Deflect Melee require different screenshot points")
+    # Validate both points before changing the character's overhead.
+    frame_target(game, args.frame, *args.approach)
+    frame_target(game, args.frame, *args.melee)
+
+    def click_frame(point, expected_boss, *, require_melee=False):
+        bounds, target = frame_target(game, args.frame, *point)
         check_focus()
         move_pointer(board, game, bounds, target)
         if game.bounds() != bounds:
             raise RuntimeError("RuneScape moved while the pointer was positioning")
+        game.check_point(*game.cursor())
+        latest, latest_player, current_boss, _, latest_hp = boss_sample(reader)
+        if (
+            (latest.pid, latest.process_creation_time, reader.combat.scene_epoch) != identity
+            or latest.status not in (Status.AVAILABLE, Status.PARTIAL)
+            or not 0 <= reader.monotonic_ns() - latest.monotonic_ns <= MAX_SAMPLE_AGE_NS
+            or latest_player.clock_stalled_ns > MAX_SAMPLE_AGE_NS
+            or latest_hp is None
+            or latest_hp <= 0
+            or current_boss is None
+            or current_boss.config_id != DORMANT_TELOS
+            or current_boss.instance_id != expected_boss
+        ):
+            raise RuntimeError("Dormant encounter changed while positioning the pointer")
+        current_prayer = Prayer(reader.active_prayer())
+        if require_melee and current_prayer != Prayer.MELEE:
+            raise RuntimeError("Deflect Melee changed before the approach click")
+        if not require_melee and current_prayer == Prayer.MELEE:
+            return
+        prayer_points = latest_player.variable(Variable.PRAYER_PACKED)
+        if prayer_points is None or not prayer_points & PRAYER_POINTS_MASK:
+            raise RuntimeError("Prayer points unavailable before the encounter click")
+        if game.bounds() != bounds:
+            raise RuntimeError("RuneScape moved before the encounter click")
         game.check_point(*game.cursor())
         board.command("CLICK L", check_focus)
 
@@ -423,7 +456,7 @@ def run(reader, args, board):
                 if now >= next_prayer_check:
                     if next_prayer_check:
                         raise RuntimeError("Deflect Melee did not activate on the configured slot")
-                    click_frame(*args.melee)
+                    click_frame(args.melee, boss.instance_id)
                     log("baseline_prayer_requested", prayer="melee")
                     next_prayer_check = reader.monotonic_ns() + ACK_TIMEOUT_NS
                 time.sleep(POLL_SECONDS)
@@ -432,7 +465,7 @@ def run(reader, args, board):
             if active_instance is not None:
                 raise RuntimeError("Active Telos disappeared")
             if not initiated and boss is not None and boss.config_id == DORMANT_TELOS:
-                click_frame(*args.approach)
+                click_frame(args.approach, boss.instance_id, require_melee=True)
                 initiated = True
                 next_approach = reader.monotonic_ns() + APPROACH_TIMEOUT_NS
                 log("approach", overhead=prayer.name.lower())
