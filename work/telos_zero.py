@@ -196,32 +196,56 @@ def cooldowns(reader):
 
 
 def replay(path):
-    """Reconstruct the observed attack counts without assuming ability availability."""
+    """Replay phase 1 counts and retain raw later-phase cues for calibration."""
     encounter = None
+    previous_phase = None
     with path.open(encoding="utf-8") as source:
         for line in source:
             row = json.loads(line)
-            raw = row["telos_raw"]
-            bosses = [npc for npc in row["telos"] if npc["config_id"] == ACTIVE_TELOS]
-            if len(bosses) != 1 or (raw is not None and (raw >> PHASE_SHIFT) & PHASE_MASK):
+            if "telos" in row:
+                raw = row["telos_raw"]
+                phase = None if raw is None else ((raw >> PHASE_SHIFT) & PHASE_MASK) + 1
+                session = [row["pid"], row["process_creation_time"], row["combat"]["scene_epoch"]]
+                bosses = [npc for npc in row["telos"] if npc["config_id"] == ACTIVE_TELOS]
+                instance = bosses[0]["instance_id"] if len(bosses) == 1 else None
+                events = row["telos_actions"]
+                sample_ns = row["sample_started_ns"]
+            elif row.get("event") == "observation":
+                phase = row["phase_candidate"]
+                session = row["session"]
+                instance = (
+                    row["boss_instance_id"] if row["boss_config_id"] == ACTIVE_TELOS else None
+                )
+                events = row["npc_actions"]
+                sample_ns = row["sample_ns"]
+            elif row.get("event") == "telos_absent":
                 encounter = None
                 continue
-            current = (
-                row["pid"],
-                row["process_creation_time"],
-                row["combat"]["scene_epoch"],
-                bosses[0]["instance_id"],
-            )
+            else:
+                continue
+            if instance is None:
+                encounter = None
+                continue
+            current = (*session, instance)
             if current != encounter:
                 phase_one = PhaseOne()
                 encounter = current
+                previous_phase = None
             if row["npc_action_events_lost"]:
                 raise RuntimeError("Replay contains an NPC action queue overflow")
             actions = [
                 action
-                for action in row["telos_actions"]
-                if action["instance_id"] == current[-1] and action["config_id"] == ACTIVE_TELOS
+                for action in events
+                if action["instance_id"] == instance and action["config_id"] == ACTIVE_TELOS
             ]
+            if phase is not None and phase > 1:
+                if phase != previous_phase:
+                    log("phase_candidate", phase=phase, sample_ns=sample_ns, hp=row["hp"])
+                if actions:
+                    log("later_phase_cues", phase=phase, actions=actions, hp=row["hp"])
+                previous_phase = phase
+            if previous_phase is not None:
+                continue
             if not actions:
                 continue
             before = phase_one.autos
@@ -252,6 +276,16 @@ def observe(reader, duration):
         if boss is not None:
             actions = telos_actions(events, session, info.sequence, {boss.instance_id})
             tile = reader.position
+            # Later phases add actors. Preserve their provenance until their roles are verified.
+            other_npcs = (
+                [
+                    (npc.instance_id, npc.config_id, npc.name.decode(errors="replace"))
+                    for npc in reader.npcs[: info.npc_count]
+                    if npc.instance_id != boss.instance_id
+                ]
+                if phase is not None and phase >= 2
+                else []
+            )
             state = dict(
                 session=session,
                 boss_config_id=boss.config_id,
@@ -260,6 +294,7 @@ def observe(reader, duration):
                 telos_raw=player.variable(Variable.TELOS_PACKED),
                 phase_candidate=phase,
                 hp=hp,
+                other_npcs=other_npcs,
                 overhead=Prayer(reader.active_prayer()).name.lower(),
                 tile=(tile.x, tile.y, tile.plane) if tile.valid else None,
             )
@@ -410,6 +445,17 @@ def run(reader, args, board):
                 raise RuntimeError("Phase 2 bits disagree with the observed boss HP")
             log("phase_two_observed", boss_hp=boss.health_current, phase=phase, player_hp=hp)
             if args.observe_transition:
+                log(
+                    "observation",
+                    session=identity,
+                    boss_config_id=boss.config_id,
+                    boss_instance_id=boss.instance_id,
+                    phase_candidate=phase,
+                    hp=hp,
+                    sample_ns=info.monotonic_ns,
+                    npc_actions=actions,
+                    npc_action_events_lost=lost,
+                )
                 board.close()
                 observe(reader, max(0, deadline - time.monotonic()))
             return 2
@@ -467,7 +513,7 @@ def main():
     parser.add_argument("--pid", type=int)
     parser.add_argument("--duration", type=int, default=MAX_PRACTICE_SECONDS)
     parser.add_argument("--port", help="Arduino COM port. Omit for observation only.")
-    parser.add_argument("--replay", type=Path, help="Read a local telos_prayer.py JSONL capture")
+    parser.add_argument("--replay", type=Path, help="Read a local Telos observation JSONL capture")
     parser.add_argument("--frame", type=Path, help="Fresh game_console.py screenshot")
     parser.add_argument(
         "--approach", type=int, nargs=2, help="Arena floor pixel near dormant Telos"

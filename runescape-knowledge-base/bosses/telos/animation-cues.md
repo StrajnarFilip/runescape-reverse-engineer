@@ -21,6 +21,8 @@ The same P1 melee and special IDs were seen in the isolated 300% captures. The 0
 
 From the repository root in PowerShell, set `$telosTrace` to an existing local capture made with `rs3_reader.telos_prayer`. To record later phases without input, run the script without `--port`.
 
+Replay also accepts the read-only observation JSONL below. It emits the phase candidate and raw Telos animation applications after the handoff. The longest existing capture contains `28930` about 1.88 seconds after the P2 field change and `28929` about 8.04 seconds after it. The observation mode records nearby NPC identities in P2 and later for matching golem and font intermissions in future captures.
+
 ```powershell
 $env:PYTHONPATH = 'python'
 python work/telos_zero.py --replay $telosTrace

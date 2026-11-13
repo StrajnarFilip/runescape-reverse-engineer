@@ -1,7 +1,9 @@
 """Exercise the standalone controller with synthetic attack events and no HID input."""
 
+import json
 import runpy
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -72,6 +74,36 @@ class PhaseOneTests(unittest.TestCase):
 
 
 class PracticeRunTests(unittest.TestCase):
+    def test_observation_replay_retains_transition_and_later_animation(self):
+        replay = controller["replay"]
+        boss_id = controller["ACTIVE_TELOS"]
+        action = dict(event(1, 28930), instance_id=4, config_id=boss_id)
+        row = dict(
+            event="observation",
+            session=[1, 2, 3],
+            boss_config_id=boss_id,
+            boss_instance_id=4,
+            phase_candidate=2,
+            sample_ns=SECOND_NS,
+            hp=2000,
+            npc_actions=[action],
+            npc_action_events_lost=0,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            capture = Path(directory) / "capture.jsonl"
+            capture.write_text(json.dumps(row), encoding="utf-8")
+            logger = Mock()
+            with patch.dict(replay.__globals__, {"log": logger}):
+                replay(capture)
+        self.assertEqual(
+            [call.args[0] for call in logger.call_args_list],
+            [
+                "phase_candidate",
+                "later_phase_cues",
+            ],
+        )
+        self.assertEqual(logger.call_args.kwargs["actions"], [action])
+
     def test_input_waits_for_baseline_prayer_and_stops_at_phase_two(self):
         run = controller["run"]
         reader = Mock()
