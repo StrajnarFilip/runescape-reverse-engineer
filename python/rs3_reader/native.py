@@ -521,6 +521,87 @@ class ItemEvent(ctypes.Structure):
     ]
 
 
+class ActorSpatial(ctypes.Structure):
+    """Caller-owned rs3_actor_spatial; validity bits are independent."""
+
+    _fields_ = [
+        ("instance_id", ctypes.c_uint64),
+        ("observed_ns", ctypes.c_uint64),
+        ("runtime_id", ctypes.c_uint32),
+        ("valid_mask", ctypes.c_uint32),
+        ("tile", Position),
+        ("footprint_size", ctypes.c_uint32),
+        ("tile_reason", ctypes.c_uint32),
+        ("fine_x", ctypes.c_float),
+        ("fine_height", ctypes.c_float),
+        ("fine_z", ctypes.c_float),
+        ("facing_degrees", ctypes.c_float),
+        ("facing_reason", ctypes.c_uint32),
+        ("target_reason", ctypes.c_uint32),
+        ("target_runtime_id", ctypes.c_int32),
+        ("target_kind", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32 * 2),
+    ]
+
+
+class SpatialFlags(IntFlag):
+    TILE = 1
+    FINE_POSITION = 2
+    FACING = 4
+    TARGET = 8
+    SAME_WORLD = 16
+
+
+class Camera(ctypes.Structure):
+    """rs3_camera; a complete physical projection requires all three validity bits."""
+
+    _fields_ = [
+        ("observed_ns", ctypes.c_uint64),
+        ("scene_epoch", ctypes.c_uint64),
+        ("pid", ctypes.c_uint32),
+        ("valid_mask", ctypes.c_uint32),
+        ("plane", ctypes.c_int32),
+        ("reason", ctypes.c_uint32),
+        ("world_to_clip", ctypes.c_float * 16),
+        ("viewport_x", ctypes.c_int32),
+        ("viewport_y", ctypes.c_int32),
+        ("viewport_width", ctypes.c_int32),
+        ("viewport_height", ctypes.c_int32),
+        ("client_screen_x", ctypes.c_int32),
+        ("client_screen_y", ctypes.c_int32),
+        ("process_creation_time", ctypes.c_uint64),
+        ("reserved", ctypes.c_uint32 * 2),
+    ]
+
+
+class SpatialInfo(ctypes.Structure):
+    _fields_ = [
+        ("sample_sequence", ctypes.c_uint64),
+        ("observed_ns", ctypes.c_uint64),
+        ("scene_epoch", ctypes.c_uint64),
+        ("process_creation_time", ctypes.c_uint64),
+        ("pid", ctypes.c_uint32),
+        ("status", ctypes.c_uint32),
+        ("npc_count", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("player", ActorSpatial),
+        ("camera", Camera),
+    ]
+
+
+class ScreenPoint(ctypes.Structure):
+    _fields_ = [
+        ("valid", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("x", ctypes.c_int32),
+        ("y", ctypes.c_int32),
+        ("clip_w", ctypes.c_float),
+        ("reserved", ctypes.c_uint32),
+    ]
+
+
+SIZED_SPATIAL_STRUCTURES = {1: ActorSpatial, 2: Camera, 3: SpatialInfo, 4: ScreenPoint}
+
 # Structures checked against rs3_sizeof() and rs3_combat_sizeof().
 SIZED_STRUCTURES = {
     Structure.OPTIONS: Options,
@@ -569,6 +650,32 @@ def _function_prototypes():
     return {
         "abi_version": (u32, []),
         "sizeof": (u32, [u32]),
+        "spatial_sizeof": (u32, [u32]),
+        "snapshot_spatial": (i32, [handle, ctypes.POINTER(SpatialInfo), u32]),
+        "snapshot_npc_spatial": (
+            i32,
+            [handle, ctypes.POINTER(ActorSpatial), u32, ctypes.POINTER(u32)],
+        ),
+        "project_tile": (
+            i32,
+            [
+                ctypes.POINTER(Camera),
+                ctypes.POINTER(Position),
+                ctypes.c_float,
+                ctypes.POINTER(ScreenPoint),
+                u32,
+            ],
+        ),
+        "project_actor": (
+            i32,
+            [
+                ctypes.POINTER(Camera),
+                ctypes.POINTER(ActorSpatial),
+                ctypes.c_float,
+                ctypes.POINTER(ScreenPoint),
+                u32,
+            ],
+        ),
         "monotonic_ns": (u64, []),
         "profile_sha256": (ctypes.c_char_p, []),
         "result_string": (ctypes.c_char_p, [i32]),
@@ -614,6 +721,9 @@ def _function_prototypes():
 
 
 def _verify_layouts(library):
+    for structure_id, structure in SIZED_SPATIAL_STRUCTURES.items():
+        if library.rs3_spatial_sizeof(structure_id) != ctypes.sizeof(structure):
+            raise RuntimeError("C/Python spatial layout mismatch: " + structure.__name__)
     for structure_id, structure in SIZED_STRUCTURES.items():
         if library.rs3_sizeof(structure_id) != ctypes.sizeof(structure):
             raise RuntimeError("C/Python layout mismatch for " + structure.__name__)
@@ -675,6 +785,8 @@ class Reader:
         self.player = Player()
         self.position = Position()
         self.combat = CombatState()
+        self.spatial = SpatialInfo()
+        self.npc_spatial = (ActorSpatial * MAX_NPCS)()
         self.npcs = (NPC * MAX_NPCS)()
         self.npc_animations = (NPCAnimation * MAX_NPCS)()
         self.hits = (Hit * MAX_HITS)()
@@ -746,6 +858,8 @@ class Reader:
         copy_record(library.rs3_snapshot_player, self.player)
         copy_record(library.rs3_snapshot_position, self.position)
         copy_record(library.rs3_snapshot_combat, self.combat)
+        copy_record(library.rs3_snapshot_spatial, self.spatial)
+        copy_array(library.rs3_snapshot_npc_spatial, self.npc_spatial)
         copy_array(library.rs3_snapshot_npcs, self.npcs)
         copy_array(library.rs3_snapshot_npc_animations, self.npc_animations)
         copy_array(library.rs3_snapshot_hits, self.hits)

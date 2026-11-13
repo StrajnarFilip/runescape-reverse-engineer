@@ -1,7 +1,7 @@
 P1 - Spatial
 ============
 
-:Status: open
+:Status: waiting for live session
 :Wave: 1
 :Branch: ``telos/P1``
 :Kind: C (native DLL)
@@ -59,7 +59,26 @@ Needs the user
 One session: stand near several NPCs, walk around them, rotate and zoom the
 camera, and attack one so target fields change.
 
+The current native implementation reads poses and physical projected pixels
+on the running original 951-3 executable. Before marking this track done:
+
+1. Completed: the two manual encounters recorded changing player/NPC poses.
+   The user then confirmed 22 Training dummy projections through 22 distinct
+   camera orientations using the read-only marker. No game inputs were sent.
+2. Combat-target identity is still unmapped. One selected-target label was
+   captured; the older context+0x98 candidate did not match its runtime ID.
+   A cleared-target label was not recorded. A fresh, explicitly labelled
+   select/clear sequence is needed after finding another static candidate.
+3. Repeat layout/signature verification on the Compatibility Mode executable
+   before enabling P1 there. The running binary currently hashes to the original.
+
 Requests
 --------
 
-None yet.
+The user authorized P1/P2 include and snapshot-storage registration in
+``src/context.h`` on 2026-11-11. Those registration lines are included here.
+
+No changes to another track's module are requested. Static layouts, limits,
+the public ABI and pending validation are documented in ``docs/spatial.rst``
+and ``docs/validation/spatial-validation.json``. Combat targets remain unknown;
+``facingTarget`` is not a target-entity mapping.

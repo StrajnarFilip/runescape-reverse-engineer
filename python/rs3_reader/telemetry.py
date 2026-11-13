@@ -7,6 +7,7 @@ tracker. Unknown values are ``None`` with a reason, never an assumed zero.
 from __future__ import annotations
 
 import time
+import ctypes
 
 from .inventory_records import extend_record
 from .native import (
@@ -19,6 +20,8 @@ from .native import (
     Reason,
     Status,
     decode_text,
+    ScreenPoint,
+    SpatialFlags,
 )
 from .prayer import Prayer
 
@@ -168,6 +171,10 @@ def npc_records(reader, info, npcs, hits):
     """Return (entity records, active hit records) of the loaded NPCs."""
     entities, active_hits = [], []
     identity_keys = ("runtime_id", "instance_id", "config_id", "name")
+    spatial = {
+        reader.npc_spatial[index].instance_id: reader.npc_spatial[index]
+        for index in range(reader.spatial.npc_count)
+    }
     for index in range(info.npc_count):
         npc = npcs[index]
         entity = {
@@ -179,6 +186,9 @@ def npc_records(reader, info, npcs, hits):
             "hit_splats": [],
         }
         entity["animation"] = npc_animation_record(reader.npc_animations[index])
+        pose = spatial.get(npc.instance_id)
+        if pose is not None:
+            entity.update(spatial_actor_record(reader, pose))
         # Each NPC references a slice of the snapshot's shared hit buffer.
         for hit_index in range(npc.hit_offset, npc.hit_offset + npc.hit_count):
             hit = hit_record(hits[hit_index])
@@ -194,6 +204,71 @@ def npc_records(reader, info, npcs, hits):
         )
     )
     return entities, active_hits
+
+
+def spatial_actor_record(reader, actor):
+    """Serialize C spatial observations; unknown targets do not mean no target."""
+    age = (
+        nanoseconds_to_milliseconds(max(0, reader.monotonic_ns() - actor.observed_ns), 3)
+        if actor.observed_ns
+        else None
+    )
+
+    def field(value, reason):
+        return {
+            "value": value,
+            "age_ms": age,
+            "source": "native_spatial",
+            "reason": (
+                None
+                if value is not None
+                else {
+                    0: "not_observed",
+                    2: "read_failed",
+                    3: "unsupported_profile",
+                    100: "unmapped",
+                }.get(reason or reader.spatial.reason, "spatial_reason_" + str(reason))
+            ),
+        }
+
+    result = {
+        "tile": field(
+            (
+                {"x": actor.tile.x, "y": actor.tile.y, "plane": actor.tile.plane}
+                if actor.valid_mask & SpatialFlags.TILE
+                else None
+            ),
+            actor.tile_reason,
+        ),
+        "facing": field(
+            (
+                {"angle": actor.facing_degrees, "unit": "degrees"}
+                if actor.valid_mask & SpatialFlags.FACING
+                else None
+            ),
+            actor.facing_reason,
+        ),
+        "target": field(None, actor.target_reason),
+    }
+    if actor.valid_mask & SpatialFlags.FINE_POSITION:
+        point = ScreenPoint()
+        reader.check_result(
+            reader.library.rs3_project_actor(
+                ctypes.byref(reader.spatial.camera),
+                ctypes.byref(actor),
+                0,
+                ctypes.byref(point),
+                ctypes.sizeof(point),
+            )
+        )
+        result["screen_point"] = {
+            "x": point.x if point.valid else None,
+            "y": point.y if point.valid else None,
+            "valid": bool(point.valid),
+            "reason": point.reason,
+            "units": "physical_screen_pixels",
+        }
+    return result
 
 
 def changing_value(value, changed_ns, sample_monotonic_ns):
@@ -273,6 +348,7 @@ class NativeTelemetry:
             read_duration_ms=native["sample_duration_ms"],
         )
         record["combat"] = combat_record(self.reader)
+        record["player"] = spatial_actor_record(self.reader, self.reader.spatial.player)
         record["player_hit_splats"] = player_hit_splats
         # Observations from earlier frames keep their own process and timestamp.
         record["hit_splats"] = {
@@ -339,6 +415,7 @@ class NativeTelemetry:
             "read_duration_ms": native["sample_duration_ms"],
             "position": position,
             "combat": combat_record(reader),
+            "player": spatial_actor_record(reader, reader.spatial.player),
             "player_hit_splats": player_hit_splats,
             "freshness": {
                 "observed_at_ms": info.timestamp_ns // 1_000_000,
