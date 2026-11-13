@@ -30,3 +30,9 @@
 
 - The trace captured two Tendrils-to-Uppercut loops, one Hold Still and entry into P2. The phase field changed from `0` to `1` in bits 21–23 at that handoff. Latest recorded P2 player HP was 251. No kill was recorded.
 - The attack count and cue order were reproduced offline by `work/telos_zero.py` from the local capture. [Animation observations and replay instructions](animation-cues.md)
+
+## Scripted 0% practice startup
+
+- Re-entered through the Telos portal at War's Retreat. The client chat confirmed 0% enrage and Practice Mode. The native reader could see dormant Telos from the staging platform across the gap.
+- The Python controller clicked the Deflect Melee slot via the Arduino and confirmed the active overhead. Its approach clicks moved the character on the staging platform, but no attempt changed Telos from dormant to active. Rejoin on the Roots reported that the character was already inside the instance. The arena crossing still needs validation before using an approach point.
+- Prayer points ran out during staging after Deflect Melee was left active. Recharge prayer before retrying and wait to activate the overhead until the route into the arena is established. No food was used and no fight or kill was recorded.
