@@ -4,6 +4,8 @@ Select **0%** and enable **Practice mode** while learning. Verify the result and
 
 For the 0% milestone, use prayer for survival and healing. Leave Rocktails and Saradomin brews unused. Start with full life points and verify the initial protection overhead before waking Telos.
 
+The Python observer records a checkpoint candidate when the decoded phase and the transmitted HP agree with the 0% phase bands. Shared boundary values can appear on either side of a handoff. During P4, the count of crossed HP thresholds helps locate candidate font events in the trace. Confirm the active font and its charge separately. At zero HP, look for the in-game Practice Mode completion message or reward interface before recording victory. [Animation cues and capture workflow](animation-cues.md)
+
 ## Visual cues and responses to test
 
 These are guide-derived cues. Confirm the visible phase, targetability and action effect before acting on a cue. Attack patterns can carry across phases, so avoid relying on a timer that restarts at every transition.

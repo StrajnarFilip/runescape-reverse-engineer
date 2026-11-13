@@ -35,6 +35,9 @@ OPENING_AUTOS = 7
 LOOP_AUTOS = 3
 HOLD_STILL_PREP_AUTOS = 2
 PHASE_TWO_HP = 300_000
+PHASE_THREE_HP = 200_000
+PHASE_FOUR_HP = 100_000
+FONT_THRESHOLDS = (75_000, 50_000, 25_000)
 MAX_SAMPLE_AGE_NS = 100_000_000
 SPECIAL_WINDOW_NS = 3_000_000_000
 ACK_TIMEOUT_NS = 1_200_000_000
@@ -195,6 +198,24 @@ def cooldowns(reader):
     return timers
 
 
+def encounter_checkpoint(phase, health):
+    """Check the 0% HP band against the phase field and flag possible font progress."""
+    current, maximum = health["current"], health["max"]
+    if maximum != ZERO_ENRAGE_HP or current is None or phase not in (1, 2, 3, 4):
+        return None
+    # A shared boundary belongs to either neighboring phase during the handoff.
+    lower, upper = {
+        1: (PHASE_TWO_HP, ZERO_ENRAGE_HP),
+        2: (PHASE_THREE_HP, PHASE_TWO_HP),
+        3: (PHASE_FOUR_HP, PHASE_THREE_HP),
+        4: (0, PHASE_FOUR_HP),
+    }[phase]
+    if not lower <= current <= upper:
+        return None
+    fonts_reached = sum(current <= threshold for threshold in FONT_THRESHOLDS) if phase == 4 else 0
+    return {"phase": phase, "font_thresholds_reached": fonts_reached, "zero_hp": current == 0}
+
+
 def replay(path):
     """Replay phase 1 counts and retain raw later-phase cues for calibration."""
     encounter = None
@@ -286,13 +307,17 @@ def observe(reader, duration):
                 if phase is not None and phase >= 2
                 else []
             )
+            health = npc_health_record(boss)
             state = dict(
                 session=session,
                 boss_config_id=boss.config_id,
                 boss_instance_id=boss.instance_id,
-                boss_health=npc_health_record(boss),
+                boss_health=health,
                 telos_raw=player.variable(Variable.TELOS_PACKED),
                 phase_candidate=phase,
+                checkpoint_candidate=(
+                    encounter_checkpoint(phase, health) if boss.config_id == ACTIVE_TELOS else None
+                ),
                 hp=hp,
                 other_npcs=other_npcs,
                 overhead=Prayer(reader.active_prayer()).name.lower(),
@@ -441,7 +466,7 @@ def run(reader, args, board):
         if phase not in (1, 2) or not hp_known:
             raise RuntimeError("Encounter phase unavailable or outside the calibrated range")
         if phase == 2:
-            if boss.health_current > PHASE_TWO_HP:
+            if encounter_checkpoint(phase, npc_health_record(boss)) is None:
                 raise RuntimeError("Phase 2 bits disagree with the observed boss HP")
             log("phase_two_observed", boss_hp=boss.health_current, phase=phase, player_hp=hp)
             if args.observe_transition:

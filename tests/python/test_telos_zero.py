@@ -74,6 +74,21 @@ class PhaseOneTests(unittest.TestCase):
 
 
 class PracticeRunTests(unittest.TestCase):
+    def test_phase_and_font_candidates_require_matching_health(self):
+        checkpoint = controller["encounter_checkpoint"]
+        health = {"current": 300_000, "max": 400_000}
+        self.assertEqual(checkpoint(1, health)["phase"], 1)
+        self.assertEqual(checkpoint(2, health)["phase"], 2)
+        self.assertIsNone(checkpoint(3, health))
+        self.assertEqual(checkpoint(3, {**health, "current": 150_000})["phase"], 3)
+        for current, count in [(75_001, 0), (75_000, 1), (50_000, 2), (25_000, 3)]:
+            candidate = checkpoint(4, {**health, "current": current})
+            self.assertEqual(candidate["font_thresholds_reached"], count)
+            self.assertFalse(candidate["zero_hp"])
+        self.assertTrue(checkpoint(4, {**health, "current": 0})["zero_hp"])
+        self.assertIsNone(checkpoint(4, {"current": 25_000, "max": None}))
+        self.assertIsNone(checkpoint(5, {**health, "current": 0}))
+
     def test_observation_replay_retains_transition_and_later_animation(self):
         replay = controller["replay"]
         boss_id = controller["ACTIVE_TELOS"]
