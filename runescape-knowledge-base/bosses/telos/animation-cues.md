@@ -46,3 +46,5 @@ An optional `--reacquire TARGET_CYCLE BASIC_ATTACK` practice trial sends one tar
 The trial records P2 animations and hitmarks from the first sample, including those before any target-cycle input. It waits up to ten seconds for a sample containing both a new melee auto and active Deflect Melee before yielding to read-only capture if requested.
 
 The saved 0% trace recorded no active overhead at the P2 transition or at either of the two subsequent animation applications. On that trace, the protected melee cue required by the reacquisition trial never appeared. A fresh run needs to show whether the Hold Still response can carry protection through to P2.
+
+In that same trace, Deflect Melee was still active for the two Hold Still hitmarks at about 1.14 and 2.31 seconds. The overhead first read `none` at 4.71 seconds, followed by the 4,187 hitmark at 5.31 seconds. The sampled Ctrl+F3/F4 press log was empty through that interval. The trace does not establish why the overhead disappeared. The optional Surge trial logs the first tile change within 1.2 seconds of input. Compare it with the cooldown acknowledgement and subsequent hitmarks to evaluate the dodge.

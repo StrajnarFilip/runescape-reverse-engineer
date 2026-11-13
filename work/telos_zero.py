@@ -454,6 +454,8 @@ def run(reader, args, board):
     next_approach = 0
     previous_tile = None
     previous_prayer = None
+    surge_origin = None
+    surge_sent_ns = None
     phase_two_at = None
     reacquire_at = None
     reacquire_hp = None
@@ -594,6 +596,17 @@ def run(reader, args, board):
         phase_one.observe(actions)
         position = reader.position
         tile = (position.x, position.y, position.plane) if position.valid else None
+        if surge_sent_ns is not None:
+            displaced = tile is not None and tile != surge_origin
+            if displaced or now - surge_sent_ns >= ACK_TIMEOUT_NS:
+                log(
+                    "surge_displacement",
+                    origin=surge_origin,
+                    tile=tile,
+                    observed=displaced,
+                    sample_ns=now,
+                )
+                surge_sent_ns = None
         if actions or hits or hits_lost or tile != previous_tile or prayer != previous_prayer:
             log(
                 "combat",
@@ -623,11 +636,17 @@ def run(reader, args, board):
             log("cooldown_acknowledgement", ability=ability, observed=confirmed, sample_ns=now)
             phase_one.cast_result = None
         if action:
+            if action.ability == "Surge" and tile is None:
+                time.sleep(POLL_SECONDS)
+                continue
             if reader.monotonic_ns() - info.monotonic_ns > MAX_SAMPLE_AGE_NS:
                 raise RuntimeError("Native sample aged out before submitting the action")
             board.tap(bindings[action.ability], KEY_HOLD_SECONDS, check_focus, time.sleep)
             sent_ns = reader.monotonic_ns()
             phase_one.sent(action, sent_ns)
+            if action.ability == "Surge":
+                surge_origin = tile
+                surge_sent_ns = sent_ns
             log("ability_sent", ability=action.ability, reason=action.reason, sent_ns=sent_ns)
         time.sleep(POLL_SECONDS)
     log("timeout", active=active_instance is not None)
