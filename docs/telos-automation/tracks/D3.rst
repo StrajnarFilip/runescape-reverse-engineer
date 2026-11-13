@@ -1,7 +1,7 @@
 D3 - Survival manager
 =====================
 
-:Status: open
+:Status: done
 :Wave: 1
 :Branch: ``telos/D3``
 :Kind: Python
@@ -58,7 +58,73 @@ Needs the user
 
 Nothing in this track. Live use starts at rung 3 of track L.
 
+Implementation and verification (2026-11-13)
+------------------------------------------
+
+``SurvivalManager.step(WorldState, encounter=None)`` emits only S0a intents at
+SURVIVAL priority; it acquires no data and never loads an actuator or DLL.
+``create_stack()`` exposes the threshold/effect-only producer to S0a replay.
+The profile contains all thresholds, item roles, priorities and defensive IDs.
+These defaults are policy, not a claim of optimal live rotations.
+
+Food and potion proposals use current native metadata, exact logical slot,
+item ID and tracking token. Brew family 19 and restore families 23/74 come
+from the local catalogue; food requires its healing tag and explicit undosed
+metadata. Dose changes and moves retain role through family metadata, not
+item names or remembered slots. Ordinary food and one potion may be proposed
+in one tick. Prayer restoration and brew priority are configurable. Renewal
+families and Disruption Shield remain documented leads, not guessed actions.
+
+Defensives require a fresh castable=True result and known zero cooldown;
+equipment match alone is insufficient. Freedom requires a confirmed stun or
+bind. Predicted-hit rules additionally require a fresh same-session D1 state,
+a calibrated future check window, measured damage bound and explicit eligible
+defensives. Confirmed effect absences protect one-hit blockers from accidental
+stacking, and Devotion requires matching observed protection. Every proposal
+retains its trigger, ability/effect observations and target evidence.
+
+Virus cleansing requires a confirmed active effect and exactly one fresh
+validated P4 cleanse route with an actual entity identity and option. Emergency
+exit requires a calibrated profile binding and fresh castability; the default
+route is explicitly unmapped. Missing data never becomes a default teleport,
+food, defensive or safe state.
+
+D6 calls ``note_sent(intent_id, sent_ns)`` only after accepted input. Pending
+lanes wait for a newer inventory/cooldown/effect observation. A changed item
+slot invalidates old preconditions without claiming consumption; a display
+metadata refresh does not acknowledge input. Timeout latches a producer fault
+until reset. Proposals never consume inventory optimistically.
+
+All 25 D3 tests pass, including the required survival scenarios and a golden
+S0a replay from 24 unchanged low-health records in the saved P2 capture.
+That replay yields 24 potion proposals with no sent input. The input SHA-256
+is ``2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618``;
+the output-log SHA-256 is
+``8cc9273431af467afe4f8d0f828bb2b7bc279913d492cbe02ce555f5d4d28911``.
+Tests can use ``RS3_LOCAL_CAPTURE_ROOT`` for ignored capture locations; without
+the local file that single test skips. Raw records and proposal logs stay local.
+The Windows x64 Release build and all 10 CTest suites passed, with 103 Python
+tests. Partial inventory omission cannot acknowledge consumption.
+
 Requests
 --------
 
-None yet.
+* D4/P3/L: current native ability records leave full castability unknown. Map
+  unlocks, runes, spellbook, adrenaline, target and other cast conditions;
+  unknown castability blocks actual defensive/exit proposals. Defensive
+  activation latency and shared timers still need live validation.
+* D1/P6: populate measured ``damage_upper_bound`` and ``defensive_options``
+  per threatened hit/component. Unknown timing or eligibility cannot justify
+  Resonance, Devotion, Barricade, Immortality or Disruption Shield. Later phases
+  and high-enrage exceptions remain calibration work, not inherited guide rules.
+* P3/P4: confirm stun/bind/virus semantics and supply calibrated cleanse
+  routes (kind=virus_cleanse, validated, source, target, option). No targets or
+  absence are inferred from a partial collection or display name.
+* D6/L: route accepted sends to ``note_sent`` immediately and honor producer
+  faults. Arbitration must recheck item/potion timers and combination lockouts;
+  threshold proposals alone do not establish food/potion readiness. Game
+  acknowledgement, cooldown compatibility and per-lane budgets remain separate.
+* A1/L: native generic item/modifier input and a verified game tick remain
+  dependencies. No live input is enabled by this track.
+* Later controlled session: calibrate an emergency teleport/exit and renewal
+  effect/shared timers. Default exit and Disruption Shield ability IDs stay null.
