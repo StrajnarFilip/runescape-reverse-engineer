@@ -1,7 +1,7 @@
 P6 - Attack catalogue
 =====================
 
-:Status: in progress
+:Status: waiting for live session
 :Wave: 1
 :Branch: ``telos/P6``
 :Kind: Data and analysis (no DLL changes)
@@ -58,10 +58,64 @@ enrage bands are added later during track L.
 Needs the user
 --------------
 
-Several manual kills at 300% with ``telos_prayer --record-keys`` running,
-calling out phase changes and each special by name. Raw captures stay local.
+Complete a manual 300% practice attempt reaching phase 5 while the recorder
+runs. Use Ctrl+F1 Magic, Ctrl+F2 Ranged, Ctrl+F3 Soul Split and Ctrl+F4 Melee
+manually. Report phase changes and each special by name; repeat missing phases
+as needed. No automatic prayer input is enabled. Raw captures stay local.
+
+The 2026-11-13 catalogue has 28 scoped rows from the two labelled phase-1
+captures and the saved P2 manual captures. It lists observed sequences in
+phases 1-4 at 300% and a separate 500% band. Phase 5 remains not captured.
+Only four old phase-1 labels are classified; unlabelled sequences, hit
+components and protection-check windows remain explicit unknowns.
+
+The additional live 300% attempt on 2026-11-13 reached the second phase-4 font
+according to the user. It retained 61 Telos cues and 13 manual prayer keys,
+with zero action/player-hit event losses. This recorder has the packed stage
+but not P2's active-encounter VARP guard or per-phase user timestamps. These
+new cues are counted as unassigned, rather than claiming exact phase labels.
+
+Consumer API: ``rs3_reader.telos_prayer.load_attack_catalogue()`` returns
+immutable metadata. ``lookup(phase, enrage, sequence, executable_sha256=...,
+context=..., require_validated=...)`` requires exact scope; unknown returns
+None. The historical melee labels require context ``isolated_p1_melee``.
+D1 may use classification labels; D2 must require validated timing and full
+incoming-attack coverage. No row currently authorizes automatic flicking.
+
+The recorder accepts ``--pid``, ``--record-keys``, ``--duration``, ``--enrage``,
+``--output`` and ``--stop-file``. It retains raw NPC actions, player hitmarks,
+loss counters and all four manual prayer-key edges. It labels no attack style
+or phase merely from an animation ID. Poll intervals are measured at key
+edges, not assumed to match the requested sampling period.
+
+``work/analyze_telos_calibration.py`` supports either isolated
+``--phase``/``--enrage`` labels or ``--annotations`` for mixed-phase captures,
+plus ``--catalogue-output``. Annotation JSON has a ``sources`` array; each
+entry contains capture_sha256, client_sha256, bounded intervals (original
+session, start_ns, end_ns, phase, enrage, source and uncertainty_ns), and
+optional labels keyed by sequence. Ambiguous/boundary cues stay unassigned.
+Guide leads never become validated; cue-to-hit delays never become protection
+deadlines. Raw stages are not decoded by the general analyzer.
+Hit pairing is disabled by default; ``--isolated-melee`` enables descriptive
+cue-to-hit observations only with an explicitly labelled phase-1 capture.
+
+``docs/validation/telos-prayer-calibration-2026-11-13.json`` records compact
+provenance, counts, guard scope and missing coverage. Offline P2 annotations
+use only the exact original-profile phase mapping and active-Telos guards in
+P2's committed validation report, with 100 ms exclusions at phase boundaries.
 
 Requests
 --------
 
-None yet.
+* Live session: phase 5 and remaining special/style/component labels at 300%.
+  Acceptance cannot be claimed from an empty phase-5 sequence list.
+* D2/L: server protection deadlines, golem/projectile coverage and reliable
+  Soul Split windows remain uncalibrated. Do not arm input from names,
+  four-tick guide cadence, client overhead timing or cue-to-hit observations.
+* P2/S0b: original-profile observations do not validate attack semantics or
+  phase mapping for a different executable hash. New runtime profiles require
+  labelled captures before catalogue reuse.
+* P2/L: include guarded encounter telemetry in the recorder after serial
+  integration, or obtain explicit bounded manual phase callouts. The current
+  integration branch lacks P2's semantic accessor. Packed stage alone is not
+  a replacement for the documented encounter guard.
