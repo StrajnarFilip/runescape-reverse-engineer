@@ -1,7 +1,7 @@
 D8 - Supervisor
 ===============
 
-:Status: in progress
+:Status: done
 :Wave: 1
 :Branch: ``telos/D8``
 :Kind: Python
@@ -95,6 +95,15 @@ become fresh simply because a newer frame is being evaluated.
 Requests
 --------
 
+* L's shadow composition request is implemented on 2026-11-13:
+  ``python -m rs3_reader.bot --capture capture.jsonl --arbitrate`` composes D6
+  when its module is present. One recording actuator is shared; dispatch stays
+  disabled. Frame logs include D6 decisions, without simulated acceptance or
+  native/serial input imports. Missing D6 is an explicit error. Existing
+  non-arbitrated logs retain their format. The clock follows the supervisor's
+  native clock even after a live observer installs it. Owner checks ran 98
+  Python tests; one local-raw-capture test was skipped in this isolated worktree.
+  Three new cases cover composition, missing D6 and the offline CLI boundary.
 * L: provide reviewed live authorization and actual A1/D6 composition before
   enabling assist/full. Those modes are deliberately refused for now; the user
   explicitly reserved L for their return. Validate the physical stop hotkey
