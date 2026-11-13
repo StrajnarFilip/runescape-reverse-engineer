@@ -1,7 +1,7 @@
 D6 - Arbiter
 ============
 
-:Status: open
+:Status: done
 :Wave: 1
 :Branch: ``telos/D6``
 :Kind: Python
@@ -55,7 +55,70 @@ Needs the user
 
 Nothing.
 
+Implementation and verification (2026-11-13)
+------------------------------------------
+
+``Arbiter.step(WorldState, proposals=None)`` is the serialized single writer.
+It can collect registered producers or arbitrate a supplied batch. Survival,
+prayer, mechanics and rotation priorities are sorted before dispatch; equal
+priority uses the earliest deadline. A low-priority proposal never executes
+before a higher-priority eligible proposal in the same batch.
+
+Budgets are per verified server tick: GCD 1, off-GCD 2, food 1, potion 1,
+prayer 4 and pointer 3, total 12 by default. They are configurable and distinct
+from game cooldown groups. Food, potion, ability and prayer can share a tick.
+Unknown ticks do not become wall-clock or client-logic estimates. Attempted
+device sends spend budget conservatively even if rejected.
+
+Deadlines, source ages, session/build identity, current preconditions and
+producer can_send are checked at dispatch. A latest-world provider can supply
+a newer frame. Pointer and prayer input additionally require injected A2/D2
+validators; default absence blocks them. Unknown castability, timers, GCD,
+prayer state or exact inventory preconditions reject the relevant action.
+
+Pending actions are not resent with new IDs. GCD/food/potion/prayer/pointer
+lanes are exclusive while awaiting observation; different off-GCD abilities
+have separate pending keys. Newer prayer, ability cooldown, destination tile
+or inventory-precondition observations release pending state. A changed slot
+is not described as successful consumption. Partial omissions do not prove
+absence. Arbitrary interactions require a producer confirm hook returning a
+fresh Observation[bool]. Timeout, scene/build/clock changes, callback faults
+or uncertain transport results stop and close the backend.
+
+Optional producer hooks: can_send(intent, world), note_sent(id, ns),
+note_rejected(id, reason, ns), confirm(intent, before, after). Accepted and
+rejected results are also available in the per-step results tuple and an
+optional on_result callback. Deferred proposals are logged and recomputed,
+not stored as a stale future queue. One compact DecisionLog is returned per
+sample and optionally written as JSON Lines; game success is never inferred
+from accepted input. History, pending state and proposal batches are bounded.
+
+Twenty D6 tests pass against a fake actuator, including priority, simultaneous
+lanes, rejection callbacks, expiry during dispatch, pending confirmation,
+fault cleanup, missing validators, changed snapshots, bounded budgets and
+S0a replay. The real native-hit capture is replayed with diagnostic synthetic
+proposals; unavailable readiness yields no device acceptance. Its golden
+proposal-log SHA-256 is
+``ac12cf5af97182bb4f31c8999a6b54d2b0429cd46490a6c1993967f9f7c2ac78``.
+Raw capture and logs remain local. ``create_stack`` constructs only the
+recording fake, with no live producers; no native backend is imported.
+
 Requests
 --------
 
-None yet.
+* L: align A1 and D6 budgets/ages, provide a verified server-tick source and
+  fresh world provider, and opt in only at an approved ladder rung. Live input
+  is disabled by default; the recording-only replay adapter cannot choose a
+  hardware backend.
+* D2/A2: provide the injected prayer/pointer validators. Prayer validation must
+  check the phase/enrage timing scope and coverage; pointer validation must
+  check calibrated geometry/visibility. An enabled arbiter alone supplies
+  neither permission nor evidence for those actions.
+* D3/D4/D5/D7: use note_sent only after acceptance; rejected sends are delivered
+  through note_rejected when implemented, plus results/on_result. Implement
+  can_send for rules needing revalidation against newer snapshots. Producers
+  without a rejection hook must consume the result mailbox through their L
+  adapter; no acceptance or success is silently manufactured for them.
+* D7/A2: interaction confirmation needs a fresh observable postcondition;
+  pointer movement or an open dialog alone does not confirm an arbitrary
+  interaction. D8 should stop on arbiter/producer faults and pending timeouts.
