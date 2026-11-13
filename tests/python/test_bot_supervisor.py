@@ -10,10 +10,17 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from types import ModuleType
+from unittest.mock import patch
 
 from rs3_reader.bot.actuator import RecordingActuator
 from rs3_reader.bot.replay import replay
-from rs3_reader.bot.supervisor import Supervisor, hotkey_codes, load_producers
+from rs3_reader.bot.supervisor import (
+    Supervisor,
+    create_shadow_supervisor,
+    hotkey_codes,
+    load_producers,
+)
 from rs3_reader.bot.world_state import WorldState
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -258,6 +265,83 @@ class SupervisorTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout.splitlines()[-1])["kind"], "session_report")
+
+    def test_shadow_composition_shares_recording_backend_and_keeps_dispatch_disabled(self):
+        class FakeArbiter:
+            def __init__(self, actuator, *, clock, producers, enabled):
+                self.actuator, self.clock = actuator, clock
+                self.enabled, self.producers, self.last_log = enabled, producers, None
+
+            def step(self, value, proposals):
+                self.clock_seen = self.clock()
+                self.last_log = SimpleNamespace(to_record=lambda: {"decisions": []})
+                return SimpleNamespace(fault=None)
+
+            def close(self):
+                self.actuator.close()
+
+        calls = []
+        producer = SimpleNamespace(step=lambda value: calls.append(value) or ())
+        fake_module = ModuleType("rs3_reader.bot.arbiter")
+        fake_module.Arbiter = FakeArbiter
+        with patch.dict(sys.modules, {"rs3_reader.bot.arbiter": fake_module}):
+            controller = create_shadow_supervisor(arbitrate=True, producers={"fixture": producer})
+        self.addCleanup(controller.close)
+        self.assertIs(controller.actuator, controller.arbiter.actuator)
+        self.assertIs(controller.arbiter.enabled, False)
+        controller.native_clock = lambda: 1001 * MS
+        controller.step(world())
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(controller.arbiter.clock_seen, 1001 * MS)
+        self.assertEqual(controller.last_log["arbitration"], {"decisions": []})
+        self.assertIs(controller.last_log["dispatch_enabled"], False)
+        self.assertIs(controller.report()["shadow_arbitration"], True)
+        self.assertFalse(controller.actuator.attempts)
+
+    def test_missing_optional_D6_is_an_explicit_error(self):
+        with patch.dict(sys.modules, {"rs3_reader.bot.arbiter": None}):
+            with self.assertRaisesRegex(RuntimeError, "D6"):
+                create_shadow_supervisor(arbitrate=True)
+        with self.assertRaises(ValueError):
+            create_shadow_supervisor(arbitrate="yes")
+        with self.assertRaises(ValueError):
+            create_shadow_supervisor(arbitrate=True, actuator=RecordingActuator())
+
+    def test_arbitrated_CLI_is_recording_only_or_reports_missing_D6(self):
+        with tempfile.TemporaryDirectory() as directory:
+            capture = Path(directory) / "synthetic.jsonl"
+            capture.write_text(json.dumps(row()) + "\n")
+            script = (
+                "import sys; from rs3_reader.bot.supervisor import main; r=main(); "
+                "assert 'rs3_reader.native' not in sys.modules; "
+                "assert 'rs3_reader.bot.actuator_sendinput' not in sys.modules; "
+                "assert 'rs3_reader.bot.actuator_serial' not in sys.modules; raise SystemExit(r)"
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    script,
+                    "--capture",
+                    str(capture),
+                    "--enable",
+                    "",
+                    "--arbitrate",
+                ],
+                env=dict(os.environ, PYTHONPATH=str(ROOT / "python")),
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if (ROOT / "python/rs3_reader/bot/arbiter.py").exists():
+                self.assertEqual(result.returncode, 0, result.stderr)
+                records = [json.loads(line) for line in result.stdout.splitlines()]
+                self.assertIs(records[0]["dispatch_enabled"], False)
+                self.assertIs(records[-1]["shadow_arbitration"], True)
+                self.assertIs(records[-1]["input_sent"], False)
+            else:
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("D6", result.stderr)
 
     def test_broken_producer_or_kill_switch_releases_keys(self):
         class BrokenProducer:

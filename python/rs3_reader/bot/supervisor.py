@@ -411,11 +411,17 @@ class Supervisor:
             "intents": [intent.to_record() for intent in proposals],
             "input_sent": False,
         }
+        if self.arbiter is not None:
+            arbitration = getattr(self.arbiter, "last_log", None)
+            self.last_log["arbitration"] = (
+                arbitration.to_record() if arbitration is not None else None
+            )
+            self.last_log["dispatch_enabled"] = False
         return proposals
 
     def report(self):
         """Return compact session totals, never infer a successful kill from despawn."""
-        return {
+        report = {
             "schema_version": 1,
             "kind": "session_report",
             "mode": "shadow",
@@ -428,6 +434,45 @@ class Supervisor:
             "kill_reports": list(self.kill_reports),
             "input_sent": False,
         }
+        if self.arbiter is not None:
+            report["shadow_arbitration"] = True
+            report["dispatch_enabled"] = False
+        return report
+
+
+def create_shadow_supervisor(*, arbitrate=False, **options):
+    """Compose optional D6 logging with one recording actuator and dispatch disabled.
+
+    Import D6 only when requested. It may not yet be merged on a standalone D8
+    branch. The clock resolves through the supervisor on each call so an explicit
+    live observer can subsequently install its native monotonic clock.
+    """
+    if type(arbitrate) is not bool:
+        raise ValueError("Shadow arbitration must be an explicit boolean")
+    if arbitrate and any(name in options for name in ("actuator", "arbiter")):
+        raise ValueError("Shadow composition owns one recording actuator and arbiter")
+    supervisor = Supervisor(**options)
+    if arbitrate:
+        try:
+            from .arbiter import Arbiter
+
+            supervisor.arbiter = Arbiter(
+                supervisor.actuator,
+                clock=lambda: supervisor.native_clock(),
+                producers=supervisor.producers,
+                enabled=False,
+            )
+        except ModuleNotFoundError as error:
+            supervisor.close()
+            if error.name == "rs3_reader.bot.arbiter":
+                raise RuntimeError(
+                    "D6 is required for --arbitrate; integrate its module first"
+                ) from error
+            raise
+        except Exception:
+            supervisor.close()
+            raise
+    return supervisor
 
 
 def main(argv=None):
@@ -442,6 +487,11 @@ def main(argv=None):
     parser.add_argument("--max-kills", type=int, default=1)
     parser.add_argument("--kill-key", default=DEFAULT_KILL_KEY)
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--arbitrate",
+        action="store_true",
+        help="Include D6 shadow decisions; dispatch remains disabled",
+    )
     arguments = parser.parse_args(argv)
     if arguments.mode != "shadow":
         parser.error("assist/full require track L authorization; use shadow")
@@ -457,7 +507,8 @@ def main(argv=None):
         producers, missing = load_producers(
             tuple(name for name in arguments.enable.split(",") if name)
         )
-        supervisor = Supervisor(
+        supervisor = create_shadow_supervisor(
+            arbitrate=arguments.arbitrate,
             producers=producers,
             missing=missing,
             maximum_seconds=arguments.max_seconds,
