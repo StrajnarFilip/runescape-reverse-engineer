@@ -50,6 +50,7 @@ F12 = 0x7B
 APPROACH_TIMEOUT_NS = 10_000_000_000
 ENGAGE_TIMEOUT_NS = 2_000_000_000
 REACQUIRE_TIMEOUT_NS = 3_600_000_000
+REACQUIRE_CUE_TIMEOUT_NS = 10_000_000_000
 MOVEMENT_WINDOWS = {
     UPPERCUT: (3_600_000_000, 4_000_000_000, "Uppercut movement trial"),
     HOLD_STILL: (2_900_000_000, 5_000_000_000, "Hold Still landing movement trial"),
@@ -436,8 +437,7 @@ def run(reader, args, board):
     next_approach = 0
     previous_tile = None
     previous_prayer = None
-    phase_two_seen = False
-    phase_two_melee_seen = False
+    phase_two_at = None
     reacquire_at = None
     reacquire_hp = None
     while time.monotonic() < deadline:
@@ -514,13 +514,26 @@ def run(reader, args, board):
         if phase == 2:
             if encounter_checkpoint(phase, npc_health_record(boss)) is None:
                 raise RuntimeError("Phase 2 bits disagree with the observed boss HP")
-            if not phase_two_seen:
+            first_phase_two_sample = phase_two_at is None
+            if first_phase_two_sample:
                 log("phase_two_observed", boss_hp=boss.health_current, phase=phase, player_hp=hp)
-                phase_two_seen = True
-            if args.reacquire:
-                phase_two_melee_seen |= any(
-                    action["action_sequence"] == MELEE_AUTO_SEQUENCE for action in actions
+                phase_two_at = now
+            if first_phase_two_sample or actions or hits or hits_lost:
+                log(
+                    "observation",
+                    session=identity,
+                    boss_config_id=boss.config_id,
+                    boss_instance_id=boss.instance_id,
+                    phase_candidate=phase,
+                    boss_health=npc_health_record(boss),
+                    hp=hp,
+                    overhead=prayer.name.lower(),
+                    sample_ns=info.monotonic_ns,
+                    npc_actions=actions,
+                    npc_action_events_lost=lost,
+                    player_hits=player_hit_splats_record(reader, hits, hits_lost),
                 )
+            if args.reacquire:
                 if reacquire_at is not None:
                     damage_seen = boss.health_current < reacquire_hp
                     if damage_seen or now - reacquire_at >= REACQUIRE_TIMEOUT_NS:
@@ -534,7 +547,9 @@ def run(reader, args, board):
                         continue
                 elif boss.health_current < PHASE_TWO_HP:
                     log("phase_two_reacquire_skipped", reason="Boss HP already decreased")
-                elif phase_two_melee_seen and prayer == Prayer.MELEE:
+                elif prayer == Prayer.MELEE and any(
+                    action["action_sequence"] == MELEE_AUTO_SEQUENCE for action in actions
+                ):
                     if reader.monotonic_ns() - info.monotonic_ns > MAX_SAMPLE_AGE_NS:
                         raise RuntimeError("Native sample aged out before target cycling")
                     board.tap(bindings["Target Cycle"], KEY_HOLD_SECONDS, check_focus, time.sleep)
@@ -544,21 +559,15 @@ def run(reader, args, board):
                     log("phase_two_reacquire_sent", boss_hp=reacquire_hp)
                     time.sleep(POLL_SECONDS)
                     continue
-                else:
+                elif now - phase_two_at < REACQUIRE_CUE_TIMEOUT_NS:
                     time.sleep(POLL_SECONDS)
                     continue
+                else:
+                    log(
+                        "phase_two_reacquire_skipped",
+                        reason="No fresh melee cue with Deflect Melee",
+                    )
             if args.observe_transition:
-                log(
-                    "observation",
-                    session=identity,
-                    boss_config_id=boss.config_id,
-                    boss_instance_id=boss.instance_id,
-                    phase_candidate=phase,
-                    hp=hp,
-                    sample_ns=info.monotonic_ns,
-                    npc_actions=actions,
-                    npc_action_events_lost=lost,
-                )
                 board.close()
                 observe(reader, max(0, deadline - time.monotonic()))
             return 2

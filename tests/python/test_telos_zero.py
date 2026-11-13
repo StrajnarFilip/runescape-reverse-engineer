@@ -207,7 +207,7 @@ class PracticeRunTests(unittest.TestCase):
             [args.melee, args.approach],
         )
         self.assertEqual([call.args[0] for call in board.command.call_args_list], ["CLICK L"] * 2)
-        self.assertEqual(mock_globals["log"].call_args.args[0], "phase_two_observed")
+        self.assertEqual(mock_globals["log"].call_args.args[0], "observation")
         board.tap.assert_not_called()
 
         board.reset_mock()
@@ -237,6 +237,13 @@ class PracticeRunTests(unittest.TestCase):
         self.assertEqual([call.args[0][-1].name for call in board.tap.call_args_list], ["F6", "Q"])
         self.assertEqual(mock_globals["log"].call_args.args[0], "phase_two_reacquire_result")
         self.assertTrue(mock_globals["log"].call_args.kwargs["damage_observed"])
+        self.assertTrue(
+            any(
+                call.args[0] == "observation"
+                and call.kwargs["npc_actions"] == [{"action_sequence": AUTO}]
+                for call in mock_globals["log"].call_args_list
+            )
+        )
 
 
 if __name__ == "__main__":
