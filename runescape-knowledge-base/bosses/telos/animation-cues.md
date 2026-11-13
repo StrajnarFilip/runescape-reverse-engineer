@@ -23,7 +23,7 @@ In the defensive capture, Hold Still began about 1.29 seconds after the second s
 
 From the repository root in PowerShell, set `$telosTrace` to an existing local capture made with `rs3_reader.telos_prayer`. To record later phases without input, run the script without `--port`.
 
-Replay also accepts the read-only observation JSONL below. It emits the phase candidate and raw Telos animation applications after the handoff. The longest existing capture contains `28930` about 1.88 seconds after the P2 field change and `28929` about 8.04 seconds after it. The observation mode records nearby NPC identities in P2 and later for matching golem and font intermissions in future captures.
+Replay also accepts the read-only observation JSONL below. It emits the phase candidate and raw Telos animation applications after the handoff. The longest existing capture contains `28930` about 1.88 seconds after the P2 field change and `28929` about 8.44 seconds after it. The observation mode records nearby NPC identities in P2 and later for matching golem and font intermissions in future captures.
 
 ```powershell
 $env:PYTHONPATH = 'python'
@@ -44,3 +44,5 @@ The script confirms Deflect Melee before approaching. It sends no food or brew i
 An optional `--reacquire TARGET_CYCLE BASIC_ATTACK` practice trial sends one target-cycle and melee basic ability at the start of P2. Assign these keys in the client. The script waits for the phase and HP to agree, a melee auto to occur, and Deflect Melee to be active. It skips the sequence if Telos is already taking damage. A subsequent HP decrease is evidence that damage resumed. The selected target and the cause of the damage still need live validation. [PVME target cycling](https://pvme.io/pvme-guides/miscellaneous-information/mechanics/#target-cycling-tc)
 
 The trial records P2 animations and hitmarks from the first sample, including those before any target-cycle input. It waits up to ten seconds for a sample containing both a new melee auto and active Deflect Melee before yielding to read-only capture if requested.
+
+The saved 0% trace recorded no active overhead at the P2 transition or at either of the two subsequent animation applications. On that trace, the protected melee cue required by the reacquisition trial never appeared. A fresh run needs to show whether the Hold Still response can carry protection through to P2.

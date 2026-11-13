@@ -135,6 +135,14 @@ class PracticeRunTests(unittest.TestCase):
             ],
         )
         self.assertEqual(logger.call_args.kwargs["actions"], [action])
+        self.assertFalse(logger.call_args.kwargs["protected_melee_cue"])
+
+    def test_phase_two_melee_cue_requires_current_protection(self):
+        cue = controller["phase_two_melee_cue"]
+        self.assertTrue(cue([event(1, AUTO)], "melee"))
+        self.assertFalse(cue([event(1, AUTO)], "none"))
+        self.assertFalse(cue([event(1, 28930)], "melee"))
+        self.assertFalse(cue([], "melee"))
 
     def test_input_waits_for_baseline_prayer_and_stops_at_phase_two(self):
         run = controller["run"]

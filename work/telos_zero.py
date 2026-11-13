@@ -223,6 +223,13 @@ def encounter_checkpoint(phase, health):
     return {"phase": phase, "font_thresholds_reached": fonts_reached, "zero_hp": current == 0}
 
 
+def phase_two_melee_cue(actions, overhead):
+    """Require a fresh melee animation and protection in the same sample."""
+    return overhead == "melee" and any(
+        action["action_sequence"] == MELEE_AUTO_SEQUENCE for action in actions
+    )
+
+
 def replay(path):
     """Replay phase 1 counts and retain raw later-phase cues for calibration."""
     encounter = None
@@ -238,6 +245,7 @@ def replay(path):
                 instance = bosses[0]["instance_id"] if len(bosses) == 1 else None
                 events = row["telos_actions"]
                 sample_ns = row["sample_started_ns"]
+                overhead = row["combat"].get("active_prayer")
             elif row.get("event") == "observation":
                 phase = row["phase_candidate"]
                 session = row["session"]
@@ -246,6 +254,7 @@ def replay(path):
                 )
                 events = row["npc_actions"]
                 sample_ns = row["sample_ns"]
+                overhead = row.get("overhead")
             elif row.get("event") == "telos_absent":
                 encounter = None
                 continue
@@ -270,7 +279,15 @@ def replay(path):
                 if phase != previous_phase:
                     log("phase_candidate", phase=phase, sample_ns=sample_ns, hp=row["hp"])
                 if actions:
-                    log("later_phase_cues", phase=phase, actions=actions, hp=row["hp"])
+                    log(
+                        "later_phase_cues",
+                        phase=phase,
+                        actions=actions,
+                        hp=row["hp"],
+                        overhead=overhead,
+                        sample_ns=sample_ns,
+                        protected_melee_cue=phase == 2 and phase_two_melee_cue(actions, overhead),
+                    )
                 previous_phase = phase
             if previous_phase is not None:
                 continue
@@ -547,9 +564,7 @@ def run(reader, args, board):
                         continue
                 elif boss.health_current < PHASE_TWO_HP:
                     log("phase_two_reacquire_skipped", reason="Boss HP already decreased")
-                elif prayer == Prayer.MELEE and any(
-                    action["action_sequence"] == MELEE_AUTO_SEQUENCE for action in actions
-                ):
+                elif phase_two_melee_cue(actions, prayer.name.lower()):
                     if reader.monotonic_ns() - info.monotonic_ns > MAX_SAMPLE_AGE_NS:
                         raise RuntimeError("Native sample aged out before target cycling")
                     board.tap(bindings["Target Cycle"], KEY_HOLD_SECONDS, check_focus, time.sleep)
