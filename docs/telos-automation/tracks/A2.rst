@@ -1,7 +1,7 @@
 A2 - Movement primitives
 ========================
 
-:Status: in progress
+:Status: waiting for live session
 :Wave: 2
 :Branch: ``telos/A2``
 :Kind: Python and C input layer
@@ -53,10 +53,79 @@ target selections are confirmed by observation with none silently wrong.
 Needs the user
 --------------
 
-One supervised session in a safe area where the bot walks a square and targets
-a dummy, with the user ready on the kill switch.
+No additional Telos fight, beam or rock capture is needed for this track now.
+The user's 2026-11-13 priority is to defer that hazard work and study phase 5
+beams together later. This does not mark unknown geometry as measured.
+
+After the upstream requests below are supplied and L authorizes the test, use
+one supervised safe-area session with the kill switch available:
+
+* Collect at least six labelled minimap clicks with subsequent native arrivals,
+  covering two independent directions while the native view signature is fixed.
+  The final two samples are held out from the fit. Native UI bounds are required;
+  no hand-measured scale or image coordinates are accepted.
+* Confirm twenty consecutive walks around a square from native tile changes.
+* Select/clear a dummy twenty times and confirm the exact native target identity.
+  Clicking, animation, damage, facing and cursor location are not target readback.
+* Record accepted-input-to-observed-outcome times, timeouts and any wrong tile
+  or target. No automatic retries are allowed after uncertain outcomes.
+
+Software evidence
+-----------------
+
+``bot/movement.py`` proposes movement, NPC selection, object interaction and
+explicitly mapped movement-ability intents. It never imports a DLL or sends
+input. Injected native UI/view, route, hit-test and castability evidence remains
+mandatory; absent dependencies reject the operation. Confirmation requires a
+newer observation after accepted input, with the same process, executable and
+scene. Timeout/identity loss latches a fault. D6's producer hooks and pointer
+validator are supported; multiple independent action lanes remain available.
+
+The minimap fit checks independent held-out arrivals, native center/bounds,
+axis conditioning and pixel uncertainty. It cannot infer a safe radius from
+successful clicks. Negative-monitor rounding matches C. The existing native
+projection helper now rejects NULL arguments and ill-conditioned axes without
+changing the public ABI or input dispatch path.
+
+Configured outcome timeout: 3000 ms after acceptance, plus caller polling delay.
+This bounds failure reporting when observations advance; successful live action
+latency remains unmeasured. The supervisor/arbiter must also watch frame freshness.
+
+Nineteen Python movement tests include twenty synthetic moves and twenty
+synthetic target changes. Those are not the brief's live acceptance trials.
+Actual safe-area counts remain zero. ``docs/validation/movement-validation.json``
+contains the scope and unresolved dependencies.
+
+The Release build and all ten CTest targets passed (97 Python tests). D6's
+recording-only arbiter accepted and confirmed a fixture move and NPC selection.
+Replaying the 7,904 real P4 records with missing minimap/target dependencies
+produced zero pointer proposals. No new game input was sent during this work.
 
 Requests
 --------
 
-None yet.
+* P1/P5: publish native minimap center/safe radius in physical pixels, plus a
+  fresh signature covering minimap/camera rotation, zoom, DPI, window and UI
+  layout. No current field supplies this complete record. Route/path validation
+  must be supplied explicitly; a projection alone does not prove walkability.
+* P1: supply verified player combat-target kind/runtime/config/lifetime, including
+  explicit cleared target. The original-profile facingTarget candidate is not
+  this field. Pending target readback must not be replaced by a click/animation.
+* P1/L: ensure the selected runtime's tile used by rs3_move_to_tile and the P1
+  pose refer to the same actor/scene. The original profile's P1 player pose does
+  not populate its older rs3_position; Compatibility Mode's P1 pose port is still
+  pending. This branch does not edit P1 or the shared native snapshot.
+* A1/L: connect guarded native pointer dispatch to the serialized backend after
+  current view, focus, identity, bounds and hit-test checks. A1 currently rejects
+  pointer actions; the serial device remains keyboard-only. No pointer backend
+  is silently enabled here, and producer code never calls SendInput.
+* P4/P5: object instance/config identity and an explicit mapped interaction
+  acknowledgement are required. Reaching an object's tile is not interaction
+  success. Current font NPCs should use their native NPC identity.
+* D6/L: keep A2's outcome watcher active for movement abilities even if D6 observes
+  their cooldown first. Cooldown confirms activation, not successful movement.
+  Call A2.step every frame and stop on its latched fault. Live use also retains
+  A1/D6's server-tick and supervisor requirements.
+* D5/L: keep deferred beam/rock research separate from safe-area movement
+  calibration. Arena routes still require explicit measured evidence; the
+  user's intended rotation is a strategy assumption, not hazard-completeness data.

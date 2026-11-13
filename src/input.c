@@ -18,6 +18,8 @@
 #define ABSOLUTE_MOUSE_RANGE 65536
 #define MODIFIER_COUNT       3u
 #define VALID_MODIFIER_MASK  ((uint32_t)(RS3_KEY_CTRL | RS3_KEY_SHIFT | RS3_KEY_ALT))
+/** Reject numerically singular fitted map axes, irrespective of their pixel scale. */
+#define MIN_MINIMAP_RELATIVE_AREA 1e-6
 
 /** Windows virtual keys pressed for each modifier bit, in bit order. */
 static const WORD modifier_virtual_keys[MODIFIER_COUNT] = {VK_CONTROL, VK_SHIFT, VK_MENU};
@@ -53,6 +55,10 @@ static int is_bindable_key(uint32_t virtual_key)
 int32_t input_project_minimap_tile(const rs3_position *player_tile, const rs3_minimap *minimap,
                                    int32_t tile_x, int32_t tile_y, int32_t plane, POINT *pixel)
 {
+    if (player_tile == NULL || minimap == NULL || pixel == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
     const rs3_position *anchor = &minimap->anchor;
     if (!is_valid_tile(tile_x, tile_y, plane) || minimap->radius_pixels == 0 ||
         minimap->reserved != 0 || anchor->valid != 1 ||
@@ -65,11 +71,14 @@ int32_t input_project_minimap_tile(const rs3_position *player_tile, const rs3_mi
     /* The two tile axes must span an area on screen. */
     double determinant =
         minimap->east_dx * minimap->north_dy - minimap->east_dy * minimap->north_dx;
-    if (!isfinite(determinant) || determinant == 0.0)
+    double axis_norm =
+        hypot(minimap->east_dx, minimap->east_dy) * hypot(minimap->north_dx, minimap->north_dy);
+    if (!isfinite(determinant) || !isfinite(axis_norm) || axis_norm == 0.0 ||
+        fabs(determinant) / axis_norm <= MIN_MINIMAP_RELATIVE_AREA)
     {
         return RS3_E_ARGUMENT;
     }
-    if (!player_tile->valid || player_tile->x != anchor->x || player_tile->y != anchor->y ||
+    if (player_tile->valid != 1 || player_tile->x != anchor->x || player_tile->y != anchor->y ||
         player_tile->plane != anchor->plane)
     {
         return RS3_E_STATE;

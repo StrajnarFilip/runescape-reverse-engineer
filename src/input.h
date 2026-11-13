@@ -21,6 +21,8 @@
  * Returns RS3_E_ARGUMENT for an invalid calibration, RS3_E_STATE when the
  * calibration does not match the sampled tile, RS3_E_TARGET when the tile is
  * off the map or on another plane, and RS3_OK with *pixel filled otherwise.
+ * NULL arguments and numerically singular fitted axes are invalid. All pixel
+ * coordinates are physical; callers must revalidate native UI/view calibration.
  */
 int32_t input_project_minimap_tile(const rs3_position *player_tile, const rs3_minimap *minimap,
                                    int32_t tile_x, int32_t tile_y, int32_t plane, POINT *pixel);
