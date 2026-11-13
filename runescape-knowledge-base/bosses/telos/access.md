@@ -8,7 +8,7 @@ Use **War's Retreat Teleport** directly. The account owner confirmed that the ac
 
 ## Starting a run
 
-At the Heart, choose **Jump to platform** on the Roots, select **0% enrage**, and check **Practice mode** before clicking **Start** while learning. At the staging platform, use **Jump to platform** again. Telos was dormant at the arena edge. Walking closer woke him, so finish checking equipment, overhead and capture before approaching.
+At the Heart, choose **Jump to platform** on the Roots, select **0% enrage**, and check **Practice mode** before clicking **Start** while learning. At the staging platform, use **Jump to platform** on the Roots again. If the game asks for a number, enter `0` and submit it. The second prompt starts the crossing animation. Wait until the character is standing across the gap on Telos's platform. The reader can see dormant Telos from either side. Capture a new frame after crossing and choose an approach tile beside Telos.
 
 ## First-time access on another account
 

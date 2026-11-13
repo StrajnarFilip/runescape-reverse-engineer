@@ -36,3 +36,9 @@
 - Re-entered through the Telos portal at War's Retreat. The client chat confirmed 0% enrage and Practice Mode. The native reader could see dormant Telos from the staging platform across the gap.
 - The Python controller clicked the Deflect Melee slot via the Arduino and confirmed the active overhead. Its approach clicks moved the character on the staging platform, but no attempt changed Telos from dormant to active. Rejoin on the Roots reported that the character was already inside the instance. The arena crossing still needs validation before using an approach point.
 - Prayer points ran out during staging after Deflect Melee was left active. Recharge prayer before retrying and wait to activate the overhead until the route into the arena is established. No food was used and no fight or kill was recorded.
+
+## First scripted phase 1 clear
+
+- Entered `0` at the second Roots prompt and crossed onto the arena. Used one Super restore dose before engagement to restore prayer points. No food or brews were used.
+- The controller activated Deflect Melee and woke Telos at 400,000 HP. Auto-retaliate and Revolution dealt damage. Freedom was acknowledged by its cooldown during Hold Still. Hurricane and Anticipation inputs had no observed cooldown acknowledgement.
+- Entered P2 at 300,000 boss HP and 3,412 player HP. Read-only observation continued while Revolution brought Telos to 271,753 HP. The last sample had 2,493 player HP and no active overhead. No full kill was recorded.
