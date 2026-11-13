@@ -180,6 +180,7 @@ class PracticeRunTests(unittest.TestCase):
             anticipation="A",
             hurricane="8",
             surge=None,
+            reacquire=None,
             frame=None,
             melee=(10, 20),
             approach=(30, 40),
@@ -217,6 +218,25 @@ class PracticeRunTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Deflect Melee changed"):
                     run(reader, args, board)
         board.command.assert_not_called()
+
+        args.reacquire = ("F6", "Q")
+        reader.active_prayer.side_effect = [Prayer.MELEE] * 5
+        damaged_boss = SimpleNamespace(**vars(phase_two))
+        damaged_boss.health_current -= 500
+        mock_globals["boss_sample"].side_effect = (
+            samples[:3]
+            + samples[-2:]
+            + [
+                (info, player, damaged_boss, 2, 9000),
+            ]
+        )
+        mock_globals["telos_actions"] = Mock(side_effect=[[], [{"action_sequence": AUTO}], []])
+        with patch.dict(sys.modules, {"game_console": console}), patch("time.sleep"):
+            with patch.dict(run.__globals__, mock_globals):
+                self.assertEqual(run(reader, args, board), 2)
+        self.assertEqual([call.args[0][-1].name for call in board.tap.call_args_list], ["F6", "Q"])
+        self.assertEqual(mock_globals["log"].call_args.args[0], "phase_two_reacquire_result")
+        self.assertTrue(mock_globals["log"].call_args.kwargs["damage_observed"])
 
 
 if __name__ == "__main__":

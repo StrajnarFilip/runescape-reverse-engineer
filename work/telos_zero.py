@@ -49,6 +49,7 @@ ZERO_ENRAGE_HP = 400_000
 F12 = 0x7B
 APPROACH_TIMEOUT_NS = 10_000_000_000
 ENGAGE_TIMEOUT_NS = 2_000_000_000
+REACQUIRE_TIMEOUT_NS = 3_600_000_000
 MOVEMENT_WINDOWS = {
     UPPERCUT: (3_600_000_000, 4_000_000_000, "Uppercut movement trial"),
     HOLD_STILL: (2_900_000_000, 5_000_000_000, "Hold Still landing movement trial"),
@@ -415,6 +416,9 @@ def run(reader, args, board):
     }
     if args.surge:
         bindings["Surge"] = parse_chord(args.surge)
+    if args.reacquire:
+        bindings["Target Cycle"] = parse_chord(args.reacquire[0])
+        bindings["Opening Attack"] = parse_chord(args.reacquire[1])
     if len(set(bindings.values())) != len(bindings):
         raise ValueError("Combat abilities require distinct bindings")
     prayer_bindings = {parse_chord(f"Ctrl+F{number}") for number in range(1, 5)}
@@ -432,6 +436,10 @@ def run(reader, args, board):
     next_approach = 0
     previous_tile = None
     previous_prayer = None
+    phase_two_seen = False
+    phase_two_melee_seen = False
+    reacquire_at = None
+    reacquire_hp = None
     while time.monotonic() < deadline:
         check_focus()
         info, player, boss, phase, hp = boss_sample(reader)
@@ -506,7 +514,39 @@ def run(reader, args, board):
         if phase == 2:
             if encounter_checkpoint(phase, npc_health_record(boss)) is None:
                 raise RuntimeError("Phase 2 bits disagree with the observed boss HP")
-            log("phase_two_observed", boss_hp=boss.health_current, phase=phase, player_hp=hp)
+            if not phase_two_seen:
+                log("phase_two_observed", boss_hp=boss.health_current, phase=phase, player_hp=hp)
+                phase_two_seen = True
+            if args.reacquire:
+                phase_two_melee_seen |= any(
+                    action["action_sequence"] == MELEE_AUTO_SEQUENCE for action in actions
+                )
+                if reacquire_at is not None:
+                    damage_seen = boss.health_current < reacquire_hp
+                    if damage_seen or now - reacquire_at >= REACQUIRE_TIMEOUT_NS:
+                        log(
+                            "phase_two_reacquire_result",
+                            boss_hp=boss.health_current,
+                            damage_observed=damage_seen,
+                        )
+                    else:
+                        time.sleep(POLL_SECONDS)
+                        continue
+                elif boss.health_current < PHASE_TWO_HP:
+                    log("phase_two_reacquire_skipped", reason="Boss HP already decreased")
+                elif phase_two_melee_seen and prayer == Prayer.MELEE:
+                    if reader.monotonic_ns() - info.monotonic_ns > MAX_SAMPLE_AGE_NS:
+                        raise RuntimeError("Native sample aged out before target cycling")
+                    board.tap(bindings["Target Cycle"], KEY_HOLD_SECONDS, check_focus, time.sleep)
+                    board.tap(bindings["Opening Attack"], KEY_HOLD_SECONDS, check_focus, time.sleep)
+                    reacquire_at = reader.monotonic_ns()
+                    reacquire_hp = boss.health_current
+                    log("phase_two_reacquire_sent", boss_hp=reacquire_hp)
+                    time.sleep(POLL_SECONDS)
+                    continue
+                else:
+                    time.sleep(POLL_SECONDS)
+                    continue
             if args.observe_transition:
                 log(
                     "observation",
@@ -592,6 +632,12 @@ def main():
     parser.add_argument("--anticipation", default="A")
     parser.add_argument("--hurricane", default="8")
     parser.add_argument("--surge", help="Optional Surge binding for experimental movement")
+    parser.add_argument(
+        "--reacquire",
+        nargs=2,
+        metavar=("TARGET_CYCLE", "BASIC_ATTACK"),
+        help="Try one phase 2 target cycle and basic attack using configured keys",
+    )
     args = parser.parse_args()
     if args.replay and args.port:
         parser.error("Replay does not open the Arduino")
