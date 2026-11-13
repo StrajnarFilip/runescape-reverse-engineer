@@ -1,7 +1,7 @@
 D8 - Supervisor
 ===============
 
-:Status: in progress
+:Status: done
 :Wave: 1
 :Branch: ``telos/D8``
 :Kind: Python
@@ -57,7 +57,52 @@ Needs the user
 
 The preferred kill-switch key.
 
+Offline implementation (2026-11-13)
+-----------------------------------
+
+The user deferred live input and track L. The CLI recognizes shadow/assist/full,
+but assist/full stop before acquisition with an explicit L-authorization error.
+Shadow owns only a RecordingActuator, optionally shared with D6, and never
+selects a hardware backend. Missing producer modules are listed as absent;
+errors inside available modules are not hidden. Producer output is bounded.
+
+``python -m rs3_reader.bot --mode shadow --capture capture.jsonl --enable ...``
+runs without importing native input. ``--pid`` explicitly selects a read-only
+NativeTelemetry observer. It registers a configurable Windows global stop key
+(default Ctrl+Alt+Pause), uses foreground checks and releases resources on exit.
+No global hotkey or live reader was opened during this implementation.
+
+Watchdogs cover stale/unavailable frames, unknown/lost native queues, changed
+process/scene/build, clock/sample regression, injected focus loss, component
+faults, unknown Telos events and arbiter confirmation timeout. Stops latch and
+close the arbiter/device plus closeable producers. Shadow replay does not
+pretend to know OS focus; an injected focus checker is tested independently.
+
+Wall-time and verified-kill caps are separate from game ticks. A kill/death
+requires a fresh explicit validated encounter_result envelope; NPC HP zero,
+despawn or raw stage alone does not establish a result. JSON Lines contain
+per-frame proposals, a compact session report and verified per-kill summaries.
+Normal caps do not count as watchdog failures. No game success is inferred
+from a recording-fake acceptance.
+
+Sixteen D8 tests trip the watchdogs, verify fake held-key release, exercise
+caps/results and run shadow CLI/replay without native imports. The real legacy
+capture has a golden no-input log and correctly trips on missing queue data.
+The Windows x64 Release build and all 10 CTest suites pass (94 Python tests).
+
 Requests
 --------
 
-None yet.
+* L: provide reviewed live authorization and actual A1/D6 composition before
+  enabling assist/full. Those modes are deliberately refused for now; the user
+  explicitly reserved L for their return. Validate the physical stop hotkey
+  and optionally change its configurable default then.
+* L/D1/D2: inject an exact-scope attack validator and connect component faults
+  and pending acknowledgements. An unknown sequence never becomes safe just
+  because its four-tick cadence or a guide is familiar.
+* P2/D7: map a validated encounter_result envelope (kind, unique result ID,
+  validated flag, age and source). Current unmapped telemetry cannot claim a
+  kill or drive unattended repetition. Detailed threat-versus-hit/manual-action
+  comparisons require the integrated L shadow session; they are not fabricated.
+* P4/A2 remain untouched. Preferred hotkey, live focus behavior and physical
+  release are user-present ladder checks, not assumptions from fake tests.
