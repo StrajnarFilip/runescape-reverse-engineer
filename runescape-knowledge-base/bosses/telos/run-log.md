@@ -25,3 +25,8 @@
 - Ran Revolution with an augmented Zaros godsword and used Turmoil, Soul Split and Deflect Melee. Drank overload salve and a prayer restore. No Rocktails or brews were used.
 - Hold Still interrupted Assault and prevented movement. The P2 transition frame showed 1,037 player HP. Soul Split then recovered some HP while Revolution continued attacking. After switching to Deflect Melee, the last fight frame showed 232,470 boss HP and 3,167 player HP. The next frame was back at the practice staging platform.
 - Continuous Soul Split through Hold Still left too little HP for the next phase. Reserve a stun break and switch to melee protection before the special when its cue is confirmed. The prototype still needs a longer capture spanning multiple specials.
+
+## 0% practice defensive capture
+
+- The trace captured two Tendrils-to-Uppercut loops, one Hold Still and entry into P2. The phase field changed from `0` to `1` in bits 21–23 at that handoff. Latest recorded P2 player HP was 251. No kill was recorded.
+- The attack count and cue order were reproduced offline by `work/telos_zero.py` from the local capture. [Animation observations and replay instructions](animation-cues.md)
