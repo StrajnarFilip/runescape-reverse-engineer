@@ -1,7 +1,7 @@
 D8 - Supervisor
 ===============
 
-:Status: done
+:Status: in progress
 :Wave: 1
 :Branch: ``telos/D8``
 :Kind: Python
