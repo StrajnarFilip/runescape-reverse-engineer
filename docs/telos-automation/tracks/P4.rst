@@ -57,4 +57,10 @@ tendrils and rocks spawn, reach phase 4 fonts and phase 5 golems.
 Requests
 --------
 
-None yet.
+* Reuse the unchanged P1 branch as a dependency on this branch, without merging
+  into ``telos/integration`` or marking P1's remaining calibration complete.
+  The integration base does not yet contain its public actor-pose API.
+* Add only ``#include "rs3/hazards.h"``, ``rs3_hazard_info hazard_info`` and
+  ``rs3_hazard hazards[RS3_MAX_HAZARDS]`` to ``src/context.h``. Snapshot storage
+  is necessary for atomic publication; that file is omitted from the shared
+  wiring list. The earlier registration exception was specific to P1/P2.
