@@ -1,7 +1,7 @@
 D1 - Encounter tracker
 ======================
 
-:Status: in progress
+:Status: done
 :Wave: 1
 :Branch: ``telos/D1``
 :Kind: Python
@@ -59,7 +59,62 @@ Needs the user
 
 Nothing. The two local captures under ``work/prayer_research/`` are the input.
 
+Implementation and verification (2026-11-13)
+------------------------------------------
+
+``EncounterTracker.step(WorldState)`` returns immutable ``EncounterState``.
+It keeps original event/session timestamps, deduplicates exact repeated drains,
+checks age and scene identity, and invalidates accumulated state after queue
+loss, unknown loss counts, sequence reuse/gaps, clock regression, ambiguous
+Telos actors or bounded-queue overflow. Reapplications with new native event
+IDs remain separate cues even when the animation ID repeats.
+
+``AttackTable`` loads P6 JSON without importing native bindings. Lookup is
+exact for executable hash, phase, enrage and context; overlapping rows remain
+unknown. A missing file uses only the four historical original-profile labels,
+restricted to 300% phase 1 and explicit ``isolated_p1_melee`` context. Runtime
+phase stays unknown without a fresh P2 field; packed stage is not decoded.
+
+Every labelled cue emits an ``IncomingThreat``. Unmeasured protection windows
+and prayers stay null with flags=0; ``prayer_record()`` returns None so these
+cannot enter the native planner as calibrated threats. The two local capture
+replays produce 15 and 16 unresolved labelled threats, respectively, and none
+from unlabelled sequences. Their offline phase/enrage annotations come from
+the committed calibration report, not runtime inference. Measured sample end
+time supplies replay age; missing capture age is not silently declared fresh.
+
+Golden S0a no-input log SHA-256 digests for those captures are asserted in
+``tests/python/test_bot_encounter_tracker.py``. Raw capture SHA-256 digests
+are checked first. No gameplay rows or logs are committed. The 15 tracker
+tests include synthetic calibrated-window and multi-hit rejection cases;
+real captures do not acquire validated timing from those fixtures.
+The Windows x64 Release build and all 10 CTest suites passed, with 93 Python
+tests. P6's 28-row production catalogue also loads without native imports.
+
+``observed_auto_count`` counts labelled cues since reset, not cycle position.
+``attack_index``/``next_attack`` require an explicit measured non-auto cycle
+anchor in P6; they remain unknown for current data. Coverage is always unknown
+until complete incoming-attack prediction is calibrated. No four-tick cadence
+or cue-to-hit delay is promoted into a protection deadline or safe idle gap.
+``create_stack()`` exposes an observe-only S0a replay adapter that emits no
+intents. Decision producers may consume its state after each step.
+
 Requests
 --------
 
-None yet.
+* P6: supply measured per-component protection windows and complete incoming
+  coverage, including golems/projectiles. Current labelled threats are useful
+  observations, not authorization to flick. Multi-hit rows without separately
+  modelled component windows remain unresolved.
+* P6: cycle anchors need ``cycle.validated``, native-labelled evidence,
+  ``index_after`` and optional ``next_sequence`` on a confirmed non-auto cue.
+  Do not infer seven/three-auto positions, phase carry or special skips from
+  a guide or elapsed time. Current P6 rows do not supply these anchors.
+* P2/L: provide fresh mapped phase/enrage fields and preserve client digest.
+  Raw stage alone is not phase. Explicit isolated-melee context requires
+  observed/calibrated encounter conditions, not just the player's chosen style.
+* D2/L: only ``prayer_record()`` output may be translated to native threats;
+  None windows and ``coverage_until_ns=None`` must block Soul Split planning.
+  A calibrated single threat does not establish complete coverage. D3 needs
+  independently measured damage bounds and defensive eligibility before timed
+  survival proposals; current real threats deliberately omit those fields.
