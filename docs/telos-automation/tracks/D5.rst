@@ -1,7 +1,7 @@
 D5 - Mechanics and movement
 ===========================
 
-:Status: open
+:Status: in progress
 :Wave: 2
 :Branch: ``telos/D5``
 :Kind: Python
