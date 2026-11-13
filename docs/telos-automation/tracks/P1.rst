@@ -72,6 +72,18 @@ on the running original 951-3 executable. Before marking this track done:
 3. Repeat layout/signature verification on the Compatibility Mode executable
    before enabling P1 there. The running binary currently hashes to the original.
 
+Update, 2026-11-13: the original profile now publishes its committed P1 player
+tile through the legacy position accessor used by movement. Both views agreed
+in 1,911 live research samples across 73 tiles, with no input sent. Player poses
+must agree with the actor/index already resolved by the hit channel when that
+channel is available. Eight native spatial tests and all 15 integrated CTest
+targets pass (271 Python tests, no skips).
+
+The user completed another training-dummy select/clear check. VARPs 623/7994
+resolved to War rather than the dummy receiving hitmarks, so they were rejected
+as direct combat-target identities. Target decoding still needs static research;
+no additional selection session is requested before a better candidate is found.
+
 Requests
 --------
 
@@ -82,3 +94,9 @@ No changes to another track's module are requested. Static layouts, limits,
 the public ABI and pending validation are documented in ``docs/spatial.rst``
 and ``docs/validation/spatial-validation.json``. Combat targets remain unknown;
 ``facingTarget`` is not a target-entity mapping.
+
+L/S0b: the original runtime now has equal legacy/P1 tile views and an available
+player-hit channel. Review the eventual runtime choice against the currently
+installed original build before porting all original-profile encounter and
+attack semantics to Compatibility Mode. P1 does not change that policy or
+enable input. Compatibility Mode pose/projection guards remain unsupported.
