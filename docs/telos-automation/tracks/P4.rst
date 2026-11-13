@@ -1,7 +1,7 @@
 P4 - Scene hazards
 ==================
 
-:Status: open
+:Status: in progress
 :Wave: 2
 :Branch: ``telos/P4``
 :Kind: C (native DLL)
