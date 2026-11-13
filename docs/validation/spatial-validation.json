@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "track": "P1",
-  "date": "2026-11-11",
+  "date": "2026-11-13",
   "status": "projection_validated_targets_and_compatibility_pending",
   "runtime_profile_observed": "951-3",
   "sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
@@ -47,10 +47,11 @@
   "raw_capture_committed": false,
   "checks": {
     "windows_x64_release_build": "passed",
-    "ctest_suites_passed": 11,
-    "python_tests_passed": 78,
-    "native_spatial_cases": 5,
-    "existing_public_structures_changed": false
+    "ctest_suites_passed": 15,
+    "python_tests_passed": 271,
+    "native_spatial_cases": 8,
+    "existing_public_structures_changed": false,
+    "python_tests_skipped": 0
   },
   "controlled_projection_validation": {
     "checked_samples": 22,
@@ -69,5 +70,69 @@
     "limits": "Ground-point projection only; not a validation of occlusion, body-click hitboxes, targets or another executable."
   },
   "cross_world_projection_guard": "An actor must carry SAME_WORLD before projection; actor-world pointers are checked against the player world. Existing public structure sizes are unchanged.",
-  "target_research": "The older context+0x98 candidate did not match the user-selected dummy runtime ID. No plain/packed runtime-ID match was found in a later bounded local-actor probe. Neither is treated as a target mapping."
+  "target_research": "The older context+0x98 candidate did not match the user-selected dummy runtime ID. No plain/packed runtime-ID match was found in a later bounded local-actor probe. Neither is treated as a target mapping.",
+  "original_position_alignment": {
+    "date": "2026-11-13",
+    "implementation": "Copy the guarded same-world P1 tile to the legacy snapshot position only during spatial_commit, after final frame validation.",
+    "player_hit_actor_alignment": "Reject the player pose when the earlier player-hit actor address or runtime index differs; absent poses do not acquire a hit-channel instance ID.",
+    "compatibility_position_decoder_changed": false,
+    "public_abi_changed": false,
+    "additional_stationary_check": {
+      "samples": 80,
+      "both_positions_valid_and_equal": 80,
+      "player_hit_channel_available_samples": 80,
+      "distinct_positions": 1
+    },
+    "moving_session": {
+      "capture_sha256": "a24a240bb9bb3fd25930e54f810a12ce7660fd40165278f6d4bef395f213d43f",
+      "samples": 1911,
+      "both_positions_valid_and_equal": 1911,
+      "distinct_positions": 73,
+      "distinct_process_identities": 1,
+      "source": "Native C snapshots recorded during the manual target research session."
+    },
+    "new_fixture_cases": [
+      "Whole-frame player pose/legacy position equality, movement, and invalidation after a failed instruction guard.",
+      "Reject a pose from an actor different from the already sampled player-hit actor.",
+      "Preserve the existing Compatibility Mode legacy position decoder."
+    ],
+    "movement_input_tested": false
+  },
+  "target_variable_research_2026_11_13": {
+    "capture_sha256": "a24a240bb9bb3fd25930e54f810a12ce7660fd40165278f6d4bef395f213d43f",
+    "samples": 1911,
+    "user_label": "Training dummy; select/clear check completed.",
+    "candidate_varps": [
+      616,
+      623,
+      7994
+    ],
+    "candidate_source": "Local public gameval names, used as research leads only.",
+    "observed_player_varp_616_values": [
+      -1
+    ],
+    "observed_npc_varp_623_values": [
+      -1,
+      25126
+    ],
+    "observed_last_npc_varp_7994_values": [
+      -1,
+      25126
+    ],
+    "candidate_exact_runtime_match": {
+      "runtime_id": 25126,
+      "config_id": 26773,
+      "name": "War"
+    },
+    "dummy_with_observed_hitmarks": {
+      "runtime_id": 25127,
+      "config_id": 16027,
+      "name": "Training dummy",
+      "distinct_hit_records": 5
+    },
+    "conclusion": "Rejected as a direct combat-target mapping. No plus/minus-one adjustment, attack attribution, generic interaction semantics or cleared combat-target interpretation is inferred.",
+    "runtime_target_fields_enabled": false,
+    "raw_capture_committed": false,
+    "input_sent": false
+  }
 }

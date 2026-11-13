@@ -236,7 +236,10 @@ void spatial_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_
     memset(info, 0, sizeof *info);
     info->status = RS3_UNAVAILABLE;
     info->reason = RS3_UNSUPPORTED_CLIENT;
+    info->player.tile_reason = RS3_UNSUPPORTED_CLIENT;
+    info->player.facing_reason = RS3_UNSUPPORTED_CLIENT;
     info->player.target_reason = RS3_SPATIAL_UNMAPPED;
+    info->player.target_runtime_id = -1;
     info->camera.reason = RS3_UNSUPPORTED_CLIENT;
     if (!spatial_layout_verified(context))
     {
@@ -244,10 +247,14 @@ void spatial_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_
     }
     info->status = RS3_PARTIAL;
     info->reason = RS3_SPATIAL_UNMAPPED;
+    info->player.tile_reason = RS3_READ_FAILED;
+    info->player.facing_reason = RS3_READ_FAILED;
     uint64_t actor;
     uint64_t player_world = 0;
     uint32_t index;
-    if (position_find_local_actor(context, world_state, &actor, &index))
+    if (position_find_local_actor(context, world_state, &actor, &index) &&
+        (snapshot->player_actor_address == 0 || (actor == snapshot->player_actor_address &&
+                                                 index == snapshot->player_hit_info.player_index)))
     {
         spatial_decode_actor(context, actor, context->target.profile->player_actor_vtable_rva,
                              index, &info->player);
@@ -288,7 +295,21 @@ void spatial_commit(rs3_context *context, rs3_snapshot *snapshot)
     info->scene_epoch = snapshot->combat.scene_epoch;
     info->process_creation_time = context->target.process_creation_time;
     info->pid = context->target.pid;
-    info->player.instance_id = snapshot->player_hit_info.instance_id;
+    const uint32_t required_player_flags = RS3_SPATIAL_TILE | RS3_SPATIAL_SAME_WORLD;
+    int player_pose_available =
+        info->status != RS3_UNAVAILABLE &&
+        (info->player.valid_mask & required_player_flags) == required_player_flags &&
+        info->player.tile.valid;
+    if (player_pose_available && snapshot->player_hit_info.status == RS3_AVAILABLE &&
+        info->player.runtime_id == snapshot->player_hit_info.player_index)
+    {
+        info->player.instance_id = snapshot->player_hit_info.instance_id;
+    }
+    /* Reuse the guarded pose after final frame validation; never perform a second lookup. */
+    if (context->target.profile == &profile_primary)
+    {
+        snapshot->position = player_pose_available ? info->player.tile : (rs3_position){0};
+    }
     info->camera.scene_epoch = info->scene_epoch;
     info->camera.process_creation_time = info->process_creation_time;
     info->camera.pid = info->pid;
