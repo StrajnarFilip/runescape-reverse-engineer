@@ -457,6 +457,24 @@ class FontDutyTests(unittest.TestCase):
         red = [(26, 22898, 7500, (14621, 1805))]
         self.assertEqual(duty.update(red, hold_end + 50), ((14621, 1805), "font_charge_started"))
 
+    def test_stand_tile_avoids_golems_and_counts_as_inside(self):
+        stand = controller["font_stand_tile"]
+        in_font = controller["in_font"]
+        font = (10192, 2216)
+        # 173454 golems beside the first font: (10194, 2215), (10196, 2219), (10194, 2217).
+        golem_tiles = {(10194, 2215), (10196, 2219), (10194, 2217)}
+        tile = stand(font, (10200, 2216), golem_tiles)
+        self.assertNotIn(tile, golem_tiles)
+        self.assertEqual(tile, (10194, 2216))
+        self.assertTrue(in_font(tile, font))
+        # Earlier charges ran inside the 2x2 and one tile diagonally outside it.
+        self.assertTrue(in_font((10193, 2216), font))
+        self.assertTrue(in_font((14609, 1831), (14608, 1832)))
+        self.assertFalse(in_font((10195, 2216), font))
+        # With every ring tile taken, the font's own tile is the fallback.
+        ring = {(font[0] + dx, font[1] + dy) for dx in range(-1, 3) for dy in range(-1, 3)}
+        self.assertEqual(stand(font, (10200, 2216), ring), font)
+
     def test_vanished_font_ends_duty(self):
         duty = FontDuty()
         duty.update(fonts(22896, 7500), 10)

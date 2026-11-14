@@ -220,7 +220,9 @@ FONT_CONFIGS = frozenset(
 )
 # Idle and charged fonts report this health; a charging font reports its remaining charge.
 FONT_UNCHARGED_HEALTH = 1
-# The charge ran with the player one tile diagonally from the font's tile.
+# Fonts are 2x2 (logged footprint). Charges ran with the player inside it (173454) or one tile
+# outside (171804), so the player counts as inside within this distance of the footprint.
+FONT_FOOTPRINT = 2
 FONT_REACH_TILES = 1
 # Stay in the charged font this many received ticks for Telos's instakill (timing unmeasured).
 FONT_HOLD_TICKS = 30
@@ -238,6 +240,34 @@ VOLCANIC_GOLEM = 22907
 MINION_CONFIGS = frozenset({PURE_GOLEM, CORRUPT_GOLEM, VOLCANIC_GOLEM})
 # Kill order: the stunning red golem, then the green one before its damage grows, then black.
 MINION_PRIORITY = (VOLCANIC_GOLEM, PURE_GOLEM, CORRUPT_GOLEM)
+
+
+def in_font(player_tile, font_tile):
+    """Whether the player stands where a font's charge reaches them."""
+    return footprint_distance(player_tile, font_tile, FONT_FOOTPRINT) <= FONT_REACH_TILES
+
+
+def font_stand_tile(font_tile, player_tile, occupied):
+    """A free tile in the ring around the font, nearest the player, or the font tile itself.
+
+    Golems spawn beside the font: in the 250% run of 182852 eleven clicks on the font's own tile
+    left the player 6-8 tiles away, circling (presumably attacking a golem standing there). Tiles
+    in ``occupied`` (golems, Telos's body) and inside the font itself are never clicked.
+    """
+    ring = [
+        (font_tile[0] + dx, font_tile[1] + dy)
+        for dx in range(-FONT_REACH_TILES, FONT_FOOTPRINT + FONT_REACH_TILES)
+        for dy in range(-FONT_REACH_TILES, FONT_FOOTPRINT + FONT_REACH_TILES)
+    ]
+    free = [
+        tile
+        for tile in ring
+        if footprint_distance(tile, font_tile, FONT_FOOTPRINT) == FONT_REACH_TILES
+        and tile not in occupied
+    ]
+    if not free:
+        return font_tile
+    return min(free, key=lambda tile: (chebyshev(tile, player_tile), tile))
 
 
 class FontDuty:
@@ -299,7 +329,7 @@ class FontDuty:
         A player outside the font (not yet arrived, or pulled out by auto-retaliate) is sent
         back at most once per FONT_MOVE_RETRY_TICKS for as long as the duty lasts.
         """
-        if chebyshev(player_tile, target) <= FONT_REACH_TILES:
+        if in_font(player_tile, target):
             return False
         if received_tick < self.next_move_tick:
             return False
@@ -1442,10 +1472,20 @@ def run(reader, args, board, attempt=None):
         if target is None or player_tile is None or not input_allowed:
             return
         if font_duty.move_due(player_tile, target, received_tick):
-            distance = chebyshev(player_tile, target)
+            distance = footprint_distance(player_tile, target, FONT_FOOTPRINT)
+            occupied = {minion[3] for minion in minions}
+            for pose in reader.npc_spatial[: reader.spatial.npc_count]:
+                if pose.instance_id == boss.instance_id and pose.valid_mask & SpatialFlags.TILE:
+                    size = pose.footprint_size or 1
+                    occupied |= {
+                        (pose.tile.x + dx, pose.tile.y + dy)
+                        for dx in range(size)
+                        for dy in range(size)
+                    }
+            stand = font_stand_tile(target, player_tile, occupied)
             # Walk only: the font is an NPC on its tile, and fifteen Dives aimed at it in the
             # 300% run of 175142 never moved the player; the walk clicks of 173454 did.
-            point = project_tile(reader, target, player.tile.plane, player.fine_height)
+            point = project_tile(reader, stand, player.tile.plane, player.fine_height)
             sent = None if point is None else click_point(point, select_dive=False)
             if sent:
                 target_picker.moved()
@@ -1453,13 +1493,14 @@ def run(reader, args, board, attempt=None):
                 "font_move",
                 sent=sent,
                 target=target,
+                stand=stand,
                 player_tile=player_tile,
                 distance=distance,
                 attempt=font_duty.move_attempts,
             )
         elif (
             font_duty.state == "charging"
-            and chebyshev(player_tile, target) <= FONT_REACH_TILES
+            and in_font(player_tile, target)
             and not font_duty.resonance_sent
             and "Resonance" in bindings
             and not timers.get("Resonance")
