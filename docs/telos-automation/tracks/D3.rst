@@ -1,7 +1,7 @@
 D3 - Survival manager
 =====================
 
-:Status: done
+:Status: in progress
 :Wave: 1
 :Branch: ``telos/D3``
 :Kind: Python
