@@ -83,6 +83,15 @@ The user authorized P1/P2 include and snapshot-storage registration in
 Unobserved semantic mappings and the game-tick reference remain pending.
 Raw evidence and attempted mappings are in ``docs/validation/encounter-validation.json``.
 
+Further tick research, 2026-11-14: broadened the bounded scan to the full
+world-state block, writable module globals and 114 directly referenced objects
+with module vtables. A global counter at RVA ``0x19420f8`` changed about every
+603 ms, but static inspection of ``0xf73920`` shows it counts calls to a
+circular-buffer reading routine, with multiple increments per interval. It is
+rejected as a tick source. No new game-tick validity is enabled. Further work
+must trace a packet-completion/game-cycle boundary; another manual fight would
+not identify this counter's semantics.
+
 Contract and ABI
 ----------------
 
