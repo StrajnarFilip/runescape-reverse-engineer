@@ -416,6 +416,14 @@ class TargetPicker:
             return "telos"
         return None
 
+    def moved(self):
+        """The player was moved (Dive, font walk): click the current golem again.
+
+        In the 250% run of 180906 one click at 9377 was followed by a stomp Dive, and the
+        golems then hit the player until death without being attacked.
+        """
+        self.clicked = None
+
     def failed(self, received_tick):
         """A click was not delivered: allow the same choice again after a short wait."""
         if self.clicked is None:
@@ -504,6 +512,16 @@ def magic_flick_ticks(distance):
     if distance <= 9:
         return 1, 2
     return 1, 3  # Beyond any logged distance: also cover a +4 hit.
+
+
+# Reactive flicks alone are not reliable. Over all logs, with Soul Split shown at the hit 1 of 27
+# hits did 1 damage, and with Deflect Magic shown at the hit 43 of 167. In the 250% run of 180906
+# Deflect Magic was up for the whole tick before two delayed hits at 6 tiles (9152 +2, 9168 +2)
+# and both still landed for 1,782 and 3,093. Damage is probably fixed when Telos fires, and the
+# overhead was never Deflect Magic at a 28959 in any log. Onslaught projectiles and P3 magic autos
+# repeat every 4 received ticks (one gap of 5), so Deflect Magic is also raised ahead of the next
+# one: during these offsets after each 28959 (inclusive). Unvalidated experiment.
+MAGIC_PREFLICK_TICKS = (3, 5)
 # Uppercut's 2,634 hitmark appeared 7 received ticks after 28938 on 2026-11-14 at 100%.
 # Escape is sent two to three ticks before that hitmark; the server hit deadline is unmeasured.
 UPPERCUT_ESCAPE_TICKS = (4, 5)
@@ -880,6 +898,9 @@ class PrayerFlicker:
                 first, last = 0, self.hold_ticks.get(sequence, DEFAULT_FLICK_HOLD_TICKS) - 1
             if tick is not None:
                 self.windows.append((tick + first, tick + last + 1, prayer))
+                if sequence == MAGIC_ATTACK:
+                    early, late = MAGIC_PREFLICK_TICKS
+                    self.windows.append((tick + early, tick + late + 1, prayer))
             self.hold_prayer = prayer
             return_ns = now + (last + 1) * TICK_FALLBACK_NS
             if self.return_ns is None or return_ns > self.return_ns:
@@ -1349,6 +1370,7 @@ def run(reader, args, board, attempt=None):
             emit("stomp_dodge", sent=sent, **record)
             if sent:
                 phase_one.stomp_pending = record
+                target_picker.moved()
             else:
                 phase_one.stomp_checked = True
             return
@@ -1417,6 +1439,8 @@ def run(reader, args, board, attempt=None):
             # 300% run of 175142 never moved the player; the walk clicks of 173454 did.
             point = project_tile(reader, target, player.tile.plane, player.fine_height)
             sent = None if point is None else click_point(point, select_dive=False)
+            if sent:
+                target_picker.moved()
             emit(
                 "font_move",
                 sent=sent,
