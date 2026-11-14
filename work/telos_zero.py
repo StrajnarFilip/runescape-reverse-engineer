@@ -21,7 +21,12 @@ from rs3_reader.native import (
     Variable,
 )
 from rs3_reader.prayer import Prayer
-from rs3_reader.rotation_keys import ArduinoBackend, parse_chord
+from rs3_reader.rotation_keys import (
+    ArduinoBackend,
+    parse_chord,
+    resolve_layout_chord,
+    window_keyboard_layout,
+)
 from rs3_reader.telemetry import npc_health_record, player_hit_splats_record
 from rs3_reader.telos_prayer import MELEE_AUTO_SEQUENCE, ManualPrayerKeys, telos_actions
 
@@ -43,6 +48,8 @@ PHASE_FOUR_HP = 100_000
 FONT_THRESHOLDS = (75_000, 50_000, 25_000)
 MAX_SAMPLE_AGE_NS = 100_000_000
 SPECIAL_WINDOW_NS = 3_000_000_000
+HOLD_STILL_HEAVY_HIT_TICK = 4
+HOLD_STILL_LAST_FREEDOM_TICK = 7
 ACK_TIMEOUT_NS = 1_200_000_000
 KEY_HOLD_SECONDS = 0.05
 POLL_SECONDS = 0.025
@@ -79,6 +86,7 @@ class PhaseOne:
         self.special = None
         self.special_ns = 0
         self.special_event = None
+        self.special_tick = None
         self.last_event = 0
         self.pending = None
         self.handled = set()
@@ -110,6 +118,7 @@ class PhaseOne:
                 self.special = sequence
                 self.special_ns = action["observed_ns"]
                 self.special_event = action["event_sequence"]
+                self.special_tick = action.get("received_tick")
                 self.handled.clear()
                 self.forecast_handled = False
                 self.expected = {
@@ -118,7 +127,9 @@ class PhaseOne:
                     HOLD_STILL: TENDRILS,
                 }[sequence]
 
-    def next_action(self, now, cooldowns, gcd_remaining_ms, prayer):
+    def next_action(
+        self, now, cooldowns, gcd_remaining_ms, prayer, *, received_tick=None, timed_freedom=False
+    ):
         """Use cooldown acknowledgement and bound the number of attempts for each mechanic."""
         if self.pending:
             self.cast_result = self.acknowledge(
@@ -131,14 +142,27 @@ class PhaseOne:
 
         elapsed_ns = now - self.special_ns
         active_special = 0 <= elapsed_ns < SPECIAL_WINDOW_NS
+        freedom_window = active_special
+        if timed_freedom:
+            tick_delta = (
+                received_tick - self.special_tick
+                if received_tick is not None and self.special_tick is not None
+                else None
+            )
+            freedom_window = (
+                tick_delta is not None
+                and HOLD_STILL_HEAVY_HIT_TICK <= tick_delta <= HOLD_STILL_LAST_FREEDOM_TICK
+                and gcd_remaining_ms == 0
+            )
         if (
-            active_special
+            freedom_window
             and self.special == HOLD_STILL
             and "Freedom" not in self.handled
             and "Freedom" in cooldowns
             and not cooldowns["Freedom"]
         ):
-            return Action("Freedom", "Hold Still animation")
+            reason = "Hold Still post-hit GCD trial" if timed_freedom else "Hold Still animation"
+            return Action("Freedom", reason)
         movement = MOVEMENT_WINDOWS.get(self.special)
         if movement and self.autos == 0 and "Surge" not in self.handled:
             earliest_ns, latest_ns, reason = movement
@@ -469,16 +493,21 @@ def run(reader, args, board, attempt=None):
         game.check_point(*game.cursor())
         board.command("CLICK L", check_focus)
 
-    bindings = {
-        "Freedom": parse_chord(args.freedom),
-        "Anticipation": parse_chord(args.anticipation),
-        "Hurricane": parse_chord(args.hurricane),
-    }
+    labels = {"Freedom": args.freedom, "Anticipation": args.anticipation}
+    if args.hurricane:
+        labels["Hurricane"] = args.hurricane
     if args.surge:
-        bindings["Surge"] = parse_chord(args.surge)
+        labels["Surge"] = args.surge
     if args.reacquire:
-        bindings["Target Cycle"] = parse_chord(args.reacquire[0])
-        bindings["Opening Attack"] = parse_chord(args.reacquire[1])
+        labels["Target Cycle"], labels["Opening Attack"] = args.reacquire
+    layout = None
+    if getattr(args, "displayed_keys", False):
+        layout, scan_for_key = window_keyboard_layout(window)
+        bindings = {
+            ability: resolve_layout_chord(label, scan_for_key) for ability, label in labels.items()
+        }
+    else:
+        bindings = {ability: parse_chord(label) for ability, label in labels.items()}
     if len(set(bindings.values())) != len(bindings):
         raise ValueError("Combat abilities require distinct bindings")
     prayer_bindings = {parse_chord(f"Ctrl+F{number}") for number in range(1, 5)}
@@ -487,6 +516,14 @@ def run(reader, args, board, attempt=None):
         for binding in bindings.values()
     ):
         raise ValueError("Combat bindings must exclude prayer chords and F12")
+    if attempt:
+        attempt.write(
+            "configured_abilities",
+            displayed_bindings=labels if layout else None,
+            bindings={
+                ability: "+".join(key.name for key in chord) for ability, chord in bindings.items()
+            },
+        )
     deadline = time.monotonic() + args.duration
     initiated = False
     active_instance = None
@@ -688,6 +725,13 @@ def run(reader, args, board, attempt=None):
             continue
 
         autos_before = phase_one.autos
+        timed_freedom = getattr(args, "timed_freedom", False)
+        received_tick = None
+        if timed_freedom:
+            tick = reader.encounter.game_tick
+            if tick.valid:
+                received_tick = tick.counter
+            actions = [dict(action, received_tick=received_tick) for action in actions]
         phase_one.observe(actions)
         position = reader.position
         tile = (position.x, position.y, position.plane) if position.valid else None
@@ -726,6 +770,8 @@ def run(reader, args, board, attempt=None):
             timers,
             player.gcd_remaining_ms if player.gcd_reason == Reason.NONE else None,
             prayer,
+            received_tick=received_tick,
+            timed_freedom=timed_freedom,
         )
         if phase_one.cast_result:
             ability, confirmed = phase_one.cast_result
@@ -797,9 +843,19 @@ def main():
         action="store_true",
         help="Record later cues after phase 1 input stops",
     )
-    parser.add_argument("--freedom", default="U")
-    parser.add_argument("--anticipation", default="A")
-    parser.add_argument("--hurricane", default="8")
+    parser.add_argument("--freedom", help="Current Freedom binding")
+    parser.add_argument("--anticipation", help="Current Anticipation binding")
+    parser.add_argument(
+        "--displayed-keys",
+        action="store_true",
+        help="Translate displayed key labels using the RuneScape keyboard layout",
+    )
+    parser.add_argument("--hurricane", help="Current Hurricane binding, if equipped on the bar")
+    parser.add_argument(
+        "--timed-freedom",
+        action="store_true",
+        help="Try Freedom at GCD zero, 4–7 received ticks after Hold Still",
+    )
     parser.add_argument("--surge", help="Optional Surge binding for experimental movement")
     parser.add_argument(
         "--continue-phase-two",
@@ -825,6 +881,8 @@ def main():
         parser.error(
             "Arduino input requires --practice-0-confirmed, --frame, --melee and --approach"
         )
+    if args.port and not (args.freedom and args.anticipation):
+        parser.error("Set --freedom and --anticipation from the current action bar")
     board = stream = attempt = None
     end_reason = "error"
     outcome = "incomplete"

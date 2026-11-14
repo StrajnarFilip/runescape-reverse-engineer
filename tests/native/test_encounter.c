@@ -213,6 +213,32 @@ static void received_counter_is_independent_of_client_clock_and_telos(void)
     fixture_destroy(test_fixture);
 }
 
+static void compatibility_received_counter_requires_its_own_handler(void)
+{
+    fixture *test_fixture = fixture_create_for_profile(&profile_compatibility);
+    const uint64_t handler = FIXTURE_MODULE_BASE + 0x36952du;
+    const uint64_t owner_global = FIXTURE_MODULE_BASE + 0x16d15e8u;
+    const unsigned char guard[] = {0x48, 0x8b, 0x0d, 0xb4, 0x80, 0x36, 0x01, 0xff, 0x81,
+                                   0xf0, 0xdb, 0x00, 0x00, 0xe8, 0x91, 0x0b, 0x8b, 0x00};
+    fixture_add_block(test_fixture, handler, sizeof guard);
+    fixture_add_block(test_fixture, owner_global, sizeof(uint64_t));
+    fixture_add_block(test_fixture, TICK_OWNER, TICK_COUNTER_OFFSET + sizeof(uint32_t));
+    memcpy(fixture_bytes(test_fixture, handler, sizeof guard), guard, sizeof guard);
+    fixture_put_u64(test_fixture, owner_global, TICK_OWNER);
+    test_fixture->snapshot->combat.scene_state = LAYOUT_IN_GAME_STATE;
+    sample_tick(test_fixture, 100);
+    publish_tick_baseline(test_fixture);
+    sample_tick(test_fixture, 101);
+    assert(test_fixture->snapshot->encounter.game_tick.valid);
+    assert(test_fixture->snapshot->encounter.game_tick.counter == 101);
+    assert(isnan(test_fixture->snapshot->encounter.game_tick.phase_ms));
+    *fixture_bytes(test_fixture, handler, 1) ^= 1;
+    publish_tick_baseline(test_fixture);
+    sample_tick(test_fixture, 102);
+    assert(!test_fixture->snapshot->encounter.game_tick.valid);
+    fixture_destroy(test_fixture);
+}
+
 static void tick_rejects_torn_owner_counter_and_instruction_guard(void)
 {
     fixture *test_fixture = tick_fixture();
@@ -291,6 +317,7 @@ int main(void)
     RUN_TEST(labelled_phases_and_enrage_require_active_telos);
     RUN_TEST(compatibility_phase_requires_zero_enrage_and_matching_hp);
     RUN_TEST(received_counter_is_independent_of_client_clock_and_telos);
+    RUN_TEST(compatibility_received_counter_requires_its_own_handler);
     RUN_TEST(tick_rejects_torn_owner_counter_and_instruction_guard);
     RUN_TEST(tick_stall_reset_and_identity_changes_drop_validity);
     RUN_TEST(tick_wraps_without_regressing_and_clear_removes_baseline);

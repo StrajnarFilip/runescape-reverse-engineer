@@ -303,6 +303,13 @@ class TransportTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 keys.parse_chord(value)
 
+    def test_client_label_uses_the_foreground_layout_scan_code(self):
+        chord = keys.resolve_layout_chord("Ctrl+Z", lambda vk: 0x15 if vk == ord("Z") else 0)
+        self.assertEqual(chord, keys.parse_chord("Ctrl+Y"))
+        self.assertEqual(keys.resolve_layout_chord("Up", lambda _: 0xE048), keys.parse_chord("Up"))
+        with self.assertRaises(ValueError):
+            keys.resolve_layout_chord("Z", lambda _: 0)
+
     def test_sendinput_layout_and_release_after_wait_interruption(self):
         self.assertEqual(
             ctypes.sizeof(keys.Input), 40 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28

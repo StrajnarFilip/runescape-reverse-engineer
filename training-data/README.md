@@ -8,14 +8,18 @@ $frame = Join-Path $env:TEMP 'telos-practice.png'
 python work/game_console.py shot $frame
 python work/telos_zero.py --port COM8 --practice-0-confirmed --frame $frame `
     --melee $meleeX $meleeY --approach $approachX $approachY `
-    --continue-phase-two --observe-transition
+    --freedom Z --anticipation T --displayed-keys --continue-phase-two --observe-transition
 ```
 
 The practice controller relies on Revolution for normal damage. It uses client samples and deterministic Python for the experimental special responses. The separate `python -m rs3_reader.bot` entry point runs the integrated decision stack in shadow mode. The Python prayer planner requires measured protection windows and complete incoming coverage before offering a return to Soul Split. The attack catalogue currently has zero validated protection windows.
 
 ## Inspecting an attempt
 
-Each file starts with `attempt_started` and a `state` row with a `changes` object. Apply subsequent state changes as top-level field replacements. `sequence` orders rows, `timestamp_ms` is Unix time, and `elapsed_ns` and `observed_ns` are relative to the same attempt origin. `client_logic_tick` is the client clock. `game_tick` is null until a server tick source is mapped.
+Confirm the actual ability tooltips before using the example keys. `--displayed-keys` resolves the client window's keyboard layout to physical Arduino keys. `configured_abilities` records the displayed labels and resolved keys.
+
+`--timed-freedom` trials the first clear GCD at received-tick offsets +4 through +7 after `28935`. The observed cast acknowledged one tick after dispatch at +4. This measures the cast path and leaves the landing response unverified.
+
+Each file starts with `attempt_started`. The first `state` row includes the initial `changes` object. Apply subsequent state changes as top-level field replacements. `sequence` orders rows, `timestamp_ms` is Unix time, and `elapsed_ns` and `observed_ns` are relative to the same attempt origin. `client_logic_tick` is the client clock. `game_tick` carries the client's received server-tick counter when valid. `received_tick` rows mark observed counter changes and loss of validity. Receipt time has no calibrated relation to the server's protection check.
 
 `actors` maps attempt-local instance IDs to `[config_id, current_hp, max_hp, action_animation, movement_animation]`. `actor_tiles` maps the same IDs to `[x, y, plane, same_world_confirmed]` when the reader has a tile. `ability_cooldowns` maps ability struct IDs to `[reason, start_client_tick, end_client_tick, active]`. A missing timer stays unknown. NPC and player hitmark rows retain native timing and recipient evidence. Hitmarks lack an attacker field.
 

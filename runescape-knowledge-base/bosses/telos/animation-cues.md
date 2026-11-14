@@ -31,12 +31,12 @@ python work/telos_zero.py --replay $telosTrace
 python work/telos_zero.py --duration 120 > (Join-Path $env:TEMP 'telos-observation.jsonl')
 ```
 
-For input, stage a fresh 0% Practice Mode instance with Telos dormant, bar 18 selected and auto-retaliate active. Capture the foreground client with `game_console.py shot`. Set `$meleeX` and `$meleeY` to the Deflect Melee slot pixel and `$approachX` and `$approachY` to a walkable approach point in that frame. `U`, `A` and `8` are the default Freedom, Anticipation and Hurricane bindings. Set `--surge` only when a slot with Surge is visible and its binding is known.
+For input, stage a fresh 0% Practice Mode instance with Telos dormant, bar 18 selected and auto-retaliate active. Capture the foreground client with `game_console.py shot`. Set `$meleeX` and `$meleeY` to the Deflect Melee slot pixel and `$approachX` and `$approachY` to a walkable approach point in that frame. Read the Freedom and Anticipation tooltips and pass their current keys. On 2026-11-14 those labels were `Z` and `T`. With this keyboard layout, `--displayed-keys` resolves `Z` to the physical `Y` key. Set `--hurricane` and `--surge` only after confirming those abilities on the current bar.
 
 ```powershell
 $telosFrame = Join-Path $env:TEMP 'telos-practice.png'
 python work/game_console.py shot $telosFrame
-python work/telos_zero.py --port COM8 --practice-0-confirmed --frame $telosFrame --melee $meleeX $meleeY --approach $approachX $approachY --observe-transition
+python work/telos_zero.py --port COM8 --practice-0-confirmed --frame $telosFrame --melee $meleeX $meleeY --approach $approachX $approachY --freedom Z --anticipation T --displayed-keys --observe-transition
 ```
 
 The script confirms Deflect Melee before approaching. It sends no food or brew inputs. F12, lost foreground, stale samples and combat queue overflow stop input. A cooldown change acknowledges an ability cast, and tile changes let you measure movement. After entering P2 the runner stops input and exits with code 2, or continues read-only recording first with `--observe-transition`. Use the compact attempt log under `training-data/`. Keep screenshots and raw captures local. [Attempt log format and coverage](../../../training-data/README.md)
@@ -50,3 +50,5 @@ The first scripted P1 clear showed Revolution damaging Telos in P2 without targe
 The saved 0% trace recorded no active overhead at the P2 transition or at either of the two subsequent animation applications. On that trace, the protected melee cue required by the reacquisition trial never appeared. A fresh run needs to show whether the Hold Still response can carry protection through to P2.
 
 In that same trace, Deflect Melee was still active for the two Hold Still hitmarks at about 1.14 and 2.31 seconds. The overhead first read `none` at 4.71 seconds, followed by the 4,187 hitmark at 5.31 seconds. The sampled Ctrl+F3/F4 press log was empty through that interval. The trace does not establish why the overhead disappeared. The optional Surge trial logs the first tile change within 1.2 seconds of input. Compare it with the cooldown acknowledgement and subsequent hitmarks to evaluate the dodge.
+
+**Observed on 2026-11-14, 0% P2.** With `--timed-freedom` and the translated Freedom binding, the controller sent Freedom four received ticks after `28935`, after the heavy type `133` hit and with the GCD clear. The cooldown acknowledged at cue +5. The overhead still changed to `none` at cue +8, and a 3,985 type `144` hitmark followed at cue +9. The trial waits for GCD zero at offsets +4 through +7. One successful cast confirms the input path. The landing dodge and protection deadline still need calibration. [Attempt log](../../../training-data/telos-20261114T081931.814573Z.jsonl)

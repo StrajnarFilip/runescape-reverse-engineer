@@ -15,7 +15,7 @@ from ..native import (
     Variable,
 )
 from ..prayer import Prayer
-from ..telemetry import hit_record
+from ..telemetry import hit_record, spatial_actor_record
 
 SCHEMA_VERSION = 1
 
@@ -73,7 +73,14 @@ class AttemptLog:
         self.frame_sequence = info.sequence
         self.client_logic_tick = info.logic_tick if info.monotonic_ns else None
         encounter = reader.encounter
-        self.game_tick = encounter.game_tick.counter if encounter.game_tick.valid else None
+        previous_tick = self.game_tick
+        tick = encounter.game_tick
+        self.game_tick = tick.counter if tick.valid else None
+        if self.game_tick != previous_tick:
+            self.write(
+                "received_tick", observed_ns=self.relative_ns(tick.observed_ns), reason=tick.reason
+            )
+        target = spatial_actor_record(reader, reader.spatial.player)["target"]
         prayer_packed = player.variable(Variable.PRAYER_PACKED)
         tile = reader.position
         poses = {
@@ -116,7 +123,10 @@ class AttemptLog:
             },
             "adrenaline_tenths": player.variable(Variable.ADRENALINE),
             "tile": (tile.x, tile.y, tile.plane) if tile.valid else None,
+            "combat_target": target["value"],
+            "combat_target_reason": target["reason"],
             "gcd_end_client_tick": player.variable(Variable.GCD_CLIENT_END),
+            "gcd_active": bool(player.gcd_remaining_ms) if player.gcd_reason == 0 else None,
             "ability_cooldowns": {
                 ability.struct_id: (
                     ability.reason,

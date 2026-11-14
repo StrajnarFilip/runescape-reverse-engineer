@@ -11,6 +11,7 @@ import ctypes
 import os
 import re
 import time
+from ctypes import wintypes
 from dataclasses import dataclass
 
 POLL_SECONDS = 0.01
@@ -142,6 +143,37 @@ def bind(library, name, result, arguments):
     function.restype = result
     function.argtypes = arguments
     return function
+
+
+def resolve_layout_chord(value, scan_for_virtual_key):
+    """Translate the client-displayed base key to the corresponding physical key."""
+    chord = parse_chord(value)
+    scan = scan_for_virtual_key(chord[-1].virtual_key)
+    physical = next(
+        (key for key in KEYS.values() if scan == (key.scan_code | (0xE000 if key.extended else 0))),
+        None,
+    )
+    if physical is None:
+        raise ValueError(f"No supported physical key for {value!r} in the active keyboard layout")
+    return (*chord[:-1], physical)
+
+
+def window_keyboard_layout(window_handle):
+    """Return the target window's input layout and its virtual-key translator."""
+    user = windows_library("user32")
+    window_thread = bind(
+        user, "GetWindowThreadProcessId", wintypes.DWORD, [wintypes.HWND, ctypes.c_void_p]
+    )
+    get_layout = bind(user, "GetKeyboardLayout", wintypes.HANDLE, [wintypes.DWORD])
+    map_key = bind(
+        user, "MapVirtualKeyExW", wintypes.UINT, [wintypes.UINT, wintypes.UINT, wintypes.HANDLE]
+    )
+    thread_id = window_thread(window_handle, None)
+    layout = get_layout(thread_id) if thread_id else None
+    if not layout:
+        raise RuntimeError("Cannot read the RuneScape keyboard layout")
+    # MAPVK_VK_TO_VSC_EX preserves the E0 prefix for extended keys.
+    return layout, lambda virtual_key: map_key(virtual_key, 4, layout)
 
 
 class KeyboardInput(ctypes.Structure):

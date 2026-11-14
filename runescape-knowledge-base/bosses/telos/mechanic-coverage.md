@@ -21,9 +21,9 @@ The practice controller has 0% evidence through the phase 3 handoff on Compatibi
 
 ## Native channels
 
-- `rs3_snapshot_encounter` provides scoped phase and enrage plus raw variables. At 0% on Compatibility Mode it requires a single active Telos, an instance guard and matching HP to publish phases 1–3. The raw lower bits of VARP 6363 vary within phases and reset at transitions. They are a meter lead. Server tick remains unknown.
+- `rs3_snapshot_encounter` provides scoped phase and enrage plus raw variables. At 0% on Compatibility Mode it requires a single active Telos, an instance guard and matching HP to publish phases 1–3. The raw lower bits of VARP 6363 vary within phases and reset at transitions. They are a meter lead. Both clients expose the received server-tick counter. Server phase and prayer-check deadlines remain unknown.
 - `rs3_snapshot_combat`, `rs3_npc_action_events_since`, `rs3_player_hit_events_since`, and `rs3_events_since` expose overhead state, animation applications and recipient hitmarks through `Reader`. They provide no server protection deadline or attacker ID.
-- `rs3_snapshot_position`, `rs3_snapshot_spatial`, `rs3_snapshot_npc_spatial` and `rs3_snapshot_hazards` provide tiles and candidate arena actors. The Compatibility Mode spatial scope covers tiles and world agreement. Camera, facing and combat target are unavailable on that profile.
+- `rs3_snapshot_position`, `rs3_snapshot_spatial`, `rs3_snapshot_npc_spatial` and `rs3_snapshot_hazards` provide tiles and candidate arena actors. Compatibility Mode also exposes the guarded local-player NPC target reference and explicit clear state. Recent attempts recorded the reference but could not resolve it to a same-world NPC tile. Camera and facing remain unmapped on that profile.
 - `rs3_snapshot_abilities` provides cooldowns and equipment requirements. `rs3_snapshot_effects` carries available effects evidence. Complete castability, stun and bind acknowledgement, virus state and Soul Split healing attribution require more observations.
 
 The original-client 300% evidence and the Compatibility Mode 0% evidence do not establish a timed protection rule for either profile. [Attack catalogue](../../../profiles/telos_attacks.json) · [Attempt logs](../../../training-data/README.md)

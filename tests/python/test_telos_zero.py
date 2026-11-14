@@ -63,6 +63,21 @@ class PhaseOneTests(unittest.TestCase):
         self.assertEqual(action.ability, "Surge")
         self.assertIsNone(phase.next_action(6 * SECOND_NS, timers, 0, Prayer.MELEE))
 
+    def test_timed_freedom_waits_for_heavy_hit_and_gcd_then_expires(self):
+        phase = PhaseOne()
+        phase.observe([dict(event(1, HOLD_STILL), received_tick=10)])
+        timers = {"Freedom": 0}
+        for tick, gcd in ((None, 0), (13, 0), (14, 20), (14, None), (18, 0)):
+            self.assertIsNone(
+                phase.next_action(
+                    3 * SECOND_NS, timers, gcd, Prayer.MELEE, received_tick=tick, timed_freedom=True
+                )
+            )
+        action = phase.next_action(
+            3 * SECOND_NS, timers, 0, Prayer.MELEE, received_tick=14, timed_freedom=True
+        )
+        self.assertEqual(action.ability, "Freedom")
+
     def test_tendrils_release_cancels_pending_damage_response(self):
         phase = PhaseOne()
         phase.observe([event(1, TENDRILS)])

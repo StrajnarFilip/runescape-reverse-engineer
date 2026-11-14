@@ -17,8 +17,9 @@ Compatibility Mode ``6ada3f59-1a86000`` now supplies player and NPC tiles. The
 player and NPC vtable entries at ``+0xb0`` both resolve to the guarded getter at
 ``0x6ee110``. The base constructor stores the world owner at ``+0x60`` (guarded
 instruction at ``0x38523``). Actor poses require the matching vtable, runtime
-ID and two consistent reads. Compatibility Mode camera, facing and combat
-target remain unmapped.
+ID and two consistent reads. The local-player NPC target resolver has matching
+instruction guards at ``0x3ffe86`` and ``0x3ffeb0``. Compatibility Mode camera
+and facing remain unmapped.
 
 The 2026-11-13 P1 update also publishes the original profile's guarded player
 tile through ``rs3_snapshot_position``. It copies the committed P1 pose after
