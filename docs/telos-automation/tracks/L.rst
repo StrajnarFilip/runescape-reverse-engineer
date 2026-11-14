@@ -191,3 +191,14 @@ Requests
   zero skips), including 43 actuator cases. See
   ``docs/validation/telos-ladder-pointer-backend-2026-11-14.json``. No live input
   was sent and no ladder rung was enabled.
+
+* P6 full-frame recording is integrated at a4e8430. The read-only command now
+  keeps guarded encounter observations and all four native queues/loss counters
+  in schema-1 records usable by replay and shadow. Synchronous C acquisition
+  prevents worker advancement between the frame copy and recorder queue drains.
+  All 15 CTest targets pass (317 Python tests, zero skips); an absent-PID real
+  DLL capture also passed readiness and analysis with unavailable values and
+  zero input. See
+  ``docs/validation/telos-prayer-calibration-recorder-2026-11-14.json``.
+  No attack timing/classification authorization changed. Historical input
+  provenance remains true/false/unknown, and analysis cannot overwrite inputs.
