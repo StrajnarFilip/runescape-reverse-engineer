@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "track": "L",
+  "date": "2026-11-14",
+  "status": "in_progress",
+  "source_commit": "af05fe9",
+  "stage": "npc_entity_reference_integration",
+  "profile_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+  "evidence": {
+    "research_samples": 2858,
+    "telos_local_player_reference_samples": 692,
+    "native_json_dormant_telos_clears": 60,
+    "active_telos_native_json_confirmation": false,
+    "report": "docs/validation/spatial-validation.json"
+  },
+  "checks": {
+    "ctest_targets_passed": 15,
+    "python_tests_passed": 271,
+    "python_tests_skipped": 0,
+    "native_spatial_cases": 15,
+    "local_serializer_regression_groups": 7
+  },
+  "remaining": [
+    "Active Telos production C/JSON confirmation in the next planned manual session.",
+    "Attack declaration/style and protection deadlines; entity references can also mean follow/owner.",
+    "Complete castability, minimap/view/hit-test acquisition, result/route mapping and P5.",
+    "Integrate and test the remaining software input/backend wiring without enabling combat input."
+  ],
+  "automatic_input_enabled": false,
+  "ladder_rung_passed": false,
+  "input_sent": false,
+  "raw_capture_committed": false
+}

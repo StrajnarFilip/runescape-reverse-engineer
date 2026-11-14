@@ -115,3 +115,16 @@ Requests
   encounter work and further practice-attempt records. Review those additions
   independently against their executable and encounter scope before integration;
   they do not establish a 300%-4000% ladder pass.
+
+* P1 follow-up, 2026-11-14: NPC entity references now decode in C. Telos's
+  player-kind UID matched the exact local player index in 692 research samples;
+  fresh C/JSON confirmed 60 dormant-Telos clears. Active-Telos C/JSON confirmation
+  remains a next-session check. Entity references can mean follow/owner and do
+  not establish an attack or protection deadline. See
+  ``docs/validation/telos-ladder-npc-targets-2026-11-14.json``.
+* A2/native input owner: implement balanced modified-ability and exact-item
+  key-chord entry points in the owned input module, with rejection/cleanup tests.
+  Request additive declarations in the unowned public ``rs3.h``; L will route
+  that narrow ABI registration with the implementation merge. A1 then connects
+  its existing serialized backend. This is software preparation only; no rung
+  or automatic input is enabled while the user is away.
