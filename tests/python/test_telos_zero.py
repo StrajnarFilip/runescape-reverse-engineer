@@ -569,16 +569,25 @@ class PrayerFlickerTests(unittest.TestCase):
         self.assertIsNone(flicker.observe([event(2, HOLD_STILL)], 11, 0))
         self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 10, 0), Prayer.MELEE)
 
+    def test_magic_projectile_keeps_deflect_magic_through_plus_three(self):
+        # 175845: a 28959 at 8080 hit for 3,765 at 8083 after Soul Split returned at 8081.
+        flicker = PrayerFlicker()
+        flicker.observe([event(1, controller["MAGIC_ATTACK"])], 8080, 0)
+        for tick in (8080, 8081, 8082, 8083):
+            self.assertTrue(flicker.holding(tick, 0))
+        self.assertFalse(flicker.holding(8084, 0))
+
     def test_magic_attack_selects_deflect_magic(self):
         flicker = PrayerFlicker()
         magic = controller["MAGIC_ATTACK"]
         flicker.observe([event(1, magic)], 30, 0)
         self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 30, 0), Prayer.MAGIC)
         flicker.sent(Prayer.MAGIC, 0)
-        self.assertEqual(flicker.next_prayer(Prayer.MAGIC, 31, 1), Prayer.SOUL_SPLIT)
+        self.assertIsNone(flicker.next_prayer(Prayer.MAGIC, 33, 1))
+        self.assertEqual(flicker.next_prayer(Prayer.MAGIC, 34, 1), Prayer.SOUL_SPLIT)
         flicker.sent(Prayer.SOUL_SPLIT, 1)
-        flicker.observe([event(2, AUTO)], 31, 2)
-        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 31, 3), Prayer.MELEE)
+        flicker.observe([event(2, AUTO)], 34, 2)
+        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 34, 3), Prayer.MELEE)
 
     def test_phase_three_default_is_deflect_magic(self):
         flicker = PrayerFlicker()

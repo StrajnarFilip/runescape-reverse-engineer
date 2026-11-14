@@ -325,6 +325,9 @@ BEAM_KIND_BY_PHASE = {2: BLACK_BEAM_KIND}
 BEAM_FEED_RISES = 2
 BEAM_FEED_WINDOW = 3
 BEAM_MOVE_RETRY_TICKS = 3
+# Movement into the stream is off: in 175845 the Telos click after reaching the strip walked the
+# player 7 tiles away and later strip clicks did not bring them back. Feeding is still logged.
+BEAM_BLOCKING_ENABLED = False
 # Escape (Uppercut +4/+5) and the stomp Dive (Hold Still +4..+7) own movement for this long.
 BEAM_SPECIAL_HOLD_TICKS = 10
 
@@ -478,7 +481,11 @@ FLICK_EXCLUDED_ANIMATIONS = frozenset({UPPERCUT})
 DEFAULT_FLICK_HOLD_TICKS = 1
 # After the Tendrils release an unanimated melee auto followed at +2 received ticks in both
 # 100% captures (1,470 and 1,076). Melee stays active through that tick.
-FLICK_HOLD_TICKS = {TENDRILS_RELEASE: 3}
+# 28959 projectile hits land 1-3 received ticks after the animation, later with distance. A hit
+# under Deflect Magic did 1 damage; the 250% P2 deaths of 174445 and 175845 came from hits of
+# 2,255-5,080 landing after the one-tick hold had already restored Soul Split (+2 and +3 at
+# about 8 tiles). Deflect Magic therefore stays up through +3.
+FLICK_HOLD_TICKS = {TENDRILS_RELEASE: 3, MAGIC_ATTACK: 4}
 # Uppercut's 2,634 hitmark appeared 7 received ticks after 28938 on 2026-11-14 at 100%.
 # Escape is sent two to three ticks before that hitmark; the server hit deadline is unmeasured.
 UPPERCUT_ESCAPE_TICKS = (4, 5)
@@ -1413,6 +1420,17 @@ def run(reader, args, board, attempt=None):
         if not isinstance(received_tick, int):
             return
         feeding = beam_blocker.observe(meter, received_tick)
+        if not BEAM_BLOCKING_ENABLED:
+            if feeding != beam_blocker.reengage_due:
+                # reengage_due doubles as the logged feeding state while movement is off.
+                beam_blocker.reengage_due = feeding
+                emit(
+                    "beam_feeding" if feeding else "beam_feeding_ended",
+                    phase=phase,
+                    meter=meter,
+                    received_tick=received_tick,
+                )
+            return
         player = reader.spatial.player
         if (
             not input_allowed
