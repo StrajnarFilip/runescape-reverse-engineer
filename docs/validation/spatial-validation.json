@@ -2,7 +2,7 @@
   "schema_version": 1,
   "track": "P1",
   "date": "2026-11-14",
-  "status": "original_player_npc_target_and_projection_validated_other_targets_pending",
+  "status": "original_actor_entity_references_mapped_attack_and_other_profile_validation_pending",
   "runtime_profile_observed": "951-3",
   "sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
   "additional_signature_guards": {
@@ -38,10 +38,11 @@
     "manually_checked_projected_samples": 0
   },
   "unmapped": {
-    "npc_target": "NPC incoming-attack target identity remains unmapped.",
+    "npc_target": "NPC entity UID/kind is mapped; incoming-attack declaration/style and timing remain separate, uncalibrated evidence.",
     "terrain_height": "Tile projection requires an explicitly known caller-supplied height.",
     "compatibility_mode_spatial": "The currently installed binary is the original profile; new Compatibility Mode pose/projection guards remain unverified.",
-    "player_vs_player_target": "Native resolver contains a player-kind branch, but it has not been manually calibrated and remains disabled."
+    "player_vs_player_target": "Native resolver contains a player-kind branch, but it has not been manually calibrated and remains disabled.",
+    "other_player_lifetimes": "Raw NPC player-kind UIDs are available in C. JSON resolves only the local player lifetime; other players remain target_not_observed."
   },
   "input_sent": false,
   "raw_capture_committed": false,
@@ -49,7 +50,7 @@
     "windows_x64_release_build": "passed",
     "ctest_suites_passed": 15,
     "python_tests_passed": 271,
-    "native_spatial_cases": 11,
+    "native_spatial_cases": 15,
     "existing_public_structures_changed": false,
     "python_tests_skipped": 0
   },
@@ -227,5 +228,98 @@
     "public_abi_sizes_unchanged": true,
     "input_sent": false,
     "raw_capture_committed": false
+  },
+  "npc_entity_target_validation": {
+    "capture_sha256": "2e7f7cc367d07cce68355b8baef25cc97176ff7958b92af8049c85042db56c5d",
+    "samples": 2858,
+    "elapsed_seconds": 164.187,
+    "distinct_process_identities": 1,
+    "player_indices": [
+      1915
+    ],
+    "telos_local_player_reference_samples": 692,
+    "telos_explicit_clear_samples": 410,
+    "telos_registry_instances": [
+      {
+        "runtime_id": 133,
+        "instance_id": 10,
+        "config_id": 22891
+      }
+    ],
+    "raw_animation_sample_counts": {
+      "28962": 3,
+      "-1": 340,
+      "28929": 285,
+      "28932": 5,
+      "28938": 10,
+      "28959": 18,
+      "28935": 31
+    },
+    "first_local_reference_sample": 1200,
+    "last_local_reference_sample": 2071,
+    "research_errors": {},
+    "other_player_references": [
+      {
+        "config_id": 26875,
+        "name": "Hellhound",
+        "samples": 893
+      },
+      {
+        "config_id": 7349,
+        "name": "Abyssal titan",
+        "samples": 183
+      }
+    ],
+    "reported_event_losses": {
+      "npc_actions": 0,
+      "npc_hits": 0,
+      "player_hits": 0
+    },
+    "player_hit_events_total": 34,
+    "user_label": "Telos, the Warden; NPC check done",
+    "enrage": null,
+    "phases": null,
+    "automatic_inputs": false,
+    "attacker_attribution_from_hits": false,
+    "raw_capture_committed": false,
+    "inventory_queue_loss_counter_recorded": false,
+    "scope": "Original-profile NPC entity reference; no attack declaration or prayer timing is inferred.",
+    "static_verification": {
+      "resolver_rva": "0x3fff60",
+      "npc_update_callsite_rva": "0x3f40ec",
+      "player_update_callsite_rva": "0x405174",
+      "shared_uid_offset": "0x1c4",
+      "shared_kind_offset": "0x238",
+      "none_kind": 127,
+      "npc_kind": 1,
+      "player_kind": 2,
+      "loaded_guards": "Same two guards listed under player_target_validation; checked against the pinned executable.",
+      "source_lead": "RuneTools c7d860eb2a9b783e680e2cd31583c7b49deceab5 Reader.cpp; followed independently in local Ghidra."
+    },
+    "native_live_json_check": {
+      "samples": 60,
+      "npc_name": "Telos, the Warden (dormant)",
+      "explicit_clears": 60,
+      "active_telos_player_reference_checked": false,
+      "strict_json_passed": true,
+      "automatic_inputs": false
+    },
+    "serializer_regression_groups": [
+      "Typed local-player EntityRef from NPC reference",
+      "Other-player lifetime remains unresolved",
+      "Source and destination require the local world",
+      "Source and destination lifetimes required",
+      "Hit-channel status, player index and lifetime must agree",
+      "Explicit clear distinct from unknown",
+      "NPC identity resolution rejects mismatched lifetimes"
+    ],
+    "rejected_candidate": "NPC+0x1374 was not used: exact local instruction matches were stack-relative and nearby observed values were zero.",
+    "limits": [
+      "The active Telos reference was independently read before the C implementation update; production C/JSON confirmation of an active Telos is pending.",
+      "No enrage/phase labels; raw animation counts remain unclassified.",
+      "A familiar owner/follow reference does not establish an attack.",
+      "Player-versus-player targets and other-player lifetimes remain unmapped.",
+      "No protection-check deadlines, complete attack coverage or ladder rung is validated."
+    ]
   }
 }
