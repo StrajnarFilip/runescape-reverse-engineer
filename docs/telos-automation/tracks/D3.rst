@@ -109,6 +109,12 @@ tests. Partial inventory omission cannot acknowledge consumption.
 Requests
 --------
 
+* L follow-up, 2026-11-14: add current-purpose can_send validation before D6
+  dispatch. Recheck resource thresholds, exact item identity and potion policy,
+  and defensive protection/effects/threat eligibility. Generic castability and
+  a fresh original evidence timestamp cannot establish those current facts.
+  Keep independent same-tick lanes and observation-based acknowledgement.
+
 * D4/P3/L: current native ability records leave full castability unknown. Map
   unlocks, runes, spellbook, adrenaline, target and other cast conditions;
   unknown castability blocks actual defensive/exit proposals. Defensive

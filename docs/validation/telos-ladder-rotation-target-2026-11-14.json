@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "track": "L",
+  "date": "2026-11-14",
+  "source_commit": "c601487",
+  "status": "offline_regression_fixed",
+  "problem": "An offered offensive ability could be revalidated after the selected NPC changed; missing runtime/config and mismatched config IDs could pass readiness.",
+  "behavior": "Require one fresh exact NPC lifetime/runtime/config match and living target; preserve those observations as evidence. A target switch or replaced action under the old intent ID rejects before dispatch.",
+  "checks": {
+    "pre_fix_regressions_reproduced": true,
+    "ctest_targets_passed": 15,
+    "python_tests_passed": 321,
+    "python_tests_skipped": 0,
+    "rotation_tests": 18,
+    "new_regression_cases": 4
+  },
+  "live_input_sent": false,
+  "account_setup_or_castability_inferred": false,
+  "rotation_profile_authorization_changed": false,
+  "ladder_rung_passed": false
+}

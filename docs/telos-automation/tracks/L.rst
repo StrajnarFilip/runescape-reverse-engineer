@@ -202,3 +202,14 @@ Requests
   ``docs/validation/telos-prayer-calibration-recorder-2026-11-14.json``.
   No attack timing/classification authorization changed. Historical input
   provenance remains true/false/unknown, and analysis cannot overwrite inputs.
+
+* D4 target regression fixed at c601487: an old offensive intent no longer
+  survives a selected-target switch, missing/mismatched config/runtime identity
+  or replacement action under its old ID. All 15 CTest targets pass (321 Python
+  tests, zero skips), including four new regressions and 18 rotation cases.
+  ``docs/validation/telos-ladder-rotation-target-2026-11-14.json`` records scope.
+  No live input or account/castability/profile authorization changed.
+* D3: add a producer can_send hook for current survival eligibility. D6's
+  generic item/ability readiness does not recheck changed resource thresholds,
+  protection, stun/defensive blockers or threat identity after proposal. Keep
+  validation side-effect free and preserve simultaneous food/potion lanes.
