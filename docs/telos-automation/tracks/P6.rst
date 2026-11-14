@@ -1,7 +1,7 @@
 P6 - Attack catalogue
 =====================
 
-:Status: waiting for live session
+:Status: in progress
 :Wave: 1
 :Branch: ``telos/P6``
 :Kind: Data and analysis (no DLL changes)
