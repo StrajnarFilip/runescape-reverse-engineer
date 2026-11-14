@@ -5,17 +5,22 @@
 #include <math.h>
 #include <string.h>
 
-#define POSE_PLANE_OFFSET      0x50u
-#define POSE_SIZE_OFFSET       0x18cu
-#define POSE_QUATERNION_OFFSET 0x1ccu
-#define POSE_FINE_OFFSET       0x280u
-#define POSE_WORLD_OFFSET      0x60u
-#define LOCAL_PLAYER_ACTOR     0x900000ull
-#define LOCAL_PLAYER_CONTEXT   0x910000ull
-#define LOCAL_PLAYER_INDEX     7u
-#define POSITION_GETTER_RVA    0x6ee1f0u
-#define FACING_GETTER_RVA      0x44b690u
-#define PROJECTION_GUARD_RVA   0x5a34eu
+#define POSE_PLANE_OFFSET         0x50u
+#define POSE_SIZE_OFFSET          0x18cu
+#define POSE_QUATERNION_OFFSET    0x1ccu
+#define POSE_FINE_OFFSET          0x280u
+#define POSE_WORLD_OFFSET         0x60u
+#define LOCAL_PLAYER_ACTOR        0x900000ull
+#define LOCAL_PLAYER_CONTEXT      0x910000ull
+#define LOCAL_PLAYER_INDEX        7u
+#define POSITION_GETTER_RVA       0x6ee1f0u
+#define FACING_GETTER_RVA         0x44b690u
+#define PROJECTION_GUARD_RVA      0x5a34eu
+#define PLAYER_TARGET_UID_OFFSET  0x1c4u
+#define PLAYER_TARGET_KIND_OFFSET 0x238u
+#define TARGET_KIND_GUARD_RVA     0x3fff66u
+#define TARGET_UID_GUARD_RVA      0x3fff90u
+#define EXPLICIT_NO_TARGET_KIND   127u
 
 static fixture *pose_fixture(void)
 {
@@ -243,6 +248,91 @@ static void spatial_commit_preserves_compatibility_position_decoder(void)
     fixture_destroy(test_fixture);
 }
 
+static fixture *player_target_fixture(void)
+{
+    fixture *test_fixture = player_pose_fixture();
+    const unsigned char kind_guard[] = {0x80, 0xb9, 0x38, 0x02, 0, 0, 0x7f};
+    const unsigned char uid_guard[] = {0x0f, 0xb6, 0x81, 0x38, 0x02, 0, 0,
+                                       0x48, 0x63, 0x91, 0xc4, 0x01, 0, 0};
+    fixture_add_block(test_fixture, FIXTURE_MODULE_BASE + TARGET_KIND_GUARD_RVA, sizeof kind_guard);
+    fixture_add_block(test_fixture, FIXTURE_MODULE_BASE + TARGET_UID_GUARD_RVA, sizeof uid_guard);
+    memcpy(
+        fixture_bytes(test_fixture, FIXTURE_MODULE_BASE + TARGET_KIND_GUARD_RVA, sizeof kind_guard),
+        kind_guard, sizeof kind_guard);
+    memcpy(
+        fixture_bytes(test_fixture, FIXTURE_MODULE_BASE + TARGET_UID_GUARD_RVA, sizeof uid_guard),
+        uid_guard, sizeof uid_guard);
+    fixture_put_u32(test_fixture, LOCAL_PLAYER_ACTOR + PLAYER_TARGET_UID_OFFSET,
+                    FIXTURE_NPC_RUNTIME_ID);
+    fixture_bytes(test_fixture, LOCAL_PLAYER_ACTOR + PLAYER_TARGET_KIND_OFFSET, 1)[0] =
+        RS3_SPATIAL_TARGET_NPC;
+    return test_fixture;
+}
+
+static void decodes_npc_target_changes_and_explicit_clear(void)
+{
+    fixture *test_fixture = player_target_fixture();
+    assert(fixture_decode(test_fixture));
+    rs3_actor_spatial *player = &test_fixture->snapshot->spatial.player;
+    assert(player->valid_mask & RS3_SPATIAL_TARGET);
+    assert(player->target_kind == RS3_SPATIAL_TARGET_NPC);
+    assert(player->target_runtime_id == FIXTURE_NPC_RUNTIME_ID && !player->target_reason);
+    assert(!(test_fixture->snapshot->npc_spatial[0].valid_mask & RS3_SPATIAL_TARGET));
+    fixture_put_u32(test_fixture, LOCAL_PLAYER_ACTOR + PLAYER_TARGET_UID_OFFSET,
+                    FIXTURE_NPC_RUNTIME_ID + 1);
+    assert(fixture_decode(test_fixture));
+    assert(player->target_runtime_id == FIXTURE_NPC_RUNTIME_ID + 1);
+    fixture_bytes(test_fixture, LOCAL_PLAYER_ACTOR + PLAYER_TARGET_KIND_OFFSET, 1)[0] =
+        EXPLICIT_NO_TARGET_KIND;
+    assert(fixture_decode(test_fixture));
+    assert(player->valid_mask & RS3_SPATIAL_TARGET);
+    assert(player->target_kind == RS3_SPATIAL_TARGET_NONE && player->target_runtime_id == -1);
+    fixture_destroy(test_fixture);
+}
+
+static void unknown_target_kinds_and_out_of_range_ids_stay_unknown(void)
+{
+    fixture *test_fixture = player_target_fixture();
+    fixture_bytes(test_fixture, LOCAL_PLAYER_ACTOR + PLAYER_TARGET_KIND_OFFSET, 1)[0] = 2;
+    assert(fixture_decode(test_fixture));
+    rs3_actor_spatial *player = &test_fixture->snapshot->spatial.player;
+    assert(!(player->valid_mask & RS3_SPATIAL_TARGET));
+    assert(player->target_reason == RS3_SPATIAL_UNMAPPED);
+    fixture_bytes(test_fixture, LOCAL_PLAYER_ACTOR + PLAYER_TARGET_KIND_OFFSET, 1)[0] =
+        RS3_SPATIAL_TARGET_NPC;
+    fixture_put_u32(test_fixture, LOCAL_PLAYER_ACTOR + PLAYER_TARGET_UID_OFFSET, UINT32_MAX);
+    assert(fixture_decode(test_fixture));
+    assert(!(player->valid_mask & RS3_SPATIAL_TARGET));
+    fixture_put_u32(test_fixture, LOCAL_PLAYER_ACTOR + PLAYER_TARGET_UID_OFFSET,
+                    (uint32_t)UINT16_MAX + 1);
+    assert(fixture_decode(test_fixture));
+    assert(!(player->valid_mask & RS3_SPATIAL_TARGET));
+    fixture_destroy(test_fixture);
+}
+
+static void target_read_tearing_and_failed_guard_preserve_pose_only(void)
+{
+    fixture *test_fixture = player_target_fixture();
+    fixture_mutate_on_read(test_fixture, LOCAL_PLAYER_ACTOR, 2,
+                           LOCAL_PLAYER_ACTOR + PLAYER_TARGET_UID_OFFSET,
+                           FIXTURE_NPC_RUNTIME_ID + 1);
+    rs3_actor_spatial actor;
+    assert(spatial_decode_actor(test_fixture->context, LOCAL_PLAYER_ACTOR,
+                                profile_primary.player_actor_vtable_rva, LOCAL_PLAYER_INDEX,
+                                &actor));
+    assert(actor.valid_mask & RS3_SPATIAL_TILE);
+    assert(!(actor.valid_mask & RS3_SPATIAL_TARGET) && actor.target_reason == RS3_READ_FAILED);
+    fixture_clear_mutation(test_fixture);
+    fixture_bytes(test_fixture, FIXTURE_MODULE_BASE + TARGET_KIND_GUARD_RVA, 1)[0] = 0;
+    assert(spatial_decode_actor(test_fixture->context, LOCAL_PLAYER_ACTOR,
+                                profile_primary.player_actor_vtable_rva, LOCAL_PLAYER_INDEX,
+                                &actor));
+    assert(actor.valid_mask & RS3_SPATIAL_TILE);
+    assert(!(actor.valid_mask & RS3_SPATIAL_TARGET));
+    assert(actor.target_reason == RS3_SPATIAL_UNMAPPED);
+    fixture_destroy(test_fixture);
+}
+
 int main(void)
 {
     RUN_TEST(decodes_pose_but_does_not_fabricate_target);
@@ -253,5 +343,8 @@ int main(void)
     RUN_TEST(original_position_and_hit_channel_share_committed_player);
     RUN_TEST(rejects_pose_from_actor_different_from_hit_channel);
     RUN_TEST(spatial_commit_preserves_compatibility_position_decoder);
+    RUN_TEST(decodes_npc_target_changes_and_explicit_clear);
+    RUN_TEST(unknown_target_kinds_and_out_of_range_ids_stay_unknown);
+    RUN_TEST(target_read_tearing_and_failed_guard_preserve_pose_only);
     return 0;
 }

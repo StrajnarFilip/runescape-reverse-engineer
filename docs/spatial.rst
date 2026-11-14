@@ -36,8 +36,14 @@ Actor fields on the original profile:
   ``0x44c910`` calls ``0x44b690`` on the actor's transform. The yaw is converted
   to degrees, zero south and increasing towards west. Non-finite or non-unit
   quaternions leave facing unknown without invalidating an otherwise usable tile.
-* ``facingTarget`` is a desired heading, not a combat-target entity. It must not
-  populate ``WorldState.*.target``. Combat-target decoding remains unmapped.
+* ``facingTarget`` is a desired heading, not an entity ID. The local player's
+  typed entity target is a separate int32 UID at ``+0x1c4`` and byte kind at
+  ``+0x238``. Original-profile resolver ``0x3fff60`` branches on kind 1 for the
+  NPC registry, kind 2 for the player registry, and skips resolution for 127.
+  Extra loaded-code guards pin the kind and UID reads. Only the observed NPC
+  kind and explicit clear are enabled; player-versus-player and NPC attack
+  targets remain unmapped. Torn target reads preserve a usable pose while
+  making the target unknown.
 
 Camera and projection
 ---------------------
@@ -80,7 +86,12 @@ age before using a projected pixel. Successful projection sends no input.
 Python ``Reader.spatial`` and ``Reader.npc_spatial`` mirror these C records.
 Telemetry adds ``player.tile/facing/target`` and the corresponding NPC fields
 using S0a observation envelopes. Unknown values have reasons; targets remain
-null. Actor ``screen_point`` fields contain C-computed physical pixels.
+null when unmapped. A mapped local NPC target is resolved against exactly one
+current same-world NPC pose/registry entry, adding its config and instance IDs.
+Missing, ambiguous or other-world entries give ``target_not_observed``. A
+verified clear is ``{kind: "none"}``. Actor ``screen_point`` fields contain
+C-computed physical pixels. C callers resolve target runtime IDs against their
+owned NPC snapshot; a raw UID is not a persistent instance ID.
 
 Validation
 ----------
@@ -90,7 +101,7 @@ read-only live observations and controlled checks. On 2026-11-11 the user
 confirmed 22 projected ground points on a Training dummy through 22 distinct
 camera orientations using a click-through marker. The observer sent no game
 input. This validates the checked physical projections, not occlusion handling,
-body-click hitboxes or combat-target identities. Target fields remain unmapped.
+body-click hitboxes or all target identities. NPC attack targets remain unmapped.
 
 On 2026-11-13, all 1,911 research samples contained equal legacy/P1 position
 views across 73 distinct player tiles in one original-profile session. An
@@ -103,3 +114,13 @@ whose exact registry match was War (config 26773). The dummy receiving hitmarks
 had runtime ID 25127 (config 16027). The candidate fields are rejected as a
 direct combat-target mapping; no offset correction or interpretation of -1 as
 an explicitly cleared combat target is inferred from these observations.
+
+The subsequent 2026-11-14 actor-field check recorded 1,248 samples. The user
+selected two different training dummies: native UID/kind changed from
+``-1/127`` to ``25127/1``, cleared to ``-1/127``, then changed to ``25128/1``.
+The two selected IDs matched separate current Training dummy registry instances
+(config 16027). One clear transition was observed; a second clear was not
+captured. A fresh C/JSON check then resolved the second dummy with its current
+config and instance ID. These observations validate the checked actor-reference
+transitions; the twenty A2 selection trials, movement retention, NPC attack
+targets, player targets and other executable profiles remain separate checks.

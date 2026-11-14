@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "track": "P1",
-  "date": "2026-11-13",
-  "status": "projection_validated_targets_and_compatibility_pending",
+  "date": "2026-11-14",
+  "status": "original_player_npc_target_and_projection_validated_other_targets_pending",
   "runtime_profile_observed": "951-3",
   "sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
   "additional_signature_guards": {
@@ -38,10 +38,10 @@
     "manually_checked_projected_samples": 0
   },
   "unmapped": {
-    "player_target": "No verified combat-target identity field. facingTarget is a heading.",
-    "npc_target": "No verified combat-target identity field.",
+    "npc_target": "NPC incoming-attack target identity remains unmapped.",
     "terrain_height": "Tile projection requires an explicitly known caller-supplied height.",
-    "compatibility_mode_spatial": "The currently installed binary is the original profile; new Compatibility Mode pose/projection guards remain unverified."
+    "compatibility_mode_spatial": "The currently installed binary is the original profile; new Compatibility Mode pose/projection guards remain unverified.",
+    "player_vs_player_target": "Native resolver contains a player-kind branch, but it has not been manually calibrated and remains disabled."
   },
   "input_sent": false,
   "raw_capture_committed": false,
@@ -49,7 +49,7 @@
     "windows_x64_release_build": "passed",
     "ctest_suites_passed": 15,
     "python_tests_passed": 271,
-    "native_spatial_cases": 8,
+    "native_spatial_cases": 11,
     "existing_public_structures_changed": false,
     "python_tests_skipped": 0
   },
@@ -134,5 +134,98 @@
     "runtime_target_fields_enabled": false,
     "raw_capture_committed": false,
     "input_sent": false
+  },
+  "player_actor_target_2026_11_14": {
+    "capture_sha256": "83b9efb51abb1e6586d99b1018dca4e243ff62a4bb87518b146094febcfe6813",
+    "samples": 1248,
+    "user_label": "Two different training dummies selected; target check done.",
+    "source_lead": "https://github.com/goldgolem624/RuneTools/blob/c7d860eb2a9b783e680e2cd31583c7b49deceab5/src/reader/Reader.cpp",
+    "independent_static_verification": {
+      "resolver_rva": "0x3fff60",
+      "uid_offset": "0x1c4",
+      "kind_offset": "0x238",
+      "kind_guard": {
+        "rva": "0x3fff66",
+        "bytes": "80b9380200007f"
+      },
+      "uid_guard": {
+        "rva": "0x3fff90",
+        "bytes": "0fb68138020000486391c4010000"
+      },
+      "observed_npc_kind": 1,
+      "explicit_clear_kind": 127,
+      "player_kind_branch_enabled": false
+    },
+    "transitions": [
+      {
+        "sample": 1,
+        "uid": -1,
+        "kind": 127,
+        "npc_matches": []
+      },
+      {
+        "sample": 706,
+        "uid": 25127,
+        "kind": 1,
+        "npc_matches": [
+          {
+            "runtime_id": 25127,
+            "config_id": 16027,
+            "instance_id": 3,
+            "name": "Training dummy"
+          }
+        ]
+      },
+      {
+        "sample": 867,
+        "uid": -1,
+        "kind": 127,
+        "npc_matches": []
+      },
+      {
+        "sample": 897,
+        "uid": 25128,
+        "kind": 1,
+        "npc_matches": [
+          {
+            "runtime_id": 25128,
+            "config_id": 16027,
+            "instance_id": 4,
+            "name": "Training dummy"
+          }
+        ]
+      }
+    ],
+    "selected_dummy_instances": 2,
+    "explicit_clear_transitions_observed": 1,
+    "second_clear_recorded": false,
+    "publication": "C flags validate the observed local-player NPC/clear kind and runtime UID. Telemetry resolves config/instance IDs from exactly one current same-world NPC pose/registry entry; otherwise target_not_observed.",
+    "native_live_json_check": {
+      "samples": 20,
+      "resolved_runtime_id": 25128,
+      "resolved_config_id": 16027,
+      "strict_json_passed": true,
+      "game_tick_counter_available_after_warmup": true
+    },
+    "serializer_regressions": [
+      "Typed WorldState EntityRef",
+      "Wrong-world target unavailable",
+      "Ambiguous runtime ID unavailable",
+      "Explicit clear distinct from unknown",
+      "Unknown remains null"
+    ],
+    "new_native_cases": [
+      "NPC target change and explicit clear",
+      "Unsupported kinds and invalid runtime IDs",
+      "Torn target read/failed code guard preserve pose but invalidate target"
+    ],
+    "limits": [
+      "Actor entity-target transitions during the labelled dummy attacks only.",
+      "A2 twenty-selection acceptance and retention during movement remain pending.",
+      "NPC incoming-attack targets, player-versus-player targets and Compatibility Mode remain uncalibrated."
+    ],
+    "public_abi_sizes_unchanged": true,
+    "input_sent": false,
+    "raw_capture_committed": false
   }
 }

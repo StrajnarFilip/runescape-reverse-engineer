@@ -65,10 +65,11 @@ on the running original 951-3 executable. Before marking this track done:
 1. Completed: the two manual encounters recorded changing player/NPC poses.
    The user then confirmed 22 Training dummy projections through 22 distinct
    camera orientations using the read-only marker. No game inputs were sent.
-2. Combat-target identity is still unmapped. One selected-target label was
-   captured; the older context+0x98 candidate did not match its runtime ID.
-   A cleared-target label was not recorded. A fresh, explicitly labelled
-   select/clear sequence is needed after finding another static candidate.
+2. The original-profile local player's NPC/cleared target reference is now
+   mapped through actor+0x1c4/+0x238. Two manually selected dummies matched
+   distinct registry identities and one explicit clear was recorded. NPC attack
+   targets, player-versus-player targets and A2's twenty selection/retention
+   trials remain pending. The old context+0x98 candidate remains rejected.
 3. Repeat layout/signature verification on the Compatibility Mode executable
    before enabling P1 there. The running binary currently hashes to the original.
 
@@ -79,10 +80,14 @@ must agree with the actor/index already resolved by the hit channel when that
 channel is available. Eight native spatial tests and all 15 integrated CTest
 targets pass (271 Python tests, no skips).
 
-The user completed another training-dummy select/clear check. VARPs 623/7994
+The user completed a training-dummy select/clear check. VARPs 623/7994
 resolved to War rather than the dummy receiving hitmarks, so they were rejected
-as direct combat-target identities. Target decoding still needs static research;
-no additional selection session is requested before a better candidate is found.
+as direct combat-target identities. A later actor-field check on 2026-11-14
+recorded two correct dummy identities and one clear. Native resolver 0x3fff60
+and two loaded signatures establish the typed UID path. The C reader now emits
+the observed NPC/clear kinds; telemetry supplies config/lifetime from the same
+current NPC snapshot. Eleven native spatial cases and all 15 integrated CTest
+targets pass (271 Python tests, no skips). NPC target research remains open.
 
 Requests
 --------
@@ -92,8 +97,8 @@ The user authorized P1/P2 include and snapshot-storage registration in
 
 No changes to another track's module are requested. Static layouts, limits,
 the public ABI and pending validation are documented in ``docs/spatial.rst``
-and ``docs/validation/spatial-validation.json``. Combat targets remain unknown;
-``facingTarget`` is not a target-entity mapping.
+and ``docs/validation/spatial-validation.json``. NPC attack targets and player
+targets remain unknown; ``facingTarget`` is not a target-entity mapping.
 
 L/S0b: the original runtime now has equal legacy/P1 tile views and an available
 player-hit channel. Review the eventual runtime choice against the currently
