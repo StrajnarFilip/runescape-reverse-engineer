@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import math
+from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Optional, Tuple
@@ -138,17 +139,23 @@ class SurvivalManager:
     does not establish castability. D1's unresolved threats never time a cast.
     """
 
-    def __init__(self, profile=None):
+    def __init__(self, profile=None, *, encounter_provider=None):
+        if encounter_provider is not None and not callable(encounter_provider):
+            raise TypeError("encounter_provider must supply current immutable D1 state")
         self.profile = load_profile() if profile is None else validate_profile(profile)
+        self.encounter_provider = encounter_provider
         self._session, self._sample, self._time = None, None, None
         self._offers, self._pending, self._fault = {}, {}, None
-        self._world = None
+        self._offer_roles = {}
+        self._world, self._encounter = None, None
         self.last_report = SurvivalReport((), (), None)
 
     def reset(self):
         """Clear acknowledged-input state after the caller has re-observed safely."""
         self._offers, self._pending, self._fault = {}, {}, None
+        self._offer_roles = {}
         self._session, self._sample, self._time, self._world = None, None, None, None
+        self._encounter = None
 
     def _fresh(self, observation, *, collection=False):
         return (
@@ -205,6 +212,7 @@ class SurvivalManager:
                 item.get("empty") is not False
                 or not _integer(item.get("quantity"), 1)
                 or not _integer(item.get("item_id"))
+                or not _integer(item.get("tracking_token"), 1)
                 or not _integer(item.get("slot"))
                 or item["slot"] >= BACKPACK_SLOT_COUNT
             ):
@@ -274,7 +282,72 @@ class SurvivalManager:
             world.observed_ns,
         )
         self._offers[intent.intent_id] = intent
+        self._offer_roles[intent.intent_id] = trigger
         return intent
+
+    def can_send(self, intent, world):
+        """Recheck current purpose on isolated decision state, without acknowledging input.
+
+        Reuse the proposal rules rather than maintain a second eligibility
+        implementation. The preview owns its offer/pending dictionaries; its
+        reconciliation cannot alter the live producer's pending inputs, report
+        or fault. Observed worlds and policy are immutable. A current encounter
+        provider is preferred; otherwise use the state supplied to step().
+        """
+        offered = self._offers.get(intent.intent_id)
+        if (
+            offered is None
+            or offered != intent
+            or self._fault
+            or intent.lane in self._pending
+            or not isinstance(world, WorldState)
+            or world.session != intent.session
+            or self._world is None
+            or world.raw.get("executable_sha256") != self._world.raw.get("executable_sha256")
+            or not _integer(world.now_ns)
+            or not _integer(world.sample_sequence, 1)
+            or world.sample_sequence < intent.sample_sequence
+            or not intent.issued_ns <= world.now_ns <= intent.deadline_ns
+        ):
+            return False
+        if isinstance(intent.action, ConsumeSlot):
+            # Preserve the pre-send quantity as well as ID/token. Otherwise a
+            # manual stack change before dispatch could later look like input
+            # acknowledgement against the older proposal frame.
+            slots = []
+            for inventory in (self._world.inventory, world.inventory):
+                if not self._fresh(inventory):
+                    return False
+                matches = [
+                    entry for entry in inventory.value if entry.get("slot") == intent.action.slot
+                ]
+                if len(matches) != 1:
+                    return False
+                slots.append(
+                    tuple(matches[0].get(key) for key in ("item_id", "quantity", "tracking_token"))
+                )
+            if slots[0] != slots[1]:
+                return False
+        incoming = self.encounter_provider() if self.encounter_provider else self._encounter
+        preview = copy(self)
+        preview._offers, preview._offer_roles = {}, {}
+        preview._pending = dict(self._pending)
+        candidates = preview.step(world, incoming)
+
+        def threat_evidence(proposal):
+            return tuple(
+                evidence.observation.value
+                for evidence in proposal.evidence
+                if evidence.field == "incoming_threat"
+            )
+
+        return any(
+            candidate.action == intent.action
+            and candidate.lane == intent.lane
+            and preview._offer_roles[candidate.intent_id] == self._offer_roles[intent.intent_id]
+            and threat_evidence(candidate) == threat_evidence(intent)
+            for candidate in candidates
+        )
 
     def note_sent(self, intent_id, sent_ns):
         """D6 calls this ONLY after accepted input; it is not acknowledgement."""
@@ -336,6 +409,8 @@ class SurvivalManager:
 
     def _defensive(self, world, encounter, reasons):
         stun, bind = self._effect(world, "stun"), self._effect(world, "bind")
+        threats = _field(encounter, "pending_threats", ())
+        threats = threats if isinstance(threats, (tuple, list)) else ()
         for rule in self.profile["defensives"]:
             lane = ActionLane(rule["lane"])
             if lane in self._pending or self._ability(world, rule["ability_id"]) is None:
@@ -365,16 +440,19 @@ class SurvivalManager:
                 ):
                     continue
                 candidates = []
-                for threat in _field(encounter, "pending_threats", ()):
+                for threat in threats:
                     earliest, latest = _field(threat, "check_earliest_ns"), _field(
                         threat, "check_latest_ns"
                     )
                     damage = _field(threat, "damage_upper_bound")
+                    options = _field(threat, "defensive_options")
                     if (
-                        type(_field(threat, "flags")) is not int
+                        not _integer(_field(threat, "event_id"), 1)
+                        or type(_field(threat, "flags")) is not int
                         or _field(threat, "flags") != 1
                         or _field(threat, "classification_validated") is not True
-                        or rule["role"] not in _field(threat, "defensive_options", ())
+                        or not isinstance(options, (tuple, list))
+                        or rule["role"] not in options
                     ):
                         continue
                     if (
@@ -414,8 +492,10 @@ class SurvivalManager:
                         Observation(
                             {
                                 "event_id": _field(threat, "event_id"),
+                                "prayer": _field(threat, "prayer"),
                                 "damage_upper_bound": _field(threat, "damage_upper_bound"),
                                 "check_earliest_ns": deadline + 1,
+                                "check_latest_ns": _field(threat, "check_latest_ns"),
                             },
                             0,
                             "validated_encounter_threat",
@@ -432,7 +512,7 @@ class SurvivalManager:
             )
         if stun.value is True or bind.value is True:
             reasons.append("stun_response_unavailable_or_unmapped")
-        if any(_field(threat, "flags") != 1 for threat in _field(encounter, "pending_threats", ())):
+        if any(_field(threat, "flags") != 1 for threat in threats):
             reasons.append("defensive_timing_unvalidated")
         return None
 
@@ -442,9 +522,11 @@ class SurvivalManager:
             raise TypeError("SurvivalManager requires WorldState")
         reasons, intents = [], []
         self._offers = {}
+        self._offer_roles = {}
         if world.session != self._session:
             self.reset()
             self._session = world.session
+        self._encounter = encounter
         if (
             not world.session.complete
             or world.status not in ("available", "partial")

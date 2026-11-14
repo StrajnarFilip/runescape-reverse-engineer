@@ -134,3 +134,24 @@ Requests
   dependencies. No live input is enabled by this track.
 * Later controlled session: calibrate an emergency teleport/exit and renewal
   effect/shared timers. Default exit and Disruption Shield ability IDs stay null.
+
+* Current-purpose follow-up, 2026-11-14: can_send re-evaluates the offered
+  action against current resource thresholds, potion priority, effect blockers,
+  protection, exact threatened component and cleanse/exit need. The current
+  encounter_provider callback is optional; otherwise the last step's D1 state
+  is used with its original freshness checks. L should supply the provider
+  when dispatch may refresh observations independently of step.
+* Revalidation uses an isolated shallow copy with separately owned pending and
+  offer dictionaries; policy and WorldState are immutable. Preview reconciliation
+  cannot acknowledge real input, latch its fault, advance the live producer or
+  change its report. The original offered action and purpose must still match.
+  Slot ID, token and quantity must remain identical before dispatch, preventing
+  a pre-send manual stack change from later looking like acknowledgement.
+  Missing/zero tokens no longer produce consumable intents.
+* Thirty-six D3 scenarios include real D6 rejection before fake-device dispatch,
+  changed health/prayer/potion policy, Devotion protection, stun/blockers,
+  threat changes, virus/exit revalidation, exact items and isolated-state checks.
+  Food and potion remain independent lanes after one is accepted. No native
+  input code is loaded; effect/castability/timing gaps still block real actions.
+  Predicted defenses additionally reject missing component IDs and unknown or
+  malformed option lists. The original real-capture golden replay is unchanged.
