@@ -90,6 +90,223 @@ def encounter(value, **kwargs):
 
 
 class SurvivalTests(unittest.TestCase):
+    def test_can_send_rechecks_health_prayer_and_current_potion_priority(self):
+        food, brew = item(), item(1, family=19, doses=4)
+        restore = item(2, family=23, doses=4, heal=False, restore=True)
+        manager = self.manager()
+        initial = world(health=2000, prayer=100, items=[food, brew, restore])
+        offered = manager.step(initial)
+        self.assertTrue(all(manager.can_send(intent, initial) for intent in offered))
+        healed = world(
+            health=9000, prayer=990, items=[food, brew, restore], sequence=2, time_ms=10010
+        )
+        self.assertFalse(any(manager.can_send(intent, healed) for intent in offered))
+        changed_priority = world(
+            health=3500, prayer=100, items=[food, brew, restore], sequence=2, time_ms=10010
+        )
+        potion = next(intent for intent in offered if intent.lane == ActionLane.POTION)
+        self.assertFalse(manager.can_send(potion, changed_priority))
+        manager = self.manager()
+        initial = world(prayer=100, items=[restore])
+        intent = manager.step(initial)[0]
+        restored = world(prayer=990, items=[restore], sequence=2, time_ms=10010)
+        self.assertFalse(manager.can_send(intent, restored))
+
+    def test_can_send_rechecks_devotion_protection_and_defensive_blockers(self):
+        initial = world(abilities=[ability(25028)], effects=[effect("devotion", False)])
+        manager = self.manager()
+        intent = manager.step(initial, encounter(initial))[0]
+        self.assertTrue(manager.can_send(intent, initial))
+        changed = replace(
+            initial,
+            player=replace(initial.player, active_prayer=Observation("soul_split", 0, "fixture")),
+        )
+        self.assertFalse(manager.can_send(intent, changed))
+        active = world(abilities=[ability(25028)], effects=[effect("devotion", True)])
+        self.assertFalse(manager.can_send(intent, active))
+        manager = self.manager()
+        initial = world(abilities=[ability(14711)], effects=[effect("stun", True)])
+        intent = manager.step(initial)[0]
+        clear = world(abilities=[ability(14711)], effects=[effect("stun", False)])
+        self.assertFalse(manager.can_send(intent, clear))
+
+    def test_can_send_uses_current_threat_provider_and_preserves_exact_component(self):
+        value = world(
+            abilities=[ability(14713)],
+            effects=[effect("resonance", False), effect("disruption_shield", False)],
+        )
+        current = [encounter(value)]
+        manager = SurvivalManager(policy(), encounter_provider=lambda: current[0])
+        intent = manager.step(value, current[0])[0]
+        self.assertTrue(manager.can_send(intent, value))
+        for changes in (
+            {"event_id": 2},
+            {"defensive_options": []},
+            {"damage_upper_bound": 1000},
+            {"flags": 0},
+            {"check_earliest_ns": value.now_ns - 1},
+            {"check_latest_ns": value.now_ns + 600 * MS},
+            {"prayer": 3},
+        ):
+            current[0] = encounter(value, **changes)
+            self.assertFalse(manager.can_send(intent, value))
+        current[0] = None
+        self.assertFalse(manager.can_send(intent, value))
+
+    def test_unknown_threat_collections_options_or_identity_cannot_authorize_defensives(self):
+        value = world(
+            abilities=[ability(14713)],
+            effects=[effect("resonance", False), effect("disruption_shield", False)],
+        )
+        for changes in (
+            {"defensive_options": None},
+            {"defensive_options": "resonance"},
+            {"event_id": None},
+            {"event_id": 0},
+        ):
+            self.assertEqual(self.manager().step(value, encounter(value, **changes)), ())
+        incoming = encounter(value)
+        incoming.pending_threats = None
+        self.assertEqual(self.manager().step(value, incoming), ())
+
+    def test_can_send_rejects_item_moves_dose_token_quantity_and_metadata_changes(self):
+        original = item(family=19, doses=4, quantity=2)
+        value = world(health=2000, items=[original])
+        manager = self.manager()
+        intent = manager.step(value)[0]
+        for changes in (
+            {"slot": 1},
+            {"item_id": 101, "doses": 3},
+            {"tracking_token": 999},
+            {"quantity": 1},
+            {"metadata_reason": "unmapped"},
+            {"family_id": 999},
+        ):
+            changed = dict(original, **changes)
+            self.assertFalse(
+                manager.can_send(
+                    intent, world(health=2000, items=[changed], sequence=2, time_ms=10010)
+                )
+            )
+
+    def test_can_send_preserves_independent_food_and_potion_lanes_after_acceptance(self):
+        value = world(health=2000, items=[item(), item(1, family=19, doses=4)])
+        manager = self.manager()
+        food, potion = manager.step(value)
+        manager.note_sent(food.intent_id, value.now_ns)
+        original_pending = dict(manager._pending)
+        original_offers = dict(manager._offers)
+        report = manager.last_report
+        self.assertFalse(manager.can_send(food, value))
+        self.assertTrue(manager.can_send(potion, value))
+        self.assertTrue(manager.can_send(potion, value))
+        self.assertEqual(manager._pending, original_pending)
+        self.assertEqual(manager._offers, original_offers)
+        self.assertIs(manager.last_report, report)
+        manager.note_sent(potion.intent_id, value.now_ns)
+        self.assertEqual(set(manager._pending), {ActionLane.FOOD, ActionLane.POTION})
+
+    def test_can_send_preview_cannot_clear_pending_or_latch_a_fault_on_the_real_producer(self):
+        configuration = policy()
+        configuration["intent_lifetime_ms"] = 3000
+        manager = SurvivalManager(configuration)
+        value = world(
+            health=5000, items=[item()], abilities=[ability(14711)], effects=[effect("stun", True)]
+        )
+        food, freedom = manager.step(value)
+        manager.note_sent(food.intent_id, value.now_ns)
+        pending, report, observed = dict(manager._pending), manager.last_report, manager._world
+        later = world(
+            health=5000,
+            items=[item()],
+            abilities=[ability(14711)],
+            effects=[effect("stun", True)],
+            sequence=2,
+            time_ms=11900,
+        )
+        self.assertFalse(manager.can_send(freedom, later))
+        self.assertEqual(manager._pending, pending)
+        self.assertIsNone(manager._fault)
+        self.assertIs(manager.last_report, report)
+        self.assertIs(manager._world, observed)
+
+    def test_can_send_rejects_expired_foreign_changed_build_and_replaced_offers(self):
+        value = world(health=5000, items=[item()])
+        manager = self.manager()
+        intent = manager.step(value)[0]
+        self.assertFalse(
+            manager.can_send(replace(intent, action=ConsumeSlot(0, 999, "eat", 10)), value)
+        )
+        self.assertFalse(manager.can_send(replace(intent, intent_id="unknown"), value))
+        for changes in (
+            {"monotonic_ms": 10101, "native": {"sample_sequence": 2, "snapshot_age_ms": 0}},
+            {"combat": {"scene_epoch": 4}},
+            {"executable_sha256": "a" * 64},
+            {"status": "unavailable"},
+        ):
+            record = row(health=5000, items=[item()])
+            record.update(changes)
+            self.assertFalse(manager.can_send(intent, WorldState.from_telemetry(record)))
+
+    def test_d6_rejects_healed_survival_offer_before_calling_the_recording_actuator(self):
+        from rs3_reader.bot.actuator import RecordingActuator
+        from rs3_reader.bot.arbiter import Arbiter
+
+        def runtime_value(health, sequence=1, time_ms=10000):
+            record = row(health=health, items=[item()], sequence=sequence, time_ms=time_ms)
+            record["executable_sha256"] = "a" * 64
+            record["game_tick"] = {"value": {"index": 20}, "age_ms": 0, "source": "fixture"}
+            return WorldState.from_telemetry(record)
+
+        before, current = runtime_value(5000), runtime_value(9000, 2, 10010)
+        manager = self.manager()
+        intent = manager.step(before)[0]
+        actuator = RecordingActuator(clock=lambda: current.now_ns)
+        arbiter = Arbiter(
+            actuator,
+            clock=lambda: current.now_ns,
+            producers={"survival": manager},
+            enabled=True,
+            world_provider=lambda: current,
+        )
+        self.addCleanup(arbiter.close)
+        log = arbiter.step(before, [intent])
+        self.assertEqual(log.decisions[0].reason, "producer_precondition_changed")
+        self.assertFalse(actuator.attempts)
+
+    def test_can_send_rechecks_virus_route_and_emergency_exit_need(self):
+        value = world(effects=[effect("anima_virus", True)])
+        route = {
+            "kind": "virus_cleanse",
+            "validated": True,
+            "source": "fixture",
+            "target": {"kind": "npc", "instance_id": 500, "runtime_id": 2, "config_id": 42},
+            "option": "Cleanse",
+        }
+        value = replace(value, hazards=Observation((route,), 0, "fixture"))
+        manager = self.manager()
+        intent = manager.step(value)[0]
+        self.assertTrue(manager.can_send(intent, value))
+        cleared = world(effects=[effect("anima_virus", False)])
+        cleared = replace(cleared, hazards=value.hazards)
+        self.assertFalse(manager.can_send(intent, cleared))
+        changed = dict(route, target=dict(route["target"], instance_id=501))
+        self.assertFalse(
+            manager.can_send(intent, replace(value, hazards=Observation((changed,), 0, "fixture")))
+        )
+        configuration = policy()
+        configuration["exit"] = {"ability_id": 777, "validated": True, "source": "fixture"}
+        manager = SurvivalManager(configuration)
+        critical = world(health=1000, abilities=[ability(777)])
+        intent = manager.step(critical)[0]
+        self.assertTrue(manager.can_send(intent, critical))
+        self.assertFalse(manager.can_send(intent, world(health=9000, abilities=[ability(777)])))
+
+    def test_consumable_roles_require_a_nonzero_exact_tracking_token(self):
+        for token in (None, 0, True, -1):
+            candidate = dict(item(), tracking_token=token)
+            self.assertEqual(self.manager().step(world(health=5000, items=[candidate])), ())
+
     def test_local_low_health_capture_has_a_repeatable_golden_intent_log(self):
         root = Path(
             os.environ.get(
