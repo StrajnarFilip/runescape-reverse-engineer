@@ -20,6 +20,15 @@ instruction at ``0x38523``). Actor poses require the matching vtable, runtime
 ID and two consistent reads. Compatibility Mode camera, facing and combat
 target remain unmapped.
 
+The 2026-11-13 P1 update also publishes the original profile's guarded player
+tile through ``rs3_snapshot_position``. It copies the committed P1 pose after
+the final frame-context check, without a second actor lookup. The position
+clears when the pose, its world or its instruction guards are unavailable.
+When the player-hit channel has already resolved an actor, P1 requires the same
+actor address and runtime index before decoding the player pose. A missing
+pose no longer receives a player-hit instance ID. Compatibility Mode keeps its
+existing independent position decoder.
+
 Actor fields on the original profile:
 
 * The vtable and 16-bit runtime ID at ``+0x88`` are checked twice.
@@ -85,3 +94,15 @@ confirmed 22 projected ground points on a Training dummy through 22 distinct
 camera orientations using a click-through marker. The observer sent no game
 input. This validates the checked physical projections, not occlusion handling,
 body-click hitboxes or combat-target identities. Target fields remain unmapped.
+
+On 2026-11-13, all 1,911 research samples contained equal legacy/P1 position
+views across 73 distinct player tiles in one original-profile session. An
+additional 80-sample check observed an available player-hit channel throughout.
+These checks sent no input and did not test movement dispatch.
+
+The same session tested metadata candidates VARPs 616, 623 and 7994 during a
+user-labelled training-dummy select/clear check. VARPs 623/7994 contained 25126,
+whose exact registry match was War (config 26773). The dummy receiving hitmarks
+had runtime ID 25127 (config 16027). The candidate fields are rejected as a
+direct combat-target mapping; no offset correction or interpretation of -1 as
+an explicitly cleared combat target is inferred from these observations.

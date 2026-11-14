@@ -11,6 +11,7 @@
 #include <stdlib.h>
 
 #include "clock.h"
+#include "encounter.h"
 #include "frame.h"
 #include "interface.h"
 #include "hazards.h"
@@ -92,6 +93,11 @@ static void copy_frame(rs3_snapshot *destination, const rs3_snapshot *source)
     memcpy(destination->npc_spatial, source->npc_spatial,
            source->spatial.npc_count * sizeof(rs3_actor_spatial));
     destination->encounter = source->encounter;
+    destination->encounter_tick_owner = source->encounter_tick_owner;
+    destination->encounter_tick_world_state = source->encounter_tick_world_state;
+    destination->encounter_tick_last_change_ns = source->encounter_tick_last_change_ns;
+    destination->encounter_tick_counter = source->encounter_tick_counter;
+    destination->encounter_tick_primed = source->encounter_tick_primed;
     destination->player_hit_info = source->player_hit_info;
     destination->player_actor_address = source->player_actor_address;
     memcpy(destination->player_hits, source->player_hits,
@@ -134,7 +140,7 @@ static void clear_unavailable_frame(rs3_context *context, rs3_snapshot *snapshot
     memset(&snapshot->spatial, 0, sizeof snapshot->spatial);
     snapshot->spatial.status = RS3_UNAVAILABLE;
     snapshot->spatial.reason = context->failure_reason;
-    memset(&snapshot->encounter, 0, sizeof snapshot->encounter);
+    encounter_clear(snapshot);
     snapshot->encounter.status = RS3_UNAVAILABLE;
     snapshot->encounter.reason = context->failure_reason;
 
@@ -191,7 +197,7 @@ static void sample_and_publish(rs3_context *context, rs3_snapshot *snapshot)
     snapshot->position = (rs3_position){0};
     memset(&snapshot->combat, 0, sizeof snapshot->combat);
     memset(&snapshot->spatial, 0, sizeof snapshot->spatial);
-    memset(&snapshot->encounter, 0, sizeof snapshot->encounter);
+    encounter_clear(snapshot);
     memset(&snapshot->player_hit_info, 0, sizeof snapshot->player_hit_info);
     snapshot->player_actor_address = 0;
     memset(&snapshot->inventory_info, 0, sizeof snapshot->inventory_info);

@@ -73,6 +73,12 @@ struct rs3_snapshot
     rs3_spatial_info spatial;
     rs3_actor_spatial npc_spatial[RS3_MAX_NPCS];
     rs3_encounter_state encounter;
+    /* P2 adjacency baseline; never part of the public snapshot ABI. */
+    uint64_t encounter_tick_owner;
+    uint64_t encounter_tick_world_state;
+    uint64_t encounter_tick_last_change_ns;
+    uint64_t encounter_tick_counter;
+    uint32_t encounter_tick_primed;
     rs3_player_hit_info player_hit_info;
     rs3_hit player_hits[MAX_HITS_PER_RING];         /**< Prefix of player_hit_info.hit_count. */
     uint64_t player_actor_address;                  /**< Verified local actor, or 0. */

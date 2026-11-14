@@ -119,7 +119,7 @@ int frame_decode(rs3_context *context, rs3_snapshot *snapshot)
     player_hits_stage(context, snapshot, contexts.world_state);
     interface_stage(context, snapshot, contexts.player_address, contexts.client_address);
     spatial_stage(context, snapshot, contexts.world_state);
-    encounter_stage(context, snapshot, contexts.player_address);
+    encounter_stage(context, snapshot, contexts.player_address, contexts.world_state);
     effects_stage(context, snapshot, contexts.player_address, contexts.client_address);
 
     if (!contexts_unchanged(context, &contexts))

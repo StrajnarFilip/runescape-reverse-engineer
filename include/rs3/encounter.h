@@ -14,7 +14,10 @@ extern "C"
 enum rs3_encounter_reason
 {
     RS3_ENCOUNTER_UNMAPPED = 100,
-    RS3_ENCOUNTER_NOT_ACTIVE
+    RS3_ENCOUNTER_NOT_ACTIVE,
+    RS3_ENCOUNTER_TICK_BASELINE,
+    RS3_ENCOUNTER_TICK_STALLED,
+    RS3_ENCOUNTER_TICK_RESET
 };
 
 /** A mapped field. value is meaningful only when valid is nonzero. */
@@ -39,7 +42,11 @@ typedef struct rs3_encounter_raw
     uint64_t observed_ns;
 } rs3_encounter_raw;
 
-/** Counter/phase estimate only when measured independently from the 20 ms client clock. */
+/**
+ * Received server-tick counter, independent of the 20 ms client clock.
+ * valid validates counter only. Non-finite phase_ms/uncertainty_ms mean that
+ * server phase and its uncertainty are unknown; they must not drive deadlines.
+ */
 typedef struct rs3_game_tick
 {
     uint64_t counter;
@@ -85,7 +92,8 @@ RS3_API uint32_t rs3_encounter_sizeof(uint32_t structure);
  * Copy an owned snapshot's encounter state. Check validity, age and identity per field.
  * Current calibration covers the original profile, active Telos phases 1..4 and
  * the instance-enrage source observed at 300/500, plus phases 1..3 at 0% on Compatibility
- * Mode when the transmitted HP corroborates the phase. Other fields/phases remain unknown.
+ * Mode when transmitted HP corroborates the phase. The received tick counter is
+ * independent of Telos presence. Server phase remains unknown.
  */
 RS3_API int32_t rs3_snapshot_encounter(const rs3_snapshot *snapshot, rs3_encounter_state *out,
                                        uint32_t out_size);
