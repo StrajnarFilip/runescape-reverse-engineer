@@ -61,8 +61,10 @@ REACQUIRE_TIMEOUT_NS = 3_600_000_000
 REACQUIRE_CUE_TIMEOUT_NS = 10_000_000_000
 # Fallback when the received server tick counter is invalid. One game tick is 0.6 seconds.
 TICK_FALLBACK_NS = 600_000_000
-# Curse bindings preserved in profiles/prayer_flick.json.
-PRAYER_CHORDS = {Prayer.MELEE: "Ctrl+F4", Prayer.SOUL_SPLIT: "Ctrl+F3"}
+# Action bar 9 keys observed on 2026-11-14: F3 Deflect Melee, F4 Soul Split. Ctrl+F3 did not
+# change the overhead in that session.
+DEFAULT_FLICK_MELEE_KEY = "F3"
+DEFAULT_FLICK_SOUL_SPLIT_KEY = "F4"
 FLICK_EXCLUDED_ANIMATIONS = frozenset({UPPERCUT})
 MOVEMENT_WINDOWS = {
     UPPERCUT: (3_600_000_000, 4_000_000_000, "Uppercut movement trial"),
@@ -597,7 +599,18 @@ def run(reader, args, board, attempt=None):
     ):
         raise ValueError("Combat bindings must exclude prayer chords and F12")
     flicker = MeleeFlicker() if getattr(args, "flick_melee", False) else None
-    prayer_chords = {target: parse_chord(chord) for target, chord in PRAYER_CHORDS.items()}
+    prayer_chords = {
+        Prayer.MELEE: parse_chord(getattr(args, "flick_melee_key", DEFAULT_FLICK_MELEE_KEY)),
+        Prayer.SOUL_SPLIT: parse_chord(
+            getattr(args, "flick_soul_split_key", DEFAULT_FLICK_SOUL_SPLIT_KEY)
+        ),
+    }
+    if flicker is not None and (
+        len(set(prayer_chords.values())) != len(prayer_chords)
+        or set(prayer_chords.values()) & set(bindings.values())
+        or any(chord[-1].virtual_key == F12 for chord in prayer_chords.values())
+    ):
+        raise ValueError("Flick prayer keys must be distinct from each other, abilities and F12")
 
     def received_tick_counter():
         tick = reader.encounter.game_tick
@@ -978,9 +991,11 @@ def main():
     parser.add_argument(
         "--flick-melee",
         action="store_true",
-        help="Unvalidated trial: Ctrl+F4 Deflect Melee on every Telos animation except Uppercut, "
-        "then Ctrl+F3 Soul Split on the next received tick (phases 1-2)",
+        help="Unvalidated trial: Deflect Melee on every Telos animation except Uppercut, "
+        "then Soul Split on the next received tick (phases 1-2)",
     )
+    parser.add_argument("--flick-melee-key", default=DEFAULT_FLICK_MELEE_KEY)
+    parser.add_argument("--flick-soul-split-key", default=DEFAULT_FLICK_SOUL_SPLIT_KEY)
     parser.add_argument("--freedom", help="Current Freedom binding")
     parser.add_argument("--anticipation", help="Current Anticipation binding")
     parser.add_argument(

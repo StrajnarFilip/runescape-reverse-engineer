@@ -17,7 +17,7 @@ The practice controller relies on Revolution for normal damage. It uses client s
 
 Confirm the actual ability tooltips before using the example keys. `--displayed-keys` resolves the client window's keyboard layout to physical Arduino keys. `configured_abilities` records the displayed labels and resolved keys.
 
-`--flick-melee` is an unvalidated user-requested trial for phases 1-2. Each new Telos animation except Uppercut (`28938`) sends Ctrl+F4 Deflect Melee, then Ctrl+F3 Soul Split on the next received tick (0.6 s when the counter is invalid). Soul Split is the overhead between cues. A toggle is only resent after the overhead matches or 1.2 s passes. `prayer_flick_cue` and `prayer_flick_sent` rows record each decision. Server protection deadlines remain unmeasured, so a hit can still land during a flick.
+`--flick-melee` is an unvalidated user-requested trial for phases 1-2. Each new Telos animation except Uppercut (`28938`) sends Deflect Melee (`--flick-melee-key`, default F3), then Soul Split (`--flick-soul-split-key`, default F4) on the next received tick (0.6 s when the counter is invalid). Soul Split is the overhead between cues. A toggle is only resent after the overhead matches or 1.2 s passes. `prayer_flick_cue` and `prayer_flick_sent` rows record each decision. Server protection deadlines remain unmeasured, so a hit can still land during a flick.
 
 `--practice-enrage N` runs above 0%. It locks the first observed Telos maximum HP and assumes the 0% quarter phase split. Special timings remain calibrated at 0% only.
 

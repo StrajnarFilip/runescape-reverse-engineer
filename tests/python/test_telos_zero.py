@@ -349,7 +349,7 @@ class PracticeRunTests(unittest.TestCase):
                 self.assertEqual(run(reader, args, board), 2)
         self.assertEqual(
             [[key.name for key in call.args[0]] for call in board.tap.call_args_list],
-            [["CTRL", "F4"]],
+            [["F3"]],
         )
         flick_events = [
             call.args[0]
