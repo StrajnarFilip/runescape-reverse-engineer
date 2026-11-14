@@ -351,6 +351,17 @@ class PrayerFlickerTests(unittest.TestCase):
 
 
 class PracticeRunTests(unittest.TestCase):
+    def test_confirmed_phase_survives_tendrils_healing_above_previous_threshold(self):
+        check = controller["check_active_phase"]
+        health = {"current": 450_309, "max": 600_000}
+        check(2, 2, health, 600_000)
+        check(1, 2, {**health, "current": 460_764}, 600_000, saw_p2_transition=True)
+        with self.assertRaisesRegex(RuntimeError, "Phase 2 entry"):
+            check(1, 2, health, 600_000)
+        with self.assertRaisesRegex(RuntimeError, "Unexpected Telos stage change"):
+            check(2, 1, health, 600_000, saw_p2_transition=True)
+        check(2, 3, {**health, "current": 300_000}, 600_000)
+
     def test_phase_and_font_candidates_require_matching_health(self):
         checkpoint = controller["encounter_checkpoint"]
         health = {"current": 300_000, "max": 400_000}

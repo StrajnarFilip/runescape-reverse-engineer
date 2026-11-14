@@ -35,8 +35,8 @@
 #define NPC_ACTION_EVENT_CAPACITY 4096u
 /** Capacity of the local-player hit event queue. */
 #define PLAYER_HIT_EVENT_CAPACITY 4096u
-/** Exclusive upper bound of valid tile coordinates. */
-#define MAX_TILE_COORDINATE 12800
+/** Exclusive upper bound of tile coordinates, including instances above the main map. */
+#define MAX_TILE_COORDINATE 16384
 /** Capacity of one actor's hit mark ring. */
 #define MAX_HITS_PER_RING 64u
 /** Number of distinct NPC runtime IDs (16-bit). */

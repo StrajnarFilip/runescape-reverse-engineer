@@ -16,7 +16,7 @@ from .intents import ActionLane, ActivateAbility, Evidence, Intent, Interact, Mo
 from .world_state import EntityRef, Observation, SessionIdentity, Tile, WorldState
 
 NS_PER_MS = 1_000_000
-MAX_TILE = 12800
+MAX_TILE = 16384
 MAX_CALIBRATION_SAMPLES = 256
 MIN_CALIBRATION_SAMPLES = 6
 MIN_RELATIVE_AREA = 1e-6

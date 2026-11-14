@@ -1,5 +1,7 @@
 # Telos mechanic coverage
 
+See [beam acquisition](beam-acquisition.md) for the 2026-11-14 P1/P2 captures, the Compatibility Mode camera, and the location and positional-effect probe.
+
 The practice controller has 0% evidence through the phase 3 handoff on Compatibility Mode. The original 951-3 client has observations through the second phase 4 font at 300%. Use the profile and enrage for each observation. Each row describes the signals and result needed to validate a response. Published behavior provides leads for capture. [PVME Telos mechanics](https://pvme.io/pvme-guides/basic-guides/telos-basic/#mechanics-summary) · [P5 movement](https://pvme.io/pvme-guides/rs3-full-boss-guides/telos/p5-movement-and-timing/)
 
 | Mechanic | Detection and expected response | Timing and verification |

@@ -31,6 +31,9 @@
 #define ACTOR_POSITION_VTABLE_SLOT 0xb0u
 #define FACING_GETTER_RVA          0x44b690u
 #define PROJECTION_INSTRUCTION_RVA 0x5a34eu
+#define COMPAT_PROJECTION_RVA      0x5a31eu
+#define COMPAT_VIEWPORT_RVA        0x5a371u
+#define COMPAT_SCENE_MANAGER_RVA   0x4042e0u
 #define PLAYER_TARGET_UID_OFFSET   0x1c4u
 #define PLAYER_TARGET_KIND_OFFSET  0x238u
 #define PLAYER_TARGET_NONE_VALUE   127u
@@ -92,6 +95,26 @@ static int compatibility_tiles_verified(rs3_context *context)
                                base + profile->npc_entity_vtable_rva + ACTOR_POSITION_VTABLE_SLOT,
                                &npc_getter) &&
            player_getter == base + COMPAT_POSITION_GETTER_RVA && npc_getter == player_getter;
+}
+
+/** Check the matrix and viewport field accesses independently of the actor facing layout. */
+static int compatibility_camera_verified(rs3_context *context)
+{
+    static const unsigned char matrix[] = {0x0f, 0x59, 0x81, 0x00, 0x39, 0x01, 0x00};
+    static const unsigned char manager[] = {0x48, 0x8b, 0x90, 0xe8, 0x99, 0x01, 0x00};
+    static const unsigned char viewport[] = {
+        0xf3, 0x41, 0x0f, 0x2a, 0x80, 0x8c, 0,    0,    0, /* width */
+        0xf3, 0x0f, 0x59, 0x15, 0x6e, 0x92, 0x58, 0x01, 0xf3,
+        0x41, 0x0f, 0x2a, 0x88, 0x84, 0,    0,    0, /* x */
+    };
+    unsigned char bytes[sizeof viewport];
+    uint64_t base = context->target.module_base;
+    return memory_read(context, base + COMPAT_PROJECTION_RVA, bytes, sizeof matrix) &&
+           memcmp(bytes, matrix, sizeof matrix) == 0 &&
+           memory_read(context, base + COMPAT_SCENE_MANAGER_RVA, bytes, sizeof manager) &&
+           memcmp(bytes, manager, sizeof manager) == 0 &&
+           memory_read(context, base + COMPAT_VIEWPORT_RVA, bytes, sizeof viewport) &&
+           memcmp(bytes, viewport, sizeof viewport) == 0;
 }
 
 /** Verify the typed entity-target resolver, independently of the pose guards. */
@@ -376,7 +399,7 @@ void spatial_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_
             {
                 info->player.valid_mask |= RS3_SPATIAL_SAME_WORLD;
             }
-            if (full_layout)
+            if (full_layout || compatibility_camera_verified(context))
             {
                 read_camera(context, world_state, actor, &info->camera);
                 info->camera.plane = info->player.tile.plane;

@@ -99,6 +99,7 @@ PHASE_THREE_AUTOS = frozenset({MAGIC_ATTACK, 28930})
 # had only one animated melee auto between it and Hold Still.
 P2_CARRY_OVER = {UPPERCUT: ONSLAUGHT}
 P2_OPENING_ATTACK = 28930
+P1_TO_P2_TRANSITION = 28963
 FLICK_EXCLUDED_ANIMATIONS = frozenset({UPPERCUT})
 DEFAULT_FLICK_HOLD_TICKS = 1
 # After the Tendrils release an unanimated melee auto followed at +2 received ticks in both
@@ -443,7 +444,7 @@ class PrayerFlicker:
         return not due
 
     def next_prayer(self, prayer, tick, now):
-        """Return the prayer to request now, or None while it is active or awaiting acknowledgement."""
+        """Return the next prayer if a switch is needed and no acknowledgement is pending."""
         target = self.hold_prayer if self.holding(tick, now) else Prayer.SOUL_SPLIT
         if self.requested is not None:
             requested, deadline = self.requested
@@ -517,6 +518,17 @@ def encounter_checkpoint(phase, health, expected_max_hp=ZERO_ENRAGE_HP):
     font_thresholds = [maximum * part // SIXTEENTHS for part in FONT_SIXTEENTHS]
     fonts_reached = sum(current <= threshold for threshold in font_thresholds) if phase == 4 else 0
     return {"phase": phase, "font_thresholds_reached": fonts_reached, "zero_hp": current == 0}
+
+
+def check_active_phase(confirmed_phase, phase, health, expected_max_hp, *, saw_p2_transition=False):
+    """Corroborate a forward stage with HP or the same actor's P1 handoff animation."""
+    if phase not in (confirmed_phase, confirmed_phase + 1):
+        raise RuntimeError(f"Unexpected Telos stage change from phase {confirmed_phase} to {phase}")
+    if phase == confirmed_phase or encounter_checkpoint(phase, health, expected_max_hp):
+        return
+    if phase == 2 and saw_p2_transition:
+        return
+    raise RuntimeError(f"Phase {phase} entry disagrees with the observed boss HP")
 
 
 def phase_two_melee_cue(actions, overhead):
@@ -847,6 +859,7 @@ def run(reader, args, board, attempt=None):
     deadline = time.monotonic() + args.duration
     initiated = False
     active_instance = None
+    p2_transition_cue = None
     practice_enrage = getattr(args, "practice_enrage", 0)
     expected_max_hp = ZERO_ENRAGE_HP if practice_enrage == 0 else None
     engaged_at = 0
@@ -938,6 +951,10 @@ def run(reader, args, board, attempt=None):
             raise RuntimeError("Telos instance changed during the attempt")
 
         actions = telos_actions(events, identity, info.sequence, {active_instance})
+        if phase in (1, 2) and phase_two_at is None:
+            for action in actions:
+                if action["action_sequence"] == P1_TO_P2_TRANSITION:
+                    p2_transition_cue = action["event_sequence"]
         hp_known = bool(boss.flags & NPCFlags.HEALTH) and boss.health_max > 1
         if hp_known and expected_max_hp is None:
             # Non-zero enrage: lock the first observed maximum for the rest of the attempt.
@@ -946,6 +963,20 @@ def run(reader, args, board, attempt=None):
         if hp_known and boss.health_max != expected_max_hp:
             raise RuntimeError(
                 f"Expected {expected_max_hp:,} maximum Telos HP, observed {boss.health_max}"
+            )
+        if phase not in (1, 2, 3, 4) or not hp_known:
+            if phase_one_started:
+                raise RuntimeError("Encounter phase unavailable or outside the calibrated range")
+        elif phase_one_started and (phase != 4 or phase_three_at is None):
+            confirmed_phase = (
+                3 if phase_three_at is not None else 2 if phase_two_at is not None else 1
+            )
+            check_active_phase(
+                confirmed_phase,
+                phase,
+                npc_health_record(boss),
+                expected_max_hp,
+                saw_p2_transition=p2_transition_cue is not None,
             )
         # Every reached phase is handled; only the P2 target-cycle trial stops input earlier.
         continue_phase_three = args.continue_phase_two
@@ -974,11 +1005,7 @@ def run(reader, args, board, attempt=None):
                 if attempt:
                     attempt.end_reason = reason
             return 2
-        if phase not in (1, 2, 3) or not hp_known:
-            raise RuntimeError("Encounter phase unavailable or outside the calibrated range")
         if phase == 3 and continue_phase_three:
-            if encounter_checkpoint(phase, npc_health_record(boss), expected_max_hp) is None:
-                raise RuntimeError("Phase 3 bits disagree with the observed boss HP")
             if phase_three_at is None:
                 emit("phase_three_observed", boss_hp=boss.health_current, player_hp=hp)
                 phase_three_at = now
@@ -1010,11 +1037,15 @@ def run(reader, args, board, attempt=None):
                     attempt.end_reason = reason
             return 2
         if phase == 2:
-            if encounter_checkpoint(phase, npc_health_record(boss), expected_max_hp) is None:
-                raise RuntimeError("Phase 2 bits disagree with the observed boss HP")
             first_phase_two_sample = phase_two_at is None
             if first_phase_two_sample:
-                emit("phase_two_observed", boss_hp=boss.health_current, phase=phase, player_hp=hp)
+                emit(
+                    "phase_two_observed",
+                    boss_hp=boss.health_current,
+                    phase=phase,
+                    player_hp=hp,
+                    transition_cue_native_sequence=p2_transition_cue,
+                )
                 if attempt and phase_one.pending:
                     ability, confirmed = phase_one.acknowledge(
                         cooldowns(reader, bindings), now, ending=True
