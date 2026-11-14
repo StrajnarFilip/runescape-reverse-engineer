@@ -87,7 +87,24 @@ NEXT_SPECIAL_BY_PHASE = {
     # P3: Red Virus, a once-per-phase spec skip, Uppercut, Hold Still. Only the last two have
     # mapped animations, so Hold Still is forecast after Uppercut.
     3: {UPPERCUT: HOLD_STILL, HOLD_STILL: UPPERCUT},
+    # P4 (wiki): Uppercut, Weak Anima Bomb, Hold Still. The bomb has no mapped animation, so
+    # no forecast follows Uppercut here; an unforecast stun is broken by Freedom.
+    4: {UPPERCUT: None, HOLD_STILL: UPPERCUT},
+    # P5 (wiki): golems, viruses and the anima bomb; its specials are not mapped yet.
+    5: {UPPERCUT: None, HOLD_STILL: None},
 }
+HANDLED_PHASES = (1, 2, 3, 4, 5)
+# Deflect used for unmapped animations: P3 and P5 are magic only (wiki, account owner); P4
+# autos are melee within reach and magic otherwise, and 28959 still selects Deflect Magic.
+DEFAULT_FLICK_PRAYER_BY_PHASE = {
+    1: Prayer.MELEE,
+    2: Prayer.MELEE,
+    3: Prayer.MAGIC,
+    4: Prayer.MELEE,
+    5: Prayer.MAGIC,
+}
+# run() result asking main() to start over for a new encounter (scene or Telos changed).
+ENCOUNTER_RESET = 3
 # P3 attacks are magic only (wiki; confirmed by the account owner). 28959 repeated every
 # 4 received ticks in the 250% P3 capture, so it is counted as the P3 auto there.
 PHASE_THREE_AUTOS = frozenset({MAGIC_ATTACK})
@@ -142,6 +159,10 @@ MOVEMENT_WINDOWS = {
 }
 
 
+class FocusLost(RuntimeError):
+    """RuneScape lost foreground focus during a key press; input pauses, the run continues."""
+
+
 @dataclass(frozen=True)
 class Action:
     """A single ability chosen using the current special and sampled readiness."""
@@ -158,7 +179,7 @@ class PhaseOne:
         self.auto_sequences = {MELEE_AUTO_SEQUENCE}
         if phase == 2:
             self.auto_sequences.add(P2_OPENING_ATTACK)
-        elif phase == 3:
+        elif phase >= 3:
             self.auto_sequences |= PHASE_THREE_AUTOS
         self.autos = 0
         self.last_auto_ns = None
@@ -171,6 +192,9 @@ class PhaseOne:
             self.expected = TENDRILS
         elif phase == 2:
             self.expected = P2_CARRY_OVER.get(carried_expected, carried_expected)
+        elif phase >= 4:
+            # Unmapped openings: forecasts resume once a special has been observed.
+            self.expected = None
         else:
             # P3 opens with magic autos, then the special carried over from P2.
             self.opening = True
@@ -740,23 +764,43 @@ def run(reader, args, board, attempt=None):
     identity = (initial.pid, initial.process_creation_time, reader.combat.scene_epoch)
     manual_engage = getattr(args, "manual_engage", False)
     window = keys.game_window(identity)
-    if not window and manual_engage:
-        # Started from a terminal: wait for the operator to click into RuneScape.
+    if not window:
+        # Started from a terminal: wait (without input) for the operator to click into RuneScape.
         log("waiting_for_foreground")
-        focus_deadline = time.monotonic() + FOREGROUND_WAIT_SECONDS
-        while not window and time.monotonic() < focus_deadline:
+        while not window:
             if keys.get_async_key_state(F12) < 0:
                 raise RuntimeError("F12 stop")
             time.sleep(POLL_SECONDS)
             window = keys.game_window(identity)
-    if not window:
-        raise RuntimeError("RuneScape must be foreground before starting")
 
     def check_focus():
+        """Inside a key press: stop the press (tap releases held keys) if focus is gone."""
         if keys.get_async_key_state(F12) < 0:
             raise RuntimeError("F12 stop")
         if keys.game_window(identity) != window:
-            raise RuntimeError("RuneScape lost foreground focus")
+            raise FocusLost("RuneScape lost foreground focus")
+
+    def wait_for_focus():
+        """Between presses: pause all input while RuneScape is not focused. Only F12 stops."""
+        if keys.get_async_key_state(F12) < 0:
+            raise RuntimeError("F12 stop")
+        if keys.game_window(identity) == window:
+            return
+        emit("input_paused", reason="RuneScape lost foreground focus")
+        while keys.game_window(identity) != window:
+            if keys.get_async_key_state(F12) < 0:
+                raise RuntimeError("F12 stop")
+            time.sleep(POLL_SECONDS)
+        emit("input_resumed")
+
+    def send_chord(chord):
+        """Press a chord; return False when focus was lost during the press."""
+        try:
+            board.tap(chord, KEY_HOLD_SECONDS, check_focus, time.sleep)
+        except FocusLost:
+            emit("input_interrupted", reason="RuneScape lost foreground focus")
+            return False
+        return True
 
     game = None
     if not manual_engage:
@@ -865,8 +909,9 @@ def run(reader, args, board, attempt=None):
         if target is None:
             return
         if reader.monotonic_ns() - sample_ns > MAX_SAMPLE_AGE_NS:
-            raise RuntimeError("Native sample aged out before the prayer switch")
-        board.tap(prayer_chords[target], KEY_HOLD_SECONDS, check_focus, time.sleep)
+            return  # Retried from the next fresh sample.
+        if not send_chord(prayer_chords[target]):
+            return
         sent_ns = reader.monotonic_ns()
         flicker.sent(target, sent_ns)
         emit(
@@ -885,7 +930,9 @@ def run(reader, args, board, attempt=None):
                 ability: "+".join(key.name for key in chord) for ability, chord in bindings.items()
             },
         )
-    deadline = time.monotonic() + args.duration
+    # The controller runs until the player dies or F12; --duration is an optional bound.
+    duration = getattr(args, "duration", None)
+    deadline = time.monotonic() + duration if duration else math.inf
     initiated = False
     active_instance = None
     p2_transition_cue = None
@@ -903,10 +950,18 @@ def run(reader, args, board, attempt=None):
     surge_cue = None
     phase_two_at = None
     phase_three_at = None
+    phase_four_at = {}
     reacquire_at = None
     reacquire_hp = None
+    warned = set()
+
+    def warn_once(reason):
+        if reason not in warned:
+            warned.add(reason)
+            emit("waiting", reason=reason)
+
     while time.monotonic() < deadline:
-        check_focus()
+        wait_for_focus()
         info, player, boss, phase, hp = boss_sample(reader)
         events, lost = reader.drain_npc_action_events()
         hits, hits_lost = reader.drain_player_hit_events()
@@ -920,43 +975,57 @@ def run(reader, args, board, attempt=None):
                 hits=hits,
                 hit_loss=hits_lost,
             )
-        if (info.pid, info.process_creation_time, reader.combat.scene_epoch) != identity:
-            raise RuntimeError("Client session changed")
+        if (info.pid, info.process_creation_time) != identity[:2]:
+            # A restarted client has nothing left to control.
+            raise RuntimeError("Client process changed")
+        if reader.combat.scene_epoch != identity[2]:
+            emit("encounter_reset", reason="Scene changed")
+            return ENCOUNTER_RESET
         now = reader.monotonic_ns()
         if (
             info.status not in (Status.AVAILABLE, Status.PARTIAL)
             or not (0 <= now - info.monotonic_ns <= MAX_SAMPLE_AGE_NS)
             or player.clock_stalled_ns > MAX_SAMPLE_AGE_NS
         ):
-            raise RuntimeError("Native sample is unavailable or stale")
-        if hp is None or hp <= 0:
-            raise RuntimeError("Player HP reached zero" if hp == 0 else "Player HP unavailable")
+            # Never act on stale data; the next fresh sample continues.
+            time.sleep(POLL_SECONDS)
+            continue
+        if hp == 0:
+            raise RuntimeError("Player HP reached zero")
+        if hp is None or hp < 0:
+            time.sleep(POLL_SECONDS)
+            continue
         if lost or hits_lost:
-            raise RuntimeError("Combat event queue overflow")
+            # Counts may be off by the lost events; specials re-synchronise the rotation.
+            emit("event_queue_overflow", npc_actions_lost=lost, player_hits_lost=hits_lost)
         prayer = Prayer(reader.active_prayer())
         prayer_raw = player.variable(Variable.PRAYER_PACKED)
         if not initiated and boss is not None and boss.config_id == ACTIVE_TELOS:
-            raise RuntimeError("Start while Telos is dormant to capture the opening attack count")
+            # Started mid-fight: join without the opening count; specials re-synchronise.
+            initiated = True
+            emit("joined_active_encounter", phase=phase)
         if not initiated and boss is not None:
             if prayer_raw is None or not prayer_raw & PRAYER_POINTS_MASK:
-                raise RuntimeError("Restore prayer points before entering the encounter")
+                warn_once("Restore prayer points before entering the encounter")
+                time.sleep(POLL_SECONDS)
+                continue
             if prayer != Prayer.MELEE:
                 if now >= next_prayer_check:
-                    if next_prayer_check:
-                        raise RuntimeError("Deflect Melee did not activate on the configured slot")
+                    sent = True
                     if manual_engage:
-                        board.tap(
-                            prayer_chords[Prayer.MELEE], KEY_HOLD_SECONDS, check_focus, time.sleep
-                        )
+                        sent = send_chord(prayer_chords[Prayer.MELEE])
                     else:
                         click_frame(args.melee, boss.instance_id)
-                    emit("baseline_prayer_requested", prayer="melee")
-                    next_prayer_check = reader.monotonic_ns() + ACK_TIMEOUT_NS
+                    if sent:
+                        emit("baseline_prayer_requested", prayer="melee")
+                        # Unacknowledged presses are simply retried after the timeout.
+                        next_prayer_check = reader.monotonic_ns() + ACK_TIMEOUT_NS
                 time.sleep(POLL_SECONDS)
                 continue
         if boss is None or boss.config_id != ACTIVE_TELOS:
             if active_instance is not None:
-                raise RuntimeError("Active Telos disappeared")
+                emit("encounter_reset", reason="Active Telos disappeared")
+                return ENCOUNTER_RESET
             if not initiated and boss is not None and boss.config_id == DORMANT_TELOS:
                 if attempt and next_prayer_check:
                     attempt.write("baseline_prayer_acknowledged", prayer="melee")
@@ -969,7 +1038,10 @@ def run(reader, args, board, attempt=None):
                     next_approach = reader.monotonic_ns() + APPROACH_TIMEOUT_NS
                     emit("approach", overhead=prayer.name.lower())
             if initiated and next_approach and now >= next_approach:
-                raise RuntimeError("Approach did not wake Telos within the expected interval")
+                # The automatic approach did not wake Telos: click again.
+                emit("approach_retry")
+                initiated = False
+                next_approach = 0
             time.sleep(POLL_SECONDS)
             continue
 
@@ -977,7 +1049,8 @@ def run(reader, args, board, attempt=None):
             active_instance = boss.instance_id
             engaged_at = now
         if boss.instance_id != active_instance:
-            raise RuntimeError("Telos instance changed during the attempt")
+            emit("encounter_reset", reason="Telos instance changed")
+            return ENCOUNTER_RESET
 
         actions = telos_actions(events, identity, info.sequence, {active_instance})
         if phase in (1, 2) and phase_two_at is None:
@@ -990,51 +1063,48 @@ def run(reader, args, board, attempt=None):
             expected_max_hp = boss.health_max
             emit("boss_max_hp_locked", boss_max_hp=expected_max_hp, enrage=practice_enrage)
         if hp_known and boss.health_max != expected_max_hp:
-            raise RuntimeError(
-                f"Expected {expected_max_hp:,} maximum Telos HP, observed {boss.health_max}"
-            )
-        if phase not in (1, 2, 3, 4) or not hp_known:
-            if phase_one_started:
-                raise RuntimeError("Encounter phase unavailable or outside the calibrated range")
-        elif phase_one_started and (phase != 4 or phase_three_at is None):
+            # P5 and enrage scaling can change the maximum: re-lock rather than stop.
+            emit("boss_max_hp_locked", boss_max_hp=boss.health_max, previous=expected_max_hp)
+            expected_max_hp = boss.health_max
+        if phase not in HANDLED_PHASES or not hp_known:
+            # Unreadable phase or HP: act again from the next sample that has them.
+            time.sleep(POLL_SECONDS)
+            continue
+        if phase_one_started and phase <= 3:
             confirmed_phase = (
                 3 if phase_three_at is not None else 2 if phase_two_at is not None else 1
             )
-            check_active_phase(
-                confirmed_phase,
-                phase,
-                npc_health_record(boss),
-                expected_max_hp,
-                saw_p2_transition=p2_transition_cue is not None,
-            )
+            try:
+                check_active_phase(
+                    confirmed_phase,
+                    phase,
+                    npc_health_record(boss),
+                    expected_max_hp,
+                    saw_p2_transition=p2_transition_cue is not None,
+                )
+            except RuntimeError as error:
+                warn_once(str(error))
         # Every reached phase is handled; only the P2 target-cycle trial stops input earlier.
         continue_phase_three = args.continue_phase_two
-        if flicker is not None and (phase in (1, 2) or (phase == 3 and continue_phase_three)):
-            if phase == 3:
-                flicker.default_prayer = Prayer.MAGIC
+        if flicker is not None and (phase in (1, 2) or (phase >= 3 and continue_phase_three)):
+            flicker.default_prayer = DEFAULT_FLICK_PRAYER_BY_PHASE[phase]
             flick_step(actions, prayer, now, info.monotonic_ns)
         if not phase_one_started:
-            if phase == 1 and hp_known:
+            if hp_known:
                 emit("engaged", boss_hp=boss.health_current, phase=phase, player_hp=hp)
                 phase_one_started = True
-            elif now - engaged_at >= ENGAGE_TIMEOUT_NS:
-                raise RuntimeError(
-                    f"Opening phase or boss HP unavailable (phase={phase}, max={boss.health_max})"
-                )
             else:
                 phase_one.observe(actions)
                 time.sleep(POLL_SECONDS)
                 continue
-        if phase == 4 and continue_phase_three:
-            # Input ends at the P4 checkpoint; fonts and golems have no handling yet.
-            emit("phase_four_observed", boss_hp=boss.health_current, player_hp=hp)
-            if args.observe_transition:
-                board.close()
-                reason = observe(reader, max(0, deadline - time.monotonic()), attempt)
-                if attempt:
-                    attempt.end_reason = reason
-            return 2
-        if phase == 3 and continue_phase_three:
+        if phase >= 4 and continue_phase_three:
+            if phase_four_at.get(phase) is None:
+                emit(f"phase_{phase}_observed", boss_hp=boss.health_current, player_hp=hp)
+                phase_four_at[phase] = now
+                pending_cue = None
+                # Fonts, golems and bombs are not handled yet; flicks and specials continue.
+                phase_one = PhaseOne(phase=phase, carried_expected=phase_one.expected)
+        elif phase == 3 and continue_phase_three:
             if phase_three_at is None:
                 emit("phase_three_observed", boss_hp=boss.health_current, player_hp=hp)
                 phase_three_at = now
@@ -1122,9 +1192,13 @@ def run(reader, args, board, attempt=None):
                     emit("phase_two_reacquire_skipped", reason="Boss HP already decreased")
                 elif phase_two_melee_cue(actions, prayer.name.lower()):
                     if reader.monotonic_ns() - info.monotonic_ns > MAX_SAMPLE_AGE_NS:
-                        raise RuntimeError("Native sample aged out before target cycling")
-                    board.tap(bindings["Target Cycle"], KEY_HOLD_SECONDS, check_focus, time.sleep)
-                    board.tap(bindings["Opening Attack"], KEY_HOLD_SECONDS, check_focus, time.sleep)
+                        time.sleep(POLL_SECONDS)
+                        continue
+                    if not (
+                        send_chord(bindings["Target Cycle"])
+                        and send_chord(bindings["Opening Attack"])
+                    ):
+                        continue
                     reacquire_at = reader.monotonic_ns()
                     reacquire_hp = boss.health_current
                     emit("phase_two_reacquire_sent", boss_hp=reacquire_hp)
@@ -1220,7 +1294,9 @@ def run(reader, args, board, attempt=None):
         if action:
             # Movement does not depend on the tile; a missing tile only makes displacement unknown.
             if reader.monotonic_ns() - info.monotonic_ns > MAX_SAMPLE_AGE_NS:
-                raise RuntimeError("Native sample aged out before submitting the action")
+                # Decided from an aged sample: decide again from the next fresh one.
+                time.sleep(POLL_SECONDS)
+                continue
             pending_cue = (
                 phase_one.last_auto_event
                 if action.ability == "Anticipation"
@@ -1236,7 +1312,11 @@ def run(reader, args, board, attempt=None):
                     gcd_remaining_ms=gcd_remaining_ms,
                     received_tick=received_tick,
                 )
-            board.tap(bindings[action.ability], KEY_HOLD_SECONDS, check_focus, time.sleep)
+            if not send_chord(bindings[action.ability]):
+                # Interrupted by focus loss; the decision is made again after focus returns.
+                if action.ability == "Freedom":
+                    phase_one.last_freedom_stun = None
+                continue
             sent_ns = reader.monotonic_ns()
             phase_one.sent(action, sent_ns)
             if attempt:
@@ -1321,7 +1401,11 @@ def main():
     """Start with bar 18 active and Practice Mode 0% confirmed in the client."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pid", type=int)
-    parser.add_argument("--duration", type=int, default=MAX_PRACTICE_SECONDS)
+    parser.add_argument(
+        "--duration",
+        type=int,
+        help="Optional session limit in seconds; by default only death or F12 ends the run",
+    )
     parser.add_argument("--port", help="Arduino COM port. Omit for observation only.")
     parser.add_argument("--replay", type=Path, help="Read a local Telos observation JSONL capture")
     parser.add_argument(
@@ -1387,8 +1471,8 @@ def main():
     args.flick_melee = args.timed_freedom = args.observe_transition = True
     if args.port:
         args.record_attempt = True
-    if not 0 < args.duration <= MAX_PRACTICE_SECONDS:
-        parser.error(f"Duration must be between 1 and {MAX_PRACTICE_SECONDS} seconds")
+    if args.duration is not None and args.duration <= 0:
+        parser.error("Duration must be positive")
     approach_points = (args.frame, args.approach, args.melee)
     # The operator wakes Telos unless every screenshot point for the automatic approach is set.
     args.manual_engage = not any(approach_points)
@@ -1420,12 +1504,15 @@ def main():
             if args.port:
                 resolve_action_bar_keys(reader, args, attempt)
             if not args.port:
-                observed_end = observe(reader, args.duration, attempt)
+                observed_end = observe(reader, args.duration or MAX_PRACTICE_SECONDS, attempt)
                 end_reason = observed_end if attempt else "observation_ended"
                 result = 0
             else:
                 board = ArduinoBackend(args.port)
                 result = run(reader, args, board, attempt)
+                # A new scene or Telos instance starts a fresh encounter in the same session.
+                while result == ENCOUNTER_RESET:
+                    result = run(reader, args, board, attempt)
                 end_reason = attempt.end_reason or ("phase_limit" if result == 2 else "time_limit")
             return result
     except KeyboardInterrupt:

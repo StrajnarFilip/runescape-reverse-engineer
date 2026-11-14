@@ -515,6 +515,70 @@ class PracticeRunTests(unittest.TestCase):
         logged = [call.args[0] for call in mock_globals["log"].call_args_list]
         self.assertIn("waiting_for_engage", logged)
 
+    def test_focus_loss_pauses_input_instead_of_stopping(self):
+        run = controller["run"]
+        reader, board, keys = Mock(), Mock(), Mock()
+        keys.get_async_key_state.return_value = 0
+        # Focused at start, then unfocused for two checks, then focused again.
+        focus = iter([7, 7, None, None])
+        keys.game_window.side_effect = lambda _session: next(focus, 7)
+        reader.combat.scene_epoch = 1
+        reader.position.valid = False
+        reader.abilities = []
+        reader.drain_npc_action_events.return_value = ([], 0)
+        reader.drain_player_hit_events.return_value = ([], 0)
+        reader.active_prayer.side_effect = [Prayer.MELEE] * 6
+        clock = 10 * SECOND_NS
+        reader.monotonic_ns.return_value = clock
+        info = SimpleNamespace(
+            pid=1, process_creation_time=2, monotonic_ns=clock, status=Status.AVAILABLE, sequence=1
+        )
+        player = Mock(clock_stalled_ns=0, gcd_reason=Reason.NONE, gcd_remaining_ms=0)
+        player.variable.side_effect = {Variable.PRAYER_PACKED: 990}.__getitem__
+        dormant = SimpleNamespace(config_id=22892, instance_id=3)
+        active = SimpleNamespace(
+            config_id=22891,
+            instance_id=4,
+            flags=NPCFlags.HEALTH,
+            health_max=400_000,
+            health_current=400_000,
+        )
+        samples = [
+            (info, player, dormant, None, 9900),
+            (info, player, dormant, None, 9900),
+            (info, player, active, 1, 9900),
+            (info, player, active, 1, 0),
+        ]
+        args = SimpleNamespace(
+            freedom="U",
+            anticipation="A",
+            hurricane=None,
+            surge=None,
+            reacquire=None,
+            continue_phase_two=True,
+            frame=None,
+            melee=None,
+            approach=None,
+            observe_transition=False,
+            manual_engage=True,
+            flick_melee_key="F3",
+        )
+        console = SimpleNamespace(GameWindow=Mock(), frame_target=Mock(), move_pointer=Mock())
+        mock_globals = {
+            "ManualPrayerKeys": Mock(return_value=keys),
+            "boss_sample": Mock(side_effect=samples),
+            "player_hit_splats_record": Mock(return_value={}),
+            "log": Mock(),
+        }
+        with patch.dict(sys.modules, {"game_console": console}), patch("time.sleep"):
+            with patch.dict(run.__globals__, mock_globals):
+                with self.assertRaisesRegex(RuntimeError, "Player HP reached zero"):
+                    run(reader, args, board)
+        logged = [call.args[0] for call in mock_globals["log"].call_args_list]
+        self.assertIn("input_paused", logged)
+        self.assertIn("input_resumed", logged)
+        self.assertIn("engaged", logged)
+
     def test_input_waits_for_baseline_prayer_and_stops_at_phase_two(self):
         run = controller["run"]
         reader = Mock()
@@ -640,6 +704,7 @@ class PracticeRunTests(unittest.TestCase):
                 (info, player, damaged_boss, 2, 9000),
                 (info, player, phase_three, 3, 9000),
                 (info, player, phase_four, 4, 9000),
+                (info, player, phase_four, 4, 0),
             ]
         )
         mock_globals["telos_actions"].side_effect = [[], [], [event(1, HOLD_STILL)], [], []]
@@ -648,13 +713,14 @@ class PracticeRunTests(unittest.TestCase):
         info.monotonic_ns = SECOND_NS
         with patch.dict(sys.modules, {"game_console": console}), patch("time.sleep"):
             with patch.dict(run.__globals__, mock_globals):
-                self.assertEqual(run(reader, args, board), 2)
+                # Only death (or F12) ends the run; P3 and P4 are both handled.
+                with self.assertRaisesRegex(RuntimeError, "Player HP reached zero"):
+                    run(reader, args, board)
         # No stun was reported, so Hold Still alone sends no Freedom.
         self.assertEqual([call.args[0][-1].name for call in board.tap.call_args_list], [])
-        # P3 is handled rather than ending input; input ends at the P4 checkpoint.
         logged = [call.args[0] for call in mock_globals["log"].call_args_list]
         self.assertIn("phase_three_observed", logged)
-        self.assertEqual(logged[-1], "phase_four_observed")
+        self.assertIn("phase_4_observed", logged)
 
         board.reset_mock()
         args.continue_phase_two = False

@@ -1,6 +1,6 @@
 # Telos attempt logs
 
-Use the 0% Practice Mode controller from the repository root. Stage the character across the gap with Telos dormant, the melee action bar selected and auto-retaliate active. Identify the Deflect Melee slot and a walkable approach tile from the fresh client image. The controller handles every phase it reaches through P3: Deflect Melee flicks in P1/P2, Deflect Magic in P3. Input ends at the P4 checkpoint. `--observe-transition` continues recording after input ends. F12 stops input. [Setup and bindings](../runescape-knowledge-base/bosses/telos/animation-cues.md)
+Use the 0% Practice Mode controller from the repository root. Stage the character across the gap with Telos dormant, the melee action bar selected and auto-retaliate active. Identify the Deflect Melee slot and a walkable approach tile from the fresh client image. The controller handles every phase it reaches through P3: Deflect Melee flicks in P1/P2, Deflect Magic in P3. P4 and P5 keep the flicks, Escape, Anticipation and Resonance (fonts, golems and bombs are not handled yet). `--observe-transition` continues recording after input ends. F12 stops input. [Setup and bindings](../runescape-knowledge-base/bosses/telos/animation-cues.md)
 
 ### Running it yourself
 
@@ -8,7 +8,7 @@ Stand on the staging platform with Telos dormant and Revolution on bar 18. Put F
 Anticipation, Escape, Resonance and the Deflect Magic, Deflect Melee and Soul Split prayers on
 any displayed action bar. The controller reads their keys from game memory
 (`rs3_reader.action_bar_keys`) and logs them as `keys_resolved`; a key passed on the command line
-takes precedence. Start the script, click into RuneScape within 60 s, and wake Telos yourself.
+takes precedence. Start the script, click into RuneScape, and wake Telos yourself. Only death or F12 ends the run: losing focus pauses input until RuneScape is focused again, stale samples are skipped, and a new scene or Telos instance starts a fresh encounter.
 The controller turns on Deflect Melee with its key and takes over when the fight starts. F12 stops it.
 
 ```powershell
