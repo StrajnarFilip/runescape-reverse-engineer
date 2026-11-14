@@ -525,6 +525,9 @@ def magic_flick_ticks(distance):
 # but a press sent one tick ahead still gave 1,294 and 1,966 at times, so the press goes out two
 # ticks ahead of the expected cast.
 MAGIC_PREFLICK_TICKS = (2, 5)
+# Right next to Telos one tick of Deflect Magic is enough (account owner, 2026-11-14): no
+# pre-flick at this grid distance from his footprint or closer.
+MAGIC_SINGLE_TICK_DISTANCE = 1
 # Uppercut's 2,634 hitmark appeared 7 received ticks after 28938 on 2026-11-14 at 100%.
 # Escape is sent two to three ticks before that hitmark; the server hit deadline is unmeasured.
 UPPERCUT_ESCAPE_TICKS = (4, 5)
@@ -901,7 +904,9 @@ class PrayerFlicker:
                 first, last = 0, self.hold_ticks.get(sequence, DEFAULT_FLICK_HOLD_TICKS) - 1
             if tick is not None:
                 self.windows.append((tick + first, tick + last + 1, prayer))
-                if sequence == MAGIC_ATTACK:
+                if sequence == MAGIC_ATTACK and (
+                    distance is None or distance > MAGIC_SINGLE_TICK_DISTANCE
+                ):
                     early, late = MAGIC_PREFLICK_TICKS
                     self.windows.append((tick + early, tick + late + 1, prayer))
             self.hold_prayer = prayer

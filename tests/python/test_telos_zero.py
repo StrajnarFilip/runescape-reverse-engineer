@@ -585,9 +585,16 @@ class PrayerFlickerTests(unittest.TestCase):
             [flicker.active_prayer(tick, 0) for tick in range(8080, 8083)],
             [None, Prayer.MAGIC, Prayer.MAGIC],
         )
-        # In melee range: the animation tick, then the pre-flick for the next one at +4.
+        # Right next to Telos: one tick on the animation tick only.
         flicker = PrayerFlicker()
         flicker.observe([event(1, magic)], 100, 0, distance=1)
+        self.assertEqual(
+            [flicker.active_prayer(tick, 0) for tick in range(100, 107)],
+            [Prayer.MAGIC, None, None, None, None, None, None],
+        )
+        # Two tiles away: the animation tick, then the pre-flick for the next one at +4.
+        flicker = PrayerFlicker()
+        flicker.observe([event(1, magic)], 100, 0, distance=2)
         self.assertEqual(
             [flicker.active_prayer(tick, 0) for tick in range(100, 107)],
             [Prayer.MAGIC, None, Prayer.MAGIC, Prayer.MAGIC, Prayer.MAGIC, Prayer.MAGIC, None],
