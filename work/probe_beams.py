@@ -47,6 +47,11 @@ KEY_DOWN_MASK = 0x8000
 VIRTUAL_KEYS = {"F9": 0x78, "F10": 0x79, "F11": 0x7A, "F12": 0x7B, "PAUSE": 0x13}
 OUTPUT_DIRECTORY = WORK_DIRECTORY / "beam_research"
 READ_THREADS = 16
+TELOS_METER_VARP = 6363
+METER_MASK = (1 << 21) - 1
+FLAT_TICKS_TO_STOP = 2
+MIN_FEEDING_TICKS = 3
+MAX_AUTOMATIC_SNAPSHOTS = 40
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 _read_process_memory = _kernel32.ReadProcessMemory
 _read_process_memory.argtypes = [
@@ -84,6 +89,60 @@ def telos_and_player_tiles(reader):
     return telos_tile, player_tile
 
 
+def meter_and_tick(reader):
+    """Return (Telos anima meter, received tick) from the latest sample; either may be None.
+
+    The meter is the low 21 bits of VARP 6363 (bits 21 and up hold the phase). It rises by 3
+    per received tick while a beam feeds Telos.
+    """
+    encounter = reader.encounter
+    meter = None
+    for raw in encounter.raw[: encounter.raw_count]:
+        if raw.varp_id == TELOS_METER_VARP and raw.valid:
+            meter = raw.value & METER_MASK
+    tick = encounter.game_tick.counter if encounter.game_tick.valid else None
+    return meter, tick
+
+
+class MeterWatcher:
+    """Turn per-tick meter readings into beam start/stop markers.
+
+    Feeding starts on the first rising tick; it stops after FLAT_TICKS_TO_STOP flat (or reset)
+    ticks, and is reported only after at least MIN_FEEDING_TICKS rises.
+    """
+
+    def __init__(self):
+        self.last_tick = None
+        self.last_meter = None
+        self.feeding = False
+        self.rising_ticks = 0
+        self.flat_ticks = 0
+
+    def update(self, meter, tick):
+        """Return 'meter_rising', 'meter_stopped' or None for a new tick."""
+        if meter is None or tick is None or tick == self.last_tick:
+            return None
+        previous = self.last_meter
+        self.last_tick, self.last_meter = tick, meter
+        if previous is None:
+            return None
+        if meter > previous:
+            self.rising_ticks += 1
+            self.flat_ticks = 0
+            if not self.feeding:
+                self.feeding = True
+                return "meter_rising"
+            return None
+        self.flat_ticks += 1
+        if self.feeding and self.flat_ticks >= FLAT_TICKS_TO_STOP:
+            fed = self.rising_ticks
+            self.feeding = False
+            self.rising_ticks = 0
+            if fed >= MIN_FEEDING_TICKS:
+                return "meter_stopped"
+        return None
+
+
 def writable_private_regions(memory):
     """Yield (base, size) of committed private read-write regions."""
     for base, size, kind, protection in memory.regions():
@@ -118,6 +177,9 @@ def scan_chunk(base, data, fine_bounds, tile_bounds):
     float_index = float_index[in_range(words[float_index + 2], z_low, z_span)]
     height = floats[float_index + 1]
     float_index = float_index[(height >= -MAX_FINE_HEIGHT) & (height <= MAX_FINE_HEIGHT)]
+    # Adjacent (x, z) float pairs, for layouts without a height between the coordinates.
+    pair_index = numpy.nonzero(in_range(words[:-1], x_low, x_span))[0]
+    pair_index = pair_index[in_range(words[pair_index + 1], z_low, z_span)]
     (tile_x_low, tile_x_high), (tile_y_low, tile_y_high) = tile_bounds
     int_index = numpy.nonzero(in_range(words[:-1], tile_x_low, tile_x_high - tile_x_low))[0]
     int_index = int_index[in_range(words[int_index + 1], tile_y_low, tile_y_high - tile_y_low)]
@@ -129,6 +191,16 @@ def scan_chunk(base, data, fine_bounds, tile_bounds):
             floats[float_index + 2].astype(numpy.float64),
         )
     )
+    # Pair rows carry NaN in the height column so analysis can tell the two layouts apart.
+    pair_rows = numpy.column_stack(
+        (
+            base + pair_index.astype(numpy.uint64) * 4,
+            floats[pair_index].astype(numpy.float64),
+            numpy.full(len(pair_index), numpy.nan),
+            floats[pair_index + 1].astype(numpy.float64),
+        )
+    )
+    float_rows = numpy.concatenate((float_rows, pair_rows))
     int_rows = numpy.column_stack(
         (
             base + int_index.astype(numpy.uint64) * 4,
@@ -198,6 +270,11 @@ def main():
     parser.add_argument("--standing-key", default="F11", choices=sorted(VIRTUAL_KEYS))
     parser.add_argument("--stop-key", default="PAUSE", choices=sorted(VIRTUAL_KEYS))
     parser.add_argument("--baseline", action="store_true", help="Take one snapshot at start")
+    parser.add_argument(
+        "--auto-meter",
+        action="store_true",
+        help="Also snapshot when the Telos anima meter (VARP 6363) starts or stops rising",
+    )
     arguments = parser.parse_args()
     labels = {
         VIRTUAL_KEYS[arguments.visible_key]: "beam_visible",
@@ -223,6 +300,8 @@ def main():
         last_center = None
         deadline = time.monotonic() + arguments.duration
         count = 0
+        automatic = 0
+        watcher = MeterWatcher()
         while time.monotonic() < deadline:
             if key_down(stop_key):
                 break
@@ -233,6 +312,12 @@ def main():
                         pending.append(label)
                 else:
                     held.discard(virtual_key)
+            if arguments.auto_meter and not pending and automatic < MAX_AUTOMATIC_SNAPSHOTS:
+                reader.sample()
+                marker = watcher.update(*meter_and_tick(reader))
+                if marker:
+                    automatic += 1
+                    pending.append(marker)
             if not pending:
                 time.sleep(KEY_POLL_SECONDS)
                 continue
@@ -252,6 +337,7 @@ def main():
                 continue
             last_center = center
             marked_ns = time.monotonic_ns()
+            meter, tick = meter_and_tick(reader)
             float_hits, int_hits, bytes_read, seconds = snapshot(memory, center)
             after_telos, after_player = telos_and_player_tiles(reader)
             count += 1
@@ -263,6 +349,8 @@ def main():
                 "marked_monotonic_ns": marked_ns,
                 "utc": datetime.now(timezone.utc).isoformat(),
                 "scan_center": center,
+                "meter": meter,
+                "received_tick": tick,
                 "telos_tile": telos_tile,
                 "player_tile": player_tile,
                 "telos_tile_after": after_telos,
