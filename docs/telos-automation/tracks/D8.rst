@@ -69,7 +69,7 @@ errors inside available modules are not hidden. Producer output is bounded.
 ``python -m rs3_reader.bot --mode shadow --capture capture.jsonl --enable ...``
 runs without importing native input. ``--pid`` explicitly selects a read-only
 NativeTelemetry observer. It registers a configurable Windows global stop key
-(default Ctrl+Alt+Pause), uses foreground checks and releases resources on exit.
+(default Ctrl+Shift+F12 after the user-tested 2026-11-13 update), uses foreground checks and releases resources on exit.
 No global hotkey or live reader was opened during this implementation.
 
 Watchdogs cover stale/unavailable frames, unknown/lost native queues, changed
@@ -120,3 +120,29 @@ Requests
   comparisons require the integrated L shadow session; they are not fabricated.
 * P4/A2 remain untouched. Preferred hotkey, live focus behavior and physical
   release are user-present ladder checks, not assumptions from fake tests.
+
+* Readiness diagnostics completed, 2026-11-14: ``python -m rs3_reader.bot
+  --readiness --pid PID --readiness-samples 40`` inspects about two seconds of
+  read-only native snapshots. ``--capture FILE`` inspects saved telemetry
+  instead. Both paths emit per-sample availability, reasons, owning tracks,
+  identity and counts. Capture replay is explicitly labelled historical.
+  ``--output`` creates a new file and cannot overwrite its source.
+* The diagnostic constructs no producer, arbiter, hotkey or input backend.
+  Missing/stale root identity invalidates every nested availability result;
+  queue event timestamps remain separate from frame-scoped loss counts.
+  Known received ordinals never establish protection timing. Sampled ability
+  castability must be explicit bools, not inferred equipment matches. No union
+  of successful fields across frames/scenes can report a ready setup.
+* Twenty-nine D8 tests pass in the isolated worktree (one intentionally local
+  raw-capture check skipped there). Eight new groups cover bounds, stale/missing
+  fields, queue loss, castability, exact local target, aged result provenance,
+  no-input/no-producer CLI imports and source-file protection. Shared result
+  envelope aging is used by the supervisor and diagnostics.
+* The preferred default is now Ctrl+Shift+F12, already physically tested by the
+  user in track L. Ctrl+Alt+Pause remains an explicit supported alternative.
+  This change does not run another physical check or enable a rung.
+* L: diagnostics on 40 saved native records expose 169 sampled abilities with
+  zero known full-castability values and unavailable/unvalidated P3 effects.
+  The active-Telos and encounter-result fields are not observed in that dormant
+  sample. These are explicit dependencies, not a claim that all software is
+  complete or that missing outside-combat fields are permanent failures.

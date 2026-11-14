@@ -25,7 +25,7 @@ from .replay import read_capture
 from .world_state import Observation, WorldState
 
 NS_PER_MS = 1_000_000
-DEFAULT_KILL_KEY = "Ctrl+Alt+Pause"
+DEFAULT_KILL_KEY = "Ctrl+Shift+F12"
 PRODUCER_MODULES = {
     "encounter": "encounter_tracker",
     "prayer": "prayer_executor",
@@ -48,6 +48,33 @@ def _field(value, name, default=None):
     return value.get(name, default) if isinstance(value, Mapping) else getattr(value, name, default)
 
 
+def _result_observation(world):
+    """Age a validated result envelope in the same way for diagnostics and the supervisor."""
+    raw = world.raw.get("encounter_result")
+    if (
+        not isinstance(raw, Mapping)
+        or not _integer(world.now_ns)
+        or not _integer(world.observed_ns)
+    ):
+        return Observation(reason="encounter_result_unavailable")
+    age = raw.get("age_ms")
+    if type(age) not in (int, float) or not math.isfinite(age) or age < 0:
+        return Observation(reason="encounter_result_age_unknown")
+    captured_age = _field(world.raw.get("native"), "snapshot_age_ms")
+    captured_age = captured_age if type(captured_age) in (int, float) else 0
+    age += max(0, (world.now_ns - world.observed_ns) / NS_PER_MS - captured_age)
+    result = raw.get("value")
+    if (
+        not isinstance(result, Mapping)
+        or result.get("validated") is not True
+        or result.get("kind") not in ("kill", "death")
+        or type(result.get("id")) not in (str, int)
+        or not result.get("id")
+    ):
+        return Observation(reason="encounter_result_unvalidated")
+    return Observation(result, age, raw.get("source"), raw.get("reason"))
+
+
 def load_producers(names):
     """Load available trusted modules; do not hide errors inside installed modules."""
     producers, absent = {}, []
@@ -67,7 +94,7 @@ def load_producers(names):
 
 
 def hotkey_codes(label):
-    """Translate an explicit stop chord; default is configurable Ctrl+Alt+Pause."""
+    """Translate a stop chord; default is the user's tested Ctrl+Shift+F12."""
     pieces = label.split("+")
     keys = {"Pause": 0x13, **{"F" + str(index): 0x6F + index for index in range(1, 13)}}
     modifiers = {"Ctrl": 2, "Alt": 1, "Shift": 4, "Win": 8}
@@ -321,15 +348,7 @@ class Supervisor:
         return None
 
     def _result(self, world, now):
-        raw = world.raw.get("encounter_result")
-        if not isinstance(raw, dict) and not hasattr(raw, "get"):
-            return
-        age = raw.get("age_ms")
-        captured_age = world.raw.get("native", {}).get("snapshot_age_ms")
-        captured_age = captured_age if type(captured_age) in (int, float) else 0
-        if type(age) in (int, float):
-            age += max(0, (world.now_ns - world.observed_ns) / NS_PER_MS - captured_age)
-        observation = Observation(raw.get("value"), age, raw.get("source"), raw.get("reason"))
+        observation = _result_observation(world)
         if not self._fresh(observation, now, world):
             return
         result = observation.value
@@ -501,6 +520,209 @@ def create_shadow_supervisor(*, arbitrate=False, **options):
     return supervisor
 
 
+def readiness_record(world, *, maximum_age_ms=150):
+    """Inspect one sample's evidence without constructing controllers or an actuator.
+
+    Availability is not live validation, complete attack coverage or permission
+    to dispatch. Empty NPC collections do not validate an active Telos target.
+    The output stays tied to this one process/scene/sample, never a union of
+    successful fields from unrelated frames or encounters.
+    """
+    if not isinstance(world, WorldState):
+        raise TypeError("Readiness inspection requires WorldState")
+
+    def fresh(value):
+        return bool(value.source) and value.reason is None and value.is_fresh(maximum_age_ms)
+
+    checks = {}
+
+    def check(name, available, reason, owner):
+        checks[name] = {
+            "available": bool(available),
+            "reason": None if available else reason,
+            "owner": owner,
+        }
+
+    digest = world.raw.get("executable_sha256")
+    hash_known = (
+        isinstance(digest, str)
+        and len(digest) == 64
+        and all(character in "0123456789abcdef" for character in digest)
+    )
+    age_ms = _field(world.raw.get("native"), "snapshot_age_ms")
+    frame = (
+        world.session.complete
+        and hash_known
+        and world.status in ("available", "partial")
+        and _integer(world.sample_sequence, 1)
+        and _integer(world.now_ns)
+        and _integer(world.observed_ns)
+        and 0 <= world.now_ns - world.observed_ns <= maximum_age_ms * NS_PER_MS
+        and type(age_ms) in (int, float)
+        and math.isfinite(age_ms)
+        and 0 <= age_ms <= maximum_age_ms
+    )
+    check("frame_identity_and_age", frame, "snapshot_identity_or_age_unavailable", "S0a/S0b")
+    resources = (
+        world.player.health.current,
+        world.player.health.maximum,
+        world.player.prayer.current,
+        world.player.prayer.maximum,
+        world.player.adrenaline_percent,
+    )
+    check(
+        "player_resources",
+        all(
+            fresh(value)
+            and type(value.value) in (int, float)
+            and math.isfinite(value.value)
+            and value.value >= 0
+            for value in resources
+        ),
+        "resources_unavailable_or_stale",
+        "native",
+    )
+    check(
+        "global_cooldown",
+        fresh(world.player.gcd)
+        and _field(world.player.gcd.value, "reason") is None
+        and _integer(_field(world.player.gcd.value, "remaining_ms")),
+        "gcd_unavailable_or_stale",
+        "native",
+    )
+    check(
+        "player_tile_and_facing",
+        fresh(world.player.tile) and fresh(world.player.facing),
+        "pose_unavailable_or_stale",
+        "P1",
+    )
+    check("player_entity_target", fresh(world.player.target), "target_unavailable_or_stale", "P1")
+    tick = world.game_tick
+    check(
+        "received_tick_ordinal",
+        fresh(tick) and _integer(_field(tick.value, "index")),
+        "received_tick_unavailable_or_stale",
+        "P2",
+    )
+    for name in NATIVE_EVENT_STREAMS:
+        batch = getattr(world.events, name)
+        check(
+            "queue_" + name,
+            # Queue batches retain per-event timestamps rather than one shared age.
+            # Availability/loss belongs to this root frame; consumers age each event.
+            batch.records.known
+            and batch.records.reason is None
+            and bool(batch.records.source)
+            and batch.lost.reason is None
+            and bool(batch.lost.source)
+            and type(batch.lost.value) is int
+            and batch.lost.value == 0,
+            "queue_loss_or_unknown",
+            "native/S0a",
+        )
+    for name in ("phase", "enrage", "meter", "freedom"):
+        check(
+            "telos_" + name, fresh(getattr(world.telos, name)), "encounter_field_not_observed", "P2"
+        )
+    check("inventory", fresh(world.inventory), "inventory_unavailable_or_stale", "native")
+    check("equipment", fresh(world.equipment), "equipment_unavailable_or_stale", "native")
+    check("player_effects", fresh(world.player.effects), "effects_unavailable_or_stale", "P3")
+    check("action_bar", fresh(world.action_bar), "action_bar_unavailable_or_stale", "P5")
+
+    abilities = world.abilities.value if fresh(world.abilities) else ()
+    castability_known = sum(
+        isinstance(value, Mapping) and type(value.get("castable")) is bool
+        for value in abilities or ()
+    )
+    check(
+        "sampled_ability_castability",
+        bool(abilities) and castability_known == len(abilities),
+        "full_castability_unmapped_or_not_observed",
+        "native/D4",
+    )
+    npcs = world.npcs.value if fresh(world.npcs) else ()
+    active_telos = [
+        npc
+        for npc in npcs or ()
+        if fresh(npc.config_id) and npc.config_id.value == ACTIVE_TELOS_CONFIG
+    ]
+    target = active_telos[0].target if len(active_telos) == 1 else None
+    local_index = _field(world.raw.get("player_hit_splats"), "player_index")
+    check(
+        "active_telos_local_player_reference",
+        target is not None
+        and fresh(target)
+        and _field(target.value, "kind") == "player"
+        and _integer(local_index)
+        and _field(target.value, "player_index") == local_index,
+        "active_telos_local_target_not_observed",
+        "P1",
+    )
+    check(
+        "validated_encounter_result",
+        fresh(_result_observation(world)),
+        "encounter_result_unmapped_or_not_observed",
+        "P2/D7",
+    )
+    if not frame:
+        # Do not let fresh-looking nested envelopes rescue an invalid root frame.
+        for value in checks.values():
+            value.update(available=False, reason="snapshot_identity_or_age_unavailable")
+    return {
+        "kind": "readiness",
+        "schema_version": 1,
+        "session": {
+            "pid": world.session.pid,
+            "process_creation_time": world.session.process_creation_time,
+            "scene_epoch": world.session.scene_epoch,
+            "executable_sha256": digest,
+        },
+        "sample_sequence": world.sample_sequence,
+        "checks": checks,
+        "unobserved_fields": [name for name, value in checks.items() if not value["available"]],
+        "counts": {
+            "sampled_abilities": len(abilities or ()),
+            "known_castability": castability_known,
+            "loaded_npcs": len(npcs or ()),
+            "active_telos": len(active_telos),
+        },
+        "availability_is_live_validation": False,
+        "attack_timing_assessed": False,
+        "dispatch_enabled": False,
+        "input_sent": False,
+    }
+
+
+def _write_readiness(arguments, output):
+    """Bounded read-only diagnostic; no producer, hotkey or device is constructed."""
+
+    def emit(world):
+        record = readiness_record(world)
+        record["inspection_source"] = "capture_replay" if arguments.capture else "live_native"
+        output.write(json.dumps(record, sort_keys=True, allow_nan=False) + "\n")
+
+    if arguments.capture:
+        with arguments.capture.open(encoding="utf-8-sig") as stream:
+            for index, (_, record) in enumerate(read_capture(stream)):
+                emit(WorldState.from_telemetry(record))
+                if index + 1 >= arguments.readiness_samples:
+                    break
+        return
+    from ..telemetry import NativeTelemetry
+
+    telemetry = NativeTelemetry(arguments.pid, 100)
+    started = time.monotonic()
+    try:
+        for index in range(arguments.readiness_samples):
+            emit(WorldState.from_telemetry(telemetry.sample(False)))
+            if time.monotonic() - started >= arguments.max_seconds:
+                break
+            if index + 1 < arguments.readiness_samples:
+                time.sleep(0.05)
+    finally:
+        telemetry.close()
+
+
 def main(argv=None):
     """Run bounded shadow capture/live observation; live actuation belongs to L."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -514,6 +736,12 @@ def main(argv=None):
     parser.add_argument("--kill-key", default=DEFAULT_KILL_KEY)
     parser.add_argument("--output", type=Path)
     parser.add_argument(
+        "--readiness",
+        action="store_true",
+        help="Inspect bounded field availability without controllers or input backends",
+    )
+    parser.add_argument("--readiness-samples", type=int, default=40)
+    parser.add_argument(
         "--arbitrate",
         action="store_true",
         help="Include D6 shadow decisions; dispatch remains disabled",
@@ -521,6 +749,10 @@ def main(argv=None):
     arguments = parser.parse_args(argv)
     if arguments.mode != "shadow":
         parser.error("assist/full require track L authorization; use shadow")
+    if not 1 <= arguments.readiness_samples <= 10000:
+        parser.error("readiness-samples must be 1..10000")
+    if not math.isfinite(arguments.max_seconds) or arguments.max_seconds <= 0:
+        parser.error("max-seconds must be finite and positive")
     if (
         arguments.capture
         and arguments.output
@@ -529,6 +761,12 @@ def main(argv=None):
         parser.error("Capture and output must differ")
     output, telemetry, hotkey, supervisor = None, None, None, None
     try:
+        if arguments.readiness:
+            output = (
+                arguments.output.open("x", encoding="utf-8") if arguments.output else sys.stdout
+            )
+            _write_readiness(arguments, output)
+            return 0
         hotkey_codes(arguments.kill_key)
         producers, missing = load_producers(
             tuple(name for name in arguments.enable.split(",") if name)
