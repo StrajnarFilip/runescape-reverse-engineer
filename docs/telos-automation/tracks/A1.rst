@@ -112,3 +112,10 @@ Requests
   serializes consumer refresh and dispatch; a changed consumer still rejects.
   Old DLLs retain latest-frame fallback plus exact identity/sequence checks.
   Thirty-three A1 fake-device/ABI/host-firmware tests pass with no game input.
+
+* D6/D8 fault handoff, 2026-11-14: both serialized backends expose a read-only
+  ``fault`` property (None or a latched reason). DeviceFault/cleanup uncertainty
+  remains observable even though send returns a rejected SendResult. Ordinary
+  disabled/deadline/precondition rejection does not set a transport fault.
+  Thirty-four fake-device/ABI/firmware cases pass. D6 must inspect this channel
+  before dispatch and after each result, close on faults and surface them to D8.
