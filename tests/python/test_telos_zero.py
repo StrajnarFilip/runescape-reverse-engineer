@@ -107,14 +107,19 @@ class PhaseOneTests(unittest.TestCase):
         self.assertTrue(under(boss, 5, (104, 204)))
         self.assertFalse(under(boss, 5, (105, 202)))
         self.assertFalse(under(boss, 5, (99, 202)))
-        # Player on the east side of the 5x5 footprint (centre 102,202): continue east first.
+        stomp = controller["in_stomp_area"]
+        # 500% capture: Telos SW (14555,1486), player (14561,1484), 4 tiles from centre: hit.
+        self.assertFalse(under((14555, 1486), 5, (14561, 1484)))
+        self.assertTrue(stomp((14555, 1486), 5, (14561, 1484)))
+        self.assertFalse(stomp((14555, 1486), 5, (14562, 1484)))
+        # Player on the east side (centre 102,202): continue east first, 6 tiles out.
         tiles = escapes(boss, 5, (104, 202))
-        self.assertEqual(tiles[0], (106, 202))
+        self.assertEqual(tiles[0], (108, 202))
         self.assertEqual(len(set(tiles)), 8)
         for tile in tiles:
-            self.assertFalse(under(boss, 5, tile))
+            self.assertFalse(stomp(boss, 5, tile))
         # North-west offset continues north-west.
-        self.assertEqual(escapes(boss, 5, (100, 204))[0], (99, 205))
+        self.assertEqual(escapes(boss, 5, (100, 204))[0], (96, 208))
 
     def test_phase_three_opening_after_tendrils_forecasts_hold_still(self):
         phase = PhaseOne(phase=3, carried_expected=controller["ONSLAUGHT"])

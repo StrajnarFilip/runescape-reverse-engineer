@@ -114,7 +114,11 @@ ENCOUNTER_RESET = 3
 # (account owner, 2026-11-14; up to 9,900 at 500%). If the player is still underneath during
 # these received ticks after 28935, Dive to a tile this far from Telos's centre.
 STOMP_CHECK_TICKS = (1, 4)
-STOMP_ESCAPE_DISTANCE = 4
+# The stomp reaches beyond the 5x5 body: players 4 tiles (Chebyshev) from Telos's centre took
+# 9,322 at 500% and 5,401 at 500% P3 (2026-11-14). Treat 4 tiles from the centre as unsafe and
+# Dive to 6 tiles out.
+STOMP_RADIUS_TILES = 4
+STOMP_ESCAPE_DISTANCE = 6
 EIGHT_DIRECTIONS = ((1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1))
 
 
@@ -124,6 +128,13 @@ def under_footprint(boss_tile, size, tile):
         boss_tile[0] <= tile[0] < boss_tile[0] + size
         and boss_tile[1] <= tile[1] < boss_tile[1] + size
     )
+
+
+def in_stomp_area(boss_tile, size, tile):
+    """Whether tile is within STOMP_RADIUS_TILES (Chebyshev) of Telos's centre tile."""
+    centre_x = boss_tile[0] + (size - 1) / 2
+    centre_y = boss_tile[1] + (size - 1) / 2
+    return max(abs(tile[0] - centre_x), abs(tile[1] - centre_y)) <= STOMP_RADIUS_TILES
 
 
 def stomp_escape_tiles(boss_tile, size, player_tile):
@@ -141,16 +152,15 @@ def stomp_escape_tiles(boss_tile, size, player_tile):
         difference = math.atan2(direction[1], direction[0]) - angle
         return abs(math.atan2(math.sin(difference), math.cos(difference)))
 
-    tiles = []
-    for direction in sorted(EIGHT_DIRECTIONS, key=closeness):
-        length = math.hypot(*direction)
-        tiles.append(
-            (
-                round(centre_x + direction[0] / length * STOMP_ESCAPE_DISTANCE),
-                round(centre_y + direction[1] / length * STOMP_ESCAPE_DISTANCE),
-            )
+    # Grid (Chebyshev) distance: diagonal targets are as far outside the square stomp area
+    # as straight ones, and still within Dive's 10-tile reach from a player near the centre.
+    return [
+        (
+            round(centre_x + direction[0] * STOMP_ESCAPE_DISTANCE),
+            round(centre_y + direction[1] * STOMP_ESCAPE_DISTANCE),
         )
-    return tiles
+        for direction in sorted(EIGHT_DIRECTIONS, key=closeness)
+    ]
 
 
 def project_tile(reader, tile, plane, fine_height):
@@ -907,8 +917,20 @@ def run(reader, args, board, attempt=None):
         boss_tile = (pose.tile.x, pose.tile.y)
         player_tile = (player.tile.x, player.tile.y)
         size = pose.footprint_size or 1
-        if not under_footprint(boss_tile, size, player_tile):
+        centre_distance = max(
+            abs(player_tile[0] - (boss_tile[0] + (size - 1) / 2)),
+            abs(player_tile[1] - (boss_tile[1] + (size - 1) / 2)),
+        )
+        if not in_stomp_area(boss_tile, size, player_tile):
             phase_one.stomp_checked = True
+            emit(
+                "stomp_check",
+                in_area=False,
+                player_tile=player_tile,
+                boss_tile=boss_tile,
+                centre_distance=centre_distance,
+                received_tick_delta=delta,
+            )
             return
         if timers.get("Dive"):
             return  # Dive still cooling down; check again next sample.
