@@ -150,3 +150,7 @@ Requests
 * L update: both additive chord declarations are registered in the public
   header on integration. Six native input groups and all 15 CTest targets
   pass (271 Python tests). Existing structure sizes/signatures are unchanged.
+
+* A1 follow-up resolved on integration: native item/modified-ability chords
+  are connected to the serialized backend with dynamic binding revalidation.
+  Pointer/view/route dependencies and supervised movement trials remain open.

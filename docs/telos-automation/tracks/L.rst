@@ -133,3 +133,10 @@ Requests
   are registered without changing any ABI structure or old function signature.
   The native tests call pure preparation helpers on positive paths, never OS
   dispatch. A1 connection and physical-delivery validation remain pending.
+
+* A1 chord/binding connection is merged: the native backend supports exact
+  tracked-item and modified-ability chords, with explicit older-DLL rejection.
+  Dynamic bindings are rechecked before dispatch and each serial key command.
+  A newer native copy rejects for policy re-evaluation instead of executing an
+  old decision. All 15 CTest targets pass (283 Python tests, zero skips),
+  including 31 A1 fake-device/ABI/host-firmware cases. No live input is enabled.

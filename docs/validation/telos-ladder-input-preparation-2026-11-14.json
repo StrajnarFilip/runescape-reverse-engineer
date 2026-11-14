@@ -11,16 +11,24 @@
   "public_header_registration": "include/rs3/rs3.h; two additive declarations only",
   "native_input_fixture_groups": 6,
   "ctest_targets_passed": 15,
-  "python_tests_passed": 271,
+  "python_tests_passed": 283,
   "public_abi_layouts_changed": false,
   "input_sent": false,
   "positive_path_tests": "Pure chord preparation; no foreground dispatch",
   "remaining": [
-    "A1 connection with old-DLL rejection and exact item token checks.",
-    "Fresh binding propagation and pre-dispatch revalidation.",
-    "Supervised physical delivery and observed game outcomes.",
-    "Complete perception/attack timing before dependent controller enablement."
+    "Supervised physical key delivery and observed game outcomes.",
+    "Account-specific consumable keys, letter/digit and potion-family alias calibration.",
+    "Native minimap/view/hit-test/route and result acquisition; serialized pointer connection.",
+    "Complete castability and exact-scope incoming attack/protection-check evidence.",
+    "Readiness/ladder composition and repeated supervised runs before enabling inputs."
   ],
   "automatic_input_enabled": false,
-  "ladder_rung_passed": false
+  "ladder_rung_passed": false,
+  "native_backend_commit": "46b9b8a",
+  "a1_tests_passed": 31,
+  "python_tests_skipped": 0,
+  "binding_provider_revalidated": true,
+  "old_dll_rejection_tested": true,
+  "exact_policy_frame_required": true,
+  "same_tick_independent_lanes_tested": true
 }
