@@ -249,6 +249,44 @@ static void key_chords_reject_stale_scene_clock_and_unknown_inventory(void)
     fixture_destroy(test_fixture);
 }
 
+static void copied_policy_snapshot_survives_source_changes_and_destruction(void)
+{
+    fixture *test_fixture = key_chord_fixture();
+    rs3_snapshot *source = test_fixture->snapshot;
+    source->info.sequence = 77;
+    source->spatial.player.target_kind = RS3_SPATIAL_TARGET_NPC;
+    source->spatial.player.target_runtime_id = FIXTURE_NPC_RUNTIME_ID;
+    rs3_snapshot *copy = NULL;
+    assert(rs3_snapshot_create(&copy) == RS3_OK);
+    assert(rs3_snapshot_copy(NULL, copy) == RS3_E_ARGUMENT);
+    assert(rs3_snapshot_copy(source, NULL) == RS3_E_ARGUMENT);
+    assert(rs3_snapshot_copy(source, copy) == RS3_OK);
+    assert(rs3_snapshot_copy(copy, copy) == RS3_OK);
+    assert(copy->info.sequence == 77);
+    assert(copy->info.monotonic_ns == source->info.monotonic_ns);
+    assert(copy->info.process_creation_time == source->info.process_creation_time);
+    assert(copy->spatial.player.target_runtime_id == FIXTURE_NPC_RUNTIME_ID);
+    source->info.sequence++;
+    source->items[0].item_id = FIXTURE_ITEM_BREW_5;
+    source->items[0].token++;
+    source->spatial.player.target_runtime_id++;
+    INPUT chord[MAX_CHORD_INPUTS];
+    uint32_t count;
+    assert(input_prepare_item_chord(source, 0, FIXTURE_ITEM_BREW_6, FIXTURE_ITEM_TOKEN, VK_F5, 0,
+                                    chord, &count) == RS3_E_TARGET);
+    assert(input_prepare_item_chord(copy, 0, FIXTURE_ITEM_BREW_6, FIXTURE_ITEM_TOKEN, VK_F5, 0,
+                                    chord, &count) == RS3_OK);
+    fixture_destroy(test_fixture);
+    /* A copied snapshot owns the arrays; it never borrows the source's lifetime. */
+    assert(copy->info.sequence == 77);
+    assert(copy->items[0].item_id == FIXTURE_ITEM_BREW_6);
+    assert(copy->items[0].token == FIXTURE_ITEM_TOKEN);
+    assert(copy->spatial.player.target_runtime_id == FIXTURE_NPC_RUNTIME_ID);
+    assert(input_prepare_ability_chord(copy, FIXTURE_ABILITY_ID, VK_F5, RS3_KEY_CTRL, chord,
+                                       &count) == RS3_OK);
+    rs3_snapshot_destroy(copy);
+}
+
 int main(void)
 {
     RUN_TEST(projects_minimap_tiles_and_guards_actions);
@@ -257,6 +295,7 @@ int main(void)
     RUN_TEST(prepares_modified_abilities_and_rejects_missing_or_ambiguous_ids);
     RUN_TEST(item_chord_requires_exact_slot_dose_token_and_quantity);
     RUN_TEST(key_chords_reject_stale_scene_clock_and_unknown_inventory);
+    RUN_TEST(copied_policy_snapshot_survives_source_changes_and_destruction);
     puts("PASS: input tests");
     return 0;
 }
