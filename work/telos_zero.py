@@ -951,7 +951,20 @@ def run(reader, args, board, attempt=None):
                 emit("stomp_dodge_skipped", reason=str(error), target=target)
                 continue
             phase_one.stomp_checked = True
+            # P only selects Dive; the left click on the pointed tile performs it (account owner).
             sent = send_chord(bindings["Dive"])
+            if sent:
+                try:
+                    pointer_window.check_point(*pointer_window.cursor())
+                    board.command("CLICK L", check_focus)
+                except FocusLost:
+                    sent = False
+                    emit("input_interrupted", reason="RuneScape lost foreground focus")
+                except RuntimeError as error:
+                    if "F12" in str(error):
+                        raise
+                    sent = False
+                    emit("stomp_dodge_skipped", reason=str(error), target=target)
             emit(
                 "stomp_dodge",
                 sent=sent,
