@@ -318,8 +318,10 @@ METER_MASK = (1 << PHASE_SHIFT) - 1
 # enum rs3_hazard_kind: scene-location strips read on Compatibility Mode (commit ca6f117).
 GREEN_BEAM_KIND = 1
 BLACK_BEAM_KIND = 2
-BEAM_KIND_BY_PHASE = {1: GREEN_BEAM_KIND, 2: BLACK_BEAM_KIND}
-# The meter counts as fed after this many rises within the last BEAM_FEED_WINDOW tick changes.
+# Only the black stream is blocked. In the 300% run of 175142 the green P1 strip stopped short
+# of Telos and moved, so following it dragged the player away from Telos for 50 ticks.
+BEAM_KIND_BY_PHASE = {2: BLACK_BEAM_KIND}
+# The meter counts as fed after this many rises within the last BEAM_FEED_WINDOW received ticks.
 BEAM_FEED_RISES = 2
 BEAM_FEED_WINDOW = 3
 BEAM_MOVE_RETRY_TICKS = 3
@@ -335,17 +337,14 @@ def footprint_distance(tile, boss_tile, size):
 
 
 def beam_target(beam_tiles, boss_tile, size, player_tile):
-    """The stream tile to block from: next to Telos (melee range) if any, nearest the player."""
-    if not beam_tiles:
+    """The stream tile next to Telos (melee range) nearest the player, or None.
+
+    Tiles further out are never chosen: clicking Telos from there walks the player out again.
+    """
+    adjacent = [tile for tile in beam_tiles if footprint_distance(tile, boss_tile, size) == 1]
+    if not adjacent:
         return None
-    return min(
-        beam_tiles,
-        key=lambda tile: (
-            max(footprint_distance(tile, boss_tile, size), 1),
-            chebyshev(tile, player_tile),
-            tile,
-        ),
-    )
+    return min(adjacent, key=lambda tile: (chebyshev(tile, player_tile), tile))
 
 
 class BeamBlocker:
@@ -353,19 +352,21 @@ class BeamBlocker:
 
     def __init__(self):
         self.last_meter = None
-        self.rises = []
+        self.rise_ticks = []
         self.next_move_tick = None
         self.reengage_due = False
 
     def observe(self, meter, received_tick):
-        """Record one meter reading; return whether a stream is feeding Telos."""
+        """Record one meter reading; return whether a stream is feeding Telos now."""
         if meter is None:
             return False
-        if self.last_meter is not None and meter != self.last_meter:
-            self.rises.append(meter > self.last_meter)
-            del self.rises[:-BEAM_FEED_WINDOW]
+        if self.last_meter is not None and meter > self.last_meter:
+            self.rise_ticks.append(received_tick)
         self.last_meter = meter
-        return sum(self.rises) >= BEAM_FEED_RISES
+        self.rise_ticks = [
+            tick for tick in self.rise_ticks if received_tick - tick < BEAM_FEED_WINDOW
+        ]
+        return len(self.rise_ticks) >= BEAM_FEED_RISES
 
     def move_due(self, received_tick):
         """Rate-limit movement into the stream."""
@@ -376,7 +377,7 @@ class BeamBlocker:
 
     def blocked(self):
         """The player has reached the stream: forget the rises seen while it fed Telos."""
-        self.rises.clear()
+        self.rise_ticks.clear()
 
 
 class TargetPicker:
@@ -1382,15 +1383,13 @@ def run(reader, args, board, attempt=None):
             return
         if font_duty.move_due(player_tile, target, received_tick):
             distance = chebyshev(player_tile, target)
-            use_dive = (
-                "Dive" in bindings and not timers.get("Dive") and distance <= DIVE_RANGE_TILES
-            )
+            # Walk only: the font is an NPC on its tile, and fifteen Dives aimed at it in the
+            # 300% run of 175142 never moved the player; the walk clicks of 173454 did.
             point = project_tile(reader, target, player.tile.plane, player.fine_height)
-            sent = None if point is None else click_point(point, select_dive=use_dive)
+            sent = None if point is None else click_point(point, select_dive=False)
             emit(
                 "font_move",
                 sent=sent,
-                dive=use_dive,
                 target=target,
                 player_tile=player_tile,
                 distance=distance,
@@ -1453,6 +1452,8 @@ def run(reader, args, board, attempt=None):
         target = beam_target(
             beam_tiles, (pose.tile.x, pose.tile.y), pose.footprint_size or 1, player_tile
         )
+        if target is None:
+            return  # The strip does not reach Telos: blocking it would end melee.
         point = project_tile(reader, target, player.tile.plane, player.fine_height)
         sent = None if point is None else click_point(point, select_dive=False)
         if sent:

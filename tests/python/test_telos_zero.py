@@ -475,20 +475,32 @@ class BeamTests(unittest.TestCase):
         strip = [(7509, y) for y in range(2456, 2466)]
         self.assertEqual(beam_target(strip, (7507, 2451), 5, (7505, 2449)), (7509, 2456))
         self.assertIsNone(beam_target([], (7507, 2451), 5, (7505, 2449)))
+        # A strip that stops short of Telos is not followed (300% P1 green, 175142).
+        self.assertIsNone(beam_target(strip[3:], (7507, 2451), 5, (7505, 2449)))
 
     def test_meter_rises_detect_feeding_but_projectile_spend_does_not(self):
         blocker = BeamBlocker()
-        # Logged meter: 0 at the P2 opener, then +3 per tick while the black stream fed Telos.
+        # Logged 174445 meter: 0 at the P2 opener, then +3 per tick while the stream fed Telos.
         self.assertFalse(blocker.observe(0, 6618))
         self.assertFalse(blocker.observe(3, 6639))
         self.assertTrue(blocker.observe(6, 6640))
-        # An Onslaught projectile spends 7-10 per cast; a stream still feeding keeps it True.
+        for tick in range(6641, 6649):
+            self.assertTrue(blocker.observe(3 * (tick - 6638), tick))
+        # An Onslaught projectile spends 7 while the stream keeps feeding: still fed.
         self.assertTrue(blocker.observe(23, 6649))
         self.assertTrue(blocker.observe(26, 6650))
         # Once blocked, an unfed Onslaught only falls (100% kill: 70, 60, 50 ...).
         blocker.blocked()
         for tick, meter in ((5702, 60), (5706, 50), (5710, 40)):
             self.assertFalse(blocker.observe(meter, tick))
+
+    def test_flat_meter_is_not_fed(self):
+        # 175142 P2: the meter sat at 3 for 30 ticks after two early rises.
+        blocker = BeamBlocker()
+        for tick, meter in ((7350, 0), (7351, 3), (7352, 3)):
+            blocker.observe(meter, tick)
+        for tick in range(7353, 7390):
+            self.assertFalse(blocker.observe(3, tick))
 
     def test_moves_are_rate_limited(self):
         blocker = BeamBlocker()
