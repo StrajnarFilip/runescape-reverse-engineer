@@ -52,6 +52,12 @@ METER_MASK = (1 << 21) - 1
 FLAT_TICKS_TO_STOP = 2
 MIN_FEEDING_TICKS = 3
 MAX_AUTOMATIC_SNAPSHOTS = 40
+# Byte windows are saved around fine positions this far from Telos (the platform edge).
+EDGE_MIN_TILES = 8
+EDGE_MAX_TILES = 25
+CONTEXT_BYTES = 0x300
+MAX_CONTEXTS = 30000
+BELOW_NORMAL_PRIORITY_CLASS = 0x4000
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 _read_process_memory = _kernel32.ReadProcessMemory
 _read_process_memory.argtypes = [
@@ -212,8 +218,34 @@ def scan_chunk(base, data, fine_bounds, tile_bounds):
     return float_rows, int_rows
 
 
-def snapshot(memory, telos_tile):
-    """Scan private writable memory once. Return (float hits, int hits, bytes read, seconds)."""
+def edge_contexts(address, buffer, float_rows, center):
+    """Return (addresses, byte windows) around fine positions at the arena edge.
+
+    The beam emitters are permanent rings at the platform edge, so their objects exist whether
+    or not they fire. Saving the bytes around each edge position lets analysis find the field
+    that changes when one starts feeding Telos.
+    """
+    rows = float_rows[~numpy.isnan(float_rows[:, 2])]
+    tiles = numpy.column_stack((rows[:, 1], rows[:, 3])) / FINE_UNITS_PER_TILE
+    distance = numpy.hypot(tiles[:, 0] - center[0], tiles[:, 1] - center[1])
+    rows = rows[(distance >= EDGE_MIN_TILES) & (distance <= EDGE_MAX_TILES)]
+    addresses, windows = [], []
+    for hit in rows[:, 0].astype(numpy.uint64):
+        start = int(hit) - address - CONTEXT_BYTES
+        window = numpy.zeros(2 * CONTEXT_BYTES, dtype=numpy.uint8)
+        low, high = max(start, 0), min(start + 2 * CONTEXT_BYTES, len(buffer))
+        if high > low:
+            window[low - start : high - start] = buffer[low:high]
+        addresses.append(int(hit))
+        windows.append(window)
+    return addresses, windows
+
+
+def snapshot(memory, telos_tile, threads=None, contexts=False):
+    """Scan private writable memory once.
+
+    Return (float hits, int hits, context addresses, context windows, bytes read, seconds).
+    """
     center_x, center_y = telos_tile[0], telos_tile[1]
     tile_bounds = (
         (center_x - ARENA_RADIUS_TILES, center_x + ARENA_RADIUS_TILES),
@@ -239,25 +271,47 @@ def snapshot(memory, telos_tile):
             return None
         if transferred.value != length:
             return None
-        return (length, *scan_chunk(address, buffer, fine_bounds, tile_bounds))
+        float_rows, int_rows = scan_chunk(address, buffer, fine_bounds, tile_bounds)
+        context = (
+            edge_contexts(address, buffer, float_rows, (center_x, center_y))
+            if contexts
+            else ([], [])
+        )
+        return length, float_rows, int_rows, context
 
     # ReadProcessMemory on this client is page-fault bound (~85 MB/s on one thread);
     # parallel reads cover the 2.7 GB private heap in about 4.4 s.
     float_parts, int_parts, bytes_read = [], [], 0
-    with ThreadPoolExecutor(READ_THREADS) as pool:
+    context_addresses, context_windows = [], []
+    with ThreadPoolExecutor(threads or READ_THREADS) as pool:
         for result in pool.map(read_and_scan, tasks):
             if result is None:
                 continue
-            length, float_rows, int_rows = result
+            length, float_rows, int_rows, (addresses, windows) = result
             bytes_read += length
             if len(float_rows):
                 float_parts.append(float_rows)
             if len(int_rows):
                 int_parts.append(int_rows)
+            room = MAX_CONTEXTS - len(context_addresses)
+            context_addresses.extend(addresses[:room])
+            context_windows.extend(windows[:room])
     empty = numpy.zeros((0, 4))
     float_hits = numpy.concatenate(float_parts) if float_parts else empty
     int_hits = numpy.concatenate(int_parts) if int_parts else empty
-    return float_hits, int_hits, bytes_read, time.perf_counter() - started
+    windows = (
+        numpy.stack(context_windows)
+        if context_windows
+        else numpy.zeros((0, 2 * CONTEXT_BYTES), dtype=numpy.uint8)
+    )
+    return (
+        float_hits,
+        int_hits,
+        numpy.array(context_addresses, dtype=numpy.uint64),
+        windows,
+        bytes_read,
+        time.perf_counter() - started,
+    )
 
 
 def main():
@@ -275,7 +329,20 @@ def main():
         action="store_true",
         help="Also snapshot when the Telos anima meter (VARP 6363) starts or stops rising",
     )
+    parser.add_argument("--threads", type=int, default=READ_THREADS, help="Parallel readers")
+    parser.add_argument(
+        "--low-priority",
+        action="store_true",
+        help="Run below normal priority, e.g. alongside the practice controller",
+    )
+    parser.add_argument(
+        "--edge-contexts",
+        action="store_true",
+        help="Save byte windows around fine positions 8-25 tiles from Telos",
+    )
     arguments = parser.parse_args()
+    if arguments.low_priority:
+        _kernel32.SetPriorityClass(_kernel32.GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS)
     labels = {
         VIRTUAL_KEYS[arguments.visible_key]: "beam_visible",
         VIRTUAL_KEYS[arguments.gone_key]: "beam_gone",
@@ -338,11 +405,19 @@ def main():
             last_center = center
             marked_ns = time.monotonic_ns()
             meter, tick = meter_and_tick(reader)
-            float_hits, int_hits, bytes_read, seconds = snapshot(memory, center)
+            float_hits, int_hits, context_addresses, context_windows, bytes_read, seconds = (
+                snapshot(memory, center, arguments.threads, arguments.edge_contexts)
+            )
             after_telos, after_player = telos_and_player_tiles(reader)
             count += 1
             name = f"{count:03d}-{label}"
-            numpy.savez_compressed(directory / f"{name}.npz", floats=float_hits, ints=int_hits)
+            numpy.savez_compressed(
+                directory / f"{name}.npz",
+                floats=float_hits,
+                ints=int_hits,
+                context_addresses=context_addresses,
+                context_windows=context_windows,
+            )
             record = {
                 "snapshot": name,
                 "label": label,
@@ -357,6 +432,7 @@ def main():
                 "player_tile_after": after_player,
                 "float_hits": len(float_hits),
                 "int_hits": len(int_hits),
+                "edge_contexts": len(context_addresses),
                 "bytes_scanned": bytes_read,
                 "scan_seconds": round(seconds, 3),
             }
