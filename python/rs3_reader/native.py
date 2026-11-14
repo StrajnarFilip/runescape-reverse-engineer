@@ -609,6 +609,13 @@ class SpatialFlags(IntFlag):
     SAME_WORLD = 16
 
 
+class SpatialTargetKind(IntEnum):
+    """Mapped local-player target kinds; require SpatialFlags.TARGET."""
+
+    NONE = 0
+    NPC = 1
+
+
 class Camera(ctypes.Structure):
     """rs3_camera; a complete physical projection requires all three validity bits."""
 
