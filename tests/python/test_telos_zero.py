@@ -136,6 +136,22 @@ class PhaseOneTests(unittest.TestCase):
         )
         self.assertEqual(action.ability, "Resonance")
 
+    def test_resonance_retries_once_when_queued_press_did_not_cast(self):
+        # The 500% P2 case: queued at +0, but the slot freed at +3 without a cast.
+        phase = PhaseOne()
+        phase.observe([dict(event(1, HOLD_STILL), received_tick=5791)])
+        timers = {"Resonance": 0}
+        first = phase.next_action(SECOND_NS, timers, 1780, Prayer.SOUL_SPLIT, received_tick=5791)
+        phase.sent(first, SECOND_NS)
+        for tick, gcd in ((5792, 1180), (5793, 580)):
+            self.assertIsNone(
+                phase.next_action(SECOND_NS, timers, gcd, Prayer.SOUL_SPLIT, received_tick=tick)
+            )
+        retry = phase.next_action(SECOND_NS, timers, 0, Prayer.SOUL_SPLIT, received_tick=5794)
+        self.assertEqual(retry.ability, "Resonance")
+        phase.sent(retry, SECOND_NS)
+        self.assertIsNone(phase.next_action(SECOND_NS, timers, 0, Prayer.MELEE, received_tick=5794))
+
     def test_resonance_skips_free_slot_before_plus_two(self):
         phase = PhaseOne()
         phase.observe([dict(event(1, HOLD_STILL), received_tick=50)])

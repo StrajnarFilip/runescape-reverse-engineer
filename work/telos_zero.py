@@ -89,6 +89,9 @@ UPPERCUT_ESCAPE_TICKS = (4, 5)
 RESONANCE_FIRST_HIT_TICK = 2
 RESONANCE_LATEST_TICK = 3
 RESONANCE_SLOT_TICKS = (2, 4)
+# In the 500% P1 Hold Still the queued press cast at +3 and the +4 hit healed 4,195. In P2 the
+# same queued press did not cast when the slot freed, so one immediate retry follows.
+RESONANCE_MAX_ATTEMPTS = 2
 TICK_MS = 600
 UPPERCUT_ESCAPE_FALLBACK_NS = (2_400_000_000, 3_000_000_000)
 MOVEMENT_ABILITIES = frozenset({"Surge", "Escape"})
@@ -125,6 +128,7 @@ class PhaseOne:
         self.forecast_handled = False
         self.forecast_attempts = 0
         self.first_hit_tick = None
+        self.resonance_attempts = 0
         self.cast_result = None
 
     @property
@@ -157,6 +161,7 @@ class PhaseOne:
                 self.forecast_handled = False
                 self.forecast_attempts = 0
                 self.first_hit_tick = None
+                self.resonance_attempts = 0
                 self.expected = {
                     TENDRILS: UPPERCUT,
                     UPPERCUT: HOLD_STILL,
@@ -283,7 +288,7 @@ class PhaseOne:
         """
         if (
             self.special != HOLD_STILL
-            or "Resonance" in self.handled
+            or self.resonance_attempts >= RESONANCE_MAX_ATTEMPTS
             or "Resonance" not in cooldowns
             or cooldowns["Resonance"]
             or not isinstance(received_tick, int)
@@ -294,6 +299,9 @@ class PhaseOne:
         earliest_slot, latest_slot = RESONANCE_SLOT_TICKS
         if not 0 <= tick_delta <= latest_slot:
             return False
+        if self.resonance_attempts:
+            # The queued press did not cast: retry once the slot is free and still in range.
+            return gcd_remaining_ms == 0 and earliest_slot <= tick_delta
         if not isinstance(gcd_remaining_ms, int):
             if tick_delta == RESONANCE_FIRST_HIT_TICK:
                 return self.first_hit_tick is not None
@@ -304,8 +312,8 @@ class PhaseOne:
     def sent(self, action, now):
         """Wait for the sampled cooldown before treating this command as a cast."""
         if action.ability == "Resonance":
+            self.resonance_attempts += 1
             # Never displace another ability's pending acknowledgement.
-            self.handled.add("Resonance")
             if self.pending is not None:
                 return
         self.pending = (action.ability, now + ACK_TIMEOUT_NS)
