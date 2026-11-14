@@ -383,6 +383,19 @@ class PhaseOneTests(unittest.TestCase):
         action = phase.next_action(4 * SECOND_NS, timers, 0, Prayer.SOUL_SPLIT, flicking=True)
         self.assertEqual(action.ability, "Anticipation")
 
+    def test_hold_position_blocks_escape_and_surge(self):
+        phase = PhaseOne()
+        phase.observe([dict(event(1, UPPERCUT), received_tick=100)])
+        phase.hold_position = True
+        timers = {"Escape": 0, "Surge": 0}
+        for tick in (104, 105):
+            self.assertIsNone(
+                phase.next_action(4 * SECOND_NS, timers, 0, Prayer.MELEE, received_tick=tick)
+            )
+        phase.hold_position = False
+        action = phase.next_action(4 * SECOND_NS, timers, 0, Prayer.MELEE, received_tick=105)
+        self.assertEqual(action.ability, "Escape")
+
     def test_stale_auto_count_cannot_trigger_anticipation(self):
         phase = PhaseOne()
         phase.observe([event(1, UPPERCUT), event(2, AUTO), event(3, AUTO)])
@@ -399,6 +412,56 @@ class PhaseOneTests(unittest.TestCase):
         self.assertIsNone(phase.cast_result)
         phase.next_action(now + 2, {"Surge": 10000}, 0, Prayer.MELEE)
         self.assertEqual(phase.cast_result, ("Surge", True))
+
+
+FontDuty = controller["FontDuty"]
+GREEN_FONT = (25, 14608, 1832)
+
+
+def fonts(green_config, green_health):
+    """Fonts as in the 250% P4 capture (telos-20261114T171804): green plus two idle fonts."""
+    return [
+        (GREEN_FONT[0], green_config, green_health, GREEN_FONT[1:]),
+        (26, 22895, 1, (14621, 1805)),
+        (27, 22894, 1, (14638, 1829)),
+    ]
+
+
+class FontDutyTests(unittest.TestCase):
+    def test_idle_fonts_need_nothing(self):
+        duty = FontDuty()
+        self.assertEqual(duty.update(fonts(22893, 1), 4190), (None, None))
+        self.assertFalse(duty.active)
+
+    def test_captured_green_font_charge_and_hold(self):
+        duty = FontDuty()
+        target, event = duty.update(fonts(22896, 7500), 4226)
+        self.assertEqual((target, event), (GREEN_FONT[1:], "font_charge_started"))
+        self.assertTrue(duty.active)
+        # Player at (14616, 1833), eight tiles away: move now, then retry every 3 ticks.
+        self.assertTrue(duty.move_due((14616, 1833), target, 4226))
+        self.assertFalse(duty.move_due((14615, 1833), target, 4227))
+        self.assertTrue(duty.move_due((14613, 1833), target, 4229))
+        # The charge ran from (14609, 1831): inside reach, so no more clicks.
+        self.assertFalse(duty.move_due((14609, 1831), target, 4232))
+        for tick, health in ((4232, 6000), (4235, 4500), (4237, 3000), (4241, 1500)):
+            self.assertEqual(duty.update(fonts(22896, health), tick), (target, None))
+        self.assertEqual(duty.update(fonts(22899, 1), 4244), (target, "font_charged"))
+        self.assertTrue(duty.active)
+        hold_end = 4244 + controller["FONT_HOLD_TICKS"]
+        self.assertEqual(duty.update(fonts(22899, 1), hold_end - 1), (target, None))
+        self.assertEqual(duty.update(fonts(22899, 1), hold_end), (None, "font_hold_ended"))
+        self.assertFalse(duty.active)
+        # The finished font is not taken again; the next charging font is.
+        self.assertEqual(duty.update(fonts(22899, 1), hold_end + 1), (None, None))
+        red = [(26, 22898, 7500, (14621, 1805))]
+        self.assertEqual(duty.update(red, hold_end + 50), ((14621, 1805), "font_charge_started"))
+
+    def test_vanished_font_ends_duty(self):
+        duty = FontDuty()
+        duty.update(fonts(22896, 7500), 10)
+        self.assertEqual(duty.update([], 11), (None, "font_lost"))
+        self.assertFalse(duty.active)
 
 
 PrayerFlicker = controller["PrayerFlicker"]

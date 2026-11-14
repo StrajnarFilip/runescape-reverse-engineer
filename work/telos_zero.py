@@ -198,6 +198,107 @@ def known_floor_targets(boss_tile, size, player_tile, floor):
     )
 
 
+def chebyshev(first, second):
+    """Grid distance between two (x, y) tiles."""
+    return max(abs(first[0] - second[0]), abs(first[1] - second[1]))
+
+
+# P4 fonts, from the 250% capture of 2026-11-14 (telos-20261114T171804) and the account owner.
+# Three actors with base animation 28988 appear at fixed tiles when P4 starts, each reporting
+# 1 HP. At 3/4 of P4 health (112,500 of 150,000) the green font switched config 22893 -> 22896
+# and held a 7,500 charge. The charge fell by 1,500 per step, with about 1,400 soft typeless
+# damage to the player standing in it, and the font ended as config 22899 with 1 HP. Telos then
+# rises and sends an instakill that only the charged font prevents. The red font (2/4) and the
+# black font (1/4) work the same way, and the player must also stand inside them for the
+# instakill. Their configs are assumed to be the other two idle ones, again plus 3 and 6.
+FONT_IDLE_CONFIGS = frozenset({22893, 22894, 22895})
+FONT_STAGE_STEP = 3
+FONT_STAGES = 3
+FONT_CONFIGS = frozenset(
+    config + stage * FONT_STAGE_STEP for config in FONT_IDLE_CONFIGS for stage in range(FONT_STAGES)
+)
+# Idle and charged fonts report this health; a charging font reports its remaining charge.
+FONT_UNCHARGED_HEALTH = 1
+# The charge ran with the player one tile diagonally from the font's tile.
+FONT_REACH_TILES = 1
+# Stay in the charged font this many received ticks for Telos's instakill (timing unmeasured).
+FONT_HOLD_TICKS = 30
+# Move again when the player is still not inside after this many received ticks.
+FONT_MOVE_RETRY_TICKS = 3
+# Three minions spawned beside the green font as it became chargeable (13,000 HP each at 250%).
+# Account owner: red stuns at random (most dangerous), green hits harder the longer it lives,
+# black strips armour. Which config is which colour is not mapped yet.
+MINION_CONFIGS = frozenset({22905, 22906, 22907})
+
+
+class FontDuty:
+    """Decide when the player must go to, charge and stay in a P4 font.
+
+    ``update`` takes the visible fonts as (instance_id, config_id, health, tile) tuples and
+    returns the tile the player must stand on, or None when no font needs the player.
+    """
+
+    def __init__(self):
+        self.font = None
+        self.state = None
+        self.charged_tick = None
+        self.next_move_tick = None
+        self.move_attempts = 0
+        self.resonance_sent = False
+        self.finished = set()
+
+    @property
+    def active(self):
+        """While True the player must not move away (no Escape, Surge or stomp Dive)."""
+        return self.state is not None
+
+    def update(self, fonts, received_tick):
+        """Advance the duty; return (target tile or None, event name or None)."""
+        by_instance = {font[0]: font for font in fonts}
+        if self.state is None:
+            for instance_id, _config, health, tile in fonts:
+                if health > FONT_UNCHARGED_HEALTH and instance_id not in self.finished:
+                    self.font = instance_id
+                    self.state = "charging"
+                    self.next_move_tick = received_tick
+                    self.move_attempts = 0
+                    self.resonance_sent = False
+                    return tile, "font_charge_started"
+            return None, None
+        current = by_instance.get(self.font)
+        if current is None:
+            return self.finish("font_lost")
+        _, _config, health, tile = current
+        if self.state == "charging" and health <= FONT_UNCHARGED_HEALTH:
+            self.state = "holding"
+            self.charged_tick = received_tick
+            return tile, "font_charged"
+        if self.state == "holding" and received_tick - self.charged_tick >= FONT_HOLD_TICKS:
+            return self.finish("font_hold_ended")
+        return tile, None
+
+    def finish(self, event):
+        """End the duty for this font; it is not taken again in this attempt."""
+        self.finished.add(self.font)
+        self.font = None
+        self.state = None
+        return None, event
+
+    def move_due(self, player_tile, target, received_tick):
+        """Whether to (re)issue movement to the font this tick.
+
+        A player outside the font (not yet arrived, or pulled out by auto-retaliate) is sent
+        back at most once per FONT_MOVE_RETRY_TICKS for as long as the duty lasts.
+        """
+        if chebyshev(player_tile, target) <= FONT_REACH_TILES:
+            return False
+        if received_tick < self.next_move_tick:
+            return False
+        self.move_attempts += 1
+        self.next_move_tick = received_tick + FONT_MOVE_RETRY_TICKS
+        return True
+
+
 def project_tile(reader, tile, plane, fine_height):
     """Physical screen pixel of a tile at the given ground height, or None.
 
@@ -331,6 +432,8 @@ class PhaseOne:
         self.last_freedom_stun = None
         self.stomp_checked = False
         self.stomp_pending = None
+        # Set while a P4 font needs the player: Escape and Surge would leave the font.
+        self.hold_position = False
         self.opening_tick = None
         self.special = None
         self.special_ns = 0
@@ -464,6 +567,7 @@ class PhaseOne:
         active_special = 0 <= elapsed_ns < SPECIAL_WINDOW_NS
         if (
             self.special == UPPERCUT
+            and not self.hold_position
             and self.autos == 0
             and "Escape" not in self.handled
             and "Escape" in cooldowns
@@ -472,7 +576,7 @@ class PhaseOne:
         ):
             return Action("Escape", "Uppercut escape")
         movement = MOVEMENT_WINDOWS.get(self.special)
-        if movement and self.autos == 0 and "Surge" not in self.handled:
+        if movement and not self.hold_position and self.autos == 0 and "Surge" not in self.handled:
             earliest_ns, latest_ns, reason = movement
             if earliest_ns <= elapsed_ns <= latest_ns and "Surge" in cooldowns:
                 if not cooldowns["Surge"]:
@@ -997,6 +1101,7 @@ def run(reader, args, board, attempt=None):
         nonlocal pointer_window
         if (
             not input_allowed
+            or font_duty.active
             or "Dive" not in bindings
             or phase_one.special != HOLD_STILL
             or phase_one.stomp_checked
@@ -1095,6 +1200,103 @@ def run(reader, args, board, attempt=None):
             else:
                 phase_one.stomp_checked = True
             return
+
+    font_duty = FontDuty()
+    seen_p4_actors = set()
+
+    def p4_actors():
+        """Return the fonts as (instance_id, config_id, health, tile); log new P4 actors once."""
+        poses = {
+            pose.instance_id: pose
+            for pose in reader.npc_spatial[: reader.spatial.npc_count]
+            if pose.valid_mask & SpatialFlags.TILE
+        }
+        fonts = []
+        for npc in reader.npcs[: reader.info.npc_count]:
+            if npc.config_id not in FONT_CONFIGS and npc.config_id not in MINION_CONFIGS:
+                continue
+            pose = poses.get(npc.instance_id)
+            tile = (pose.tile.x, pose.tile.y) if pose is not None else None
+            key = (npc.instance_id, npc.config_id)
+            if key not in seen_p4_actors:
+                # Names show which minion is red, green or black.
+                seen_p4_actors.add(key)
+                emit(
+                    "p4_actor_seen",
+                    kind="font" if npc.config_id in FONT_CONFIGS else "minion",
+                    instance_id=npc.instance_id,
+                    config_id=npc.config_id,
+                    name=npc.name.decode(errors="replace"),
+                    health=npc.health_current,
+                    tile=tile,
+                    footprint=pose.footprint_size if pose is not None else None,
+                )
+            if npc.config_id in FONT_CONFIGS and tile is not None:
+                fonts.append((npc.instance_id, npc.config_id, npc.health_current, tile))
+        return fonts
+
+    def font_step(phase_one, boss, received_tick, timers):
+        """Go to the chargeable P4 font, stay through the instakill, then attack Telos again."""
+        if not isinstance(received_tick, int):
+            return
+        target, event = font_duty.update(p4_actors(), received_tick)
+        phase_one.hold_position = font_duty.active
+        player = reader.spatial.player
+        located = player.valid_mask & SpatialFlags.TILE and player.valid_mask & (
+            SpatialFlags.FINE_POSITION
+        )
+        player_tile = (player.tile.x, player.tile.y) if located else None
+        if event:
+            emit(event, target=target, player_tile=player_tile, received_tick=received_tick)
+            if event == "font_hold_ended":
+                reengage_telos(boss, player)
+        if target is None or player_tile is None or not input_allowed:
+            return
+        if font_duty.move_due(player_tile, target, received_tick):
+            distance = chebyshev(player_tile, target)
+            use_dive = (
+                "Dive" in bindings and not timers.get("Dive") and distance <= DIVE_RANGE_TILES
+            )
+            point = project_tile(reader, target, player.tile.plane, player.fine_height)
+            sent = None if point is None else click_point(point, select_dive=use_dive)
+            emit(
+                "font_move",
+                sent=sent,
+                dive=use_dive,
+                target=target,
+                player_tile=player_tile,
+                distance=distance,
+                attempt=font_duty.move_attempts,
+            )
+        elif (
+            font_duty.state == "charging"
+            and chebyshev(player_tile, target) <= FONT_REACH_TILES
+            and not font_duty.resonance_sent
+            and "Resonance" in bindings
+            and not timers.get("Resonance")
+        ):
+            # Resonance nullifies one charge step (account owner).
+            font_duty.resonance_sent = True
+            emit("font_resonance", sent=send_chord(bindings["Resonance"]))
+
+    def reengage_telos(boss, player):
+        """Left-click Telos's centre tile so melee resumes after leaving the font."""
+        pose = next(
+            (
+                p
+                for p in reader.npc_spatial[: reader.spatial.npc_count]
+                if p.instance_id == boss.instance_id and p.valid_mask & SpatialFlags.TILE
+            ),
+            None,
+        )
+        if pose is None or not input_allowed:
+            emit("telos_reengage", sent=False, reason="Telos tile or input unavailable")
+            return
+        offset = (pose.footprint_size or 1) // 2
+        centre = (pose.tile.x + offset, pose.tile.y + offset)
+        point = project_tile(reader, centre, player.tile.plane, player.fine_height)
+        sent = None if point is None else click_point(point, select_dive=False)
+        emit("telos_reengage", sent=sent, tile=centre)
 
     def click_point(point, *, select_dive):
         """Move the pointer to a physical pixel and left-click, after Dive if requested.
@@ -1602,6 +1804,7 @@ def run(reader, args, board, attempt=None):
             name: value for name, value in cooldowns(reader, bindings).items() if name in bindings
         }
         gcd_remaining_ms = player.gcd_remaining_ms if player.gcd_reason == Reason.NONE else None
+        phase_one.hold_position = font_duty.active  # A new phase object starts without it.
         action = phase_one.next_action(
             now,
             timers,
@@ -1667,6 +1870,8 @@ def run(reader, args, board, attempt=None):
                 surge_cue = pending_cue
             log("ability_sent", ability=action.ability, reason=action.reason, sent_ns=sent_ns)
         remember_floor(phase, boss)
+        if phase is not None and phase >= 4:
+            font_step(phase_one, boss, received_tick, timers)
         stomp_dodge(phase_one, boss, received_tick, timers)
         time.sleep(POLL_SECONDS)
     emit("timeout", active=active_instance is not None)
