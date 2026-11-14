@@ -219,7 +219,42 @@ class EncounterTracker:
         self._pending, self._auto_count = [], 0
         self._index, self._next = None, None
 
-    def _threats(self, event, row):
+    def _targets_local_player(self, event, world):
+        """Require same-frame native target identity, not proximity or animation alone."""
+        channel = world.raw.get("player_hit_splats")
+        if (
+            not isinstance(channel, Mapping)
+            or channel.get("status") != "available"
+            or not _integer(channel.get("player_index"))
+            or channel["player_index"] > 65535
+            or not _integer(channel.get("instance_id"), 1)
+            or not _fresh(world.player.tile, self.maximum_age_ms)
+            or not _fresh(world.npcs, self.maximum_age_ms)
+            or not _integer(event.get("sample_sequence"), 1)
+            or event["sample_sequence"] != world.sample_sequence
+        ):
+            return False
+        actors = [
+            npc
+            for npc in world.npcs.value
+            if _fresh(npc.instance_id, self.maximum_age_ms)
+            and npc.instance_id.value == event.get("instance_id")
+        ]
+        if len(actors) != 1:
+            return False
+        actor = actors[0]
+        target = actor.target
+        return (
+            _fresh(target, self.maximum_age_ms)
+            and target.value.kind == "player"
+            and target.value.instance_id == channel["instance_id"]
+            and target.value.player_index == channel["player_index"]
+            and target.value.runtime_id == channel["player_index"]
+            and _fresh(actor.tile, self.maximum_age_ms)
+            and actor.tile.value.plane == world.player.tile.value.plane
+        )
+
+    def _threats(self, event, row, world):
         window = row.get("cue_to_prayer_check_ms")
         prayer = PRAYER_IDS.get(row.get("required_protection"))
         valid = (
@@ -244,6 +279,8 @@ class EncounterTracker:
         # represent an entire multi-hit mechanic as one calibrated hitsplat.
         components = row.get("hit_components")
         valid = valid and isinstance(components, (tuple, list)) and len(components) == 1
+        timing_validated = bool(valid)
+        valid = timing_validated and self._targets_local_player(event, world)
         self._pending.append(
             IncomingThreat(
                 self._next_id,
@@ -256,7 +293,15 @@ class EncounterTracker:
                 event["observed_ns"] + round(window[1] * NS_PER_MS) if valid else None,
                 prayer if valid else None,
                 1 if valid else 0,
-                None if valid else "protection_check_unmeasured",
+                (
+                    None
+                    if valid
+                    else (
+                        "attacker_target_unverified"
+                        if timing_validated
+                        else "protection_check_unmeasured"
+                    )
+                ),
             )
         )
         self._next_id += 1
@@ -383,7 +428,9 @@ class EncounterTracker:
                 self._index, self._next = None, None
                 reasons.append("sequence_unlabelled_or_context_unknown")
                 continue
-            self._threats(event, row)
+            self._threats(event, row, world)
+            if self._pending[-1].reason == "attacker_target_unverified":
+                reasons.append("attacker_target_unverified")
             self._next = None
             if row.get("counts_as_auto") is True:
                 self._auto_count += 1

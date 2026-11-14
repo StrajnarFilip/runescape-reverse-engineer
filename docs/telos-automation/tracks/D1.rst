@@ -1,7 +1,7 @@
 D1 - Encounter tracker
 ======================
 
-:Status: in progress
+:Status: done
 :Wave: 1
 :Branch: ``telos/D1``
 :Kind: Python
@@ -124,3 +124,16 @@ Requests
   A calibrated single threat does not establish complete coverage. D3 needs
   independently measured damage bounds and defensive eligibility before timed
   survival proposals; current real threats deliberately omit those fields.
+
+* Attacker-target guard completed offline, 2026-11-14: a timing-calibrated
+  cue is usable only when its own native sample matches the current frame,
+  one fresh NPC target points to the exact local-player index/lifetime in the
+  current available player-hit channel, and both poses share a plane. Clear,
+  foreign, stale, unknown or other-frame target evidence leaves the classified
+  cue unresolved with attacker_target_unverified. Older captures keep their
+  classification counts without acquiring timing. Confirmed in-flight impacts
+  survive a later target clear or phase transition.
+* Twenty D1 tests pass, including five new target/frame regressions and both
+  unchanged historical real-capture golden replays. This does not validate new
+  attack rows or server deadlines. P1's live active-Telos native target check
+  and P6's per-component/timing/coverage work remain required before live use.
