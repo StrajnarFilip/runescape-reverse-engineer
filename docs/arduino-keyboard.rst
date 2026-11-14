@@ -181,9 +181,13 @@ only P5's validated plain/Ctrl function-key labels. It rejects missing,
 duplicate, stale or undecoded rows without falling back to a static mapping.
 Letter/digit mappings and potion-family aliases require separate calibration.
 
-The native adapter copies a private snapshot and requires the exact same
-sample sequence, process/scene and executable as the WorldState whose policy
-and binding were checked. A newer sample rejects with
+The native adapter uses ``rs3_snapshot_copy`` when available to copy the exact
+caller-owned ``Reader.snapshot`` into its private storage. The caller must
+serialize consumer refresh and dispatch, as required by Reader's reusable
+storage contract. The independent native worker may keep sampling; it never
+mutates that consumer snapshot. Older DLLs fall back to copying worker latest.
+Both paths require the exact same sample sequence, process/scene and executable
+as the WorldState whose policy and binding were checked. A newer sample rejects with
 ``native_snapshot_advanced`` so the arbiter can recompute from new evidence.
 It never applies an old item/binding decision to a newer unexamined frame.
 
@@ -216,3 +220,8 @@ cover typed native chord calls and 64-bit item arguments, old-DLL capability
 rejection, same-tick lanes, binding moves (including after modifier press),
 P5 unknown/duplicate/stale rows, and copied-frame/build changes. No physical
 USB/game delivery or live controller enablement was performed.
+
+The 2026-11-14 owned-copy follow-up passes 33 A1 tests. It verifies that a
+newer independent worker cannot replace the consumer frame, and that a changed
+or missing consumer snapshot still rejects. The native copy preserves the
+original timestamps and never makes stale evidence fresh.

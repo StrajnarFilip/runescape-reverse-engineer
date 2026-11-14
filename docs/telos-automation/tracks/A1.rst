@@ -106,3 +106,9 @@ Requests
   the independent native worker must not race the examined policy frame. Keep
   exact metadata checks and reject if the consumer itself advanced. No game
   memory or function calls are involved in a local snapshot copy.
+
+* Exact-snapshot request resolved: prefer ``rs3_snapshot_copy`` of the stable
+  caller-owned reader sample. The worker may advance independently. The caller
+  serializes consumer refresh and dispatch; a changed consumer still rejects.
+  Old DLLs retain latest-frame fallback plus exact identity/sequence checks.
+  Thirty-three A1 fake-device/ABI/host-firmware tests pass with no game input.

@@ -524,6 +524,8 @@ class NativeSnapshotDevice:
     Close the actuator before closing its Reader. DLL chords are balanced and
     partial-insertion releases are owned by src/input.c, not by Python. This
     adapter never emits a global key-up that could release a user's own keys.
+    As with Reader.sample(), the caller serializes consumer refresh and dispatch.
+    The native worker may run independently: it never mutates Reader.snapshot.
     """
 
     def __init__(self, reader):
@@ -532,6 +534,10 @@ class NativeSnapshotDevice:
         self.reader, self.library = reader, reader.library
         self.snapshot = ctypes.c_void_p()
         self.info, self.combat = Info(), CombatState()
+        self.snapshot_copy = getattr(self.library, "rs3_snapshot_copy", None)
+        if self.snapshot_copy is not None:
+            self.snapshot_copy.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            self.snapshot_copy.restype = ctypes.c_int32
         function = self.library.rs3_activate_ability
         function.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32]
         function.restype = ctypes.c_int32
@@ -573,8 +579,17 @@ class NativeSnapshotDevice:
         lib, snapshot = self.library, self.snapshot
         if not snapshot or not self.reader.context:
             raise DeviceFault("native_device_closed")
+        if self.snapshot_copy is not None:
+            source = getattr(self.reader, "snapshot", None)
+            if not source:
+                raise DeviceFault("native_source_snapshot_unavailable")
+            acquire = self.snapshot_copy
+        else:
+            # Older DLLs can copy only the worker's latest frame; exact metadata below
+            # still rejects if it has advanced beyond the WorldState being checked.
+            source, acquire = self.reader.context, lib.rs3_copy_latest
         for function, arguments in (
-            (lib.rs3_copy_latest, (self.reader.context, snapshot)),
+            (acquire, (source, snapshot)),
             (lib.rs3_snapshot_info, (snapshot, ctypes.byref(self.info), ctypes.sizeof(self.info))),
             (
                 lib.rs3_snapshot_combat,
