@@ -121,6 +121,14 @@ class PhaseOneTests(unittest.TestCase):
         # North-west offset continues north-west.
         self.assertEqual(escapes(boss, 5, (100, 204))[0], (96, 208))
 
+    def test_dive_targets_only_known_floor_outside_the_stomp(self):
+        targets = controller["known_floor_targets"]
+        boss, player = (100, 200), (106, 202)  # Centre (102,202); player 4 tiles east.
+        floor = {(106, 202), (107, 202), (108, 202), (97, 202), (102, 213), (100, 200)}
+        # (106,202) is inside the stomp area, (102,213) is beyond Dive reach; nearest first.
+        self.assertEqual(targets(boss, 5, player, floor), [(107, 202), (108, 202), (97, 202)])
+        self.assertEqual(targets(boss, 5, player, {(100, 200), (104, 204)}), [])
+
     def test_phase_three_opening_after_tendrils_forecasts_hold_still(self):
         phase = PhaseOne(phase=3, carried_expected=controller["ONSLAUGHT"])
         self.assertEqual(phase.expected, HOLD_STILL)

@@ -113,7 +113,16 @@ ENCOUNTER_RESET = 3
 # Hold Still ends with a typeless stomp that only hurts a player inside Telos's footprint
 # (account owner, 2026-11-14; up to 9,900 at 500%). If the player is still underneath during
 # these received ticks after 28935, Dive to a tile this far from Telos's centre.
-STOMP_CHECK_TICKS = (1, 4)
+# Telos relocated at +3 in the 500% capture of 2026-11-14 and the stomp follows his new position
+# at +8/+9, so the check starts once he has moved (and after Resonance's +2..+4 slot: a click
+# right after queuing Resonance coincided with Resonance never casting).
+STOMP_CHECK_TICKS = (4, 7)
+# The Dive press and the click are separated so the client is in targeting mode first; a
+# Dive that leaves the tile unchanged after this many ticks falls back to walking there.
+DIVE_SELECT_SECONDS = 0.15
+DIVE_RANGE_TILES = 10
+STOMP_TARGET_ATTEMPTS = 4
+STOMP_DIVE_CONFIRM_TICKS = 2
 # The stomp reaches beyond the 5x5 body: players 4 tiles (Chebyshev) from Telos's centre took
 # 9,322 at 500% and 5,401 at 500% P3 (2026-11-14). Treat 4 tiles from the centre as unsafe and
 # Dive to 6 tiles out.
@@ -161,6 +170,27 @@ def stomp_escape_tiles(boss_tile, size, player_tile):
         )
         for direction in sorted(EIGHT_DIRECTIONS, key=closeness)
     ]
+
+
+def known_floor_targets(boss_tile, size, player_tile, floor):
+    """Known-walkable Dive targets outside the stomp area and within Dive reach, nearest first.
+
+    A direction-only target landed off the platform on 2026-11-14 (account owner), so only
+    tiles the player or Telos's body has occupied on the current platform are used.
+    """
+    candidates = [
+        tile
+        for tile in floor
+        if not in_stomp_area(boss_tile, size, tile)
+        and max(abs(tile[0] - player_tile[0]), abs(tile[1] - player_tile[1])) <= DIVE_RANGE_TILES
+    ]
+    return sorted(
+        candidates,
+        key=lambda tile: (
+            max(abs(tile[0] - player_tile[0]), abs(tile[1] - player_tile[1])),
+            tile,
+        ),
+    )
 
 
 def project_tile(reader, tile, plane, fine_height):
@@ -287,6 +317,7 @@ class PhaseOne:
             )
         self.last_freedom_stun = None
         self.stomp_checked = False
+        self.stomp_pending = None
         self.special = None
         self.special_ns = 0
         self.special_event = None
@@ -332,6 +363,7 @@ class PhaseOne:
                 self.first_hit_tick = None
                 self.resonance_attempts = 0
                 self.stomp_checked = False
+                self.stomp_pending = None
                 self.expected = self.next_special[sequence]
 
     def next_action(
@@ -886,6 +918,26 @@ def run(reader, args, board, attempt=None):
             input_allowed = focused
 
     pointer_window = None
+    # Tiles known to be floor on the current platform: player tiles and Telos's body.
+    floor_tiles = set()
+    floor_phase = [None]
+
+    def remember_floor(phase, boss):
+        """Collect walkable tiles for the stomp dodge (only needed when Dive is bound)."""
+        if "Dive" not in bindings:
+            return
+        if phase != floor_phase[0]:
+            floor_tiles.clear()  # Each phase is a different platform.
+            floor_phase[0] = phase
+        player = reader.spatial.player
+        if player.valid_mask & SpatialFlags.TILE:
+            floor_tiles.add((player.tile.x, player.tile.y))
+        for pose in reader.npc_spatial[: reader.spatial.npc_count]:
+            if pose.instance_id == boss.instance_id and pose.valid_mask & SpatialFlags.TILE:
+                size = pose.footprint_size or 1
+                for dx in range(size):
+                    for dy in range(size):
+                        floor_tiles.add((pose.tile.x + dx, pose.tile.y + dy))
 
     def stomp_dodge(phase_one, boss, received_tick, timers):
         """Dive out from under Telos before the Hold Still stomp, once per Hold Still."""
@@ -904,8 +956,29 @@ def run(reader, args, board, attempt=None):
             return
         if delta > STOMP_CHECK_TICKS[1]:
             phase_one.stomp_checked = True
+            if phase_one.stomp_pending:
+                emit("stomp_dodge_result", moved=False, **phase_one.stomp_pending)
+                phase_one.stomp_pending = None
             return
         player = reader.spatial.player
+        pending = phase_one.stomp_pending
+        if pending is not None:
+            # Confirm the Dive moved the player; otherwise walk to the same tile once.
+            if not player.valid_mask & SpatialFlags.TILE:
+                return
+            current = (player.tile.x, player.tile.y)
+            if current != tuple(pending["player_tile"]):
+                emit("stomp_dodge_result", moved=True, tile=current, **pending)
+                phase_one.stomp_pending = None
+                phase_one.stomp_checked = True
+            elif (
+                delta - pending["received_tick_delta"] >= STOMP_DIVE_CONFIRM_TICKS
+                and not pending["walked"]
+            ):
+                pending["walked"] = True
+                walked = click_point(tuple(pending["screen_point"]), select_dive=False)
+                emit("stomp_walk_fallback", sent=walked, target=pending["target"])
+            return
         pose = next(
             (
                 p
@@ -941,48 +1014,62 @@ def run(reader, args, board, attempt=None):
             return
         if timers.get("Dive"):
             return  # Dive still cooling down; check again next sample.
-        for target in stomp_escape_tiles(boss_tile, size, player_tile):
+        targets = known_floor_targets(boss_tile, size, player_tile, floor_tiles)
+        if not targets:
+            emit("stomp_dodge_skipped", reason="No known floor tile outside the stomp area")
+            phase_one.stomp_checked = True
+            return
+        for target in targets[:STOMP_TARGET_ATTEMPTS]:
             point = project_tile(reader, target, player.tile.plane, player.fine_height)
             if point is None:
                 continue
-            try:
-                if pointer_window is None:
-                    pointer_window = GameWindow()
-                bounds = pointer_window.bounds()
-                move_pointer(board, pointer_window, bounds, point)
-            except FocusLost:
-                raise
-            except RuntimeError as error:
-                if "F12" in str(error):
-                    raise
-                emit("stomp_dodge_skipped", reason=str(error), target=target)
-                continue
-            phase_one.stomp_checked = True
-            # P only selects Dive; the left click on the pointed tile performs it (account owner).
-            sent = send_chord(bindings["Dive"])
+            sent = click_point(point, select_dive=True)
+            if sent is None:
+                continue  # Pointer could not reach this target; try the next direction.
+            record = {
+                "player_tile": player_tile,
+                "boss_tile": boss_tile,
+                "footprint": size,
+                "centre_distance": centre_distance,
+                "target": target,
+                "screen_point": point,
+                "received_tick_delta": delta,
+                "walked": False,
+            }
+            emit("stomp_dodge", sent=sent, **record)
             if sent:
-                try:
-                    pointer_window.check_point(*pointer_window.cursor())
-                    board.command("CLICK L", check_focus)
-                except FocusLost:
-                    sent = False
-                    emit("input_interrupted", reason="RuneScape lost foreground focus")
-                except RuntimeError as error:
-                    if "F12" in str(error):
-                        raise
-                    sent = False
-                    emit("stomp_dodge_skipped", reason=str(error), target=target)
-            emit(
-                "stomp_dodge",
-                sent=sent,
-                player_tile=player_tile,
-                boss_tile=boss_tile,
-                footprint=size,
-                target=target,
-                screen_point=point,
-                received_tick_delta=delta,
-            )
+                phase_one.stomp_pending = record
+            else:
+                phase_one.stomp_checked = True
             return
+
+    def click_point(point, *, select_dive):
+        """Move the pointer to a physical pixel and left-click, after Dive if requested.
+
+        Returns True when sent, False when focus was lost, None when the pointer could not be
+        placed (window moved, pixel covered). Only F12 propagates.
+        """
+        nonlocal pointer_window
+        try:
+            if pointer_window is None:
+                pointer_window = GameWindow()
+            move_pointer(board, pointer_window, pointer_window.bounds(), point)
+            if select_dive:
+                # P only selects Dive; the left click on the pointed tile performs it.
+                if not send_chord(bindings["Dive"]):
+                    return False
+                time.sleep(DIVE_SELECT_SECONDS)
+            pointer_window.check_point(*pointer_window.cursor())
+            board.command("CLICK L", check_focus)
+        except FocusLost:
+            emit("input_interrupted", reason="RuneScape lost foreground focus")
+            return False
+        except RuntimeError as error:
+            if "F12" in str(error):
+                raise
+            emit("stomp_dodge_skipped", reason=str(error), screen_point=point)
+            return None
+        return True
 
     def send_chord(chord):
         """Press a chord; return False when RuneScape is unfocused or focus was lost mid-press."""
@@ -1528,6 +1615,7 @@ def run(reader, args, board, attempt=None):
                 surge_sent_ns = sent_ns
                 surge_cue = pending_cue
             log("ability_sent", ability=action.ability, reason=action.reason, sent_ns=sent_ns)
+        remember_floor(phase, boss)
         stomp_dodge(phase_one, boss, received_tick, timers)
         time.sleep(POLL_SECONDS)
     emit("timeout", active=active_instance is not None)
