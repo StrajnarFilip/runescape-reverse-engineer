@@ -343,6 +343,46 @@ class PhaseOneTests(unittest.TestCase):
         )
         self.assertEqual(action.ability, "Anticipation")
 
+    def test_phase_two_opening_magic_attack_counts_as_auto(self):
+        onslaught = controller["ONSLAUGHT"]
+        opening = controller["P2_OPENING_ATTACK"]
+        # 123908: opener, lone 28959 at +11, then Hold Still.
+        phase = PhaseOne(phase=2, carried_expected=HOLD_STILL)
+        phase.observe([dict(event(1, opening), received_tick=100)])
+        phase.observe([dict(event(2, onslaught), received_tick=111)])
+        self.assertEqual(phase.expected, HOLD_STILL)
+        self.assertIsNone(phase.special)
+        action = phase.next_action(
+            2 * SECOND_NS, {"Anticipation": 0}, 0, Prayer.SOUL_SPLIT, flicking=True
+        )
+        self.assertEqual(action.ability, "Anticipation")
+        # 105331: the 28959 at +15 is the Onslaught itself.
+        phase = PhaseOne(phase=2, carried_expected=UPPERCUT)
+        phase.observe([dict(event(1, opening), received_tick=100)])
+        phase.observe([dict(event(2, onslaught), received_tick=115)])
+        self.assertEqual(phase.special, onslaught)
+        self.assertEqual(phase.expected, HOLD_STILL)
+
+    def test_phase_four_forecasts_opening_and_cued_hold_still(self):
+        phase = PhaseOne(phase=4, carried_expected=HOLD_STILL)
+        self.assertEqual(phase.expected, HOLD_STILL)
+        phase.observe([event(1, controller["P2_OPENING_ATTACK"]), event(2, AUTO)])
+        timers = {"Anticipation": 0}
+        self.assertIsNone(
+            phase.next_action(2 * SECOND_NS, timers, 0, Prayer.SOUL_SPLIT, flicking=True)
+        )
+        phase.observe([event(3, AUTO)])
+        action = phase.next_action(3 * SECOND_NS, timers, 0, Prayer.SOUL_SPLIT, flicking=True)
+        self.assertEqual(action.ability, "Anticipation")
+        # Tendrils restarts the count; 28966 is anticipated at once.
+        phase = PhaseOne(phase=4)
+        phase.observe([event(1, TENDRILS), event(2, RELEASE), event(3, AUTO)])
+        self.assertIsNone(phase.expected)
+        phase.observe([event(4, controller["P4_HOLD_STILL_CUE"])])
+        self.assertEqual(phase.expected, HOLD_STILL)
+        action = phase.next_action(4 * SECOND_NS, timers, 0, Prayer.SOUL_SPLIT, flicking=True)
+        self.assertEqual(action.ability, "Anticipation")
+
     def test_stale_auto_count_cannot_trigger_anticipation(self):
         phase = PhaseOne()
         phase.observe([event(1, UPPERCUT), event(2, AUTO), event(3, AUTO)])

@@ -86,15 +86,20 @@ FLICK_PRAYER_BY_ANIMATION = {MAGIC_ATTACK: Prayer.MAGIC}
 # Next special per phase, from the RuneScape Wiki rotation (guide-derived; P1 matches the live
 # captures). P2: Onslaught, Hold Still, Black Virus, Uppercut, Tendrils, each after 3 autos.
 # The virus has no mapped animation, so Hold Still is followed directly by Uppercut here.
+# Seen once, 4 received ticks before a P4 Hold Still (500%, 2026-11-14); probably the anima bomb.
+P4_HOLD_STILL_CUE = 28966
+# Specials after which the forecast Hold Still is anticipated at once rather than on an auto.
+IMMEDIATE_FORECAST_CUES = frozenset({P4_HOLD_STILL_CUE})
 NEXT_SPECIAL_BY_PHASE = {
     1: {TENDRILS: UPPERCUT, UPPERCUT: HOLD_STILL, HOLD_STILL: TENDRILS},
     2: {ONSLAUGHT: HOLD_STILL, HOLD_STILL: UPPERCUT, UPPERCUT: TENDRILS, TENDRILS: ONSLAUGHT},
     # P3: Red Virus, a once-per-phase spec skip, Uppercut, Hold Still. Only the last two have
     # mapped animations, so Hold Still is forecast after Uppercut.
     3: {UPPERCUT: HOLD_STILL, HOLD_STILL: UPPERCUT},
-    # P4 (wiki): Uppercut, Weak Anima Bomb, Hold Still. The bomb has no mapped animation, so
-    # no forecast follows Uppercut here; an unforecast stun is broken by Freedom.
-    4: {UPPERCUT: None, HOLD_STILL: UPPERCUT},
+    # P4 (wiki): Uppercut, Weak Anima Bomb, Hold Still. In the one 2026-11-14 P4 capture that
+    # used it, 28966 preceded Hold Still by 4 received ticks, so it is the Hold Still cue here.
+    # Tendrils (seen once in P4) restarts the count without a forecast.
+    4: {UPPERCUT: None, TENDRILS: None, P4_HOLD_STILL_CUE: HOLD_STILL, HOLD_STILL: UPPERCUT},
     # P5 (wiki): golems, viruses and the anima bomb; its specials are not mapped yet.
     5: {UPPERCUT: None, HOLD_STILL: None},
 }
@@ -242,6 +247,8 @@ P3_CARRY_OVER = {
 # Onslaught, on Hold Still with Tendrils. 28930 opens P2 and is counted as an auto: one capture
 # had only one animated melee auto between it and Hold Still.
 P2_CARRY_OVER = {UPPERCUT: ONSLAUGHT}
+# A 28959 within this many received ticks of the first P2 animation is a plain magic attack.
+P2_OPENING_MAGIC_ATTACK_TICKS = 12
 P2_OPENING_ATTACK = 28930
 P1_TO_P2_TRANSITION = 28963
 FLICK_EXCLUDED_ANIMATIONS = frozenset({UPPERCUT})
@@ -273,7 +280,7 @@ MOVEMENT_WINDOWS = {
 }
 
 
-class FocusLost(RuntimeError):
+class FocusLostError(RuntimeError):
     """RuneScape lost foreground focus during a key press; input pauses, the run continues."""
 
 
@@ -307,8 +314,13 @@ class PhaseOne:
             self.expected = TENDRILS
         elif phase == 2:
             self.expected = P2_CARRY_OVER.get(carried_expected, carried_expected)
-        elif phase >= 4:
-            # Unmapped openings: forecasts resume once a special has been observed.
+        elif phase == 4:
+            # At 500% on 2026-11-14 one P4 opened 28930, three autos, Hold Still; another
+            # opened with longer autos then Tendrils. A press on the second auto costs at most
+            # one early Anticipation, which is ready again for the 28966 cue in the second case.
+            self.expected = HOLD_STILL
+        elif phase >= 5:
+            # Unmapped opening: forecasts resume once a special has been observed.
             self.expected = None
         else:
             # P3 opens with magic autos, then the special carried over from P2.
@@ -319,6 +331,7 @@ class PhaseOne:
         self.last_freedom_stun = None
         self.stomp_checked = False
         self.stomp_pending = None
+        self.opening_tick = None
         self.special = None
         self.special_ns = 0
         self.special_event = None
@@ -348,9 +361,26 @@ class PhaseOne:
         """
         # The carried-over P2 opening keeps the earlier press: there Hold Still followed 28930
         # and only one animated auto in one 500% capture.
+        if self.special in IMMEDIATE_FORECAST_CUES:
+            return 0
         if self.phase == 2 and self.special is not None:
             return self.expected_after
         return self.expected_after - 1
+
+    def is_p2_opening_magic_attack(self, sequence, tick):
+        """Whether a 28959 is the plain magic attack early in P2 rather than Onslaught.
+
+        Replayed logs: a 28959 11 ticks after the P2 opener was followed by ordinary autos
+        (then Hold Still or a later multi-projectile Onslaught); one at +15 was the Onslaught.
+        """
+        return (
+            self.phase == 2
+            and sequence == ONSLAUGHT
+            and self.special is None
+            and isinstance(tick, int)
+            and self.opening_tick is not None
+            and tick - self.opening_tick <= P2_OPENING_MAGIC_ATTACK_TICKS
+        )
 
     def observe(self, actions):
         """Apply each new animation once. Treat the Tendrils release as a count offset."""
@@ -359,6 +389,11 @@ class PhaseOne:
                 continue
             self.last_event = action["event_sequence"]
             sequence = action["action_sequence"]
+            tick = action.get("received_tick")
+            if self.opening_tick is None and isinstance(tick, int):
+                self.opening_tick = tick
+            if self.is_p2_opening_magic_attack(sequence, tick):
+                sequence = MELEE_AUTO_SEQUENCE  # Counted as an ordinary attack.
             if sequence in self.auto_sequences:
                 self.autos += 1
                 self.last_auto_ns = action["observed_ns"]
@@ -381,6 +416,9 @@ class PhaseOne:
                 self.stomp_checked = False
                 self.stomp_pending = None
                 self.expected = self.next_special[sequence]
+                if sequence in IMMEDIATE_FORECAST_CUES:
+                    # The forecast window counts from the cue itself.
+                    self.last_auto_ns = action["observed_ns"]
 
     def next_action(
         self,
@@ -911,7 +949,7 @@ def run(reader, args, board, attempt=None):
         if keys.get_async_key_state(F12) < 0:
             raise RuntimeError("F12 stop")
         if keys.game_window(identity) != window:
-            raise FocusLost("RuneScape lost foreground focus")
+            raise FocusLostError("RuneScape lost foreground focus")
 
     input_allowed = True
 
@@ -1076,7 +1114,7 @@ def run(reader, args, board, attempt=None):
                 time.sleep(DIVE_SELECT_SECONDS)
             pointer_window.check_point(*pointer_window.cursor())
             board.command("CLICK L", check_focus)
-        except FocusLost:
+        except FocusLostError:
             emit("input_interrupted", reason="RuneScape lost foreground focus")
             return False
         except RuntimeError as error:
@@ -1092,7 +1130,7 @@ def run(reader, args, board, attempt=None):
             return False
         try:
             board.tap(chord, KEY_HOLD_SECONDS, check_focus, time.sleep)
-        except FocusLost:
+        except FocusLostError:
             emit("input_interrupted", reason="RuneScape lost foreground focus")
             return False
         return True
@@ -1235,7 +1273,6 @@ def run(reader, args, board, attempt=None):
     p2_transition_cue = None
     practice_enrage = getattr(args, "practice_enrage", 0)
     expected_max_hp = ZERO_ENRAGE_HP if practice_enrage == 0 else None
-    engaged_at = 0
     phase_one_started = False
     next_prayer_check = 0
     next_approach = 0
@@ -1344,7 +1381,6 @@ def run(reader, args, board, attempt=None):
 
         if active_instance is None:
             active_instance = boss.instance_id
-            engaged_at = now
         if boss.instance_id != active_instance:
             emit("encounter_reset", reason="Telos instance changed")
             return ENCOUNTER_RESET
