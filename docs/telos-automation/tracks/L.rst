@@ -83,19 +83,25 @@ Requests
   after 93 supervised frames, with zero input acceptances. Use the explicit
   live CLI option ``--kill-key Ctrl+Shift+F12``; the source default is unchanged.
   This verifies the read-only stop path, not combat timing or held-key release.
-* P1/P2/P3/P6: unfinished perception/timing scope stays explicit. Merging the
-  software is not live acceptance; unknown target, tick, castability, phase-5
-  and protection-check data must continue blocking dependent actions.
+* P1/P2 update, 2026-11-14: the original-profile collector now supplies the
+  legacy/P1 player tile, the local player's typed NPC/cleared target and a
+  received-server-tick ordinal in one runtime. Player target config/instance
+  resolution requires a current same-world NPC record. The counter warms up
+  at a transition and invalidates on stale, torn or changed-identity evidence.
+  ``docs/validation/telos-ladder-native-foundation-2026-11-14.json`` records the
+  combined checks. NPC incoming-attack targets, castability, phase 5 and
+  protection-check data still block their dependent actions.
 * A1/A2/P5: native target/minimap/view evidence and serialized pointer dispatch
   remain required before safe-area movement acceptance. No extra Telos fight
   is requested while these dependencies are being connected.
-* P1/P2/P3/P6: the active client in the integration smoke check is the original
-  951-3 executable. S0b's completed Compatibility Mode foundation validation is
-  merged separately; its result does not validate P1's original-only pose layout
-  or the original-profile encounter/attack semantics on Compatibility Mode.
-  Align the chosen runtime before asking for a combat acceptance session.
-* P2/A1/D6: server-tick identity remains unmapped. Do not turn the 20 ms client
-  clock or a four-tick attack cadence into a verified server-tick index.
+* P1/P2/P3/P6: the current L calibration scope is explicitly the pinned original
+  951-3 runtime: all new target/counter evidence and existing Telos semantics
+  belong to its hash. S0b's historical Compatibility Mode result remains
+  separate; no pose, target, tick or encounter mapping is transferred to it.
+* P2/A1/D6: the received ordinal is now available on the original profile.
+  Server phase and transport uncertainty remain unknown (NaN in C, null in
+  JSON). It does not establish prayer deadlines or the server tick in which
+  a future input arrives. No automatic input or ladder rung is enabled here.
 * D4: intended-account rotation rules/bindings and complete castability remain
   unconfigured. A successful module merge is not a demonstrated optimal rotation.
 * P4/D5: respect the user's deferred earlier beam/rock research. Phase-5 beams
@@ -105,3 +111,7 @@ Requests
   foundation. Review that distinct control path before adopting it into L;
   do not merge its whole branch as though it were only profile-unification data.
   Only the completed foundation at ``d9e496c`` is included in this checkpoint.
+  The later ``32d8253`` update adds Compatibility Mode spatial/zero-enrage
+  encounter work and further practice-attempt records. Review those additions
+  independently against their executable and encounter scope before integration;
+  they do not establish a 300%-4000% ladder pass.

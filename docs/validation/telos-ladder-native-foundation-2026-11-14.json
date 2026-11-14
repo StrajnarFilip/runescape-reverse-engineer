@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-14",
+  "track": "L",
+  "status": "in_progress",
+  "stage": "native_foundation_follow_up_shadow_only",
+  "source_checkpoint": "30f2b20b2b6ba332f774815c59b4e015d43f3326",
+  "source_commits": {
+    "P1_position": "43ad3c46c4bb56798dfba2186e776e7d884b7fc1",
+    "P1_player_npc_target": "5f8de8fb701aafcabb208ce18310bd6446b6c853",
+    "P2_received_tick_counter": "7aa36aa742168b8d010495b22732b376e7472b07"
+  },
+  "validation_profile": {
+    "name": "Original 951-3",
+    "sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+    "scope": "Current L calibration is pinned to this active executable. Historical Compatibility Mode foundation evidence remains separate; no new field is transferred to that hash.",
+    "process_restart_observed": true,
+    "new_process_explicitly_pinned": true,
+    "old_process_data_carried_forward": false
+  },
+  "completed_changes": [
+    "Publish the committed original-profile P1 player tile through the legacy position API used by movement.",
+    "Require the player pose to match the actor/index already resolved by the hit channel when that channel is available.",
+    "Decode the original local-player actor NPC/cleared target under independent loaded-code guards.",
+    "Resolve target config and lifetime from exactly one current same-world NPC record; reject missing/ambiguous/other-world targets.",
+    "Read the received server-tick ordinal in C from the independently verified handler/global/heap path.",
+    "Wait for the first tick transition and invalidate stale, torn, non-adjacent, reset or changed-identity counter observations.",
+    "Preserve uint32 counter wrap in a uint64 ordinal and keep phase/uncertainty unknown as NaN in C and null in JSON."
+  ],
+  "live_evidence": {
+    "position": {
+      "capture_sha256": "a24a240bb9bb3fd25930e54f810a12ce7660fd40165278f6d4bef395f213d43f",
+      "samples": 1911,
+      "both_positions_valid_and_equal": 1911,
+      "distinct_positions": 73,
+      "distinct_process_identities": 1,
+      "source": "Native C snapshots recorded during the manual target research session."
+    },
+    "player_target": {
+      "capture_sha256": "83b9efb51abb1e6586d99b1018dca4e243ff62a4bb87518b146094febcfe6813",
+      "samples": 1248,
+      "different_dummy_targets": 2,
+      "clear_transitions_observed": 1,
+      "second_clear_observed": false,
+      "fresh_native_json_samples": 20,
+      "config_and_current_instance_resolved": true
+    },
+    "received_tick_independent_probe": {
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "duration_seconds": 15.012,
+      "samples": 960,
+      "owner_rva": "0x17345a8",
+      "counter_offset": "0xdbf0",
+      "transitions": 25,
+      "delta_values": [
+        1
+      ],
+      "interval_minimum_ms": 583.2531999999997,
+      "interval_median_ms": 602.5525500000003,
+      "interval_maximum_ms": 613.6921000000016,
+      "maximum_detection_window_ms": 21.671000000001328,
+      "counter_owner_stable": true,
+      "input_sent": false
+    },
+    "received_tick_native_probe": {
+      "duration_seconds": 15.016,
+      "worker_hz": 100,
+      "counts": {
+        "awaiting_tick_transition": 10,
+        "samples": 240,
+        "valid": 230
+      },
+      "counter_changes": 23,
+      "counter_delta_values": [
+        1
+      ],
+      "output_interval_median_ms": 609.9999999860302,
+      "native_sample_duration_median_ms": 2.3435,
+      "queue_losses": {
+        "npc_actions": 0,
+        "npc_hits": 0,
+        "player_hits": 0,
+        "inventory": 0
+      },
+      "strict_json_passed": true,
+      "phase_and_uncertainty_null": true,
+      "input_sent": false
+    }
+  },
+  "rejected_leads": [
+    "VARPs 623/7994 matched War rather than the dummy and were not used as direct target identity.",
+    "The roughly 603 ms global at RVA 0x19420f8 is a buffer-read call counter, not a game-tick ordinal."
+  ],
+  "checks": {
+    "release_build": "passed",
+    "ctest_targets_passed": 15,
+    "ctest_targets_failed": 0,
+    "python_tests_passed": 271,
+    "python_tests_skipped": 0,
+    "native_spatial_cases": 11,
+    "native_encounter_cases": 9,
+    "target_serializer_checks": "passed: typed EntityRef, other-world/missing/ambiguous targets, explicit none and unknown",
+    "strict_live_json": "passed",
+    "all_eight_public_headers_installed": true,
+    "public_abi_layouts_changed": false,
+    "new_code_format_checks": "passed"
+  },
+  "remaining_dependencies": [
+    "Map and validate NPC incoming-attack targets; other-player target kinds remain disabled.",
+    "Complete the A2 movement/target-selection acceptance trials and native minimap/view/pointer dependencies.",
+    "Map complete castability and configure intended-account rotation/unlocks/bindings.",
+    "Measure exact-scope protection-check windows and complete incoming attack coverage; received tick ordinals do not establish server phase or input-arrival deadlines.",
+    "Validate remaining encounter/effect semantics, phase 5 and its beams in later controlled sessions.",
+    "Validate instance/result/control/route postconditions before an unattended loop."
+  ],
+  "strategy_scope": "Earlier beam/rock research remains deferred at the user request; no missing hazard channel becomes complete.",
+  "ladder": {
+    "rung_1_passed": false,
+    "clean_integrated_manual_combat_runs_in_this_validation": 0,
+    "verified_kills_in_this_validation": 0,
+    "automatic_input_enabled": false,
+    "prayer_flicking_enabled": false,
+    "rungs_2_through_7_enabled": false
+  },
+  "raw_captures_game_binaries_cache_and_tools_published": false,
+  "third_party_agent_installed": false,
+  "input_sent": false
+}

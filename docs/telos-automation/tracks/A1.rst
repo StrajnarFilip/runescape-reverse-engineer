@@ -74,8 +74,10 @@ Requests
   current DLL exposes modified prayer and unmodified ability input only.
   Generic item and modified ability intents explicitly reject in the native
   backend until this API lands. No C files were changed by A1.
-* P2/L: provide a fresh verified server-tick index in WorldState. A1's budgets
-  reject unknown tick identity; the 20 ms client clock is not a replacement.
+* P2/L update, 2026-11-14: the original profile now supplies a guarded received
+  server-tick ordinal in WorldState. A1 still rejects an unknown/stale index.
+  Tick phase and input-arrival timing remain unknown; this mapping alone does
+  not enable input or prove which server tick will process a chord.
 * A2: pointer operations require calibrated client coordinates, visible-window
   and bounds checks, and a mouse-capable serial protocol/device or a declared
   native-pointer route. The Leonardo sketch remains keyboard-only and both A1

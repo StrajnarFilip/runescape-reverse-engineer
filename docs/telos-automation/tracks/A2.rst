@@ -108,13 +108,14 @@ Requests
   fresh signature covering minimap/camera rotation, zoom, DPI, window and UI
   layout. No current field supplies this complete record. Route/path validation
   must be supplied explicitly; a projection alone does not prove walkability.
-* P1: supply verified player combat-target kind/runtime/config/lifetime, including
-  explicit cleared target. The original-profile facingTarget candidate is not
-  this field. Pending target readback must not be replaced by a click/animation.
+* P1 update, 2026-11-14: original-profile local NPC/cleared references now carry
+  native kind/runtime plus config/lifetime from the current same-world registry.
+  Two different dummy targets and one clear were observed. A2's twenty selection
+  trials and retention checks remain pending; player targets stay unknown.
 * P1/L: ensure the selected runtime's tile used by rs3_move_to_tile and the P1
-  pose refer to the same actor/scene. The original profile's P1 player pose does
-  not populate its older rs3_position; Compatibility Mode's P1 pose port is still
-  pending. This branch does not edit P1 or the shared native snapshot.
+  pose refer to the same actor/scene. P1 now copies its guarded original-profile
+  pose to rs3_position after frame validation; 1,911 samples across 73 tiles
+  agreed. Compatibility Mode's P1 pose port remains pending.
 * A1/L: connect guarded native pointer dispatch to the serialized backend after
   current view, focus, identity, bounds and hit-test checks. A1 currently rejects
   pointer actions; the serial device remains keyboard-only. No pointer backend

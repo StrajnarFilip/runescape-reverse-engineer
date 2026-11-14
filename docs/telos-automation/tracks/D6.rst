@@ -106,10 +106,11 @@ recording fake, with no live producers; no native backend is imported.
 Requests
 --------
 
-* L: align A1 and D6 budgets/ages, provide a verified server-tick source and
-  fresh world provider, and opt in only at an approved ladder rung. Live input
-  is disabled by default; the recording-only replay adapter cannot choose a
-  hardware backend.
+* L: align A1 and D6 budgets/ages, provide a fresh world provider and opt in
+  only at an approved ladder rung. P2 now supplies the original profile's
+  received-tick ordinal; server phase/input-arrival timing remain unknown.
+  Live input stays disabled by default; the recording-only replay adapter
+  cannot choose a hardware backend.
 * D2/A2: provide the injected prayer/pointer validators. Prayer validation must
   check the phase/enrage timing scope and coverage; pointer validation must
   check calibrated geometry/visibility. An enabled arbiter alone supplies
