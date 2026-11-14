@@ -1,9 +1,11 @@
 /* Telos variables: calibrated semantics and raw evidence must remain separate. */
 #include "encounter.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "clock.h"
+#include "memory.h"
 #include "variables.h"
 
 #define TELOS_PACKED_VARP        6363u
@@ -17,6 +19,12 @@
 #define ACTIVE_TELOS_CONFIG_ID   22891
 #define LAST_VALIDATED_STAGE     3u
 #define TELOS_INSTANCE_GUARD_BIT (1u << 29)
+#define TICK_HANDLER_GUARD_RVA   0x36960du
+#define TICK_OWNER_GLOBAL_RVA    0x17345a8u
+#define TICK_COUNTER_OFFSET      0xdbf0u
+#define TICK_MAX_SAMPLE_GAP_NS   150000000ull
+#define TICK_MAX_STALL_NS        1500000000ull
+#define TICK_MAX_FORWARD_STEP    4u
 
 /* Raw channels include calibrated sources and neighbouring candidates; presence alone proves no
  * semantics. */
@@ -27,6 +35,104 @@ _Static_assert(sizeof(rs3_encounter_value) == 32, "ABI encounter value");
 _Static_assert(sizeof(rs3_encounter_raw) == 32, "ABI encounter raw");
 _Static_assert(sizeof(rs3_game_tick) == 40, "ABI game tick");
 _Static_assert(sizeof(rs3_encounter_state) == 472, "ABI encounter state");
+
+void encounter_clear(rs3_snapshot *snapshot)
+{
+    memset(&snapshot->encounter, 0, sizeof snapshot->encounter);
+    snapshot->encounter.game_tick.phase_ms = NAN;
+    snapshot->encounter.game_tick.uncertainty_ms = NAN;
+    snapshot->encounter_tick_owner = 0;
+    snapshot->encounter_tick_world_state = 0;
+    snapshot->encounter_tick_last_change_ns = 0;
+    snapshot->encounter_tick_counter = 0;
+    snapshot->encounter_tick_primed = 0;
+}
+
+/** Read the original executable's received-tick counter; never estimate a server phase. */
+static void stage_game_tick(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_state)
+{
+    rs3_game_tick *tick = &snapshot->encounter.game_tick;
+    static const unsigned char handler_guard[] = {0x48, 0x8b, 0x0d, 0x94, 0xaf, 0x3c,
+                                                  0x01, 0xff, 0x81, 0xf0, 0xdb, 0x00,
+                                                  0x00, 0xe8, 0xc1, 0x0c, 0x8b, 0x00};
+    unsigned char observed_guard[sizeof handler_guard];
+    if (context->target.profile != &profile_primary ||
+        snapshot->combat.scene_state != (int32_t)LAYOUT_IN_GAME_STATE || !world_state ||
+        !memory_read(context, context->target.module_base + TICK_HANDLER_GUARD_RVA, observed_guard,
+                     sizeof observed_guard) ||
+        memcmp(observed_guard, handler_guard, sizeof handler_guard))
+    {
+        return;
+    }
+    uint64_t owner, owner_after;
+    uint32_t counter, counter_after;
+    tick->reason = RS3_READ_FAILED;
+    if (!memory_read_pointer(context, context->target.module_base + TICK_OWNER_GLOBAL_RVA,
+                             &owner) ||
+        !owner || !memory_read(context, owner + TICK_COUNTER_OFFSET, &counter, sizeof counter) ||
+        !memory_read(context, owner + TICK_COUNTER_OFFSET, &counter_after, sizeof counter_after) ||
+        counter_after != counter ||
+        !memory_read_pointer(context, context->target.module_base + TICK_OWNER_GLOBAL_RVA,
+                             &owner_after) ||
+        owner_after != owner)
+    {
+        return;
+    }
+    uint64_t now_ns = clock_monotonic_ns();
+    snapshot->encounter_tick_owner = owner;
+    snapshot->encounter_tick_world_state = world_state;
+    snapshot->encounter_tick_last_change_ns = now_ns;
+    snapshot->encounter_tick_counter = counter;
+    tick->observed_ns = now_ns;
+    tick->reason = RS3_ENCOUNTER_TICK_BASELINE;
+
+    uint64_t previous_counter = 0, previous_changed_ns = 0;
+    uint32_t previous_primed = 0;
+    int adjacent = 0;
+    AcquireSRWLockShared(&context->latest_frame_lock);
+    const rs3_snapshot *previous = context->latest_frame;
+    if (previous != NULL)
+    {
+        uint64_t previous_read_ns = previous->encounter.game_tick.observed_ns;
+        adjacent =
+            previous->encounter.pid == context->target.pid &&
+            previous->encounter.process_creation_time == context->target.process_creation_time &&
+            previous->encounter_tick_owner == owner &&
+            previous->encounter_tick_world_state == world_state &&
+            previous->info.sequence + 1 == snapshot->info.sequence && previous_read_ns &&
+            now_ns >= previous_read_ns && now_ns - previous_read_ns <= TICK_MAX_SAMPLE_GAP_NS;
+        previous_counter = previous->encounter_tick_counter;
+        previous_changed_ns = previous->encounter_tick_last_change_ns;
+        previous_primed = previous->encounter_tick_primed;
+    }
+    ReleaseSRWLockShared(&context->latest_frame_lock);
+    if (!adjacent)
+    {
+        return;
+    }
+    uint32_t delta = counter - (uint32_t)previous_counter;
+    if (delta > TICK_MAX_FORWARD_STEP)
+    {
+        tick->reason = RS3_ENCOUNTER_TICK_RESET;
+        return;
+    }
+    snapshot->encounter_tick_counter = previous_counter + delta;
+    snapshot->encounter_tick_last_change_ns = delta ? now_ns : previous_changed_ns;
+    snapshot->encounter_tick_primed = delta ? 1u : previous_primed;
+    if (now_ns < snapshot->encounter_tick_last_change_ns ||
+        now_ns - snapshot->encounter_tick_last_change_ns > TICK_MAX_STALL_NS)
+    {
+        snapshot->encounter_tick_primed = 0;
+        tick->reason = RS3_ENCOUNTER_TICK_STALLED;
+        return;
+    }
+    if (snapshot->encounter_tick_primed)
+    {
+        tick->counter = snapshot->encounter_tick_counter;
+        tick->valid = 1;
+        tick->reason = RS3_REASON_NONE;
+    }
+}
 
 static void invalidate_semantics(rs3_encounter_state *state)
 {
@@ -66,12 +172,18 @@ static int has_active_telos(const rs3_snapshot *snapshot)
     return matches == 1 && instance_guard;
 }
 
-void encounter_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t player_address)
+void encounter_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t player_address,
+                     uint64_t world_state)
 {
     rs3_encounter_state *state = &snapshot->encounter;
-    memset(state, 0, sizeof *state);
+    encounter_clear(snapshot);
     invalidate_semantics(state);
+    stage_game_tick(context, snapshot, world_state);
     state->status = RS3_UNAVAILABLE;
+    if (state->game_tick.valid)
+    {
+        state->status = RS3_PARTIAL;
+    }
     state->reason = RS3_NOT_SET;
     state->raw_count = RS3_ENCOUNTER_RAW_CAPACITY;
     variable_table table;

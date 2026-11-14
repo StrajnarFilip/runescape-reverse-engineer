@@ -84,18 +84,20 @@
     "streak": "User labelled zero kill streak in the 500% practice attempt. No changing streak count; zero alone does not establish the candidate field.",
     "meter": "Candidate lower bits varied 0..100; no labelled displayed meter values to establish meaning or scale.",
     "freedom": "Candidate bit 24 toggled in the 300% attempt; no labelled Freedom state to establish its meaning.",
-    "game_tick": "No verified game-tick source. The earlier 7.48-second probe and the additional bounded direct/global/114-object probes did not establish one. Global RVA 0x19420f8 had a roughly 603 ms cadence but static inspection identified a buffer-read call counter, so it is rejected. The 20 ms client logic clock is not substituted.",
     "phase_5_and_other_forms": "No phase-5 capture or form mapping. Raw stages above 3 and unobserved forms remain unknown.",
-    "compatibility_mode_semantics": "Raw variable paths are supported; semantic validity is limited to the original profile that was captured."
+    "compatibility_mode_semantics": "Raw variable paths are supported; semantic validity is limited to the original profile that was captured.",
+    "game_tick_phase_and_protection_deadlines": "The received ordinal counter is mapped on the original profile. Server phase, transport uncertainty and protection-check deadlines remain unknown."
   },
   "input_sent": false,
   "raw_capture_committed": false,
   "checks": {
     "windows_x64_release_build": "passed",
-    "ctest_suites_passed": 11,
-    "python_tests_passed": 78,
-    "native_encounter_cases": 5,
-    "existing_public_structures_changed": false
+    "ctest_suites_passed": 15,
+    "python_tests_passed": 263,
+    "native_encounter_cases": 9,
+    "existing_public_structures_changed": false,
+    "python_tests_run": 271,
+    "python_tests_skipped_local_capture_only": 8
   },
   "semantic_profile_scope": "951-3 original executable only; Compatibility Mode semantic validity remains disabled",
   "live_validation": {
@@ -244,5 +246,95 @@
     "new_game_tick_mapping_enabled": false,
     "raw_memory_saved": false,
     "input_sent": false
+  },
+  "received_server_tick_2026_11_14": {
+    "profile": "951-3 original",
+    "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+    "source_leads": [
+      "https://github.com/goldgolem624/RuneTools/blob/c7d860eb2a9b783e680e2cd31583c7b49deceab5/companion/ServerOps.h",
+      "https://github.com/goldgolem624/RuneTools/blob/c7d860eb2a9b783e680e2cd31583c7b49deceab5/src/reader/Reader.cpp"
+    ],
+    "method": "Source used only as a lead; independent local PE scan found one increment signature. Headless Ghidra reconstructed the load/increment path, followed by read-only live checks and a C implementation.",
+    "static_mapping": {
+      "handler_rva": "0x369600",
+      "guard_rva": "0x36960d",
+      "guard_bytes": "488b0d94af3c01ff81f0db0000e8c10c8b00",
+      "owner_global_rva": "0x17345a8",
+      "counter_offset": "0xdbf0",
+      "counter_type": "uint32_t",
+      "matching_increment_instructions": 1,
+      "packet_opcode_number_assumed": false
+    },
+    "independent_live_probe": {
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "duration_seconds": 15.012,
+      "samples": 960,
+      "owner_rva": "0x17345a8",
+      "counter_offset": "0xdbf0",
+      "transitions": 25,
+      "delta_values": [
+        1
+      ],
+      "interval_minimum_ms": 583.2531999999997,
+      "interval_median_ms": 602.5525500000003,
+      "interval_maximum_ms": 613.6921000000016,
+      "maximum_detection_window_ms": 21.671000000001328,
+      "counter_owner_stable": true,
+      "input_sent": false
+    },
+    "native_live_probe": {
+      "duration_seconds": 15.016,
+      "worker_hz": 100,
+      "counts": {
+        "awaiting_tick_transition": 10,
+        "samples": 240,
+        "valid": 230
+      },
+      "counter_changes": 23,
+      "counter_delta_values": [
+        1
+      ],
+      "output_interval_median_ms": 609.9999999860302,
+      "native_sample_duration_median_ms": 2.3435,
+      "queue_losses": {
+        "npc_actions": 0,
+        "npc_hits": 0,
+        "player_hits": 0,
+        "inventory": 0
+      },
+      "strict_json_passed": true,
+      "phase_and_uncertainty_null": true,
+      "input_sent": false
+    },
+    "publication": {
+      "counter_mapped": true,
+      "source": "received_server_tick_counter",
+      "phase_mapped": false,
+      "protection_deadline_mapped": false,
+      "c_unknown_phase_and_uncertainty": "NaN; valid validates counter only",
+      "json_unknown_phase_and_uncertainty": null,
+      "no_client_clock_division": true
+    },
+    "reader_policy": {
+      "maximum_adjacent_sample_gap_ms": 150,
+      "maximum_counter_stall_ms": 1500,
+      "maximum_forward_step_per_sample": 4,
+      "wait_for_first_transition": true,
+      "same_owner_world_process_and_adjacent_sequence": true,
+      "uint32_wrap_extended_to_uint64": true,
+      "double_read_counter_and_owner": true
+    },
+    "policy_is_server_timing_calibration": false,
+    "fixture_cases_total": 9,
+    "owner_checks": {
+      "ctest_targets_passed": 15,
+      "python_tests_run": 271,
+      "python_tests_skipped_local_capture_only": 8,
+      "python_tests_passed": 263
+    },
+    "public_abi_sizes_unchanged": true,
+    "input_sent": false,
+    "third_party_agent_installed": false,
+    "raw_memory_or_captures_committed": false
   }
 }
