@@ -640,7 +640,7 @@ class FakeFunction:
 
 
 class NativeAdapterTests(unittest.TestCase):
-    def device(self, *, chord_api=True):
+    def device(self, *, chord_api=True, owned_copy=False):
         from rs3_reader.native import CombatState, Info
 
         info, combat, calls = Info(), CombatState(), []
@@ -673,17 +673,48 @@ class NativeAdapterTests(unittest.TestCase):
                     "rs3_activate_item_chord": lambda *args: calls.append(("item", args[1:])) or 0,
                 }
             )
+        copies = []
+        if owned_copy:
+            functions["rs3_snapshot_copy"] = (
+                lambda source, target: copies.append((source.value, target.value)) or 0
+            )
         library = SimpleNamespace(
             **{name: FakeFunction(function) for name, function in functions.items()}
         )
+        library.copy_sources = copies
         reader = SimpleNamespace(
             library=library,
             context=ctypes.c_void_p(42),
+            snapshot=ctypes.c_void_p(9876),
             check_result=lambda result: self.assertEqual(result, 0),
         )
         device = NativeSnapshotDevice(reader)
         self.addCleanup(device.close)
         return device, info, calls
+
+    def test_owned_policy_copy_is_independent_of_worker_latest_frame(self):
+        device, _, calls = self.device(owned_copy=True)
+
+        def newer_worker(*args):
+            self.fail("Worker latest must not replace the already examined consumer frame")
+
+        device.library.rs3_copy_latest.callback = newer_worker
+        world = BackendTests().world()
+        device.dispatch(SetPrayer("magic"), KeyBinding(0x70, CTRL, True, "fixture"), world)
+        self.assertEqual(device.library.copy_sources, [(9876, 1234)])
+        self.assertEqual(calls, [("prayer", (3, 0x70, CTRL))])
+
+    def test_advanced_or_missing_consumer_copy_does_not_send_an_old_decision(self):
+        device, info, calls = self.device(owned_copy=True)
+        world = BackendTests().world()
+        binding = KeyBinding(0x70, CTRL, True, "fixture")
+        info.sequence = 2
+        with self.assertRaisesRegex(InputRejected, "native_snapshot_advanced"):
+            device.dispatch(SetPrayer("magic"), binding, world)
+        device.reader.snapshot = ctypes.c_void_p()
+        with self.assertRaisesRegex(DeviceFault, "native_source_snapshot_unavailable"):
+            device.dispatch(SetPrayer("magic"), binding, world)
+        self.assertEqual(calls, [])
 
     def test_modified_ability_and_exact_item_use_typed_chord_exports(self):
         device, _, calls = self.device()
