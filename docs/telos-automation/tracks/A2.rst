@@ -1,7 +1,7 @@
 A2 - Movement primitives
 ========================
 
-:Status: in progress
+:Status: waiting for live session
 :Wave: 2
 :Branch: ``telos/A2``
 :Kind: Python and C input layer
@@ -154,3 +154,9 @@ Requests
 * A1 follow-up resolved on integration: native item/modified-ability chords
   are connected to the serialized backend with dynamic binding revalidation.
   Pointer/view/route dependencies and supervised movement trials remain open.
+
+* Snapshot handoff fixture completed, 2026-11-14: a copied policy frame keeps
+  its timestamp, sequence, target and tracked item after the source changes
+  and is destroyed. Chord preparation accepts the old exact item only in the
+  owned copy; moved/dose-changed source state rejects. NULL/self-copy paths are
+  covered. Seven native input fixture groups pass without dispatching input.

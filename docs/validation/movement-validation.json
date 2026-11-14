@@ -142,5 +142,23 @@
       "A1 serialized backend connection",
       "supervised physical key delivery and observed outcomes"
     ]
+  },
+  "snapshot_handoff_follow_up": {
+    "date": "2026-11-14",
+    "api": "rs3_snapshot_copy",
+    "scope": "Local caller-owned snapshots only; source/destination must be externally serialized.",
+    "preserves": [
+      "sample sequence",
+      "original timestamps",
+      "process/scene metadata",
+      "target reference",
+      "item ID and 64-bit token"
+    ],
+    "source_mutation_and_destruction_tested": true,
+    "null_and_self_copy_tested": true,
+    "input_fixture_groups": 7,
+    "game_memory_read_or_written": false,
+    "input_sent": false,
+    "freshness_refreshed_by_copy": false
   }
 }
