@@ -19,6 +19,27 @@ The practice controller has 0% evidence through the phase 3 handoff on Compatibi
 | Phase transitions and victory | Corroborate stage changes with Telos HP and actor lifetime. Move and reacquire once the destination and target are confirmed. **The player can take no action during the P1→P2 switch: prayers, abilities and other inputs all fail (account owner, 2026-11-14).** Set the overhead and HP before the switch and treat inputs as lost until it ends. | In the 100% flick attempt, Telos repeated `28963` four times about 2.4 s apart before the phase field changed to 2. Four Deflect Melee keypresses during that time left the overhead unchanged. The end of the lockout and the first accepted input tick still need measurement. For a clear, capture an explicit result or reward signal. |
 | Soul Split | Correlate eligible outgoing damage, active Soul Split and attributable healing. Prioritize protection through an overlapping check window. | Measure activation acknowledgement, latest required protection and earliest safe return in game ticks. Raw HP changes alone do not identify Soul Split healing. |
 
+## Special rotation per phase
+
+Guide-derived from the [RuneScape Wiki strategy page](https://runescape.wiki/w/Telos,_the_Warden/Strategies#Phase_2), which warns it may predate the March 2026 combat modernisation. Rows marked *live* match the 2026-11-14 Compatibility Mode captures.
+
+| Phase | Rotation (3 autos between specials unless stated) | Live evidence |
+| --- | --- | --- |
+| P1 | 7 autos → Tendrils → Uppercut → Hold Still → repeat from Tendrils | *live*: `28931` → `28938` → `28935` order and counts |
+| P2 | Onslaught → Hold Still → Black Virus (≥50% enrage) → Uppercut → Tendrils → repeat. The first special continues the P1 order, except that a P1 ending on Tendrils leads to Onslaught. | *live*: P1 ending on Uppercut opened P2 with Hold Still (twice), on Tendrils with Onslaught, on Hold Still with Tendrils. `28930` opens P2. Onslaught is `28959`, repeated per projectile with rising damage. The virus began after the third auto following Hold Still. |
+| P3 | 7 magic autos → Red Virus → spec skip (once) → Uppercut → Hold Still → repeat. The opening depends on the P2 ending. | none |
+| P4 | 3 autos → Uppercut → Weak Anima Bomb → Hold Still → repeat from Hold Still | none |
+| P5 | Golem spawn → 10 magic autos → random virus → 17 magic autos → instant-kill anima bomb → 2 autos → repeat | none |
+
+Other guide points relevant to automation:
+- P1 HP scales with enrage from 400,000 at 0% to 600,000 at 200% and above. *live*: 600,000 at 250% and 500%.
+- In P1, Telos attacks faster when the green stream reaches him. Standing in it blocks this and gives adrenaline, but drains prayer. It is on for about 12 s and off for about 17 s.
+- In P2, standing in the black stream reduces damage dealt and taken by 30% and cleanses the black virus. An uncleansed virus ends after 30 s with a heavy hit.
+- Uppercut can be avoided by moving at least 3 tiles with Surge, Escape or similar abilities, or by using Resonance, which does not heal.
+- Hold Still is countered by Anticipation beforehand, or by Freedom plus Resonance on the second hit. At 250% and above, Telos is stun-immune for 6 s after breaking free.
+
+The controller uses the P1 and P2 orders to forecast Hold Still for Anticipation.
+
 ## Native channels
 
 - `rs3_snapshot_encounter` provides scoped phase and enrage plus raw variables. At 0% on Compatibility Mode it requires a single active Telos, an instance guard and matching HP to publish phases 1–3. The raw lower bits of VARP 6363 vary within phases and reset at transitions. They are a meter lead. Both clients expose the received server-tick counter. Server phase and prayer-check deadlines remain unknown.

@@ -227,6 +227,35 @@ class PhaseOneTests(unittest.TestCase):
         action = phase.next_action(3_500_000_000, timers, 0, Prayer.MELEE)
         self.assertEqual(action.ability, "Escape")
 
+    def test_phase_two_anticipates_hold_still_after_onslaught_not_uppercut(self):
+        onslaught = controller["ONSLAUGHT"]
+        phase = PhaseOne(phase=2, carried_expected=UPPERCUT)
+        self.assertEqual(phase.expected, onslaught)
+        phase.observe([event(1, onslaught), event(2, onslaught), event(3, AUTO), event(4, AUTO)])
+        self.assertEqual(phase.expected, HOLD_STILL)
+        action = phase.next_action(
+            4 * SECOND_NS, {"Anticipation": 0}, 0, Prayer.SOUL_SPLIT, flicking=True
+        )
+        self.assertEqual(action.ability, "Anticipation")
+        phase = PhaseOne(phase=2, carried_expected=TENDRILS)
+        phase.observe([event(1, TENDRILS), event(2, RELEASE), event(3, AUTO)])
+        self.assertEqual(phase.expected, onslaught)
+        phase.observe([event(4, UPPERCUT), event(5, AUTO), event(6, AUTO)])
+        self.assertIsNone(
+            phase.next_action(
+                6 * SECOND_NS, {"Anticipation": 0}, 0, Prayer.SOUL_SPLIT, flicking=True
+            )
+        )
+
+    def test_phase_two_carry_over_counts_opening_attack(self):
+        phase = PhaseOne(phase=2, carried_expected=HOLD_STILL)
+        self.assertEqual(phase.expected, HOLD_STILL)
+        phase.observe([event(1, controller["P2_OPENING_ATTACK"]), event(2, AUTO)])
+        action = phase.next_action(
+            2 * SECOND_NS, {"Anticipation": 0}, 0, Prayer.SOUL_SPLIT, flicking=True
+        )
+        self.assertEqual(action.ability, "Anticipation")
+
     def test_stale_auto_count_cannot_trigger_anticipation(self):
         phase = PhaseOne()
         phase.observe([event(1, UPPERCUT), event(2, AUTO), event(3, AUTO)])

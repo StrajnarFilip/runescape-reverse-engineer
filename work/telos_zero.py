@@ -71,7 +71,22 @@ DEFAULT_FLICK_MAGIC_KEY = "F1"
 # The account owner identified 28959 as a Telos magic attack. Its type 139 hits rose from 1,139
 # to 3,828 in P2 at 250% while Deflect Melee was flicked (2026-11-14).
 MAGIC_ATTACK = 28959
+# The RuneScape Wiki strategy page names the P2 magic barrage Magical Onslaught: projectiles
+# grow in damage, matching the rising 28959 hits. Each projectile repeats the animation.
+ONSLAUGHT = MAGIC_ATTACK
 FLICK_PRAYER_BY_ANIMATION = {MAGIC_ATTACK: Prayer.MAGIC}
+# Next special per phase, from the RuneScape Wiki rotation (guide-derived; P1 matches the live
+# captures). P2: Onslaught, Hold Still, Black Virus, Uppercut, Tendrils, each after 3 autos.
+# The virus has no mapped animation, so Hold Still is followed directly by Uppercut here.
+NEXT_SPECIAL_BY_PHASE = {
+    1: {TENDRILS: UPPERCUT, UPPERCUT: HOLD_STILL, HOLD_STILL: TENDRILS},
+    2: {ONSLAUGHT: HOLD_STILL, HOLD_STILL: UPPERCUT, UPPERCUT: TENDRILS, TENDRILS: ONSLAUGHT},
+}
+# Four 2026-11-14 captures: a P1 ending on Uppercut opened P2 with Hold Still, on Tendrils with
+# Onslaught, on Hold Still with Tendrils. 28930 opens P2 and is counted as an auto: one capture
+# had only one animated melee auto between it and Hold Still.
+P2_CARRY_OVER = {UPPERCUT: ONSLAUGHT}
+P2_OPENING_ATTACK = 28930
 FLICK_EXCLUDED_ANIMATIONS = frozenset({UPPERCUT})
 DEFAULT_FLICK_HOLD_TICKS = 1
 # After the Tendrils release an unanimated melee auto followed at +2 received ticks in both
@@ -112,12 +127,21 @@ class Action:
 class PhaseOne:
     """Track confirmed animation applications and prepare for the next special."""
 
-    def __init__(self):
+    def __init__(self, phase=1, carried_expected=None):
+        self.next_special = NEXT_SPECIAL_BY_PHASE[phase]
+        self.auto_sequences = {MELEE_AUTO_SEQUENCE}
+        if phase == 2:
+            self.auto_sequences.add(P2_OPENING_ATTACK)
         self.autos = 0
         self.last_auto_ns = None
         self.last_auto_event = None
-        self.opening = True
-        self.expected = TENDRILS
+        # P1 opens with 7 autos then Tendrils. P2 opens with the special P1 would have used
+        # next, except that a P1 ending on Tendrils leads to Onslaught instead of Uppercut.
+        self.opening = phase == 1
+        if phase == 1:
+            self.expected = TENDRILS
+        else:
+            self.expected = P2_CARRY_OVER.get(carried_expected, carried_expected)
         self.special = None
         self.special_ns = 0
         self.special_event = None
@@ -143,14 +167,14 @@ class PhaseOne:
                 continue
             self.last_event = action["event_sequence"]
             sequence = action["action_sequence"]
-            if sequence == MELEE_AUTO_SEQUENCE:
+            if sequence in self.auto_sequences:
                 self.autos += 1
                 self.last_auto_ns = action["observed_ns"]
                 self.last_auto_event = action["event_sequence"]
             elif sequence == TENDRILS_RELEASE and self.special == TENDRILS:
                 self.autos += 1
                 self.special = None
-            elif sequence in (TENDRILS, UPPERCUT, HOLD_STILL):
+            elif sequence in self.next_special:
                 self.opening = False
                 self.autos = 0
                 self.special = sequence
@@ -162,11 +186,7 @@ class PhaseOne:
                 self.forecast_attempts = 0
                 self.first_hit_tick = None
                 self.resonance_attempts = 0
-                self.expected = {
-                    TENDRILS: UPPERCUT,
-                    UPPERCUT: HOLD_STILL,
-                    HOLD_STILL: TENDRILS,
-                }[sequence]
+                self.expected = self.next_special[sequence]
 
     def next_action(
         self,
@@ -943,7 +963,7 @@ def run(reader, args, board, attempt=None):
                 phase_two_at = now
                 if args.continue_phase_two:
                     # No P1 forecast or pending input is evidence in the new arena.
-                    phase_one = PhaseOne()
+                    phase_one = PhaseOne(phase=2, carried_expected=phase_one.expected)
             if first_phase_two_sample or actions or hits or hits_lost:
                 log(
                     "observation",
