@@ -184,6 +184,72 @@ class SupervisorTests(unittest.TestCase):
         controller.step(world())
         self.assert_stopped(controller, device, "confirmation_timeout")
 
+    def test_real_arbiter_reported_transport_fault_stops_the_supervisor(self):
+        from rs3_reader.bot.arbiter import Arbiter
+        from rs3_reader.bot.intents import ActionLane, ActivateAbility, Evidence, Intent, Priority
+
+        record = row()
+        record.update(
+            health={"current": 8000, "max": 10000},
+            gcd={"remaining_ms": 0, "reason": None},
+            game_tick={"value": {"index": 20}, "age_ms": 0, "source": "synthetic_tick"},
+            abilities={
+                "status": "available",
+                "entries": [
+                    {
+                        "struct_id": 10,
+                        "castable": True,
+                        "cooldown": {"remaining_ms": 0, "reason": None},
+                    },
+                ],
+            },
+        )
+        value = WorldState.from_telemetry(record)
+
+        class FaultRecordingDevice(RecordingActuator):
+            def __init__(self):
+                super().__init__(clock=lambda: value.now_ns, accept=False)
+                self.fault, self.closes = None, 0
+                self.held = {"synthetic-held-key"}
+
+            def send(self, proposal):
+                result = super().send(proposal)
+                self.fault = "synthetic_transport_uncertain"
+                return result
+
+            def close(self):
+                self.held.clear()
+                self.closes += 1
+                super().close()
+
+        device = FaultRecordingDevice()
+        proposal = Intent(
+            "fault-test",
+            "rotation",
+            ActivateAbility(10),
+            Priority.ROTATION,
+            ActionLane.GCD,
+            value.now_ns,
+            value.now_ns + 100 * MS,
+            value.session,
+            value.sample_sequence,
+            (Evidence("health", value.player.health.current),),
+            value.observed_ns,
+        )
+        arbiter = Arbiter(device, clock=lambda: value.now_ns, enabled=True)
+        controller = Supervisor(
+            actuator=device,
+            arbiter=arbiter,
+            native_clock=lambda: value.now_ns,
+            producers={"rotation": SimpleNamespace(step=lambda current: (proposal,))},
+        )
+        self.addCleanup(controller.close)
+        controller.step(value)
+        self.assert_stopped(controller, device, "actuator_fault:synthetic_transport_uncertain")
+        self.assertEqual(len(device.attempts), 1)
+        self.assertFalse(device.attempts[0].result.accepted)
+        self.assertFalse(controller.last_log["input_sent"])
+
     def test_clock_regression_stops(self):
         controller, device = self.make()
         controller.step(world())
