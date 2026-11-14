@@ -123,3 +123,13 @@ Requests
 * D7/A2: interaction confirmation needs a fresh observable postcondition;
   pointer movement or an open dialog alone does not confirm an arbitrary
   interaction. D8 should stop on arbiter/producer faults and pending timeouts.
+
+* Fault propagation fixed, 2026-11-14: D6 checks A1's optional None/string
+  ``fault`` channel before collecting/dispatching and after every send result.
+  A rejected SendResult no longer masks transport/cleanup uncertainty. Faults
+  close the backend and reject the remaining batch; invalid fault-channel
+  states fail closed. A genuinely accepted input stays logged as accepted even
+  if cleanup subsequently faults. D8 receives the latched DecisionLog fault.
+  Twenty-five D6 cases pass, including a real A1 serialized backend around a
+  fake native device. The isolated worktree skips one local raw-capture check.
+  No DLL/device/game input is used by the integration fixture.

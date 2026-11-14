@@ -189,6 +189,15 @@ class Arbiter:
             except Exception:
                 self._fault = "actuator_close_failed_input_state_unknown"
 
+    def _backend_fault_reason(self):
+        """A1 exposes uncertainty separately from ordinary rejected SendResults."""
+        fault = getattr(self.actuator, "fault", None)
+        if fault is None:
+            return None
+        if not isinstance(fault, str) or not fault:
+            return "actuator_fault_state_invalid"
+        return "actuator_fault:" + fault
+
     def close(self):
         """Stop dispatch and release backend-owned keys, idempotently."""
         with self._lock:
@@ -511,9 +520,15 @@ class Arbiter:
                     results,
                 )
                 continue
+            backend_fault = self._backend_fault_reason()
+            if backend_fault:
+                self._stop(backend_fault)
+            status = "sent" if result.accepted else "rejected"
+            if backend_fault and not result.accepted:
+                status = "fault"
             decisions.append(
                 self._decision(
-                    intent, "sent" if result.accepted else "rejected", result.reason, result.sent_ns
+                    intent, status, self._fault if backend_fault else result.reason, result.sent_ns
                 )
             )
             if result.accepted:
@@ -537,6 +552,9 @@ class Arbiter:
             self.last_proposals = ()
             try:
                 now = self._now()
+                backend_fault = self._backend_fault_reason()
+                if backend_fault:
+                    self._stop(backend_fault)
                 frame_reason = self._frame_reason(world, now)
                 if self._identity is not None and world.session != self._identity[0]:
                     self._stop("session_changed")
