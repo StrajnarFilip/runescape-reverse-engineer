@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "track": "P2",
-  "date": "2026-11-11",
+  "date": "2026-11-14",
   "status": "partial_live_mapping_validated",
   "runtime_observed": "951-3 original profile, fd8afd32...358d45",
   "supported_variable_paths": [
@@ -84,7 +84,7 @@
     "streak": "User labelled zero kill streak in the 500% practice attempt. No changing streak count; zero alone does not establish the candidate field.",
     "meter": "Candidate lower bits varied 0..100; no labelled displayed meter values to establish meaning or scale.",
     "freedom": "Candidate bit 24 toggled in the 300% attempt; no labelled Freedom state to establish its meaning.",
-    "game_tick": "No verified game-tick source. A 7.48-second read-only counter probe of client+0..0x8000 and world-state+0..0x4000 found no monotonic +1 counter with seven or more 400-850 ms intervals. The 20 ms logic clock is not substituted.",
+    "game_tick": "No verified game-tick source. The earlier 7.48-second probe and the additional bounded direct/global/114-object probes did not establish one. Global RVA 0x19420f8 had a roughly 603 ms cadence but static inspection identified a buffer-read call counter, so it is rejected. The 20 ms client logic clock is not substituted.",
     "phase_5_and_other_forms": "No phase-5 capture or form mapping. Raw stages above 3 and unobserved forms remain unknown.",
     "compatibility_mode_semantics": "Raw variable paths are supported; semantic validity is limited to the original profile that was captured."
   },
@@ -159,5 +159,90 @@
     },
     "full_kill_observed": false,
     "all_semantics_validated": false
+  },
+  "additional_tick_research_2026_11_14": {
+    "source": "Bounded read-only memory probes and independent Capstone inspection of the pinned local PE image.",
+    "direct_objects_and_globals": {
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "blocks": [
+        {
+          "name": "client",
+          "bytes": 32768
+        },
+        {
+          "name": "world",
+          "bytes": 106496
+        },
+        {
+          "name": "global",
+          "bytes": 2843052
+        }
+      ],
+      "initial_candidate_fields": 23,
+      "refinement_samples": 478,
+      "nominal_refinement_seconds": 22,
+      "matching_candidates": [
+        {
+          "block": "global",
+          "offset": "0x2250f8",
+          "changes": 38,
+          "delta_values": [
+            8,
+            11,
+            12,
+            15,
+            16,
+            20,
+            23,
+            51,
+            126,
+            407
+          ],
+          "median_interval_ms": 603.332,
+          "minimum_interval_ms": 47.644,
+          "maximum_interval_ms": 653.941,
+          "fraction_within_400_850_ms": 0.972972972972973,
+          "rva": "0x19420f8"
+        }
+      ],
+      "semantics_validated": false,
+      "input_sent": false,
+      "raw_memory_saved": false
+    },
+    "one_indirection_module_objects": {
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "objects_scanned": 114,
+      "bytes_per_object": 4096,
+      "initial_candidate_fields": 15,
+      "refinement_samples": 703,
+      "nominal_refinement_seconds": 22,
+      "matching_candidates": [],
+      "semantics_validated": false,
+      "input_sent": false,
+      "raw_memory_saved": false
+    },
+    "candidate_review": {
+      "counter_rva": "0x19420f8",
+      "function_rva": "0xf73920",
+      "increment_instruction_rva": "0xf7392f",
+      "static_observation": "The function increments the global at entry, copies up to the requested byte count from a circular buffer, advances its read cursor and decreases its available-byte count.",
+      "observed_increment_sizes": [
+        8,
+        11,
+        12,
+        15,
+        16,
+        20,
+        23,
+        51,
+        126,
+        407
+      ],
+      "conclusion": "Rejected as a server-tick counter: it counts calls to this buffer-reading routine. Roughly 600 ms changes do not establish tick identity or protection-check timing."
+    },
+    "limits": "The probes cover only the named blocks and 114 directly referenced readable module-vtable objects. No conclusion of global absence is drawn.",
+    "new_game_tick_mapping_enabled": false,
+    "raw_memory_saved": false,
+    "input_sent": false
   }
 }
