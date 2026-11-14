@@ -1,7 +1,7 @@
 D6 - Arbiter
 ============
 
-:Status: done
+:Status: in progress
 :Wave: 1
 :Branch: ``telos/D6``
 :Kind: Python
