@@ -225,10 +225,18 @@ FONT_REACH_TILES = 1
 FONT_HOLD_TICKS = 30
 # Move again when the player is still not inside after this many received ticks.
 FONT_MOVE_RETRY_TICKS = 3
-# Three minions spawned beside the green font as it became chargeable (13,000 HP each at 250%).
-# Account owner: red stuns at random (most dangerous), green hits harder the longer it lives,
-# black strips armour. Which config is which colour is not mapped yet.
-MINION_CONFIGS = frozenset({22905, 22906, 22907})
+# 100% kill of 2026-11-14 (telos-20261114T173454): Pure Anima Font (green) 22893/22896/22899,
+# Volcanic (red) 22894/22897/22900 and Corrupt (black) 22895/22898/22901, charged in that order.
+# Each charged font despawned 12-14 received ticks after charging.
+# Three anima-golems spawn beside each font as it becomes chargeable (10,000 HP at 100%, 13,000
+# at 250%). Account owner: red stuns at random (most dangerous), green hits harder the longer it
+# lives, black strips armour. Names: Pure 22905, Corrupt 22906, Volcanic 22907.
+PURE_GOLEM = 22905
+CORRUPT_GOLEM = 22906
+VOLCANIC_GOLEM = 22907
+MINION_CONFIGS = frozenset({PURE_GOLEM, CORRUPT_GOLEM, VOLCANIC_GOLEM})
+# Kill order: the stunning red golem, then the green one before its damage grows, then black.
+MINION_PRIORITY = (VOLCANIC_GOLEM, PURE_GOLEM, CORRUPT_GOLEM)
 
 
 class FontDuty:
@@ -297,6 +305,47 @@ class FontDuty:
         self.move_attempts += 1
         self.next_move_tick = received_tick + FONT_MOVE_RETRY_TICKS
         return True
+
+
+class TargetPicker:
+    """Choose what to attack in P4: golems by MINION_PRIORITY, then Telos again.
+
+    ``choose`` takes the golems as (instance_id, config_id, health, tile) tuples and the font
+    duty state. It returns a golem tuple to click, "telos", or None (nothing new to click).
+    Nothing is clicked while a font is charging, since a click could leave the font.
+    """
+
+    def __init__(self):
+        self.clicked = None
+        self.telos_due = False
+        self.retry_tick = None
+
+    def choose(self, minions, duty_state, received_tick):
+        """Return the next target to click, at most once per golem."""
+        if duty_state == "charging":
+            return None
+        if self.retry_tick is not None and received_tick < self.retry_tick:
+            return None
+        alive = [minion for minion in minions if minion[2] > 0]
+        if alive:
+            best = min(alive, key=lambda minion: (MINION_PRIORITY.index(minion[1]), minion[0]))
+            if best[0] == self.clicked:
+                return None
+            self.clicked = best[0]
+            self.telos_due = True
+            return best
+        if self.telos_due and duty_state is None:
+            self.telos_due = False
+            self.clicked = None
+            return "telos"
+        return None
+
+    def failed(self, received_tick):
+        """A click was not delivered: allow the same choice again after a short wait."""
+        if self.clicked is None:
+            self.telos_due = True
+        self.clicked = None
+        self.retry_tick = received_tick + FONT_MOVE_RETRY_TICKS
 
 
 def project_tile(reader, tile, plane, fine_height):
@@ -1202,16 +1251,17 @@ def run(reader, args, board, attempt=None):
             return
 
     font_duty = FontDuty()
+    target_picker = TargetPicker()
     seen_p4_actors = set()
 
     def p4_actors():
-        """Return the fonts as (instance_id, config_id, health, tile); log new P4 actors once."""
+        """Return (fonts, golems) as (instance_id, config_id, health, tile); log new ones once."""
         poses = {
             pose.instance_id: pose
             for pose in reader.npc_spatial[: reader.spatial.npc_count]
             if pose.valid_mask & SpatialFlags.TILE
         }
-        fonts = []
+        fonts, minions = [], []
         for npc in reader.npcs[: reader.info.npc_count]:
             if npc.config_id not in FONT_CONFIGS and npc.config_id not in MINION_CONFIGS:
                 continue
@@ -1231,15 +1281,18 @@ def run(reader, args, board, attempt=None):
                     tile=tile,
                     footprint=pose.footprint_size if pose is not None else None,
                 )
-            if npc.config_id in FONT_CONFIGS and tile is not None:
-                fonts.append((npc.instance_id, npc.config_id, npc.health_current, tile))
-        return fonts
+            if tile is None:
+                continue
+            record = (npc.instance_id, npc.config_id, npc.health_current, tile)
+            (fonts if npc.config_id in FONT_CONFIGS else minions).append(record)
+        return fonts, minions
 
     def font_step(phase_one, boss, received_tick, timers):
-        """Go to the chargeable P4 font, stay through the instakill, then attack Telos again."""
+        """Go to the chargeable P4 font, stay through the instakill, then pick targets."""
         if not isinstance(received_tick, int):
             return
-        target, event = font_duty.update(p4_actors(), received_tick)
+        fonts, minions = p4_actors()
+        target, event = font_duty.update(fonts, received_tick)
         phase_one.hold_position = font_duty.active
         player = reader.spatial.player
         located = player.valid_mask & SpatialFlags.TILE and player.valid_mask & (
@@ -1248,8 +1301,11 @@ def run(reader, args, board, attempt=None):
         player_tile = (player.tile.x, player.tile.y) if located else None
         if event:
             emit(event, target=target, player_tile=player_tile, received_tick=received_tick)
-            if event == "font_hold_ended":
-                reengage_telos(boss, player)
+            if event in ("font_hold_ended", "font_lost"):
+                # The player left Telos for the font; melee must be restarted by a click.
+                target_picker.telos_due = True
+        if player_tile is not None and input_allowed:
+            attack_step(minions, boss, player, received_tick)
         if target is None or player_tile is None or not input_allowed:
             return
         if font_duty.move_due(player_tile, target, received_tick):
@@ -1279,8 +1335,31 @@ def run(reader, args, board, attempt=None):
             font_duty.resonance_sent = True
             emit("font_resonance", sent=send_chord(bindings["Resonance"]))
 
+    def attack_step(minions, boss, player, received_tick):
+        """Click the next golem by priority, or Telos once no golem is left."""
+        choice = target_picker.choose(minions, font_duty.state, received_tick)
+        if choice is None:
+            return
+        if choice == "telos":
+            if not reengage_telos(boss, player):
+                target_picker.failed(received_tick)
+            return
+        instance_id, config_id, health, tile = choice
+        point = project_tile(reader, tile, player.tile.plane, player.fine_height)
+        sent = None if point is None else click_point(point, select_dive=False)
+        emit(
+            "golem_target",
+            sent=sent,
+            instance_id=instance_id,
+            config_id=config_id,
+            health=health,
+            tile=tile,
+        )
+        if not sent:
+            target_picker.failed(received_tick)
+
     def reengage_telos(boss, player):
-        """Left-click Telos's centre tile so melee resumes after leaving the font."""
+        """Left-click Telos's centre tile so melee resumes; return whether the click was sent."""
         pose = next(
             (
                 p
@@ -1291,12 +1370,13 @@ def run(reader, args, board, attempt=None):
         )
         if pose is None or not input_allowed:
             emit("telos_reengage", sent=False, reason="Telos tile or input unavailable")
-            return
+            return False
         offset = (pose.footprint_size or 1) // 2
         centre = (pose.tile.x + offset, pose.tile.y + offset)
         point = project_tile(reader, centre, player.tile.plane, player.fine_height)
         sent = None if point is None else click_point(point, select_dive=False)
         emit("telos_reengage", sent=sent, tile=centre)
+        return bool(sent)
 
     def click_point(point, *, select_dive):
         """Move the pointer to a physical pixel and left-click, after Dive if requested.

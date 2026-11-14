@@ -464,6 +464,42 @@ class FontDutyTests(unittest.TestCase):
         self.assertFalse(duty.active)
 
 
+TargetPicker = controller["TargetPicker"]
+
+
+def golems(pure, corrupt, volcanic):
+    """First-font golems of the 100% kill (telos-20261114T173454) with the given health."""
+    return [
+        (34, controller["PURE_GOLEM"], pure, (10194, 2217)),
+        (33, controller["CORRUPT_GOLEM"], corrupt, (10196, 2219)),
+        (32, controller["VOLCANIC_GOLEM"], volcanic, (10194, 2215)),
+    ]
+
+
+class TargetPickerTests(unittest.TestCase):
+    def test_golems_in_priority_order_then_telos(self):
+        picker = TargetPicker()
+        # Nothing is clicked while the font charges.
+        self.assertIsNone(picker.choose(golems(10000, 10000, 10000), "charging", 5909))
+        choice = picker.choose(golems(10000, 10000, 10000), "holding", 5923)
+        self.assertEqual(choice[0], 32)  # Volcanic (red) first.
+        self.assertIsNone(picker.choose(golems(10000, 10000, 4970), "holding", 5931))
+        self.assertEqual(picker.choose(golems(10000, 10000, 0), "holding", 5934)[0], 34)
+        self.assertEqual(picker.choose(golems(0, 9782, 0), None, 5937)[0], 33)
+        self.assertEqual(picker.choose([], None, 5995), "telos")
+        self.assertIsNone(picker.choose([], None, 5996))
+
+    def test_font_end_without_golems_reengages_telos_and_retries(self):
+        picker = TargetPicker()
+        picker.telos_due = True
+        self.assertIsNone(picker.choose([], "holding", 100))
+        self.assertEqual(picker.choose([], None, 101), "telos")
+        picker.failed(101)
+        self.assertIsNone(picker.choose([], None, 102))
+        retry_tick = 101 + controller["FONT_MOVE_RETRY_TICKS"]
+        self.assertEqual(picker.choose([], None, retry_tick), "telos")
+
+
 PrayerFlicker = controller["PrayerFlicker"]
 
 
