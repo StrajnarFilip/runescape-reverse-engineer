@@ -23,6 +23,12 @@ The practice controller has 0% evidence through the phase 3 handoff on Compatibi
 
 ## Special rotation per phase
 
+**P4 walk validation.** In the [250% follow-up](../../../training-data/telos-20261114T193511.217029Z.jsonl),
+the first font became chargeable at tick 3986. Fourteen projected clicks followed while the
+player stayed outside charging range. The controller now checks the client's default Walk tile
+before clicking and accepts a free tile in the font's charging ring. Confirm charge steps and
+survival after using this check in a live encounter.
+
 Guide-derived from the [RuneScape Wiki strategy page](https://runescape.wiki/w/Telos,_the_Warden/Strategies#Phase_2), which warns it may predate the March 2026 combat modernisation. Rows marked *live* match the 2026-11-14 Compatibility Mode captures.
 
 | Phase | Rotation (3 autos between specials unless stated) | Live evidence |

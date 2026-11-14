@@ -1,5 +1,6 @@
 """Exercise the standalone controller with synthetic attack events and no HID input."""
 
+import io
 import json
 import runpy
 import sys
@@ -9,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from rs3_reader.bot.attempt_log import AttemptLog
 from rs3_reader.native import (
     EncounterState,
     HazardFlags,
@@ -467,12 +469,13 @@ class FontDutyTests(unittest.TestCase):
         self.assertEqual(duty.update(red, hold_end + 50), ((14621, 1805), "font_charge_started"))
 
     def test_stand_tile_avoids_golems_and_counts_as_inside(self):
-        stand = controller["font_stand_tile"]
+        stand = controller["font_stand_tiles"]
         in_font = controller["in_font"]
         font = (10192, 2216)
         # 173454 golems beside the first font: (10194, 2215), (10196, 2219), (10194, 2217).
         golem_tiles = {(10194, 2215), (10196, 2219), (10194, 2217)}
-        tile = stand(font, (10200, 2216), golem_tiles)
+        tiles = stand(font, (10200, 2216), golem_tiles)
+        tile = tiles[0]
         self.assertNotIn(tile, golem_tiles)
         self.assertEqual(tile, (10194, 2216))
         self.assertTrue(in_font(tile, font))
@@ -482,7 +485,8 @@ class FontDutyTests(unittest.TestCase):
         self.assertFalse(in_font((10195, 2216), font))
         # With every ring tile taken, the font's own tile is the fallback.
         ring = {(font[0] + dx, font[1] + dy) for dx in range(-1, 3) for dy in range(-1, 3)}
-        self.assertEqual(stand(font, (10200, 2216), ring), font)
+        self.assertFalse(set(tiles) & golem_tiles)
+        self.assertEqual(stand(font, (10200, 2216), ring), [font])
 
     def test_vanished_font_ends_duty(self):
         duty = FontDuty()
@@ -656,6 +660,37 @@ PrayerFlicker = controller["PrayerFlicker"]
 
 
 class PrayerFlickerTests(unittest.TestCase):
+    def test_attempt_log_matches_observed_overhead_to_the_issued_request(self):
+        stream = io.StringIO()
+        now = 100
+        attempt = AttemptLog(
+            stream, mode="practice", enrage=250, monotonic_ns=lambda: now,
+            prayer_ack_timeout_ns=20,
+        )
+        attempt.game_tick = 61
+        attempt.write("prayer_flick_sent", prayer="magic", cue_native_sequence=10)
+        attempt.observe_prayer(99, "magic")
+        attempt.observe_prayer(103, "melee")
+        attempt.game_tick = 62
+        now = 108
+        attempt.observe_prayer(now, "magic")
+        attempt.write("prayer_flick_sent", prayer="soul_split")
+        now = 129
+        attempt.observe_prayer(now, "magic")
+        attempt.write("prayer_flick_sent", prayer="soul_split")
+        attempt.write("attempt_ended", result="incomplete", reason="interrupted")
+        outcomes = [
+            row for row in map(json.loads, stream.getvalue().splitlines())
+            if row["event"] == "prayer_flick_outcome"
+        ]
+        self.assertEqual([row["outcome"] for row in outcomes], [
+            "acknowledged", "timeout", "attempt_ended",
+        ])
+        self.assertEqual(
+            (outcomes[0]["request_sequence"], outcomes[0]["sent_tick"], outcomes[0]["game_tick"]),
+            (2, 61, 62),
+        )
+
     def test_animation_holds_melee_until_next_received_tick(self):
         flicker = PrayerFlicker()
         self.assertEqual(flicker.next_prayer(Prayer.MELEE, 10, 0), Prayer.SOUL_SPLIT)

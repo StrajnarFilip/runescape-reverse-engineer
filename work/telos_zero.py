@@ -247,8 +247,8 @@ def in_font(player_tile, font_tile):
     return footprint_distance(player_tile, font_tile, FONT_FOOTPRINT) <= FONT_REACH_TILES
 
 
-def font_stand_tile(font_tile, player_tile, occupied):
-    """A free tile in the ring around the font, nearest the player, or the font tile itself.
+def font_stand_tiles(font_tile, player_tile, occupied):
+    """Return the free ring in nearest-first order, with a last-resort font tile.
 
     Golems spawn beside the font: in the 250% run of 182852 eleven clicks on the font's own tile
     left the player 6-8 tiles away, circling (presumably attacking a golem standing there). Tiles
@@ -265,9 +265,7 @@ def font_stand_tile(font_tile, player_tile, occupied):
         if footprint_distance(tile, font_tile, FONT_FOOTPRINT) == FONT_REACH_TILES
         and tile not in occupied
     ]
-    if not free:
-        return font_tile
-    return min(free, key=lambda tile: (chebyshev(tile, player_tile), tile))
+    return sorted(free, key=lambda tile: (chebyshev(tile, player_tile), tile)) or [font_tile]
 
 
 class FontDuty:
@@ -285,6 +283,7 @@ class FontDuty:
         self.move_attempts = 0
         self.resonance_sent = False
         self.finished = set()
+        self.rejected_points = set()
 
     @property
     def active(self):
@@ -301,6 +300,7 @@ class FontDuty:
                     self.state = "charging"
                     self.next_move_tick = received_tick
                     self.move_attempts = 0
+                    self.rejected_points.clear()
                     self.resonance_sent = False
                     return tile, "font_charge_started"
             return None, None
@@ -366,7 +366,7 @@ VIRUS_TIMER_START = 3840
 VIRUS_TIMER_STEP = 128
 VIRUS_BEAM_BY_PHASE = {2: BLACK_BEAM_KIND, 3: RED_BEAM_KIND}
 VIRUS_CLEANSE_GRACE_TICKS = 2
-VIRUS_HOVER_SETTLE_SECONDS = 0.05
+WALK_HOVER_SETTLE_SECONDS = 0.05
 
 
 def footprint_distance(tile, boss_tile, size):
@@ -1578,18 +1578,59 @@ def run(reader, args, board, attempt=None):
                         for dx in range(size)
                         for dy in range(size)
                     }
-            stand = font_stand_tile(target, player_tile, occupied)
-            # Walk only: the font is an NPC on its tile, and fifteen Dives aimed at it in the
-            # 300% run of 175142 never moved the player; the walk clicks of 173454 did.
-            point = project_tile(reader, stand, player.tile.plane, player.fine_height)
-            sent = None if point is None else click_point(point, select_dive=False)
+            stand_tiles = font_stand_tiles(target, player_tile, occupied)
+            plane = player.tile.plane
+            accepted = {(x, y, plane) for x, y in stand_tiles if in_font((x, y), target)}
+            hover = {}
+            stand = point = sent = None
+            for candidate in stand_tiles:
+                projected = project_tile(reader, candidate, plane, player.fine_height)
+                if projected is not None and projected not in font_duty.rejected_points:
+                    stand, point = candidate, projected
+                    break
+            if point is None:
+                font_duty.rejected_points.clear()
+            else:
+                previous_menu_cycle = reader.pointer_walk.menu_cycle
+                boss_id = boss.instance_id
+
+                def font_destination_current():
+                    fresh, current_boss, current_phase, hp = refresh_for_walk()
+                    fill_walk_hover(hover)
+                    return (
+                        fresh
+                        and current_boss is not None
+                        and current_boss.config_id == ACTIVE_TELOS
+                        and current_boss.instance_id == boss_id
+                        and current_phase == 4
+                        and hp is not None
+                        and hp > 0
+                        and reader.pointer_walk.menu_cycle != previous_menu_cycle
+                        and hover.get("tile") in accepted
+                        and any(
+                            font[0] == font_duty.font and font[3] == target
+                            for font in p4_actors()[0]
+                        )
+                    )
+
+                sent = click_point(
+                    point,
+                    select_dive=False,
+                    validate=font_destination_current,
+                    failure_event="font_move_skipped",
+                )
+                if not sent and hover and hover.get("tile") not in accepted:
+                    font_duty.rejected_points.add(point)
+                    font_duty.next_move_tick = received_tick + 1
             if sent:
+                font_duty.rejected_points.clear()
                 target_picker.moved()
             emit(
                 "font_move",
                 sent=sent,
                 target=target,
                 stand=stand,
+                hover=hover,
                 player_tile=player_tile,
                 distance=distance,
                 attempt=font_duty.move_attempts,
@@ -1607,6 +1648,24 @@ def run(reader, args, board, attempt=None):
 
     beam_blocker = BeamBlocker()
     virus = VirusResponse()
+
+    def refresh_for_walk():
+        """Observe a new client sample once the moved pointer has had time to update."""
+        time.sleep(WALK_HOVER_SETTLE_SECONDS)
+        latest, _, current_boss, current_phase, hp = boss_sample(reader)
+        fresh = (
+            (latest.pid, latest.process_creation_time, reader.combat.scene_epoch) == identity
+            and latest.status in (Status.AVAILABLE, Status.PARTIAL)
+            and 0 <= reader.monotonic_ns() - latest.monotonic_ns <= MAX_SAMPLE_AGE_NS
+        )
+        return fresh, current_boss, current_phase, hp
+
+    def fill_walk_hover(hover):
+        pointer = reader.pointer_walk
+        if pointer.valid:
+            hover["action"] = pointer.action
+            if pointer.tile.valid:
+                hover["tile"] = (pointer.tile.x, pointer.tile.y, pointer.tile.plane)
 
     def virus_step(phase, boss, received_tick, *, movement_busy):
         """Walk to the live strip while the debuff is active and log its resolution."""
@@ -1695,12 +1754,9 @@ def run(reader, args, board, attempt=None):
 
         def destination_current():
             nonlocal actual_destination
-            time.sleep(VIRUS_HOVER_SETTLE_SECONDS)
-            latest, _, current_boss, current_phase, hp = boss_sample(reader)
+            fresh, current_boss, current_phase, hp = refresh_for_walk()
             if (
-                (latest.pid, latest.process_creation_time, reader.combat.scene_epoch) != identity
-                or latest.status not in (Status.AVAILABLE, Status.PARTIAL)
-                or not 0 <= reader.monotonic_ns() - latest.monotonic_ns <= MAX_SAMPLE_AGE_NS
+                not fresh
                 or hp is None
                 or hp <= 0
                 or current_phase != phase
@@ -1714,10 +1770,7 @@ def run(reader, args, board, attempt=None):
             if not current_player.valid_mask & SpatialFlags.TILE:
                 return False
             pointer = reader.pointer_walk
-            if pointer.valid:
-                hover["action"] = pointer.action
-                if pointer.tile.valid:
-                    hover["tile"] = (pointer.tile.x, pointer.tile.y, pointer.tile.plane)
+            fill_walk_hover(hover)
             if pointer.menu_cycle == previous_menu_cycle or "tile" not in hover:
                 return False
             current_route = virus_beam_destination(
@@ -2656,6 +2709,7 @@ def main():
                     mode="practice" if args.port else "observation",
                     enrage=args.practice_enrage,
                     monotonic_ns=reader.monotonic_ns,
+                    prayer_ack_timeout_ns=ACK_TIMEOUT_NS,
                 )
                 print(f"Attempt log {path}", flush=True)
             if args.port:
@@ -2667,10 +2721,12 @@ def main():
             else:
                 board = ArduinoBackend(args.port)
                 result = run(reader, args, board, attempt)
-                # A new scene or Telos instance starts a fresh encounter in the same session.
-                while result == ENCOUNTER_RESET:
+                # Setup can cross scenes before engaging. After that, leaving the encounter
+                # closes its log even when the game returns to staging between samples.
+                while result == ENCOUNTER_RESET and not attempt.engaged:
                     result = run(reader, args, board, attempt)
-                end_reason = attempt.end_reason or ("phase_limit" if result == 2 else "time_limit")
+                result_reasons = {2: "phase_limit", ENCOUNTER_RESET: "encounter_ended"}
+                end_reason = attempt.end_reason or result_reasons.get(result, "time_limit")
             return result
     except KeyboardInterrupt:
         end_reason = "interrupted"

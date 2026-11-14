@@ -19,12 +19,21 @@ from ..telemetry import hit_record, spatial_actor_record
 
 SCHEMA_VERSION = 1
 CLEANSE_MAX_AGE_CLIENT_TICKS = 50
+PRAYER_ACK_TIMEOUT_NS = 1_200_000_000
 
 
 class AttemptLog:
     """Write one initial state, state deltas, native events and controller outcomes."""
 
-    def __init__(self, stream, *, mode, enrage, monotonic_ns=time.monotonic_ns):
+    def __init__(
+        self,
+        stream,
+        *,
+        mode,
+        enrage,
+        monotonic_ns=time.monotonic_ns,
+        prayer_ack_timeout_ns=PRAYER_ACK_TIMEOUT_NS,
+    ):
         self.stream = stream
         self.clock = monotonic_ns
         self.origin_ns = None
@@ -37,6 +46,8 @@ class AttemptLog:
         self.session_index = 0
         self.engaged = False
         self.last_cleanse = None
+        self.pending_prayer = None
+        self.prayer_ack_timeout_ns = prayer_ack_timeout_ns
         self.end_reason = None
         self.write("attempt_started", mode=mode, enrage_label=enrage)
 
@@ -49,6 +60,11 @@ class AttemptLog:
         now_ns = self.clock()
         if self.origin_ns is None:
             self.origin_ns = now_ns
+        if self.pending_prayer is not None:
+            if event in ("attempt_ended", "encounter_reset"):
+                self.observe_prayer(now_ns, None, ending=event)
+            elif event == "prayer_flick_sent":
+                self.observe_prayer(now_ns, None, ending="superseded")
         self.engaged |= event == "engaged"
         self.sequence += 1
         row = {
@@ -63,6 +79,41 @@ class AttemptLog:
             **fields,
         }
         print(json.dumps(row, separators=(",", ":"), allow_nan=False), file=self.stream, flush=True)
+        if event == "prayer_flick_sent":
+            self.pending_prayer = (
+                self.sequence,
+                fields["prayer"],
+                fields.get("cue_native_sequence"),
+                self.game_tick,
+                now_ns,
+            )
+
+    def observe_prayer(self, observed_ns, prayer, *, ending=None):
+        """Match an issued player input against the next valid client overhead observation."""
+        if self.pending_prayer is None:
+            return
+        request, target, cue, sent_tick, sent_ns = self.pending_prayer
+        if ending:
+            outcome = ending
+        elif observed_ns < sent_ns:
+            return
+        elif prayer == target and observed_ns - sent_ns <= self.prayer_ack_timeout_ns:
+            outcome = "acknowledged"
+        elif observed_ns - sent_ns < self.prayer_ack_timeout_ns:
+            return
+        else:
+            outcome = "timeout"
+        self.pending_prayer = None
+        self.write(
+            "prayer_flick_outcome",
+            request_sequence=request,
+            prayer=target,
+            observed_prayer=prayer,
+            cue_native_sequence=cue,
+            sent_tick=sent_tick,
+            outcome=outcome,
+            observed_ns=self.relative_ns(observed_ns),
+        )
 
     def frame(self, reader, info, *, phase, actions, action_loss, hits, hit_loss):
         """Record only encounter-relevant decoded fields and preserve queue event ordering."""
@@ -203,6 +254,8 @@ class AttemptLog:
         self.previous = state
         if changes:
             self.write("state", observed_ns=self.relative_ns(info.monotonic_ns), changes=changes)
+        if info.monotonic_ns:
+            self.observe_prayer(info.monotonic_ns, state["active_prayer"])
         cleanse = reader.telos_cleanse
         if self.engaged and cleanse.valid and self.client_logic_tick is not None:
             message = (self.session_index, cleanse.message_id, cleanse.client_logic_tick)

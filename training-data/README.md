@@ -8,7 +8,9 @@ Stand on the staging platform with Telos dormant and Revolution on bar 18. Put F
 Anticipation, Escape, Resonance, Dive and the Deflect Magic, Deflect Melee and Soul Split prayers on
 any displayed action bar. The controller reads their keys from game memory
 (`rs3_reader.action_bar_keys`) and logs them as `keys_resolved`; a key passed on the command line
-takes precedence. Start the script, click into RuneScape, and wake Telos yourself. Only death or F12 ends the run: losing focus pauses input until RuneScape is focused again, stale samples are skipped, and a new scene or Telos instance starts a fresh encounter.
+takes precedence. Start the script, click into RuneScape, and wake Telos yourself. After engagement,
+leaving the encounter closes its attempt log. Losing focus pauses input until RuneScape is focused
+again, stale samples are skipped, and F12 stops the script.
 The controller turns on Deflect Melee with its key and takes over when the fight starts. If the player is still under Telos 1-4 ticks after Hold Still, it moves the pointer to a projected tile outside his footprint and presses Dive, avoiding the stomp. F12 stops it.
 
 ```powershell
@@ -59,6 +61,10 @@ the message. The nearest logged beam row can be one tile away when a cleanse occ
 Movement rows include the projected target, the observed default action and tile in `hover`,
 and the verified `walk_target` and `dispatch_tick` when a click is sent.
 A log with no `attempt_ended` was interrupted before the writer could record its outcome.
+
+Join `prayer_flick_outcome.request_sequence` to the original `prayer_flick_sent` row. An
+`acknowledged` outcome confirms the overhead observed in the client and records the sampling
+tick. Compare it with the recipient's hitmark and its client clock to assess the window.
 
 Join an `ability_sent` row to the `npc_animation` row whose `native_sequence` matches `cue_native_sequence`. Use `cooldown_acknowledgement` and `surge_displacement` for later observations. A cooldown acknowledges a cast. Dodge success, damage prevention and healing each require their own evidence. Inspect `queue_loss` and `attempt_ended` before interpreting a run. The first practice trace predates NPC tile and NPC hitmark logging and has no explicit Anticipation acknowledgement at the phase boundary.
 
