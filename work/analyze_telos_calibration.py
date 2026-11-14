@@ -111,6 +111,13 @@ def normalize_row(row):
         if "newly_observed" in section:
             result["player_hit_events"] = section["newly_observed"] or []
             result["player_hit_events_lost"] = section.get("events_lost")
+    for section_name, loss_name in (
+        ("hit_splats", "npc_hit_events_lost"),
+        ("inventory_changes", "inventory_events_lost"),
+    ):
+        section = row.get(section_name)
+        if loss_name not in result and isinstance(section, dict):
+            result[loss_name] = section.get("events_lost")
     presses = row.get("manual_prayer_keys", row.get("manual_prayer_presses", [])) or []
     result["manual_prayer_keys"] = []
     for original in presses:
@@ -322,7 +329,25 @@ def summarize(rows, *, isolated_phase_1_melee=False):
         "player_hit_events_lost": (
             known_loss_total(rows, "player_hit_events_lost") if hit_data_present else None
         ),
+        "native_queue_losses": {
+            name: known_loss_total(rows, key)
+            for name, key in (
+                ("npc_actions", "npc_action_events_lost"),
+                ("npc_hits", "npc_hit_events_lost"),
+                ("player_hits", "player_hit_events_lost"),
+                ("inventory_changes", "inventory_events_lost"),
+            )
+        },
+        "input_sent_by_calibration": input_history(rows),
     }
+
+
+def input_history(rows):
+    """Any explicit true is retained; omitted/invalid input provenance stays unknown."""
+    values = [row.get("input_sent_by_calibration") for row in rows]
+    if any(value is True for value in values):
+        return True
+    return False if values and all(value is False for value in values) else None
 
 
 def known_loss_total(rows, key):
@@ -331,6 +356,21 @@ def known_loss_total(rows, key):
     if not values or any(type(value) is not int or value < 0 for value in values):
         return None
     return sum(values)
+
+
+def validate_output_paths(inputs, outputs):
+    """Reject aliases of captures/annotations or another output before writing."""
+    protected = [Path(path).resolve() for path in inputs]
+    for output in outputs:
+        if output is None:
+            continue
+        path = Path(output).resolve()
+        for existing in protected:
+            if path == existing or (
+                path.exists() and existing.exists() and path.samefile(existing)
+            ):
+                raise ValueError("Analysis outputs must differ from inputs and each other")
+        protected.append(path)
 
 
 def build_attack_catalogue(sources):
@@ -529,6 +569,13 @@ def main():
         parser.error("Supply --phase and --enrage for an isolated capture, or --annotations")
     if arguments.isolated_melee and (arguments.phase != 1 or arguments.annotations):
         parser.error("--isolated-melee requires a single labelled phase-1 context")
+    try:
+        validate_output_paths(
+            [*arguments.capture, *([arguments.annotations] if arguments.annotations else [])],
+            [arguments.output, arguments.catalogue_output],
+        )
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
     sources = [
         {
             "capture_sha256": hashlib.sha256(capture.read_bytes()).hexdigest(),
@@ -542,7 +589,7 @@ def main():
         "client_session_date": arguments.session_date,
         "enrage_user_label": arguments.enrage,
         "phase_user_label": arguments.phase,
-        "input_sent_by_calibration": False,
+        "input_sent_by_calibration": input_history([source["summary"] for source in sources]),
         "sources": sources,
         "historical_isolated_phase_1_labels": USER_LABELLED_CUES,
         "observed_npc_forms": OBSERVED_NPC_FORMS,

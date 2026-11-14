@@ -1,9 +1,14 @@
 """Timing evidence must preserve misses, session boundaries and unmatched keys."""
 
 import copy
+import contextlib
 import importlib.util
+import io
+import os
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ANALYSIS_PATH = Path(__file__).resolve().parents[2] / "work" / "analyze_telos_calibration.py"
 specification = importlib.util.spec_from_file_location("analyze_telos_calibration", ANALYSIS_PATH)
@@ -71,6 +76,82 @@ def soul_split_key(time_ms, virtual_key=VK_F3, prayer="soul_split"):
 
 
 class CalibrationAnalysisTests(unittest.TestCase):
+    def test_complete_telemetry_loss_counts_and_input_history_remain_explicit(self):
+        row = capture_row(1000)
+        row.pop("player_hit_events")
+        row.update(
+            npc_action_events_lost=1,
+            hit_splats={"events_lost": 2},
+            player_hit_splats={"newly_observed": [], "events_lost": 3},
+            inventory_changes={"newly_observed": [], "events_lost": 4},
+            input_sent_by_calibration=False,
+        )
+        result = analysis.summarize([row])
+        self.assertEqual(
+            result["native_queue_losses"],
+            {"npc_actions": 1, "npc_hits": 2, "player_hits": 3, "inventory_changes": 4},
+        )
+        self.assertIs(result["input_sent_by_calibration"], False)
+        unknown = copy.deepcopy(row)
+        unknown.pop("inventory_changes")
+        unknown.pop("input_sent_by_calibration")
+        result = analysis.summarize([row, unknown])
+        self.assertIsNone(result["native_queue_losses"]["inventory_changes"])
+        self.assertIsNone(result["input_sent_by_calibration"])
+        unknown["input_sent_by_calibration"] = True
+        self.assertIs(analysis.summarize([row, unknown])["input_sent_by_calibration"], True)
+
+    def test_input_history_does_not_treat_numeric_or_missing_flags_as_false(self):
+        for value in (0, 1, "false", None):
+            self.assertIsNone(analysis.input_history([{"input_sent_by_calibration": value}]))
+        self.assertIsNone(analysis.input_history([]))
+        self.assertIsNone(analysis.input_history([{}]))
+
+    def test_output_aliases_cannot_overwrite_capture_annotations_or_another_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            capture, annotation = directory / "capture.jsonl", directory / "labels.json"
+            capture.write_text("preserve raw capture\n")
+            annotation.write_text("preserve annotations\n")
+            alias = directory / "alias.jsonl"
+            os.link(capture, alias)
+            for inputs, outputs in (
+                ([capture], [capture]),
+                ([capture], [alias]),
+                ([capture, annotation], [annotation]),
+                ([capture], [directory / "out.json", directory / "out.json"]),
+            ):
+                with self.subTest(outputs=outputs), self.assertRaises(ValueError):
+                    analysis.validate_output_paths(inputs, outputs)
+            analysis.validate_output_paths([capture, annotation], [directory / "out.json", None])
+            self.assertEqual(capture.read_text(), "preserve raw capture\n")
+            self.assertEqual(annotation.read_text(), "preserve annotations\n")
+
+    def test_cli_rejects_capture_output_alias_before_reading_or_writing(self):
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            capture = Path(temporary) / "capture.jsonl"
+            capture.write_text("preserve even non-JSON input\n")
+            arguments = [
+                "analysis",
+                "--capture",
+                str(capture),
+                "--output",
+                str(capture),
+                "--phase",
+                "1",
+                "--enrage",
+                "300",
+                "--session-date",
+                "2026-11-14",
+            ]
+            with patch("sys.argv", arguments), self.assertRaises(SystemExit) as error:
+                analysis.main()
+            self.assertEqual(error.exception.code, 2)
+            self.assertEqual(capture.read_text(), "preserve even non-JSON input\n")
+
     def test_legacy_filtered_cue_uses_its_parent_session_without_overwriting_identity(self):
         row = capture_row(1000)
         row.pop("npc_action_events")

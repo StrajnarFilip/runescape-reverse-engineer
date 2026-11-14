@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "track": "P6",
+  "date": "2026-11-14",
+  "status": "complete_native_recording_prepared_live_calibration_pending",
+  "scope": "Read-only capture and offline analysis preparation; no new Telos observations or attack authorization.",
+  "recording": {
+    "serializer": "NativeTelemetry schema 1",
+    "acquisition": "Synchronous C DLL; worker_hz 0 preserves frame/queue handoff",
+    "requested_poll_ms": 10,
+    "actual_poll_intervals": "Measured at manual key edges; scheduling and serialization may extend them",
+    "exact_nanoseconds_and_sequence": true,
+    "guarded_native_phase_and_enrage_retained": true,
+    "manual_enrage_overrides_native_value": false,
+    "native_queue_records_and_losses": ["npc_actions", "npc_hits", "player_hits", "inventory_changes"],
+    "manual_key_transition_loss": "unknown; a complete transition between polls may be missed",
+    "perception_fields": "Full source frame retained, including pose/targets, effects, hazards, bars, inventory/equipment and abilities",
+    "default_duration_seconds": 300,
+    "output_must_be_new": true
+  },
+  "analysis": {
+    "native_queue_totals_preserve_unknown": true,
+    "input_history": "true if any explicit true; false only if every row explicitly false; otherwise null",
+    "input_and_annotation_output_aliases_rejected": true,
+    "hard_link_aliases_rejected": true,
+    "raw_stage_promoted_to_phase": false,
+    "hit_time_promoted_to_protection_deadline": false
+  },
+  "checks": {
+    "ctest_targets_passed": 15,
+    "python_tests_passed": 317,
+    "python_tests_skipped": 0,
+    "recorder_catalogue_and_key_tests": 17,
+    "analysis_tests": 18,
+    "absent_pid_real_dll_cli_frames": 4,
+    "absent_pid_capture_status": "unavailable",
+    "absent_pid_capture_to_readiness_and_analysis": "passed"
+  },
+  "game_process_opened_for_this_work": false,
+  "input_sent_by_calibration": false,
+  "automatic_flick_ready": false,
+  "prayer_check_deadline_validated": false,
+  "catalogue_authorization_changed": false,
+  "raw_capture_published": false,
+  "pending": [
+    "Labelled phase-5, remaining attack styles and individual damage components.",
+    "Controlled server protection-check outcomes and complete incoming coverage.",
+    "Supervised track L shadow comparisons on the intended account/profile."
+  ]
+}
