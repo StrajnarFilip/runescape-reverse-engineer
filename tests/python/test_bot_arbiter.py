@@ -474,6 +474,100 @@ class ArbiterTests(unittest.TestCase):
             "ac12cf5af97182bb4f31c8999a6b54d2b0429cd46490a6c1993967f9f7c2ac78",
         )
 
+    def test_reported_fault_stops_even_without_new_proposals(self):
+        arbiter, device, _ = self.make()
+        device.fault = "transport_state_unknown"
+        report = arbiter.step(world(), [])
+        self.assertEqual(report.fault, "actuator_fault:transport_state_unknown")
+        self.assertEqual(device.closes, 1)
+        self.assertEqual(device.attempts, ())
+
+    def test_rejected_result_with_reported_fault_closes_before_the_next_lane(self):
+        value = world()
+        arbiter, device, _ = self.make(accept=False)
+        device.hook = lambda proposal: setattr(device, "fault", "partial_input_uncertain")
+        report = arbiter.step(
+            value,
+            [
+                intent(value, "first", priority=Priority.SURVIVAL),
+                intent(value, "second", action=ActivateAbility(11), lane=ActionLane.OFF_GCD),
+            ],
+        )
+        self.assertEqual(report.fault, "actuator_fault:partial_input_uncertain")
+        self.assertEqual([item.status for item in report.decisions], ["fault", "rejected"])
+        self.assertEqual(len(device.attempts), 1)
+        self.assertEqual(device.closes, 1)
+
+    def test_accepted_input_stays_recorded_when_the_backend_also_faults(self):
+        value = world()
+        arbiter, device, _ = self.make()
+        device.hook = lambda proposal: setattr(device, "fault", "post_acceptance_cleanup_failed")
+        report = arbiter.step(value, [intent(value)])
+        self.assertTrue(report.to_record()["input_accepted"])
+        self.assertEqual(report.decisions[0].status, "sent")
+        self.assertEqual(report.fault, "actuator_fault:post_acceptance_cleanup_failed")
+        self.assertEqual(device.closes, 1)
+
+    def test_invalid_optional_fault_state_does_not_look_healthy(self):
+        for fault in (False, 0, "", {}, []):
+            arbiter, device, _ = self.make()
+            device.fault = fault
+            report = arbiter.step(world(), [intent(world())])
+            self.assertEqual(report.fault, "actuator_fault_state_invalid")
+            self.assertEqual(device.attempts, ())
+
+    def test_real_a1_fault_channel_stops_real_d6_with_a_fake_native_device(self):
+        from rs3_reader.bot.actuator_sendinput import (
+            Bindings,
+            DeviceFault,
+            KeyBinding,
+            SendInputActuator,
+        )
+
+        class BrokenNativeDevice:
+            def __init__(self):
+                self.calls = self.releases = self.closes = 0
+
+            def dispatch(self, action, binding, value):
+                self.calls += 1
+                raise DeviceFault("synthetic_native_delivery_uncertain")
+
+            def release_all(self):
+                self.releases += 1
+
+            def close(self):
+                self.closes += 1
+
+        value, device = world(), BrokenNativeDevice()
+        backend = SendInputActuator(
+            device,
+            world_provider=lambda: value,
+            clock=lambda: value.now_ns,
+            session=value.session,
+            bindings=Bindings(
+                abilities={
+                    identity: KeyBinding(0x70, 0, True, "synthetic_calibration")
+                    for identity in (10, 11)
+                }
+            ),
+            guard=lambda *args: True,
+            enabled=True,
+        )
+        arbiter = Arbiter(backend, clock=lambda: value.now_ns, enabled=True)
+        self.addCleanup(arbiter.close)
+        report = arbiter.step(
+            value,
+            [
+                intent(value, "first", priority=Priority.SURVIVAL),
+                intent(value, "second", action=ActivateAbility(11), lane=ActionLane.OFF_GCD),
+            ],
+        )
+        self.assertEqual(report.fault, "actuator_fault:synthetic_native_delivery_uncertain")
+        self.assertEqual(device.calls, 1)
+        self.assertGreaterEqual(device.releases, 1)
+        self.assertEqual(device.closes, 1)
+        self.assertEqual([item.status for item in report.decisions], ["fault", "rejected"])
+
 
 if __name__ == "__main__":
     unittest.main()
