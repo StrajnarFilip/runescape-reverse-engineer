@@ -81,8 +81,9 @@ Requests
   not enable input or prove which server tick will process a chord.
 * A2: pointer operations require calibrated client coordinates, visible-window
   and bounds checks, and a mouse-capable serial protocol/device or a declared
-  native-pointer route. The Leonardo sketch remains keyboard-only and both A1
-  backends reject pointer intents. Do not encode movement as guessed keys.
+  native-pointer route. The Leonardo sketch remains keyboard-only. The optional
+  native route added below requires explicit providers; do not encode movement
+  as guessed keys.
 * P5/D6: translate game modifier codes to the native Ctrl=1/Shift=2/Alt=4 mask
   and pass fresh, validated account-specific bindings. Letter/digit HID usages
   require keyboard-layout calibration. D3/D4/D6 retain castability and cooldown
@@ -119,3 +120,18 @@ Requests
   disabled/deadline/precondition rejection does not set a transport fault.
   Thirty-four fake-device/ABI/firmware cases pass. D6 must inspect this channel
   before dispatch and after each result, close on faults and surface them to D8.
+
+* Native pointer plumbing completed offline, 2026-11-14: the optional binding
+  provider accepts MinimapBinding (A2 calibration/current native region plus
+  explicit current path validation) and NpcClickBinding (exact NPC default
+  action/physical hit test). Both require exact frame/build, fresh scoped
+  evidence and unchanged view; NPC identities and anchor tiles are rechecked.
+  Existing C movement/interaction exports are used with typed arguments and
+  minimap layout verification. Serial pointer rejection remains explicit.
+  Forty-three fake-device/ABI/host-firmware tests pass; no OS/game input.
+* P1/P5/A2/L: no runtime provider yet establishes physical minimap bounds,
+  complete view signature, native paths or exact NPC default-action hit tests.
+  Keep this route unavailable until these providers are mapped and validated.
+  The raw P5 menu candidate has semantic value null and cannot validate a click.
+  D6 still requires A2's pointer validator; A2 owns observed arrival/target
+  acknowledgement. Object/menu/interface pointer operations remain unsupported.

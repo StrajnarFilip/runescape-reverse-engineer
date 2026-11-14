@@ -170,7 +170,8 @@ exact unambiguous item slot/ID/nonzero token/positive quantity. The adapter uses
 64-bit item tokens. Older DLLs retain unmodified abilities and explicitly
 reject unsupported modified/item input. Full castability remains a caller
 policy; neither native acceptance nor a serial reply proves an ability fired
-or an item was consumed. Neither backend implements pointer movement here.
+or an item was consumed. Only the native backend has an optional pointer route,
+with the additional dependencies described below.
 
 ``binding_provider(action, world)`` optionally supplies a fresh ``KeyBinding``
 to either serialized backend. It is checked again before dispatch and before
@@ -190,6 +191,50 @@ Both paths require the exact same sample sequence, process/scene and executable
 as the WorldState whose policy and binding were checked. A newer sample rejects with
 ``native_snapshot_advanced`` so the arbiter can recompute from new evidence.
 It never applies an old item/binding decision to a newer unexamined frame.
+
+Native pointer route
+~~~~~~~~~~~~~~~~~~~~
+
+The same optional ``binding_provider(action, world)`` may return an immutable
+``MinimapBinding`` for a MoveTo or ``NpcClickBinding`` for a default/select-target
+NPC interaction. No built-in provider supplies either mapping. Static Bindings
+remain keyboard-only. Raw menu candidates and projected NPC ground positions
+do not authorize pointer input.
+
+A minimap binding contains the exact action, current player anchor tile, A2's
+measured MinimapCalibration and a freshly acquired MinimapRegion, exact frame
+sequence and executable hash. ``path_validated=True`` asserts a current route
+check; the native region must separately be validated. A1 checks same session,
+150 ms freshness, current anchor, plane, safe radius and the unchanged view
+signature before calling ``rs3_move_to_tile``. A fit alone is insufficient.
+The native 64-byte minimap layout is checked against ``rs3_sizeof`` before use.
+
+An NPC binding contains the exact action and process/scene/frame/build,
+observation time, physical point, current view signature and validation source.
+``validated=True`` must come from a native hit test proving that this point's
+default action selects the exact NPC, with visibility and UI occlusion checked.
+A1 requires one fresh matching instance/runtime/config identity on the current
+plane, and rejects an already-targeted NPC. It calls ``rs3_interact`` with the
+nonzero NPC lifetime and the default action. Object, interface and menu-option
+clicks are unsupported. Accepting a click still needs later target/arrival
+observation from A2; it is not success or proof that an attack occurred.
+
+Providers must acquire the view signature from current native evidence on
+every resolution and preserve the timestamps of that evidence. They must
+change it for camera, minimap zoom, window, DPI or UI-layout changes. A1 resolves
+the binding twice; changes to the action, point, transform or provenance reject
+before dispatch. Missing/stale geometry, path or hit-test data keeps the route
+unavailable. D6's A2 pointer validator remains a separate required policy check.
+These native mappings still need research and controlled live validation.
+
+Native pointer calls use the same copied-frame, foreground, observed-tick,
+deadline, lane-budget and fault checks as keyboard calls. The OS guard checks
+held modifier and mouse buttons; the DLL repeats its own physical-window/bounds
+checks immediately before insertion. Signed physical pixels support monitors
+left of the primary display. Missing native symbols reject without fallback.
+The Arduino protocol remains keyboard-only and returns
+``serial_pointer_unsupported`` without latching a transport fault or tapping
+any key. Adding this backend route does not enable a ladder rung.
 
 Verification
 ------------
@@ -231,3 +276,9 @@ reason. ``SendResult.accepted=False`` alone does not distinguish an ordinary
 precondition rejection from uncertain delivery. D6 checks the fault channel
 before dispatch and after each result, stops the remaining batch and closes
 the backend on uncertainty. The property remains latched through shutdown.
+
+The guarded pointer follow-up passes 43 A1 fake-device/ABI/host-firmware cases.
+It covers same-tick pointer/prayer dispatch, changed geometry and NPC lifetimes,
+missing/duplicate/stale identities, stale/foreign frames, unsupported object or
+menu actions, signed coordinates, typed native arguments and native result
+faults. No physical pointer or keyboard input was sent.

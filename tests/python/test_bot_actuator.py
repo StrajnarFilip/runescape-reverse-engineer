@@ -20,7 +20,9 @@ from rs3_reader.bot.actuator_sendinput import (
     InputPolicy,
     InputRejected,
     KeyBinding,
+    MinimapBinding,
     NativeSnapshotDevice,
+    NpcClickBinding,
     SendInputActuator,
     observed_binding,
 )
@@ -30,14 +32,56 @@ from rs3_reader.bot.intents import (
     ActivateAbility,
     ConsumeSlot,
     Evidence,
+    Interact,
     Intent,
+    MoveTo,
     Priority,
     SetPrayer,
 )
-from rs3_reader.bot.world_state import Observation, SessionIdentity, WorldState
+from rs3_reader.bot.movement import MinimapCalibration, MinimapRegion
+from rs3_reader.bot.world_state import EntityRef, Observation, SessionIdentity, Tile, WorldState
 
 FIXTURE = Path(__file__).parent / "fixtures/bot/synthetic_capture.jsonl"
 MS = 1_000_000
+
+
+def minimap_binding(world):
+    region = MinimapRegion(
+        world.session, world.now_ns, "synthetic_view", -500, 200, 100, "fixture", True
+    )
+    return MinimapBinding(
+        MoveTo(Tile(3202, 3202, 0)),
+        world.player.tile.value,
+        MinimapCalibration(region, 0, 4, 0, 0, -4, 0, 6),
+        region,
+        world.sample_sequence,
+        world.raw["executable_sha256"],
+        True,
+    )
+
+
+def npc_binding(world):
+    return NpcClickBinding(
+        Interact(EntityRef("npc", 99, 7, 42), "select_target"),
+        world.session,
+        world.sample_sequence,
+        world.raw["executable_sha256"],
+        world.now_ns,
+        "synthetic_view",
+        -490,
+        204,
+        "synthetic_exact_default_hit_test",
+        True,
+    )
+
+
+def pointer_world(world):
+    npc = replace(world.npcs.value[0], tile=Observation(Tile(3203, 3202, 0), 0, "fixture"))
+    return replace(
+        world,
+        npcs=Observation((npc,), 0, "fixture"),
+        player=replace(world.player, target=Observation(EntityRef("none"), 0, "fixture")),
+    )
 
 
 class FakeClock:
@@ -55,8 +99,11 @@ class FakeDLL:
         self.actions, self.releases, self.closes = [], 0, 0
         self.fail, self.hook = False, None
         self.chords_supported = False
+        self.pointers_supported = False
 
     def supports(self, action, binding):
+        if isinstance(action, (MoveTo, Interact)) and not self.pointers_supported:
+            raise InputRejected("native_pointer_api_unavailable")
         if isinstance(action, ConsumeSlot):
             if not self.chords_supported:
                 raise InputRejected("native_item_key_api_unmapped")
@@ -196,6 +243,143 @@ class BackendTests(unittest.TestCase):
             (Evidence("health", world.player.health.current),),
             world.observed_ns,
         )
+
+    def test_pointer_requires_explicit_provider_and_serial_rejects_without_fault(self):
+        for kind in ("native", "serial"):
+            backend, state, clock, device, channel = self.make_backend(kind)
+            state[0] = pointer_world(state[0])
+            binding = minimap_binding(state[0])
+            intent = self.intent(state, clock, action=binding.action, lane=ActionLane.POINTER)
+            self.assertEqual(backend.send(intent).reason, "pointer_mapping_unavailable")
+            backend.binding_provider = lambda *args: binding
+            if kind == "serial":
+                self.assertEqual(backend.send(intent).reason, "serial_pointer_unsupported")
+                self.assertFalse(channel.taps)
+                self.assertIsNone(backend.fault)
+            else:
+                self.assertEqual(backend.send(intent).reason, "native_pointer_api_unavailable")
+                self.assertFalse(device.actions)
+
+    def test_native_accepts_scoped_pointer_and_prayer_in_the_same_tick(self):
+        backend, state, clock, device, _ = self.make_backend("native")
+        state[0] = pointer_world(state[0])
+        binding = [minimap_binding(state[0])]
+        backend.binding_provider = lambda action, world: (
+            binding[0]
+            if isinstance(action, (MoveTo, Interact))
+            else backend.bindings.resolve(action)
+        )
+        device.pointers_supported = True
+        for index, value in enumerate((binding[0], npc_binding(state[0]))):
+            binding[0] = value
+            self.assertTrue(
+                backend.send(
+                    self.intent(state, clock, str(index), value.action, ActionLane.POINTER)
+                ).accepted
+            )
+        self.assertTrue(backend.send(self.intent(state, clock, "prayer")).accepted)
+        self.assertEqual(len(device.actions), 3)
+
+    def test_pointer_frame_geometry_path_and_target_preconditions(self):
+        backend, state, clock, device, _ = self.make_backend("native")
+        state[0] = pointer_world(state[0])
+        device.pointers_supported = True
+        move = minimap_binding(state[0])
+        click = npc_binding(state[0])
+        cases = (
+            (replace(move, path_validated=False), "pointer_geometry_or_path_unvalidated"),
+            (
+                replace(move, region=replace(move.region, validated=False)),
+                "pointer_geometry_or_path_unvalidated",
+            ),
+            (replace(move, sample_sequence=2), "pointer_binding_frame_mismatch"),
+            (replace(move, executable_sha256="b" * 64), "pointer_binding_frame_mismatch"),
+            (replace(move, anchor=Tile(3201, 3201, 0)), "pointer_minimap_or_anchor_changed"),
+            (
+                replace(move, region=replace(move.region, view_signature="changed")),
+                "pointer_minimap_or_anchor_changed",
+            ),
+            (
+                replace(move, region=replace(move.region, observed_ns=clock() - 151 * MS)),
+                "pointer_binding_stale_or_foreign",
+            ),
+            (replace(click, validated=False), "pointer_hit_test_unvalidated"),
+            (replace(click, observed_ns=clock() + 1), "pointer_binding_stale_or_foreign"),
+            (
+                replace(click, session=SessionIdentity(111, 999, 3)),
+                "pointer_binding_stale_or_foreign",
+            ),
+            (
+                replace(click, action=Interact(EntityRef("npc", 99, 7, 43), "default")),
+                "pointer_npc_changed_or_already_targeted",
+            ),
+        )
+        for binding, reason in cases:
+            with self.subTest(reason=reason, binding=binding):
+                backend.binding_provider = lambda *args: binding
+                result = backend.send(
+                    self.intent(state, clock, action=binding.action, lane=ActionLane.POINTER)
+                )
+                self.assertEqual(result.reason, reason)
+                self.assertIsNone(backend.fault)
+        self.assertFalse(device.actions)
+
+    def test_changed_pointer_before_dispatch_rejects_and_recycled_npc_does_not_match(self):
+        backend, state, clock, device, _ = self.make_backend("native")
+        state[0] = pointer_world(state[0])
+        device.pointers_supported = True
+        click = npc_binding(state[0])
+        bindings = iter((click, replace(click, screen_x=click.screen_x + 1)))
+        backend.binding_provider = lambda *args: next(bindings)
+        intent = self.intent(state, clock, action=click.action, lane=ActionLane.POINTER)
+        self.assertEqual(backend.send(intent).reason, "binding_changed_during_dispatch")
+        backend.binding_provider = lambda *args: click
+        npc = replace(state[0].npcs.value[0], instance_id=Observation(100, 0, "fixture"))
+        state[0] = replace(state[0], npcs=Observation((npc,), 0, "fixture"))
+        self.assertEqual(backend.send(intent).reason, "pointer_npc_changed_or_already_targeted")
+        self.assertFalse(device.actions)
+
+    def test_pointer_rejects_unknown_or_duplicate_npc_and_already_targeted(self):
+        backend, state, clock, device, _ = self.make_backend("native")
+        original = pointer_world(state[0])
+        click = npc_binding(original)
+        backend.binding_provider = lambda *args: click
+        device.pointers_supported = True
+        cases = (
+            (replace(original, npcs=Observation()), "pointer_npc_identity_unavailable"),
+            (
+                replace(original, npcs=Observation(original.npcs.value * 2, 0, "fixture")),
+                "pointer_npc_changed_or_already_targeted",
+            ),
+            (
+                replace(
+                    original,
+                    player=replace(
+                        original.player, target=Observation(click.action.target, 0, "fixture")
+                    ),
+                ),
+                "pointer_npc_changed_or_already_targeted",
+            ),
+        )
+        for world, reason in cases:
+            state[0] = world
+            result = backend.send(
+                self.intent(state, clock, action=click.action, lane=ActionLane.POINTER)
+            )
+            self.assertEqual(result.reason, reason)
+        self.assertFalse(device.actions)
+
+    def test_pointer_constructor_rejects_objects_menu_options_and_invalid_physical_points(self):
+        binding = npc_binding(pointer_world(self.world()))
+        for arguments in (
+            {"action": Interact(EntityRef("object", 99), "default")},
+            {"action": Interact(binding.action.target, "open_menu")},
+            {"screen_x": 2**31},
+            {"screen_y": True},
+            {"view_signature": ""},
+        ):
+            with self.subTest(arguments=arguments), self.assertRaises(ValueError):
+                replace(binding, **arguments)
 
     def test_both_accept_prayer_and_ability_in_same_tick(self):
         for kind in ("native", "serial"):
@@ -649,7 +833,7 @@ class FakeFunction:
 
 
 class NativeAdapterTests(unittest.TestCase):
-    def device(self, *, chord_api=True, owned_copy=False):
+    def device(self, *, chord_api=True, owned_copy=False, pointer_api=False, minimap_size=64):
         from rs3_reader.native import CombatState, Info
 
         info, combat, calls = Info(), CombatState(), []
@@ -687,6 +871,26 @@ class NativeAdapterTests(unittest.TestCase):
             functions["rs3_snapshot_copy"] = (
                 lambda source, target: copies.append((source.value, target.value)) or 0
             )
+        if pointer_api:
+
+            def move(snapshot, x, y, plane, out):
+                value = out._obj
+                calls.append(
+                    (
+                        "move",
+                        (x, y, plane),
+                        tuple(getattr(value, name) for name, _ in value._fields_),
+                    )
+                )
+                return 0
+
+            functions.update(
+                {
+                    "rs3_sizeof": lambda structure: minimap_size if structure == 12 else 0,
+                    "rs3_move_to_tile": move,
+                    "rs3_interact": lambda *args: calls.append(("interact", args[1:])) or 0,
+                }
+            )
         library = SimpleNamespace(
             **{name: FakeFunction(function) for name, function in functions.items()}
         )
@@ -700,6 +904,53 @@ class NativeAdapterTests(unittest.TestCase):
         device = NativeSnapshotDevice(reader)
         self.addCleanup(device.close)
         return device, info, calls
+
+    def test_typed_native_pointer_calls_preserve_coordinates_axes_and_instance(self):
+        device, _, calls = self.device(pointer_api=True, owned_copy=True)
+        world = pointer_world(BackendTests().world())
+        move, click = minimap_binding(world), npc_binding(world)
+        device.dispatch(move.action, move, world)
+        device.dispatch(click.action, click, world)
+        self.assertEqual(
+            calls,
+            [
+                ("move", (3202, 3202, 0), (1, 3200, 3201, 0, -500, 200, 4, 0, 0, -4, 100, 0)),
+                ("interact", (99, 1, -490, 204)),
+            ],
+        )
+        self.assertEqual(ctypes.sizeof(device.move_to_tile.argtypes[-1]._type_), 64)
+        self.assertIs(device.interact.argtypes[1], ctypes.c_uint64)
+        self.assertIs(device.interact.argtypes[-1], ctypes.c_int32)
+        self.assertEqual(device.library.copy_sources, [(9876, 1234), (9876, 1234)])
+
+    def test_pointer_capability_and_layout_rejection_do_not_guess_a_fallback(self):
+        device, _, calls = self.device()
+        world = pointer_world(BackendTests().world())
+        for binding, reason in (
+            (minimap_binding(world), "native_movement_api_unavailable"),
+            (npc_binding(world), "native_interaction_api_unavailable"),
+        ):
+            with self.assertRaisesRegex(InputRejected, reason):
+                device.dispatch(binding.action, binding, world)
+        self.assertEqual(calls, [])
+        with self.assertRaisesRegex(DeviceFault, "native_minimap_layout_mismatch"):
+            self.device(pointer_api=True, minimap_size=56)
+
+    def test_pointer_input_result_and_copied_frame_failures_propagate(self):
+        device, info, calls = self.device(pointer_api=True, owned_copy=True)
+        world = pointer_world(BackendTests().world())
+        click = npc_binding(world)
+        info.sequence = 2
+        with self.assertRaisesRegex(InputRejected, "native_snapshot_advanced"):
+            device.dispatch(click.action, click, world)
+        info.sequence = 1
+        device.interact.callback = lambda *args: -7
+        with self.assertRaisesRegex(InputRejected, "native_rejected:-7"):
+            device.dispatch(click.action, click, world)
+        device.interact.callback = lambda *args: -6
+        with self.assertRaisesRegex(DeviceFault, "native_input_fault:-6"):
+            device.dispatch(click.action, click, world)
+        self.assertFalse(calls)
 
     def test_owned_policy_copy_is_independent_of_worker_latest_frame(self):
         device, _, calls = self.device(owned_copy=True)

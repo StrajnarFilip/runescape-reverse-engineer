@@ -15,12 +15,27 @@ from threading import Condition, RLock
 from typing import Mapping, Optional
 
 from .actuator import SendResult
-from .intents import ActionLane, ActivateAbility, ConsumeSlot, Intent, SetPrayer
-from .world_state import SessionIdentity, WorldState
+from .intents import ActionLane, ActivateAbility, ConsumeSlot, Interact, Intent, MoveTo, SetPrayer
+from .movement import MinimapCalibration, MinimapRegion
+from .world_state import SessionIdentity, Tile, WorldState
 
 NS_PER_MS = 1_000_000
 CTRL, SHIFT, ALT = 1, 2, 4  # rs3_key_modifiers; these are NOT P5 game modifier codes.
 PRAYER_IDS = {"melee": 2, "magic": 3, "ranged": 4, "soul_split": 5, "necromancy": 6}
+NATIVE_MINIMAP_STRUCTURE = 12
+NATIVE_MINIMAP_SIZE = 64
+NATIVE_ENTITY_DEFAULT = 1
+MAX_TILE_COORDINATE = 12800
+
+
+def _pointer_frame(sequence, executable_sha256):
+    return (
+        type(sequence) is int
+        and sequence > 0
+        and isinstance(executable_sha256, str)
+        and len(executable_sha256) == 64
+        and all(character in "0123456789abcdef" for character in executable_sha256)
+    )
 
 
 class InputRejected(RuntimeError):
@@ -55,6 +70,104 @@ class KeyBinding:
             type(self.hid_usage) is not int or not 4 <= self.hid_usage <= 0x73
         ):
             raise ValueError("HID usage must be a regular supported keyboard key")
+
+
+@dataclass(frozen=True)
+class MinimapBinding:
+    """A current A2 transform plus an explicitly validated route for one action.
+
+    The provider re-reads native geometry and validates the path each time it
+    is called. A fit alone cannot validate the UI, path or current view. No
+    current native provider supplies all these dependencies automatically.
+    """
+
+    action: MoveTo
+    anchor: Tile
+    calibration: MinimapCalibration
+    region: MinimapRegion
+    sample_sequence: int
+    executable_sha256: str
+    path_validated: bool = False
+
+    def __post_init__(self):
+        if (
+            not isinstance(self.action, MoveTo)
+            or not isinstance(self.anchor, Tile)
+            or not isinstance(self.calibration, MinimapCalibration)
+            or not isinstance(self.region, MinimapRegion)
+            or not _pointer_frame(self.sample_sequence, self.executable_sha256)
+            or type(self.path_validated) is not bool
+        ):
+            raise ValueError("Minimap binding requires a scoped transform and route evidence")
+
+
+@dataclass(frozen=True)
+class NpcClickBinding:
+    """One native physical point whose default action hits the exact NPC.
+
+    ``validated`` asserts a current native hit test, including default-option
+    identity, visibility and UI occlusion. A ground projection or raw menu
+    candidate is insufficient. The view signature includes window/DPI, camera
+    and UI changes. No built-in provider currently establishes these facts.
+    """
+
+    action: Interact
+    session: SessionIdentity
+    sample_sequence: int
+    executable_sha256: str
+    observed_ns: int
+    view_signature: str
+    screen_x: int
+    screen_y: int
+    source: str
+    validated: bool = False
+
+    def __post_init__(self):
+        if (
+            not isinstance(self.action, Interact)
+            or self.action.target.kind != "npc"
+            or self.action.option not in ("default", "select_target")
+            or type(self.action.target.instance_id) is not int
+            or not 0 < self.action.target.instance_id < 2**64
+            or type(self.action.target.runtime_id) is not int
+            or not 0 <= self.action.target.runtime_id <= 65535
+            or type(self.action.target.config_id) is not int
+            or not 0 <= self.action.target.config_id < 2**31
+            or not isinstance(self.session, SessionIdentity)
+            or not self.session.complete
+            or not _pointer_frame(self.sample_sequence, self.executable_sha256)
+            or type(self.observed_ns) is not int
+            or self.observed_ns < 0
+            or not isinstance(self.view_signature, str)
+            or not self.view_signature.strip()
+            or not isinstance(self.source, str)
+            or not self.source.strip()
+            or type(self.validated) is not bool
+            or any(
+                type(value) is not int or not -(2**31) <= value < 2**31
+                for value in (self.screen_x, self.screen_y)
+            )
+        ):
+            raise ValueError("NPC click requires current physical hit-test provenance")
+
+
+class _NativeMinimap(ctypes.Structure):
+    """Private mirror of the existing rs3_minimap ABI; anchor is four scalars."""
+
+    _fields_ = [
+        ("anchor_valid", ctypes.c_uint32),
+        ("anchor_x", ctypes.c_int32),
+        ("anchor_y", ctypes.c_int32),
+        ("anchor_plane", ctypes.c_int32),
+        ("screen_x", ctypes.c_int32),
+        ("screen_y", ctypes.c_int32),
+        ("east_dx", ctypes.c_double),
+        ("east_dy", ctypes.c_double),
+        ("north_dx", ctypes.c_double),
+        ("north_dy", ctypes.c_double),
+        ("radius_pixels", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32),
+    ]
 
 
 @dataclass(frozen=True)
@@ -254,10 +367,12 @@ class WindowsTargetGuard:
                 return False
         finally:
             self.kernel.CloseHandle(process)
-        if binding is not None and any(
-            self.user.GetAsyncKeyState(key) < 0
-            for key in (0x10, 0x11, 0x12, 0x5B, 0x5C, binding.virtual_key)
-        ):
+        keys = (0x10, 0x11, 0x12, 0x5B, 0x5C)
+        if isinstance(binding, KeyBinding):
+            keys += (binding.virtual_key,)
+        elif isinstance(binding, (MinimapBinding, NpcClickBinding)):
+            keys += (0x01, 0x02, 0x04, 0x05, 0x06)  # All mouse buttons.
+        if binding is not None and any(self.user.GetAsyncKeyState(key) < 0 for key in keys):
             return False
         return self.user.GetForegroundWindow() == window
 
@@ -384,9 +499,85 @@ class SerializedActuator:
             if self.binding_provider is None
             else self.binding_provider(action, world)
         )
+        if isinstance(action, (MoveTo, Interact)):
+            self._pointer_preconditions(action, binding, world)
+            return binding
         if not isinstance(binding, KeyBinding) or not binding.validated:
             raise InputRejected("binding_unvalidated")
         return binding
+
+    def _pointer_preconditions(self, action, binding, world):
+        if not isinstance(binding, (MinimapBinding, NpcClickBinding)):
+            raise InputRejected("pointer_mapping_unavailable")
+        if (
+            binding.action != action
+            or binding.sample_sequence != world.sample_sequence
+            or binding.executable_sha256 != world.raw.get("executable_sha256")
+        ):
+            raise InputRejected("pointer_binding_frame_mismatch")
+        now = self._now()
+        if isinstance(binding, MinimapBinding):
+            region = binding.region
+            if region.validated is not True or binding.path_validated is not True:
+                raise InputRejected("pointer_geometry_or_path_unvalidated")
+            if (
+                any(not -(2**31) <= value < 2**31 for value in (region.center_x, region.center_y))
+                or not 0 < region.radius < 2**32
+            ):
+                raise InputRejected("pointer_geometry_out_of_range")
+            if not self._fresh(world.player.tile, world, now):
+                raise InputRejected("pointer_player_tile_unavailable")
+            if (
+                binding.anchor != world.player.tile.value
+                or binding.anchor == action.tile
+                or any(
+                    coordinate >= MAX_TILE_COORDINATE
+                    for tile in (binding.anchor, action.tile)
+                    for coordinate in (tile.x, tile.y)
+                )
+                or binding.calibration.project(binding.anchor, action.tile, region) is None
+            ):
+                raise InputRejected("pointer_minimap_or_anchor_changed")
+            session, observed_ns = region.session, region.observed_ns
+        else:
+            if binding.validated is not True:
+                raise InputRejected("pointer_hit_test_unvalidated")
+            target = action.target
+            if (
+                type(target.instance_id) is not int
+                or not 0 < target.instance_id < 2**64
+                or type(target.runtime_id) is not int
+                or not 0 <= target.runtime_id <= 65535
+                or type(target.config_id) is not int
+                or not 0 <= target.config_id < 2**31
+                or not self._fresh(world.npcs, world, now)
+                or not self._fresh(world.player.target, world, now)
+                or not self._fresh(world.player.tile, world, now)
+            ):
+                raise InputRejected("pointer_npc_identity_unavailable")
+            matches = [
+                npc
+                for npc in world.npcs.value
+                if all(
+                    self._fresh(observation, world, now)
+                    and type(observation.value) is int
+                    and observation.value == expected
+                    for observation, expected in (
+                        (npc.instance_id, target.instance_id),
+                        (npc.runtime_id, target.runtime_id),
+                        (npc.config_id, target.config_id),
+                    )
+                )
+                and self._fresh(npc.tile, world, now)
+                and npc.tile.value.plane == world.player.tile.value.plane
+            ]
+            if len(matches) != 1 or world.player.target.value == target:
+                raise InputRejected("pointer_npc_changed_or_already_targeted")
+            session, observed_ns = binding.session, binding.observed_ns
+        if session != world.session or not (
+            0 <= now - observed_ns <= self.policy.maximum_age_ms * NS_PER_MS
+        ):
+            raise InputRejected("pointer_binding_stale_or_foreign")
 
     def _preconditions(self, action, world):
         now = self._now()
@@ -562,11 +753,51 @@ class NativeSnapshotDevice:
                 ctypes.c_uint32,
             ]
             self.item_chord.restype = ctypes.c_int32
+        self.move_to_tile = getattr(self.library, "rs3_move_to_tile", None)
+        self.interact = getattr(self.library, "rs3_interact", None)
+        if self.move_to_tile is not None:
+            self.library.rs3_sizeof.argtypes = [ctypes.c_uint32]
+            self.library.rs3_sizeof.restype = ctypes.c_uint32
+            size = self.library.rs3_sizeof(NATIVE_MINIMAP_STRUCTURE)
+            if size != ctypes.sizeof(_NativeMinimap) or size != NATIVE_MINIMAP_SIZE:
+                raise DeviceFault("native_minimap_layout_mismatch")
+            self.move_to_tile.argtypes = (
+                [ctypes.c_void_p] + [ctypes.c_int32] * 3 + [ctypes.POINTER(_NativeMinimap)]
+            )
+            self.move_to_tile.restype = ctypes.c_int32
+        if self.interact is not None:
+            self.interact.argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_uint64,
+                ctypes.c_uint32,
+                ctypes.c_int32,
+                ctypes.c_int32,
+            ]
+            self.interact.restype = ctypes.c_int32
         reader.check_result(self.library.rs3_snapshot_create(ctypes.byref(self.snapshot)))
 
     def supports(self, action, binding):
         """Reject unavailable old-DLL operations before spending a dispatch budget."""
-        if isinstance(action, ConsumeSlot):
+        if isinstance(action, MoveTo):
+            if self.move_to_tile is None:
+                raise InputRejected("native_movement_api_unavailable")
+            if (
+                not isinstance(binding, MinimapBinding)
+                or binding.action != action
+                or binding.path_validated is not True
+                or binding.region.validated is not True
+            ):
+                raise InputRejected("pointer_geometry_or_path_unvalidated")
+        elif isinstance(action, Interact):
+            if self.interact is None:
+                raise InputRejected("native_interaction_api_unavailable")
+            if (
+                not isinstance(binding, NpcClickBinding)
+                or binding.action != action
+                or binding.validated is not True
+            ):
+                raise InputRejected("pointer_hit_test_unvalidated")
+        elif isinstance(action, ConsumeSlot):
             if self.item_chord is None:
                 raise InputRejected("native_item_key_api_unmapped")
             if (
@@ -622,6 +853,33 @@ class NativeSnapshotDevice:
             result = lib.rs3_set_prayer(
                 snapshot, PRAYER_IDS[action.prayer], binding.virtual_key, binding.modifiers
             )
+        elif isinstance(action, MoveTo):
+            origin, region, calibration = binding.anchor, binding.region, binding.calibration
+            minimap = _NativeMinimap(
+                1,
+                origin.x,
+                origin.y,
+                origin.plane,
+                region.center_x,
+                region.center_y,
+                calibration.east_dx,
+                calibration.east_dy,
+                calibration.north_dx,
+                calibration.north_dy,
+                region.radius,
+                0,
+            )
+            result = self.move_to_tile(
+                snapshot, action.tile.x, action.tile.y, action.tile.plane, ctypes.byref(minimap)
+            )
+        elif isinstance(action, Interact):
+            result = self.interact(
+                snapshot,
+                action.target.instance_id,
+                NATIVE_ENTITY_DEFAULT,
+                binding.screen_x,
+                binding.screen_y,
+            )
         elif isinstance(action, ConsumeSlot):
             result = self.item_chord(
                 snapshot,
@@ -659,6 +917,8 @@ class SendInputActuator(SerializedActuator):
         if callable(supports):
             supports(action, binding)
             return
+        if isinstance(action, (MoveTo, Interact)):
+            raise InputRejected("native_pointer_api_unavailable")
         if isinstance(action, ConsumeSlot):
             raise InputRejected("native_item_key_api_unmapped")
         if isinstance(action, ActivateAbility) and binding.modifiers:
