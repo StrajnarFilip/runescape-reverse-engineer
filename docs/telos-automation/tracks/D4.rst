@@ -116,3 +116,12 @@ Requests
 * Later tuning: shared cooldowns, cast acknowledgements for abilities without
   individual timers, channel interruption, stored EoF specials and stall/release
   remain separate unmapped work. No rotation rule invents those states.
+
+* Exact-target follow-up, 2026-11-14: readiness now requires fresh matching
+  nonzero NPC lifetime, runtime and config identity, with no wildcard for a
+  missing runtime/config. Identity observations are attached to the intent.
+  can_send rejects a target switch or replacement action under an old intent
+  ID, so the next policy sample must make a new decision. Regression cases
+  reproduced the old target-switch/config/staleness failures before the fix.
+  Eighteen D4 scenario/replay tests pass with no native input code loaded.
+  Account setup, complete castability and rung-4 validation remain pending.

@@ -71,11 +71,18 @@ def row(phase=1, sequence=1, time_ms=10000, *, abilities=None):
             "configuration": "dual_wield",
             "main_hand": {"item_id": 200, "equipment": {"weapon": True, "style": "melee"}},
         },
-        "player": {"target": {"kind": "npc", "instance_id": 4, "runtime_id": 7}},
+        "player": {
+            "target": {"kind": "npc", "instance_id": 4, "runtime_id": 7, "config_id": 22891}
+        },
         "npcs": {
             "status": "available",
             "entities": [
-                {"instance_id": 4, "runtime_id": 7, "health": {"current": 100000, "max": 100000}}
+                {
+                    "instance_id": 4,
+                    "runtime_id": 7,
+                    "config_id": 22891,
+                    "health": {"current": 100000, "max": 100000},
+                }
             ],
         },
     }
@@ -169,6 +176,47 @@ class RotationTests(unittest.TestCase):
         value = world()
         value = replace(value, player=replace(value.player, target=Observation()))
         self.assertEqual(self.engine().step(value), ())
+
+    def test_target_requires_complete_matching_npc_lifetime_runtime_and_config(self):
+        for field in ("instance_id", "runtime_id", "config_id"):
+            record = row()
+            record["player"]["target"].pop(field)
+            with self.subTest(missing=field):
+                self.assertEqual(self.engine().step(WorldState.from_telemetry(record)), ())
+            record = row()
+            record["npcs"]["entities"][0][field] += 1
+            with self.subTest(changed=field):
+                self.assertEqual(self.engine().step(WorldState.from_telemetry(record)), ())
+
+    def test_live_target_switch_cannot_reuse_an_old_offensive_intent(self):
+        engine = self.engine()
+        intent = engine.step(world())[0]
+        record = row(sequence=2, time_ms=10001)
+        record["player"]["target"]["instance_id"] = 5
+        record["player"]["target"]["runtime_id"] = 8
+        record["npcs"]["entities"].append(
+            dict(record["npcs"]["entities"][0], instance_id=5, runtime_id=8)
+        )
+        changed = WorldState.from_telemetry(record)
+        self.assertFalse(engine.can_send(intent, changed))
+        self.assertTrue(self.engine().step(changed))  # Fresh policy may consider the new target.
+
+    def test_known_intent_id_cannot_authorize_a_replaced_ability(self):
+        engine = self.engine()
+        value = world(abilities=[ability(), ability(14686, "Overpower")])
+        intent = engine.step(value)[0]
+        self.assertTrue(engine.can_send(intent, value))
+        self.assertFalse(engine.can_send(replace(intent, action=ActivateAbility(14686)), value))
+
+    def test_stale_or_duplicate_exact_target_cannot_authorize_a_rotation(self):
+        value = world()
+        target = value.npcs.value[0]
+        stale = replace(target, config_id=Observation(22891, 151, "fixture"))
+        for npcs in ((stale,), (target, target)):
+            with self.subTest(npcs=npcs):
+                self.assertEqual(
+                    self.engine().step(replace(value, npcs=Observation(npcs, 0, "fixture"))), ()
+                )
 
     def test_live_bindings_take_precedence_and_do_not_fall_back_after_bar_changes(self):
         record = row()

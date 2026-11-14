@@ -329,17 +329,30 @@ class RotationEngine:
         ):
             return None
         target = world.player.target
-        if not fresh(target) or target.value.kind != "npc" or not fresh(world.npcs):
+        if (
+            not fresh(target)
+            or target.value.kind != "npc"
+            or not _integer(target.value.instance_id, 1)
+            or target.value.instance_id >= 2**64
+            or not _integer(target.value.runtime_id)
+            or target.value.runtime_id > 65535
+            or not _integer(target.value.config_id)
+            or target.value.config_id >= 2**31
+            or not fresh(world.npcs)
+        ):
             return None
         actors = [
             npc
             for npc in world.npcs.value
-            if fresh(npc.instance_id)
-            and npc.instance_id.value == target.value.instance_id
-            and (
-                target.value.runtime_id is None
-                or fresh(npc.runtime_id)
-                and npc.runtime_id.value == target.value.runtime_id
+            if all(
+                fresh(observation)
+                and type(observation.value) is int
+                and observation.value == expected
+                for observation, expected in (
+                    (npc.instance_id, target.value.instance_id),
+                    (npc.runtime_id, target.value.runtime_id),
+                    (npc.config_id, target.value.config_id),
+                )
             )
         ]
         if (
@@ -363,6 +376,9 @@ class RotationEngine:
             Evidence("player.adrenaline_percent", world.player.adrenaline_percent),
             Evidence("equipment", world.equipment),
             Evidence("player.target", target),
+            Evidence("target.instance_id", actors[0].instance_id),
+            Evidence("target.runtime_id", actors[0].runtime_id),
+            Evidence("target.config_id", actors[0].config_id),
             Evidence("target.health", actors[0].health.current),
             Evidence("telos.phase", world.telos.phase),
         ]
@@ -415,16 +431,18 @@ class RotationEngine:
         return profile
 
     def can_send(self, intent, world):
-        """D6 pre-dispatch validation; a changed phase, gear or chord rejects it."""
+        """D6 validation of the offered action and its current exact NPC target."""
         offer = self._offers.get(intent.intent_id)
         profile = self._profile(world)
         if (
             offer is None
+            or intent != offer[3]
             or profile is None
             or intent.session != world.session
             or profile["phase"] != offer[0]
             or self._fault
             or self._pending
+            or world.player.target.value != offer[4]
         ):
             return False
         evaluated = self._evaluate(world, profile, offer[1])
@@ -528,7 +546,13 @@ class RotationEngine:
                 evidence,
                 world.observed_ns,
             )
-            self._offers[intent.intent_id] = (profile["phase"], rule, binding, intent)
+            self._offers[intent.intent_id] = (
+                profile["phase"],
+                rule,
+                binding,
+                intent,
+                world.player.target.value,
+            )
             self.last_report = RotationReport(profile["phase"], rule["id"], (), None, None)
             return (intent,)
         self.last_report = RotationReport(
