@@ -1,6 +1,6 @@
 # Telos attempt logs
 
-Use the 0% Practice Mode controller from the repository root. Stage the character across the gap with Telos dormant, the melee action bar selected and auto-retaliate active. Identify the Deflect Melee slot and a walkable approach tile from the fresh client image. `--continue-phase-two` enables the existing special-response trials through phase 2. `--observe-transition` continues recording after input ends at the next phase limit. F12 stops input. [Setup and bindings](../runescape-knowledge-base/bosses/telos/animation-cues.md)
+Use the 0% Practice Mode controller from the repository root. Stage the character across the gap with Telos dormant, the melee action bar selected and auto-retaliate active. Identify the Deflect Melee slot and a walkable approach tile from the fresh client image. The controller handles every phase it reaches through P3: Deflect Melee flicks in P1/P2, Deflect Magic in P3. Input ends at the P4 checkpoint. `--observe-transition` continues recording after input ends. F12 stops input. [Setup and bindings](../runescape-knowledge-base/bosses/telos/animation-cues.md)
 
 ```powershell
 $env:PYTHONPATH = 'python'
@@ -8,7 +8,7 @@ $frame = Join-Path $env:TEMP 'telos-practice.png'
 python work/game_console.py shot $frame
 python work/telos_zero.py --port COM8 --practice-0-confirmed --frame $frame `
     --melee $meleeX $meleeY --approach $approachX $approachY `
-    --freedom Z --anticipation T --displayed-keys --continue-phase-two --observe-transition
+    --freedom Z --anticipation T --displayed-keys --observe-transition
 ```
 
 The practice controller relies on Revolution for normal damage. It uses client samples and deterministic Python for the experimental special responses. The separate `python -m rs3_reader.bot` entry point runs the integrated decision stack in shadow mode. The Python prayer planner requires measured protection windows and complete incoming coverage before offering a return to Soul Split. The attack catalogue currently has zero validated protection windows.

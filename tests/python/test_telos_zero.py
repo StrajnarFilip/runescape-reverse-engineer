@@ -517,18 +517,21 @@ class PracticeRunTests(unittest.TestCase):
         board.reset_mock()
         args.reacquire = None
         args.continue_phase_two = True
-        reader.active_prayer.side_effect = [Prayer.MELEE] * 6
+        reader.active_prayer.side_effect = [Prayer.MELEE] * 7
         phase_three = SimpleNamespace(**vars(phase_two))
         phase_three.health_current = 200_000
+        phase_four = SimpleNamespace(**vars(phase_two))
+        phase_four.health_current = 90_000
         mock_globals["boss_sample"].side_effect = (
             samples[:3]
             + samples[-2:]
             + [
                 (info, player, damaged_boss, 2, 9000),
                 (info, player, phase_three, 3, 9000),
+                (info, player, phase_four, 4, 9000),
             ]
         )
-        mock_globals["telos_actions"].side_effect = [[], [], [event(1, HOLD_STILL)], []]
+        mock_globals["telos_actions"].side_effect = [[], [], [event(1, HOLD_STILL)], [], []]
         mock_globals["cooldowns"] = Mock(return_value={"Freedom": 0})
         reader.monotonic_ns.return_value = SECOND_NS
         info.monotonic_ns = SECOND_NS
@@ -536,7 +539,10 @@ class PracticeRunTests(unittest.TestCase):
             with patch.dict(run.__globals__, mock_globals):
                 self.assertEqual(run(reader, args, board), 2)
         self.assertEqual([call.args[0][-1].name for call in board.tap.call_args_list], ["U"])
-        self.assertEqual(mock_globals["log"].call_args.args[0], "phase_three_observed")
+        # P3 is handled rather than ending input; input ends at the P4 checkpoint.
+        logged = [call.args[0] for call in mock_globals["log"].call_args_list]
+        self.assertIn("phase_three_observed", logged)
+        self.assertEqual(logged[-1], "phase_four_observed")
 
         board.reset_mock()
         args.continue_phase_two = False

@@ -916,7 +916,8 @@ def run(reader, args, board, attempt=None):
             raise RuntimeError(
                 f"Expected {expected_max_hp:,} maximum Telos HP, observed {boss.health_max}"
             )
-        continue_phase_three = getattr(args, "continue_phase_three", False)
+        # Every reached phase is handled; only the P2 target-cycle trial stops input earlier.
+        continue_phase_three = args.continue_phase_two
         if flicker is not None and (phase in (1, 2) or (phase == 3 and continue_phase_three)):
             if phase == 3:
                 flicker.default_prayer = Prayer.MAGIC
@@ -1224,31 +1225,22 @@ def main():
         "--resonance",
         help="Optional Resonance binding, sent after Hold Still's +2 hit to absorb the +4 hit",
     )
-    parser.add_argument(
-        "--continue-phase-two",
-        action="store_true",
-        help="Try shared defenses against observed specials through phase 2",
-    )
-    parser.add_argument(
-        "--continue-phase-three",
-        action="store_true",
-        help="Keep defenses and flicks (Deflect Magic) through phase 3; input ends at phase 4",
-    )
+    # Phases 2 and 3 are always handled; the old opt-in flag is still accepted as a no-op.
+    parser.add_argument("--continue-phase-two", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--reacquire",
         nargs=2,
         metavar=("TARGET_CYCLE", "BASIC_ATTACK"),
-        help="Try one phase 2 target cycle and basic attack using configured keys",
+        help="Experimental one-shot P2 target cycle and basic attack; input then stops at P2",
     )
     args = parser.parse_args()
     if args.replay and args.port:
         parser.error("Replay does not open the Arduino")
     if args.replay and args.record_attempt:
         parser.error("An attempt log requires a live session")
-    if args.continue_phase_three and not args.continue_phase_two:
-        parser.error("--continue-phase-three requires --continue-phase-two")
-    if args.continue_phase_two and args.reacquire:
-        parser.error("Choose either phase 2 defenses or the one-shot target cycle trial")
+    # Input continues through every handled phase (to the P4 checkpoint) unless the one-shot
+    # target-cycle trial is selected, which needs input to end at P2.
+    args.continue_phase_two = not args.reacquire
     if not 0 < args.duration <= MAX_PRACTICE_SECONDS:
         parser.error(f"Duration must be between 1 and {MAX_PRACTICE_SECONDS} seconds")
     if args.port and not all((args.frame, args.approach, args.melee, args.practice_0_confirmed)):
