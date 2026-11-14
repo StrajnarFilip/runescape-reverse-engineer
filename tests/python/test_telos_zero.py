@@ -309,6 +309,22 @@ class PrayerFlickerTests(unittest.TestCase):
         flicker.observe([event(2, AUTO)], 31, 2)
         self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 31, 3), Prayer.MELEE)
 
+    def test_phase_three_default_is_deflect_magic(self):
+        flicker = PrayerFlicker()
+        flicker.default_prayer = Prayer.MAGIC
+        flicker.observe([event(1, AUTO)], 40, 0)
+        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 40, 0), Prayer.MAGIC)
+
+    def test_phase_three_counts_magic_autos_before_hold_still(self):
+        phase = PhaseOne(phase=3)
+        magic = controller["MAGIC_ATTACK"]
+        phase.observe([event(1, UPPERCUT), event(2, magic), event(3, magic)])
+        self.assertEqual(phase.expected, HOLD_STILL)
+        action = phase.next_action(
+            3 * SECOND_NS, {"Anticipation": 0}, 0, Prayer.SOUL_SPLIT, flicking=True
+        )
+        self.assertEqual(action.ability, "Anticipation")
+
     def test_tendrils_release_holds_melee_through_unanimated_auto(self):
         flicker = PrayerFlicker()
         flicker.observe([event(1, RELEASE)], 20, 0)

@@ -81,7 +81,13 @@ FLICK_PRAYER_BY_ANIMATION = {MAGIC_ATTACK: Prayer.MAGIC}
 NEXT_SPECIAL_BY_PHASE = {
     1: {TENDRILS: UPPERCUT, UPPERCUT: HOLD_STILL, HOLD_STILL: TENDRILS},
     2: {ONSLAUGHT: HOLD_STILL, HOLD_STILL: UPPERCUT, UPPERCUT: TENDRILS, TENDRILS: ONSLAUGHT},
+    # P3: Red Virus, a once-per-phase spec skip, Uppercut, Hold Still. Only the last two have
+    # mapped animations, so Hold Still is forecast after Uppercut.
+    3: {UPPERCUT: HOLD_STILL, HOLD_STILL: UPPERCUT},
 }
+# P3 attacks are magic only (wiki; confirmed by the account owner). 28959 repeated every
+# 4 received ticks in the 250% P3 capture, so it is counted as the P3 auto there.
+PHASE_THREE_AUTOS = frozenset({MAGIC_ATTACK, 28930})
 # Four 2026-11-14 captures: a P1 ending on Uppercut opened P2 with Hold Still, on Tendrils with
 # Onslaught, on Hold Still with Tendrils. 28930 opens P2 and is counted as an auto: one capture
 # had only one animated melee auto between it and Hold Still.
@@ -132,6 +138,8 @@ class PhaseOne:
         self.auto_sequences = {MELEE_AUTO_SEQUENCE}
         if phase == 2:
             self.auto_sequences.add(P2_OPENING_ATTACK)
+        elif phase == 3:
+            self.auto_sequences |= PHASE_THREE_AUTOS
         self.autos = 0
         self.last_auto_ns = None
         self.last_auto_event = None
@@ -140,8 +148,11 @@ class PhaseOne:
         self.opening = phase == 1
         if phase == 1:
             self.expected = TENDRILS
-        else:
+        elif phase == 2:
             self.expected = P2_CARRY_OVER.get(carried_expected, carried_expected)
+        else:
+            # The P3 opening depends on the P2 ending in ways not yet captured.
+            self.expected = None
         self.special = None
         self.special_ns = 0
         self.special_event = None
@@ -377,6 +388,8 @@ class PrayerFlicker:
         self.return_tick = None
         self.return_ns = None
         self.hold_prayer = Prayer.MELEE
+        # Deflect for animations without an override; P3 switches this to Deflect Magic.
+        self.default_prayer = Prayer.MELEE
         self.cue_event = None
         self.requested = None
 
@@ -395,7 +408,7 @@ class PrayerFlicker:
             if sequence in self.excluded:
                 continue
             trigger = action
-            self.hold_prayer = self.prayers.get(sequence, Prayer.MELEE)
+            self.hold_prayer = self.prayers.get(sequence, self.default_prayer)
             hold = self.hold_ticks.get(sequence, DEFAULT_FLICK_HOLD_TICKS)
             return_tick = None if tick is None else tick + hold
             return_ns = now + hold * TICK_FALLBACK_NS
@@ -825,6 +838,7 @@ def run(reader, args, board, attempt=None):
     surge_sent_ns = None
     surge_cue = None
     phase_two_at = None
+    phase_three_at = None
     reacquire_at = None
     reacquire_hp = None
     while time.monotonic() < deadline:
@@ -902,7 +916,10 @@ def run(reader, args, board, attempt=None):
             raise RuntimeError(
                 f"Expected {expected_max_hp:,} maximum Telos HP, observed {boss.health_max}"
             )
-        if flicker is not None and phase in (1, 2):
+        continue_phase_three = getattr(args, "continue_phase_three", False)
+        if flicker is not None and (phase in (1, 2) or (phase == 3 and continue_phase_three)):
+            if phase == 3:
+                flicker.default_prayer = Prayer.MAGIC
             flick_step(actions, prayer, now, info.monotonic_ns)
         if not phase_one_started:
             if phase == 1 and hp_known:
@@ -916,9 +933,27 @@ def run(reader, args, board, attempt=None):
                 phase_one.observe(actions)
                 time.sleep(POLL_SECONDS)
                 continue
+        if phase == 4 and continue_phase_three:
+            # Input ends at the P4 checkpoint; fonts and golems have no handling yet.
+            emit("phase_four_observed", boss_hp=boss.health_current, player_hp=hp)
+            if args.observe_transition:
+                board.close()
+                reason = observe(reader, max(0, deadline - time.monotonic()), attempt)
+                if attempt:
+                    attempt.end_reason = reason
+            return 2
         if phase not in (1, 2, 3) or not hp_known:
             raise RuntimeError("Encounter phase unavailable or outside the calibrated range")
-        if phase == 3:
+        if phase == 3 and continue_phase_three:
+            if encounter_checkpoint(phase, npc_health_record(boss), expected_max_hp) is None:
+                raise RuntimeError("Phase 3 bits disagree with the observed boss HP")
+            if phase_three_at is None:
+                emit("phase_three_observed", boss_hp=boss.health_current, player_hp=hp)
+                phase_three_at = now
+                pending_cue = None
+                # P3 attacks are magic only, with their own special order.
+                phase_one = PhaseOne(phase=3)
+        elif phase == 3:
             if (
                 not args.continue_phase_two
                 or encounter_checkpoint(phase, npc_health_record(boss), expected_max_hp) is None
@@ -1195,6 +1230,11 @@ def main():
         help="Try shared defenses against observed specials through phase 2",
     )
     parser.add_argument(
+        "--continue-phase-three",
+        action="store_true",
+        help="Keep defenses and flicks (Deflect Magic) through phase 3; input ends at phase 4",
+    )
+    parser.add_argument(
         "--reacquire",
         nargs=2,
         metavar=("TARGET_CYCLE", "BASIC_ATTACK"),
@@ -1205,6 +1245,8 @@ def main():
         parser.error("Replay does not open the Arduino")
     if args.replay and args.record_attempt:
         parser.error("An attempt log requires a live session")
+    if args.continue_phase_three and not args.continue_phase_two:
+        parser.error("--continue-phase-three requires --continue-phase-two")
     if args.continue_phase_two and args.reacquire:
         parser.error("Choose either phase 2 defenses or the one-shot target cycle trial")
     if not 0 < args.duration <= MAX_PRACTICE_SECONDS:
