@@ -146,3 +146,10 @@ Requests
   The active-Telos and encounter-result fields are not observed in that dormant
   sample. These are explicit dependencies, not a claim that all software is
   complete or that missing outside-combat fields are permanent failures.
+
+* Integrated fault-stop fixture, 2026-11-14: real D6 receives a rejected result
+  plus a latched fake transport fault, closes the shared recording backend,
+  and stops D8 in that frame. No second input is attempted and synthetic held
+  keys are cleared. All 30 D8 cases pass in the isolated worktree, with the one
+  intentionally local capture test skipped there. This is software evidence,
+  not a physical delivery/release or combat ladder pass.
