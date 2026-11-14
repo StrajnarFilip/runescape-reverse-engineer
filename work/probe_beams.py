@@ -212,15 +212,15 @@ def main():
     directory.mkdir(parents=True, exist_ok=False)
     index_path = directory / "index.jsonl"
     print(f"Session {directory}", flush=True)
+    reader = Reader(pid=arguments.pid, worker_hz=0)
     with (
-        Reader(pid=arguments.pid, worker_hz=0) as reader,
         ProcessMemory(arguments.pid) as memory,
         index_path.open("x", encoding="utf-8") as index,
     ):
         identity = (memory.pid, memory.creation_time)
         pending = ["baseline"] if arguments.baseline else []
         held = set()
-        last_telos_tile = None
+        last_center = None
         deadline = time.monotonic() + arguments.duration
         count = 0
         while time.monotonic() < deadline:
@@ -240,13 +240,19 @@ def main():
             if not memory.alive() or (memory.pid, memory.creation_time) != identity:
                 raise RuntimeError("Client process changed")
             telos_tile, player_tile = telos_and_player_tiles(reader)
-            telos_tile = telos_tile or last_telos_tile
-            if telos_tile is None:
-                print(json.dumps({"skipped": label, "reason": "Telos tile unavailable"}))
+            if telos_tile is None and player_tile is None:
+                # A reader attached across a scene load can stay without tiles; reattach once.
+                reader.close()
+                reader = Reader(pid=arguments.pid, worker_hz=0)
+                telos_tile, player_tile = telos_and_player_tiles(reader)
+            # The arena square is centred on Telos, else on the player, else the last centre.
+            center = telos_tile or player_tile or last_center
+            if center is None:
+                print(json.dumps({"skipped": label, "reason": "No Telos or player tile"}))
                 continue
-            last_telos_tile = telos_tile
+            last_center = center
             marked_ns = time.monotonic_ns()
-            float_hits, int_hits, bytes_read, seconds = snapshot(memory, telos_tile)
+            float_hits, int_hits, bytes_read, seconds = snapshot(memory, center)
             after_telos, after_player = telos_and_player_tiles(reader)
             count += 1
             name = f"{count:03d}-{label}"
@@ -256,6 +262,7 @@ def main():
                 "label": label,
                 "marked_monotonic_ns": marked_ns,
                 "utc": datetime.now(timezone.utc).isoformat(),
+                "scan_center": center,
                 "telos_tile": telos_tile,
                 "player_tile": player_tile,
                 "telos_tile_after": after_telos,
@@ -268,6 +275,7 @@ def main():
             index.write(json.dumps(record) + "\n")
             index.flush()
             print(json.dumps(record), flush=True)
+    reader.close()
     print(f"Stopped after {count} snapshots", flush=True)
 
 
