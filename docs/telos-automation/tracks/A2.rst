@@ -1,7 +1,7 @@
 A2 - Movement primitives
 ========================
 
-:Status: in progress
+:Status: waiting for live session
 :Wave: 2
 :Branch: ``telos/A2``
 :Kind: Python and C input layer
@@ -130,3 +130,19 @@ Requests
 * D5/L: keep deferred beam/rock research separate from safe-area movement
   calibration. Arena routes still require explicit measured evidence; the
   user's intended rotation is a strategy assumption, not hazard-completeness data.
+
+* Native input follow-up, 2026-11-14: exported balanced ability/item chord
+  functions now have pure preparation helpers and six native input fixture
+  groups. New chords require an active scene, a snapshot/clock stall no older
+  than 150 ms, and the sampled ability or exact unambiguous backpack slot, ID,
+  nonzero tracking token and positive quantity. Final foreground dispatch
+  rechecks the age limit and preserves existing partial-insertion cleanup.
+  Pure positive-path fixtures send no OS input.
+* L: register only the two additive declarations
+  ``rs3_activate_ability_chord`` and ``rs3_activate_item_chord`` in public
+  ``include/rs3/rs3.h`` with their freshness/precondition contract. Implementation
+  and exported declarations are in the owned input module. Existing public
+  structures and legacy input signatures remain unchanged.
+* A1: use the new chord symbols when present; keep explicit rejection for an
+  older DLL. Consumable intents need a nonzero exact tracking token. Observe
+  consumption/cooldowns later; OS acceptance never establishes game success.

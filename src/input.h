@@ -41,4 +41,24 @@ int32_t input_build_key_chord(uint32_t virtual_key, uint32_t modifiers,
 uint32_t input_release_inserted(const INPUT *events, uint32_t inserted_count,
                                 INPUT releases[MAX_CHORD_INPUTS]);
 
+/** Prepare a guarded sampled-ability chord without sending input; exposed for fixture tests. */
+int32_t input_prepare_ability_chord(const rs3_snapshot *snapshot, uint32_t struct_id,
+                                    uint32_t virtual_key, uint32_t modifiers,
+                                    INPUT chord[MAX_CHORD_INPUTS], uint32_t *input_count);
+
+/** Prepare an exact, unambiguous backpack-item chord without sending input. */
+int32_t input_prepare_item_chord(const rs3_snapshot *snapshot, uint32_t slot,
+                                 int32_t expected_item_id, uint64_t expected_token,
+                                 uint32_t virtual_key, uint32_t modifiers,
+                                 INPUT chord[MAX_CHORD_INPUTS], uint32_t *input_count);
+
+/* Additive public declarations are routed through L's shared ABI registration. */
+/** Send a balanced sampled-ability chord; modifiers use rs3_key_modifiers. */
+RS3_API int32_t rs3_activate_ability_chord(const rs3_snapshot *snapshot, uint32_t struct_id,
+                                           uint32_t virtual_key, uint32_t modifiers);
+/** Send a calibrated item's chord only while its exact slot, ID and nonzero token agree. */
+RS3_API int32_t rs3_activate_item_chord(const rs3_snapshot *snapshot, uint32_t slot,
+                                        int32_t expected_item_id, uint64_t expected_token,
+                                        uint32_t virtual_key, uint32_t modifiers);
+
 #endif /* RS3_INPUT_H */
