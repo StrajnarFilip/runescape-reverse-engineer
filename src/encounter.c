@@ -189,28 +189,33 @@ static const rs3_npc *active_telos(const rs3_snapshot *snapshot)
 /** Calibrated 0% phases on Compatibility Mode, with corroborating transmitted HP. */
 static void decode_compatibility_attempt(rs3_encounter_state *state, const rs3_npc *active)
 {
-    if (active == NULL)
-    {
-        state->phase.reason = RS3_ENCOUNTER_NOT_ACTIVE;
-        state->enrage.reason = RS3_ENCOUNTER_NOT_ACTIVE;
-        return;
-    }
-    if (!(active->flags & RS3_NPC_HEALTH) || active->health_max != ZERO_ENRAGE_MAX_HP)
-    {
-        return;
-    }
+    /* The enrage varbit is server data. On Compatibility Mode its low bits matched the chat
+     * announcement at 0%, 100%, 250% and 500% (2026-11-14), from staging onwards. */
     for (uint32_t index = 0; index < state->raw_count; index++)
     {
         const rs3_encounter_raw *raw = &state->raw[index];
         if (raw->varp_id == TELOS_INSTANCE_VARP && raw->valid && raw->value >= INT32_MIN &&
-            raw->value <= UINT32_MAX && ((uint32_t)raw->value & TELOS_ENRAGE_MASK) == 0)
+            raw->value <= UINT32_MAX &&
+            ((uint32_t)raw->value & TELOS_ENRAGE_MASK) <= MAX_SUPPORTED_ENRAGE)
         {
-            state->enrage = (rs3_encounter_value){.observed_ns = raw->observed_ns,
+            state->enrage = (rs3_encounter_value){.value = (uint32_t)raw->value & TELOS_ENRAGE_MASK,
+                                                  .observed_ns = raw->observed_ns,
                                                   .valid = 1,
                                                   .source_varp = TELOS_INSTANCE_VARP,
                                                   .source_varbit = TELOS_ENRAGE_VARBIT};
             break;
         }
+    }
+    if (active == NULL)
+    {
+        state->phase.reason = RS3_ENCOUNTER_NOT_ACTIVE;
+        return;
+    }
+    /* Phase semantics remain calibrated for 0% only. */
+    if (!(active->flags & RS3_NPC_HEALTH) || active->health_max != ZERO_ENRAGE_MAX_HP ||
+        state->enrage.value != 0)
+    {
+        return;
     }
     if (state->enrage.valid && state->stage_raw.valid &&
         state->stage_raw.value <= COMPAT_LAST_OBSERVED_STAGE)

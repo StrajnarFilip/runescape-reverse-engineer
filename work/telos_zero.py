@@ -1,4 +1,8 @@
-"""Observe Telos or run the phase 1 melee controller in a staged 0% practice instance."""
+"""Observe Telos, or run the melee practice controller through phases 1-3.
+
+With --port, keys come from the displayed action bars and the enrage from memory. The operator
+wakes Telos unless screenshot points are given for the automatic approach.
+"""
 
 from __future__ import annotations
 
@@ -1208,6 +1212,18 @@ FLICK_KEY_FALLBACKS = {
 }
 
 
+def resolve_enrage(reader, args):
+    """Use the enrage from VARP 6359 unless --practice-enrage overrides it."""
+    reader.sample()
+    enrage = reader.encounter.enrage
+    observed = enrage.value if enrage.valid else None
+    if args.practice_enrage is None:
+        if observed is None:
+            raise RuntimeError("Telos enrage unavailable in memory; pass --practice-enrage")
+        args.practice_enrage = observed
+    log("enrage_resolved", enrage=args.practice_enrage, from_memory=observed)
+
+
 def resolve_action_bar_keys(reader, args, attempt=None):
     """Fill unset key arguments from the displayed action bars and record their source.
 
@@ -1247,7 +1263,11 @@ def main():
     parser.add_argument("--duration", type=int, default=MAX_PRACTICE_SECONDS)
     parser.add_argument("--port", help="Arduino COM port. Omit for observation only.")
     parser.add_argument("--replay", type=Path, help="Read a local Telos observation JSONL capture")
-    parser.add_argument("--record-attempt", action="store_true", help="Write under training-data/")
+    parser.add_argument(
+        "--record-attempt",
+        action="store_true",
+        help="Write an attempt log under training-data/ (always on with --port)",
+    )
     parser.add_argument("--frame", type=Path, help="Fresh game_console.py screenshot")
     parser.add_argument(
         "--approach", type=int, nargs=2, help="Arena floor pixel near dormant Telos"
@@ -1257,44 +1277,28 @@ def main():
     parser.add_argument(
         "--practice-enrage",
         type=int,
-        default=0,
-        help="Confirmed Practice Mode enrage. Non-zero values lock the first observed maximum HP "
-        "and assume the 0%% quarter phase split; special timings are only calibrated at 0%%",
+        help="Override the enrage read from memory (VARP 6359). Non-zero values lock the first "
+        "observed maximum HP and assume the 0%% quarter phase split",
     )
-    parser.add_argument(
-        "--observe-transition",
-        action="store_true",
-        help="Record later cues after phase 1 input stops",
-    )
-    parser.add_argument(
-        "--flick-melee",
-        action="store_true",
-        help="Unvalidated trial: Deflect Melee (Deflect Magic for 28959) on every Telos "
-        "animation except Uppercut, then Soul Split after the hold (phases 1-2)",
-    )
+    # Prayer flicking, timed Freedom and post-input observation are always on; these old
+    # switches are still accepted so earlier commands keep working.
+    parser.add_argument("--observe-transition", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--flick-melee", action="store_true", help=argparse.SUPPRESS)
     # Unset keys are read from the displayed action bars (rs3_reader.action_bar_keys).
     parser.add_argument("--flick-melee-key", help="Deflect Melee key (default: from action bar)")
     parser.add_argument("--flick-magic-key", help="Deflect Magic key (default: from action bar)")
     parser.add_argument("--flick-soul-split-key", help="Soul Split key (default: from action bar)")
     parser.add_argument("--freedom", help="Freedom key (default: from action bar)")
     parser.add_argument("--anticipation", help="Anticipation key (default: from action bar)")
-    parser.add_argument(
-        "--manual-engage",
-        action="store_true",
-        help="Operator-run mode: no screenshot points; Deflect Melee by key, then wait for the "
-        "operator to wake Telos",
-    )
+    # Without screenshot points the operator wakes Telos (the default); the old switch remains.
+    parser.add_argument("--manual-engage", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--displayed-keys",
         action="store_true",
         help="Translate displayed key labels using the RuneScape keyboard layout",
     )
     parser.add_argument("--hurricane", help="Current Hurricane binding, if equipped on the bar")
-    parser.add_argument(
-        "--timed-freedom",
-        action="store_true",
-        help="Try Freedom at GCD zero, 4–7 received ticks after Hold Still",
-    )
+    parser.add_argument("--timed-freedom", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--surge", help="Optional Surge binding for experimental movement")
     parser.add_argument(
         "--escape", help="Optional Escape binding, sent 4-5 received ticks after Uppercut"
@@ -1319,17 +1323,16 @@ def main():
     # Input continues through every handled phase (to the P4 checkpoint) unless the one-shot
     # target-cycle trial is selected, which needs input to end at P2.
     args.continue_phase_two = not args.reacquire
+    args.flick_melee = args.timed_freedom = args.observe_transition = True
+    if args.port:
+        args.record_attempt = True
     if not 0 < args.duration <= MAX_PRACTICE_SECONDS:
         parser.error(f"Duration must be between 1 and {MAX_PRACTICE_SECONDS} seconds")
-    if (
-        args.port
-        and not args.manual_engage
-        and not all((args.frame, args.approach, args.melee, args.practice_0_confirmed))
-    ):
-        parser.error(
-            "Automatic approach requires --practice-0-confirmed, --frame, --melee and --approach;"
-            " use --manual-engage to wake Telos yourself"
-        )
+    approach_points = (args.frame, args.approach, args.melee)
+    # The operator wakes Telos unless every screenshot point for the automatic approach is set.
+    args.manual_engage = not any(approach_points)
+    if args.port and not args.manual_engage and not all(approach_points):
+        parser.error("The automatic approach needs --frame, --melee and --approach together")
     board = stream = attempt = None
     end_reason = "error"
     outcome = "incomplete"
@@ -1338,6 +1341,8 @@ def main():
             replay(args.replay)
             return 0
         with Reader(pid=args.pid, worker_hz=0) as reader:
+            if args.port:
+                resolve_enrage(reader, args)
             if args.port or args.record_attempt:
                 directory = Path(__file__).resolve().parents[1] / "training-data"
                 directory.mkdir(exist_ok=True)
@@ -1347,7 +1352,7 @@ def main():
                 attempt = AttemptLog(
                     stream,
                     mode="practice" if args.port else "observation",
-                    enrage=args.practice_enrage if args.practice_0_confirmed else None,
+                    enrage=args.practice_enrage,
                     monotonic_ns=reader.monotonic_ns,
                 )
                 print(f"Attempt log {path}", flush=True)

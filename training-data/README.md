@@ -13,11 +13,12 @@ The controller turns on Deflect Melee with its key and takes over when the fight
 
 ```powershell
 $env:PYTHONPATH = 'python'
-python work/telos_zero.py --port COM8 --manual-engage --practice-enrage 250 `
-    --timed-freedom --observe-transition --record-attempt --flick-melee
+python work/telos_zero.py --port COM8
 ```
 
-Set `--practice-enrage` to the enrage in chat. Game key codes and slot contents were calibrated
+The enrage is read from memory (low 12 bits of VARP 6359) and logged as `enrage_resolved`;
+`--practice-enrage` overrides it. Prayer flicking, timed Freedom, the attempt log and recording
+after input ends are always on. Game key codes and slot contents were calibrated
 against this account's bars on 2026-11-14. Raw modifier bits are logged but not used: Soul Split
 reported a modifier while plain F4 works. An unexpected key shows up in `keys_resolved`.
 

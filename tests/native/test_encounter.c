@@ -127,8 +127,10 @@ static void labelled_phases_and_enrage_require_active_telos(void)
                     0x795301f4u);
     test_fixture->context->target.profile = &profile_compatibility;
     encounter_stage(test_fixture->context, snapshot, FIXTURE_PLAYER, FIXTURE_WORLD);
-    assert(!snapshot->encounter.phase.valid && !snapshot->encounter.enrage.valid);
-    assert(snapshot->encounter.enrage.reason == RS3_ENCOUNTER_UNMAPPED);
+    /* Compatibility Mode publishes the enrage varbit (live-matched at 0-500%); phases stay
+     * limited to the calibrated 0% case. */
+    assert(!snapshot->encounter.phase.valid);
+    assert(snapshot->encounter.enrage.valid && snapshot->encounter.enrage.value == 500);
     fixture_destroy(test_fixture);
 }
 
@@ -153,9 +155,15 @@ static void compatibility_phase_requires_zero_enrage_and_matching_hp(void)
     encounter_stage(test_fixture->context, snapshot, FIXTURE_PLAYER, FIXTURE_WORLD);
     assert(!snapshot->encounter.phase.valid);
     snapshot->npcs[0].health_current--;
+    /* 300% enrage: the enrage is published, but the 0%-calibrated phase is withheld. */
     fixture_put_u64(test_fixture, enrage_node + LAYOUT_VARIABLE_NODE_VALUE_OFFSET, 0x7836012cu);
     encounter_stage(test_fixture->context, snapshot, FIXTURE_PLAYER, FIXTURE_WORLD);
-    assert(!snapshot->encounter.phase.valid && !snapshot->encounter.enrage.valid);
+    assert(!snapshot->encounter.phase.valid);
+    assert(snapshot->encounter.enrage.valid && snapshot->encounter.enrage.value == 300);
+    /* Out-of-range enrage bits are not published. */
+    fixture_put_u64(test_fixture, enrage_node + LAYOUT_VARIABLE_NODE_VALUE_OFFSET, 0x78360fffu);
+    encounter_stage(test_fixture->context, snapshot, FIXTURE_PLAYER, FIXTURE_WORLD);
+    assert(!snapshot->encounter.enrage.valid);
     fixture_destroy(test_fixture);
 }
 
