@@ -46,7 +46,6 @@ PHASE_SHIFT = 21
 PHASE_MASK = 7
 OPENING_AUTOS = 7
 LOOP_AUTOS = 3
-HOLD_STILL_PREP_AUTOS = 2
 HOLD_STILL_FORECAST_WINDOW_NS = 2_400_000_000
 ANTICIPATION_MAX_ATTEMPTS = 2
 PHASE_COUNT = 4
@@ -54,8 +53,6 @@ FONT_SIXTEENTHS = (3, 2, 1)
 SIXTEENTHS = 16
 MAX_SAMPLE_AGE_NS = 100_000_000
 SPECIAL_WINDOW_NS = 3_000_000_000
-HOLD_STILL_HEAVY_HIT_TICK = 4
-HOLD_STILL_LAST_FREEDOM_TICK = 7
 ACK_TIMEOUT_NS = 1_200_000_000
 KEY_HOLD_SECONDS = 0.05
 POLL_SECONDS = 0.025
@@ -93,7 +90,23 @@ NEXT_SPECIAL_BY_PHASE = {
 }
 # P3 attacks are magic only (wiki; confirmed by the account owner). 28959 repeated every
 # 4 received ticks in the 250% P3 capture, so it is counted as the P3 auto there.
-PHASE_THREE_AUTOS = frozenset({MAGIC_ATTACK, 28930})
+PHASE_THREE_AUTOS = frozenset({MAGIC_ATTACK})
+# enum rs3_effect_id RS3_EFFECT_STUN and raw_valid_mask bit 0 (include/rs3/effects.h).
+STUN_EFFECT_ID = 6
+EFFECT_RAW_EXPIRY_VALID = 1
+# Stuns last a few seconds; a longer expiry in 20 ms logic ticks is not treated as a stun.
+MAX_STUN_TICKS = 1_500
+P3_OPENING_AUTOS = 7
+P3_LONG_OPENING_AUTOS = 10
+# P3 opening by the P2 special that would have come next (wiki). Live at 500% on 2026-11-14:
+# P2 ended on Tendrils, and P3 opened with 28930, seven 28959 magic autos, then Hold Still.
+# The other rows are guide-derived. After Onslaught the Red Virus has no mapped animation.
+P3_CARRY_OVER = {
+    ONSLAUGHT: (HOLD_STILL, P3_OPENING_AUTOS),
+    HOLD_STILL: (None, P3_OPENING_AUTOS),
+    UPPERCUT: (UPPERCUT, P3_LONG_OPENING_AUTOS),
+    TENDRILS: (UPPERCUT, P3_LONG_OPENING_AUTOS),
+}
 # Four 2026-11-14 captures: a P1 ending on Uppercut opened P2 with Hold Still, on Tendrils with
 # Onslaught, on Hold Still with Tendrils. 28930 opens P2 and is counted as an auto: one capture
 # had only one animated melee auto between it and Hold Still.
@@ -153,13 +166,18 @@ class PhaseOne:
         # P1 opens with 7 autos then Tendrils. P2 opens with the special P1 would have used
         # next, except that a P1 ending on Tendrils leads to Onslaught instead of Uppercut.
         self.opening = phase == 1
+        self.opening_autos = OPENING_AUTOS
         if phase == 1:
             self.expected = TENDRILS
         elif phase == 2:
             self.expected = P2_CARRY_OVER.get(carried_expected, carried_expected)
         else:
-            # The P3 opening depends on the P2 ending in ways not yet captured.
-            self.expected = None
+            # P3 opens with magic autos, then the special carried over from P2.
+            self.opening = True
+            self.expected, self.opening_autos = P3_CARRY_OVER.get(
+                carried_expected, (None, OPENING_AUTOS)
+            )
+        self.last_freedom_stun = None
         self.special = None
         self.special_ns = 0
         self.special_event = None
@@ -176,7 +194,7 @@ class PhaseOne:
     @property
     def expected_after(self):
         """Number of ordinary attacks that precede the expected special."""
-        return OPENING_AUTOS if self.opening else LOOP_AUTOS
+        return self.opening_autos if self.opening else LOOP_AUTOS
 
     def observe(self, actions):
         """Apply each new animation once. Treat the Tendrils release as a count offset."""
@@ -216,12 +234,24 @@ class PhaseOne:
         received_tick=None,
         timed_freedom=False,
         flicking=False,
+        stun_expiry=None,
     ):
         """Use cooldown acknowledgement and bound the number of attempts for each mechanic.
 
         With ``flicking``, the melee flicker owns protection, so Anticipation no longer
-        requires Deflect Melee to be the current overhead.
+        requires Deflect Melee to be the current overhead. ``stun_expiry`` is the player's
+        active stun timer (None when not stunned); Freedom is used only then, once per stun.
+        ``timed_freedom`` is accepted for older callers and no longer changes behavior.
         """
+        # Freedom is reactive: only an observed stun justifies it, and it precedes the rest.
+        if (
+            stun_expiry is not None
+            and stun_expiry != self.last_freedom_stun
+            and "Freedom" in cooldowns
+            and not cooldowns["Freedom"]
+        ):
+            self.last_freedom_stun = stun_expiry
+            return Action("Freedom", "Player stunned")
         # Resonance is tick-critical, so it precedes any acknowledgement still pending.
         if self.resonance_due(cooldowns, received_tick, gcd_remaining_ms):
             return Action("Resonance", "Hold Still second melee hit")
@@ -236,27 +266,6 @@ class PhaseOne:
 
         elapsed_ns = now - self.special_ns
         active_special = 0 <= elapsed_ns < SPECIAL_WINDOW_NS
-        freedom_window = active_special
-        if timed_freedom:
-            tick_delta = (
-                received_tick - self.special_tick
-                if received_tick is not None and self.special_tick is not None
-                else None
-            )
-            freedom_window = (
-                tick_delta is not None
-                and HOLD_STILL_HEAVY_HIT_TICK <= tick_delta <= HOLD_STILL_LAST_FREEDOM_TICK
-                and gcd_remaining_ms == 0
-            )
-        if (
-            freedom_window
-            and self.special == HOLD_STILL
-            and "Freedom" not in self.handled
-            and "Freedom" in cooldowns
-            and not cooldowns["Freedom"]
-        ):
-            reason = "Hold Still post-hit GCD trial" if timed_freedom else "Hold Still animation"
-            return Action("Freedom", reason)
         if (
             self.special == UPPERCUT
             and self.autos == 0
@@ -275,7 +284,8 @@ class PhaseOne:
         # The client queues an ability pressed during the GCD, so Anticipation does not wait for it.
         if (
             self.expected == HOLD_STILL
-            and self.autos == HOLD_STILL_PREP_AUTOS
+            # One auto before the stun: the second of three, or the sixth of the P3 opening.
+            and self.autos == self.expected_after - 1
             and self.last_auto_ns is not None
             and 0 <= now - self.last_auto_ns < HOLD_STILL_FORECAST_WINDOW_NS
             and (prayer == Prayer.MELEE or flicking)
@@ -474,6 +484,25 @@ def boss_sample(reader):
     phase = None if phase_raw is None else ((phase_raw >> PHASE_SHIFT) & PHASE_MASK) + 1
     hp = player.variable(Variable.HEALTH)
     return info, player, boss, phase, hp
+
+
+def active_stun_expiry(reader, logic_tick):
+    """Return the player's stun expiry while it lies ahead of the client logic tick, else None.
+
+    The stun candidate (varc 3748) shares the 20 ms logic clock: on 2026-11-14 the effect
+    expiries of Anticipation, Resonance and Freedom changed with their casts, and an old stun
+    expiry read below the current tick. The effect remains unvalidated in the DLL.
+    """
+    if logic_tick is None:
+        return None
+    try:
+        stun = reader.effects[STUN_EFFECT_ID - 1]
+    except (AttributeError, IndexError, TypeError):
+        return None
+    if stun.effect_id != STUN_EFFECT_ID or not stun.raw_valid_mask & EFFECT_RAW_EXPIRY_VALID:
+        return None
+    remaining = (int(stun.raw_expiry) - int(logic_tick)) & 0xFFFFFFFF
+    return int(stun.raw_expiry) if 0 < remaining <= MAX_STUN_TICKS else None
 
 
 def cooldowns(reader, operator_bound=()):
@@ -1011,7 +1040,7 @@ def run(reader, args, board, attempt=None):
                 phase_three_at = now
                 pending_cue = None
                 # P3 attacks are magic only, with their own special order.
-                phase_one = PhaseOne(phase=3)
+                phase_one = PhaseOne(phase=3, carried_expected=phase_one.expected)
         elif phase == 3:
             if (
                 not args.continue_phase_two
@@ -1174,6 +1203,7 @@ def run(reader, args, board, attempt=None):
             received_tick=received_tick,
             timed_freedom=timed_freedom,
             flicking=flicker is not None,
+            stun_expiry=active_stun_expiry(reader, getattr(info, "logic_tick", None)),
         )
         if phase_one.cast_result:
             ability, confirmed = phase_one.cast_result

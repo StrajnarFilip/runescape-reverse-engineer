@@ -94,7 +94,11 @@ void effects_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t player
     snapshot->effects_info.count = RS3_EFFECT_COUNT;
     snapshot->effects_info.status = RS3_PARTIAL;
     snapshot->effects_info.reason = RS3_EFFECT_UNVALIDATED;
-    int supported = context->target.profile == &profile_primary;
+    /* Effect candidates are server-defined variables, read identically on Compatibility Mode.
+     * There the Anticipation, Resonance and Freedom expiries changed with their casts
+     * (2026-11-14); every effect stays unvalidated. */
+    int supported = context->target.profile == &profile_primary ||
+                    context->target.profile == &profile_compatibility;
     if (!supported)
     {
         snapshot->effects_info.reason = RS3_EFFECT_UNSUPPORTED_PROFILE;

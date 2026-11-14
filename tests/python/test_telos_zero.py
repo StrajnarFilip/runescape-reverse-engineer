@@ -46,9 +46,11 @@ class PhaseOneTests(unittest.TestCase):
         self.assertEqual(action.ability, "Anticipation")
         phase.sent(action, 3 * SECOND_NS)
         phase.observe([event(4, HOLD_STILL)])
-        action = phase.next_action(4 * SECOND_NS, timers, 1000, Prayer.MELEE)
-        self.assertEqual(action.ability, "Freedom")
+        # Hold Still alone never triggers Freedom; Anticipation is the planned answer.
+        self.assertIsNone(phase.next_action(4 * SECOND_NS, timers, 1000, Prayer.MELEE))
         self.assertEqual(phase.cast_result, ("Anticipation", False))
+        action = phase.next_action(4 * SECOND_NS, timers, 1000, Prayer.MELEE, stun_expiry=900)
+        self.assertEqual(action, controller["Action"]("Freedom", "Player stunned"))
         phase.sent(action, 4 * SECOND_NS)
         self.assertIsNone(phase.next_action(5 * SECOND_NS, {"Freedom": 16000}, 0, Prayer.NONE))
         self.assertEqual(phase.cast_result, ("Freedom", True))
@@ -63,20 +65,53 @@ class PhaseOneTests(unittest.TestCase):
         self.assertEqual(action.ability, "Surge")
         self.assertIsNone(phase.next_action(6 * SECOND_NS, timers, 0, Prayer.MELEE))
 
-    def test_timed_freedom_waits_for_heavy_hit_and_gcd_then_expires(self):
+    def test_freedom_only_while_stunned_and_once_per_stun(self):
         phase = PhaseOne()
         phase.observe([dict(event(1, HOLD_STILL), received_tick=10)])
         timers = {"Freedom": 0}
-        for tick, gcd in ((None, 0), (13, 0), (14, 20), (14, None), (18, 0)):
+        for tick in (11, 14, 18):
             self.assertIsNone(
-                phase.next_action(
-                    3 * SECOND_NS, timers, gcd, Prayer.MELEE, received_tick=tick, timed_freedom=True
-                )
+                phase.next_action(3 * SECOND_NS, timers, 0, Prayer.MELEE, received_tick=tick)
             )
-        action = phase.next_action(
-            3 * SECOND_NS, timers, 0, Prayer.MELEE, received_tick=14, timed_freedom=True
+        self.assertIsNone(
+            phase.next_action(3 * SECOND_NS, {"Freedom": 5000}, 0, Prayer.MELEE, stun_expiry=700)
         )
+        action = phase.next_action(3 * SECOND_NS, timers, 0, Prayer.MELEE, stun_expiry=700)
         self.assertEqual(action.ability, "Freedom")
+        self.assertIsNone(
+            phase.next_action(3 * SECOND_NS, timers, 0, Prayer.MELEE, stun_expiry=700)
+        )
+        # A new stun (a new expiry) allows Freedom again.
+        self.assertEqual(
+            phase.next_action(4 * SECOND_NS, timers, 0, Prayer.MELEE, stun_expiry=950).ability,
+            "Freedom",
+        )
+
+    def test_active_stun_expiry_reads_the_stun_timer_ahead_of_the_logic_tick(self):
+        stun_effect = SimpleNamespace(effect_id=6, raw_valid_mask=1, raw_expiry=1_000)
+        reader = SimpleNamespace(effects=[SimpleNamespace(effect_id=i) for i in range(1, 6)])
+        reader.effects.append(stun_effect)
+        active = controller["active_stun_expiry"]
+        self.assertEqual(active(reader, 900), 1_000)
+        self.assertIsNone(active(reader, 1_000))
+        self.assertIsNone(active(reader, 1_200))
+        self.assertIsNone(active(reader, None))
+        stun_effect.raw_valid_mask = 0
+        self.assertIsNone(active(reader, 900))
+
+    def test_phase_three_opening_after_tendrils_forecasts_hold_still(self):
+        phase = PhaseOne(phase=3, carried_expected=controller["ONSLAUGHT"])
+        self.assertEqual(phase.expected, HOLD_STILL)
+        magic = controller["MAGIC_ATTACK"]
+        phase.observe([event(1, controller["P2_OPENING_ATTACK"])])
+        phase.observe([event(index, magic) for index in range(2, 7)])
+        timers = {"Anticipation": 0}
+        self.assertIsNone(
+            phase.next_action(6 * SECOND_NS, timers, 0, Prayer.SOUL_SPLIT, flicking=True)
+        )
+        phase.observe([event(7, magic)])
+        action = phase.next_action(7 * SECOND_NS, timers, 0, Prayer.SOUL_SPLIT, flicking=True)
+        self.assertEqual(action.ability, "Anticipation")
 
     def test_tendrils_release_cancels_pending_damage_response(self):
         phase = PhaseOne()
@@ -614,7 +649,8 @@ class PracticeRunTests(unittest.TestCase):
         with patch.dict(sys.modules, {"game_console": console}), patch("time.sleep"):
             with patch.dict(run.__globals__, mock_globals):
                 self.assertEqual(run(reader, args, board), 2)
-        self.assertEqual([call.args[0][-1].name for call in board.tap.call_args_list], ["U"])
+        # No stun was reported, so Hold Still alone sends no Freedom.
+        self.assertEqual([call.args[0][-1].name for call in board.tap.call_args_list], [])
         # P3 is handled rather than ending input; input ends at the P4 checkpoint.
         logged = [call.args[0] for call in mock_globals["log"].call_args_list]
         self.assertIn("phase_three_observed", logged)
