@@ -1,7 +1,7 @@
 P5 - Interface state
 ====================
 
-:Status: in progress
+:Status: waiting for live session
 :Wave: 1
 :Branch: ``telos/P5``
 :Kind: C (native DLL)
@@ -112,3 +112,18 @@ sample identity and age remain mandatory for downstream use.
   groups. The next user session should label an NPC hover, empty ground and
   menu open/close while the read-only collector is active. No click automation
   or semantic mapping is enabled by this preparation.
+
+* Raw-candidate registration is now complete on integration: module clear/stage
+  paths, worker snapshot copy, additive accessor, checked 304-byte ctypes layout
+  and ``ui.pointer_candidate`` diagnostics. Semantic ``value`` stays null with
+  ``unvalidated_source``; raw overloaded fields and text remain under candidate.
+  Eighteen native interface groups cover the decoder plus accessor, worker copy
+  and unavailable reset. Four local serializer/real-ABI regression groups pass.
+  All 15 CTest targets pass in this isolated worktree (300 Python tests with
+  eight intentionally absent raw-capture skips). No game process was opened.
+* Next controlled session: record native JSONL while the user hovers a named
+  ordinary NPC, empty ground and one inventory item, then opens/closes a context
+  menu. Correlate raw descriptor/reference fields with same-frame identities.
+  Do not turn names, raw reference equality or pointer clearing into a trusted
+  hit-test. Physical pixel/view geometry and consumed pointer-event age still
+  need mapping before a click backend may use this channel.

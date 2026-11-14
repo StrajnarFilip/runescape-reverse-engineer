@@ -19,6 +19,7 @@ from .native import (
     HazardFlags,
     NPCFlags,
     NPCActionFlags,
+    PointerCandidateFlags,
     Reader,
     Reason,
     Status,
@@ -59,6 +60,7 @@ INTERFACE_REASONS = (
     "content_unmapped",
     "key_unmapped",
     "frame_unavailable",
+    "unvalidated_source",
 )
 INTERFACE_KINDS = ("instance", "enrage", "loot", "bank_preset", "death")
 
@@ -148,6 +150,42 @@ def interface_records(reader):
         "source": "native_memory",
         "required": required,
     }
+    pointer = getattr(reader, "pointer_candidate", None)
+    if pointer is not None:
+        flags = PointerCandidateFlags(pointer.flags)
+        raw_record = bool(flags & PointerCandidateFlags.RAW_RECORD)
+        raw_text = bool(flags & PointerCandidateFlags.RAW_TEXT)
+        ui["pointer_candidate"] = {
+            "value": None,
+            "age_ms": (
+                max(0, reader.monotonic_ns() - pointer.observed_ns) / 1e6
+                if pointer.observed_ns
+                else None
+            ),
+            "source": "native_menu_candidate",
+            "reason": INTERFACE_REASONS[pointer.reason],
+            "candidate": (
+                {
+                    "record_read": raw_record,
+                    "raw_menu_state": (
+                        pointer.raw_menu_state if flags & PointerCandidateFlags.RAW_MENU else None
+                    ),
+                    "raw_type_rva": (
+                        pointer.raw_type_rva if flags & PointerCandidateFlags.RAW_TYPE else None
+                    ),
+                    "raw_reference": pointer.raw_reference if raw_record else None,
+                    "raw_item_id": pointer.raw_item_id if raw_record else None,
+                    "raw_arg1": pointer.raw_arg1 if raw_record else None,
+                    "raw_arg2": pointer.raw_arg2 if raw_record else None,
+                    "name": decode_text(pointer.name) if raw_text else None,
+                    "verb": decode_text(pointer.verb) if raw_text else None,
+                    "semantic_identity_validated": False,
+                    "physical_coordinates_validated": False,
+                }
+                if flags
+                else None
+            ),
+        }
     bars = {
         "status": PLAYER_HIT_STATUS_NAMES.get(info.status, "unavailable"),
         "entries": entries if info.action_bar_count else None,

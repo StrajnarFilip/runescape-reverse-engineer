@@ -412,6 +412,34 @@ class Hit(ctypes.Structure):
     ]
 
 
+POINTER_TEXT_CAPACITY = 128
+
+
+class PointerCandidateFlags(IntFlag):
+    """Raw menu-record read flags; never semantic identity or click permission."""
+
+    RAW_MENU = 1
+    RAW_RECORD = 2
+    RAW_TEXT = 4
+    RAW_TYPE = 8
+
+
+class PointerCandidate(ctypes.Structure):
+    """rs3_pointer_candidate; all decoded content still requires live calibration."""
+
+    _fields_ = [
+        ("observed_ns", ctypes.c_uint64),
+        *((name, ctypes.c_uint32) for name in ("status", "reason", "flags", "raw_type_rva")),
+        *(
+            (name, ctypes.c_int32)
+            for name in ("raw_reference", "raw_item_id", "raw_arg1", "raw_arg2", "raw_menu_state")
+        ),
+        ("reserved", ctypes.c_uint32),
+        ("name", ctypes.c_char * POINTER_TEXT_CAPACITY),
+        ("verb", ctypes.c_char * POINTER_TEXT_CAPACITY),
+    ]
+
+
 class InterfaceInfo(ctypes.Structure):
     _fields_ = [
         *(
@@ -911,6 +939,7 @@ def _function_prototypes():
             [handle, u64, ctypes.POINTER(NPCActionEvent), u32, *cursor_outputs],
         ),
         "interface_sizeof": (u32, [u32]),
+        "snapshot_pointer_candidate": (i32, [handle, ctypes.POINTER(PointerCandidate), u32]),
         "snapshot_interface_info": (i32, [handle, ctypes.POINTER(InterfaceInfo), u32]),
         "snapshot_interfaces": (
             i32,
@@ -950,6 +979,7 @@ def _verify_layouts(library):
         (1, InterfaceInfo),
         (2, InterfaceObservation),
         (3, ActionBarSlot),
+        (4, PointerCandidate),
     ):
         if library.rs3_interface_sizeof(structure_id) != ctypes.sizeof(structure):
             raise RuntimeError("C/Python interface layout mismatch for " + structure.__name__)
@@ -1031,6 +1061,7 @@ class Reader:
         self.npc_animations = (NPCAnimation * MAX_NPCS)()
         self.hits = (Hit * MAX_HITS)()
         self.interface_info = InterfaceInfo()
+        self.pointer_candidate = PointerCandidate()
         self.interfaces = (InterfaceObservation * 5)()
         self.action_bar = (ActionBarSlot * 70)()
         self.player_hit_info = PlayerHitInfo()
@@ -1112,6 +1143,7 @@ class Reader:
         copy_array(library.rs3_snapshot_npc_animations, self.npc_animations)
         copy_array(library.rs3_snapshot_hits, self.hits)
         copy_record(library.rs3_snapshot_interface_info, self.interface_info)
+        copy_record(library.rs3_snapshot_pointer_candidate, self.pointer_candidate)
         copy_array(library.rs3_snapshot_interfaces, self.interfaces)
         copy_array(library.rs3_snapshot_action_bar, self.action_bar)
         copy_record(library.rs3_snapshot_player_hit_info, self.player_hit_info)

@@ -503,7 +503,7 @@
     "default_reason": "unvalidated_source",
     "default_status_after_raw_read": "partial",
     "new_fixture_groups": 4,
-    "native_interface_fixture_groups": 17,
+    "native_interface_fixture_groups": 18,
     "tests": [
       "Raw fields stay nonsemantic",
       "Empty slot/owner/profile states",
@@ -513,9 +513,14 @@
     "game_inputs_sent": false,
     "game_running_during_research": false,
     "pending": [
-      "L private snapshot/storage/accessor registration",
-      "P5 collector/bindings/telemetry wiring",
-      "Manual pointer/menu labels on the same executable; no automatic pointer input"
-    ]
+      "Manual pointer/menu labels on the same executable; no automatic pointer input",
+      "Semantic target/action-type association and current-pointer acknowledgement",
+      "Physical geometry, minimap/view calibration and safe-area acceptance"
+    ],
+    "snapshot_accessor": "rs3_snapshot_pointer_candidate",
+    "snapshot_and_telemetry_wiring_complete": true,
+    "serializer_regression_groups": 4,
+    "unavailable_frame_and_worker_copy_tested": true,
+    "semantic_value_always_null": true
   }
 }
