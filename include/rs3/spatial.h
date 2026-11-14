@@ -29,6 +29,13 @@ enum rs3_spatial_reason
     RS3_SPATIAL_WRONG_WORLD
 };
 
+/** Target kinds currently mapped for the original-profile local player. */
+enum rs3_spatial_target_kind
+{
+    RS3_SPATIAL_TARGET_NONE = 0,
+    RS3_SPATIAL_TARGET_NPC = 1
+};
+
 enum rs3_camera_flags
 {
     RS3_CAMERA_MATRIX = 1u,
@@ -54,7 +61,7 @@ typedef struct rs3_actor_spatial
     uint32_t facing_reason;
     uint32_t target_reason;
     int32_t target_runtime_id;
-    uint32_t target_kind; /**< Reserved until mapped; never inferred from facingTarget. */
+    uint32_t target_kind; /**< rs3_spatial_target_kind; meaningful only with TARGET set. */
     uint32_t reserved[2];
 } rs3_actor_spatial;
 

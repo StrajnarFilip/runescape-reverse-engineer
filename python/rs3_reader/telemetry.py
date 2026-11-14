@@ -25,6 +25,7 @@ from .native import (
     decode_text,
     ScreenPoint,
     SpatialFlags,
+    SpatialTargetKind,
 )
 from .prayer import Prayer
 
@@ -428,6 +429,37 @@ def spatial_actor_record(reader, actor):
             ),
         }
 
+    target = None
+    unresolved_target = False
+    if actor.valid_mask & SpatialFlags.TARGET:
+        if actor.target_kind == SpatialTargetKind.NONE:
+            target = {"kind": "none"}
+        elif actor.target_kind == SpatialTargetKind.NPC:
+            required_flags = SpatialFlags.TILE | SpatialFlags.SAME_WORLD
+            matches = []
+            for index in range(min(reader.info.npc_count, reader.spatial.npc_count)):
+                candidate = reader.npcs[index]
+                pose = reader.npc_spatial[index]
+                if (
+                    candidate.runtime_id == actor.target_runtime_id
+                    and candidate.instance_id
+                    and pose.instance_id == candidate.instance_id
+                    and pose.valid_mask & required_flags == required_flags
+                ):
+                    matches.append(candidate)
+            if len(matches) == 1:
+                candidate = matches[0]
+                target = {
+                    "kind": "npc",
+                    "runtime_id": candidate.runtime_id,
+                    "instance_id": candidate.instance_id,
+                    "config_id": (
+                        candidate.config_id if candidate.flags & NPCFlags.CONFIG else None
+                    ),
+                }
+            else:
+                unresolved_target = True
+
     result = {
         "tile": field(
             (
@@ -445,8 +477,10 @@ def spatial_actor_record(reader, actor):
             ),
             actor.facing_reason,
         ),
-        "target": field(None, actor.target_reason),
+        "target": field(target, actor.target_reason),
     }
+    if unresolved_target:
+        result["target"]["reason"] = "target_not_observed"
     if actor.valid_mask & SpatialFlags.FINE_POSITION:
         point = ScreenPoint()
         reader.check_result(
