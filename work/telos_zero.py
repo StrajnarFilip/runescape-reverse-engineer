@@ -7,6 +7,7 @@ wakes Telos unless screenshot points are given for the automatic approach.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
 import math
 import time
@@ -19,10 +20,14 @@ from rs3_reader.bot.attempt_log import AttemptLog
 from rs3_reader.native import (
     PRAYER_POINTS_MASK,
     AbilityFlags,
+    Camera,
     EquipmentMatch,
     NPCFlags,
+    Position,
     Reader,
     Reason,
+    ScreenPoint,
+    SpatialFlags,
     Status,
     Variable,
 )
@@ -105,6 +110,75 @@ DEFAULT_FLICK_PRAYER_BY_PHASE = {
 }
 # run() result asking main() to start over for a new encounter (scene or Telos changed).
 ENCOUNTER_RESET = 3
+# Hold Still ends with a typeless stomp that only hurts a player inside Telos's footprint
+# (account owner, 2026-11-14; up to 9,900 at 500%). If the player is still underneath during
+# these received ticks after 28935, Dive to a tile this far from Telos's centre.
+STOMP_CHECK_TICKS = (1, 4)
+STOMP_ESCAPE_DISTANCE = 4
+EIGHT_DIRECTIONS = ((1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1))
+
+
+def under_footprint(boss_tile, size, tile):
+    """Whether tile lies in the size x size footprint whose south-west corner is boss_tile."""
+    return (
+        boss_tile[0] <= tile[0] < boss_tile[0] + size
+        and boss_tile[1] <= tile[1] < boss_tile[1] + size
+    )
+
+
+def stomp_escape_tiles(boss_tile, size, player_tile):
+    """Candidate Dive targets outside the footprint, best first.
+
+    The first direction continues the player's offset from Telos's centre (the side the
+    character came from is likely open floor); the rest follow by angular closeness.
+    """
+    centre_x = boss_tile[0] + (size - 1) / 2
+    centre_y = boss_tile[1] + (size - 1) / 2
+    offset = (player_tile[0] - centre_x, player_tile[1] - centre_y)
+    angle = math.atan2(offset[1], offset[0]) if offset != (0, 0) else 0.0
+
+    def closeness(direction):
+        difference = math.atan2(direction[1], direction[0]) - angle
+        return abs(math.atan2(math.sin(difference), math.cos(difference)))
+
+    tiles = []
+    for direction in sorted(EIGHT_DIRECTIONS, key=closeness):
+        length = math.hypot(*direction)
+        tiles.append(
+            (
+                round(centre_x + direction[0] / length * STOMP_ESCAPE_DISTANCE),
+                round(centre_y + direction[1] / length * STOMP_ESCAPE_DISTANCE),
+            )
+        )
+    return tiles
+
+
+def project_tile(reader, tile, plane, fine_height):
+    """Physical screen pixel of a tile at the given ground height, or None.
+
+    Matches rs3_project_actor for the player's own tile (2026-11-14, Compatibility Mode).
+    """
+    library = reader.library
+    library.rs3_project_tile.argtypes = [
+        ctypes.POINTER(Camera),
+        ctypes.POINTER(Position),
+        ctypes.c_float,
+        ctypes.POINTER(ScreenPoint),
+        ctypes.c_uint32,
+    ]
+    library.rs3_project_tile.restype = ctypes.c_int32
+    position = Position(1, tile[0], tile[1], plane)
+    point = ScreenPoint()
+    result = library.rs3_project_tile(
+        ctypes.byref(reader.spatial.camera),
+        ctypes.byref(position),
+        ctypes.c_float(fine_height),
+        ctypes.byref(point),
+        ctypes.sizeof(point),
+    )
+    return (point.x, point.y) if result == 0 and point.valid else None
+
+
 # P3 attacks are magic only (wiki; confirmed by the account owner). 28959 repeated every
 # 4 received ticks in the 250% P3 capture, so it is counted as the P3 auto there.
 PHASE_THREE_AUTOS = frozenset({MAGIC_ATTACK})
@@ -202,6 +276,7 @@ class PhaseOne:
                 carried_expected, (None, OPENING_AUTOS)
             )
         self.last_freedom_stun = None
+        self.stomp_checked = False
         self.special = None
         self.special_ns = 0
         self.special_event = None
@@ -246,6 +321,7 @@ class PhaseOne:
                 self.forecast_attempts = 0
                 self.first_hit_tick = None
                 self.resonance_attempts = 0
+                self.stomp_checked = False
                 self.expected = self.next_special[sequence]
 
     def next_action(
@@ -793,6 +869,79 @@ def run(reader, args, board, attempt=None):
             time.sleep(POLL_SECONDS)
         emit("input_resumed")
 
+    pointer_window = None
+
+    def stomp_dodge(phase_one, boss, received_tick, timers):
+        """Dive out from under Telos before the Hold Still stomp, once per Hold Still."""
+        nonlocal pointer_window
+        if (
+            "Dive" not in bindings
+            or phase_one.special != HOLD_STILL
+            or phase_one.stomp_checked
+            or not isinstance(received_tick, int)
+            or not isinstance(phase_one.special_tick, int)
+        ):
+            return
+        delta = received_tick - phase_one.special_tick
+        if delta < STOMP_CHECK_TICKS[0]:
+            return
+        if delta > STOMP_CHECK_TICKS[1]:
+            phase_one.stomp_checked = True
+            return
+        player = reader.spatial.player
+        pose = next(
+            (
+                p
+                for p in reader.npc_spatial[: reader.spatial.npc_count]
+                if p.instance_id == boss.instance_id
+            ),
+            None,
+        )
+        if (
+            pose is None
+            or not pose.valid_mask & SpatialFlags.TILE
+            or not player.valid_mask & SpatialFlags.TILE
+            or not player.valid_mask & SpatialFlags.FINE_POSITION
+        ):
+            return  # Positions unavailable this sample; try again within the window.
+        boss_tile = (pose.tile.x, pose.tile.y)
+        player_tile = (player.tile.x, player.tile.y)
+        size = pose.footprint_size or 1
+        if not under_footprint(boss_tile, size, player_tile):
+            phase_one.stomp_checked = True
+            return
+        if timers.get("Dive"):
+            return  # Dive still cooling down; check again next sample.
+        for target in stomp_escape_tiles(boss_tile, size, player_tile):
+            point = project_tile(reader, target, player.tile.plane, player.fine_height)
+            if point is None:
+                continue
+            try:
+                if pointer_window is None:
+                    pointer_window = GameWindow()
+                bounds = pointer_window.bounds()
+                move_pointer(board, pointer_window, bounds, point)
+            except FocusLost:
+                raise
+            except RuntimeError as error:
+                if "F12" in str(error):
+                    raise
+                emit("stomp_dodge_skipped", reason=str(error), target=target)
+                continue
+            phase_one.stomp_checked = True
+            sent = send_chord(bindings["Dive"])
+            emit(
+                "stomp_dodge",
+                sent=sent,
+                player_tile=player_tile,
+                boss_tile=boss_tile,
+                footprint=size,
+                target=target,
+                screen_point=point,
+                received_tick_delta=delta,
+            )
+            return
+
     def send_chord(chord):
         """Press a chord; return False when focus was lost during the press."""
         try:
@@ -853,6 +1002,8 @@ def run(reader, args, board, attempt=None):
         labels["Escape"] = args.escape
     if getattr(args, "resonance", None):
         labels["Resonance"] = args.resonance
+    if getattr(args, "dive", None):
+        labels["Dive"] = args.dive
     if args.reacquire:
         labels["Target Cycle"], labels["Opening Attack"] = args.reacquire
     layout = None
@@ -1332,6 +1483,7 @@ def run(reader, args, board, attempt=None):
                 surge_sent_ns = sent_ns
                 surge_cue = pending_cue
             log("ability_sent", ability=action.ability, reason=action.reason, sent_ns=sent_ns)
+        stomp_dodge(phase_one, boss, received_tick, timers)
         time.sleep(POLL_SECONDS)
     emit("timeout", active=active_instance is not None)
     return 1
@@ -1342,6 +1494,7 @@ ACTION_BAR_KEY_ARGUMENTS = {
     "anticipation": "Anticipation",
     "escape": "Escape",
     "resonance": "Resonance",
+    "dive": "Dive",
     "flick_melee_key": "Deflect Melee",
     "flick_magic_key": "Deflect Magic",
     "flick_soul_split_key": "Soul Split",
@@ -1447,6 +1600,9 @@ def main():
     parser.add_argument("--surge", help="Optional Surge binding for experimental movement")
     parser.add_argument(
         "--escape", help="Optional Escape binding, sent 4-5 received ticks after Uppercut"
+    )
+    parser.add_argument(
+        "--dive", help="Dive key, used to leave Telos's footprint before the Hold Still stomp"
     )
     parser.add_argument(
         "--resonance",

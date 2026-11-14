@@ -5,11 +5,11 @@ Use the 0% Practice Mode controller from the repository root. Stage the characte
 ### Running it yourself
 
 Stand on the staging platform with Telos dormant and Revolution on bar 18. Put Freedom,
-Anticipation, Escape, Resonance and the Deflect Magic, Deflect Melee and Soul Split prayers on
+Anticipation, Escape, Resonance, Dive and the Deflect Magic, Deflect Melee and Soul Split prayers on
 any displayed action bar. The controller reads their keys from game memory
 (`rs3_reader.action_bar_keys`) and logs them as `keys_resolved`; a key passed on the command line
 takes precedence. Start the script, click into RuneScape, and wake Telos yourself. Only death or F12 ends the run: losing focus pauses input until RuneScape is focused again, stale samples are skipped, and a new scene or Telos instance starts a fresh encounter.
-The controller turns on Deflect Melee with its key and takes over when the fight starts. F12 stops it.
+The controller turns on Deflect Melee with its key and takes over when the fight starts. If the player is still under Telos 1-4 ticks after Hold Still, it moves the pointer to a projected tile outside his footprint and presses Dive, avoiding the stomp. F12 stops it.
 
 ```powershell
 $env:PYTHONPATH = 'python'
