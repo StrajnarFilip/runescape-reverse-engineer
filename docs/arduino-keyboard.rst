@@ -137,10 +137,11 @@ Intent IDs remain deduplicated until their deadlines expire. An attempted
 dispatch consumes budget even if the device later rejects or fails; no retry
 is automatic.
 
-There is currently no verified server-tick producer in integration. Live
-dispatch therefore rejects ``server_tick_unknown``; the client logic clock and
-wall-clock divisions are never substituted. A1 does not enable prayer timing
-or validate server protection deadlines. Track L controls live enablement.
+The original-profile C collector now provides a guarded received-server-tick
+ordinal after observing a transition. An unknown/stale tick still rejects
+``server_tick_unknown``; the client logic clock and wall-clock divisions are
+never substituted. Server phase and input-arrival uncertainty remain unknown.
+A1 does not establish protection deadlines; track L controls live enablement.
 
 Transport guarantees and limits
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -162,11 +163,29 @@ link cannot deliver ``RELEASE_ALL``, dropping DTR and the firmware watchdog are
 fallbacks, not proof of immediate release at the OS. No background heartbeat
 is needed for the short chords used by this backend.
 
-The existing native DLL supports modified prayer chords and unmodified ability
-keys. It has no generic modified ability/item key API; these intents return
-``native_modified_ability_api_unmapped`` or ``native_item_key_api_unmapped``.
-Neither backend implements pointer movement here. See A1's Requests for the
-additive C API and A2 pointer dependencies.
+The native DLL also exports ``rs3_activate_ability_chord`` and
+``rs3_activate_item_chord``. New chords require an active game scene, a snapshot
+and advancing client clock within 150 ms, plus sampled ability identity or an
+exact unambiguous item slot/ID/nonzero token/positive quantity. The adapter uses
+64-bit item tokens. Older DLLs retain unmodified abilities and explicitly
+reject unsupported modified/item input. Full castability remains a caller
+policy; neither native acceptance nor a serial reply proves an ability fired
+or an item was consumed. Neither backend implements pointer movement here.
+
+``binding_provider(action, world)`` optionally supplies a fresh ``KeyBinding``
+to either serialized backend. It is checked again before dispatch and before
+each serial key command. If it changes, input is rejected and owned modifier
+keys are released. ``observed_binding`` resolves one current P5 row, requires
+an explicit native ``now_ns``, and accounts for time spent waiting. It decodes
+only P5's validated plain/Ctrl function-key labels. It rejects missing,
+duplicate, stale or undecoded rows without falling back to a static mapping.
+Letter/digit mappings and potion-family aliases require separate calibration.
+
+The native adapter copies a private snapshot and requires the exact same
+sample sequence, process/scene and executable as the WorldState whose policy
+and binding were checked. A newer sample rejects with
+``native_snapshot_advanced`` so the arbiter can recompute from new evidence.
+It never applies an old item/binding decision to a newer unexamined frame.
 
 Verification
 ------------
@@ -191,3 +210,9 @@ Protocol implementation references: `Windows DCB
 <https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-commtimeouts>`_
 and `Arduino Keyboard raw-usage implementation
 <https://github.com/arduino-libraries/Keyboard/blob/master/src/Keyboard.cpp>`_.
+
+The 2026-11-14 A1 follow-up passes 31 fake-device/ABI/firmware tests. New cases
+cover typed native chord calls and 64-bit item arguments, old-DLL capability
+rejection, same-tick lanes, binding moves (including after modifier press),
+P5 unknown/duplicate/stale rows, and copied-frame/build changes. No physical
+USB/game delivery or live controller enablement was performed.

@@ -278,6 +278,8 @@ class SerialActuator(SerializedActuator):
 
         def check():
             current = self._validate(intent)
+            if self._resolve_binding(intent.action, current) != binding:
+                raise InputRejected("binding_changed_during_dispatch")
             self._preconditions(intent.action, current)
             if not self._fresh(current.game_tick, current, self._now()) or (
                 current.game_tick.value.get("index") != expected_tick

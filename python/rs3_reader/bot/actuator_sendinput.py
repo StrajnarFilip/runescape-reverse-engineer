@@ -95,6 +95,62 @@ class Bindings:
         return binding
 
 
+def observed_binding(action, world, *, prayer_struct_ids, now_ns, maximum_age_ms=150):
+    """Resolve one current P5 function-key chord, without guessing raw modifier codes.
+
+    Pass the configured prayer-name to struct-ID mapping. Missing, duplicate,
+    stale or undecoded rows reject; there is no manual-binding fallback here.
+    Potion-family aliases and letter/digit layout calibration remain explicit
+    caller configuration, not an inference from matching item names.
+    """
+    bars = world.action_bar
+    if (
+        type(now_ns) is not int
+        or world.now_ns is None
+        or now_ns < world.now_ns
+        or not bars.source
+        or bars.reason is not None
+        or not bars.is_fresh(maximum_age_ms)
+        or bars.age_ms + (now_ns - world.now_ns) / NS_PER_MS > maximum_age_ms
+    ):
+        raise InputRejected("action_bar_unavailable_or_stale")
+    if isinstance(action, SetPrayer):
+        kind, field_name = "prayer", "ability_struct_id"
+        identity = prayer_struct_ids.get(action.prayer)
+    elif isinstance(action, ActivateAbility):
+        kind, field_name, identity = "ability", "ability_struct_id", action.ability_id
+    elif isinstance(action, ConsumeSlot):
+        kind, field_name, identity = "item", "item_id", action.expected_item_id
+    else:
+        raise InputRejected("pointer_mapping_unavailable")
+    if type(identity) is not int or identity < 0:
+        raise InputRejected("binding_unmapped")
+    if any(not isinstance(row, Mapping) for row in bars.value):
+        raise InputRejected("binding_unmapped")
+    rows = [
+        row for row in bars.value if row.get("kind") == kind and row.get(field_name) == identity
+    ]
+    if len(rows) != 1:
+        raise InputRejected("binding_missing_or_ambiguous")
+    row = rows[0]
+    label = row.get("key")
+    if (
+        row.get("reason") is not None
+        or row.get("binding_reason") is not None
+        or not row.get("source")
+    ):
+        raise InputRejected("binding_unmapped")
+    chords = {
+        prefix + f"F{number}": (0x6F + number, modifiers)
+        for prefix, modifiers in (("", 0), ("Ctrl+", CTRL))
+        for number in range(1, 13)
+    }
+    if not isinstance(label, str) or label not in chords:
+        raise InputRejected("binding_key_encoding_unmapped")
+    virtual_key, modifiers = chords[label]
+    return KeyBinding(virtual_key, modifiers, True, row["source"])
+
+
 @dataclass(frozen=True)
 class InputPolicy:
     """Multiple lanes may share a server tick. No one-action-per-tick rule."""
@@ -223,6 +279,7 @@ class SerializedActuator:
         clock,
         session,
         bindings,
+        binding_provider=None,
         guard=None,
         policy=None,
         enabled=False,
@@ -237,8 +294,11 @@ class SerializedActuator:
             raise TypeError("Supply a native clock, immutable world provider and Bindings")
         if type(enabled) is not bool:
             raise TypeError("enabled must be explicit boolean")
+        if binding_provider is not None and not callable(binding_provider):
+            raise TypeError("binding_provider must be callable")
         self.device, self.world_provider, self.clock = device, world_provider, clock
         self.session, self.bindings = session, bindings
+        self.binding_provider = binding_provider
         self.guard, self.policy = (
             guard if guard is not None else WindowsTargetGuard()
         ), policy or InputPolicy()
@@ -311,6 +371,16 @@ class SerializedActuator:
                 observation.age_ms + (now - world.now_ns) / NS_PER_MS <= self.policy.maximum_age_ms
             )
         )
+
+    def _resolve_binding(self, action, world):
+        binding = (
+            self.bindings.resolve(action)
+            if self.binding_provider is None
+            else self.binding_provider(action, world)
+        )
+        if not isinstance(binding, KeyBinding) or not binding.validated:
+            raise InputRejected("binding_unvalidated")
+        return binding
 
     def _preconditions(self, action, world):
         now = self._now()
@@ -397,9 +467,11 @@ class SerializedActuator:
         try:
             with self._io:
                 world = self._validate(intent)
-                binding = self.bindings.resolve(intent.action)
+                binding = self._resolve_binding(intent.action, world)
                 self._preconditions(intent.action, world)
                 world = self._validate(intent, binding=binding)
+                if self._resolve_binding(intent.action, world) != binding:
+                    raise InputRejected("binding_changed_during_dispatch")
                 self._preconditions(intent.action, world)
                 self._supported(intent.action, binding)
                 self._charge(intent, world)
@@ -463,9 +535,41 @@ class NativeSnapshotDevice:
         function = self.library.rs3_activate_ability
         function.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32]
         function.restype = ctypes.c_int32
+        self.ability_chord = getattr(self.library, "rs3_activate_ability_chord", None)
+        if self.ability_chord is not None:
+            self.ability_chord.argtypes = [ctypes.c_void_p] + [ctypes.c_uint32] * 3
+            self.ability_chord.restype = ctypes.c_int32
+        self.item_chord = getattr(self.library, "rs3_activate_item_chord", None)
+        if self.item_chord is not None:
+            self.item_chord.argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_uint32,
+                ctypes.c_int32,
+                ctypes.c_uint64,
+                ctypes.c_uint32,
+                ctypes.c_uint32,
+            ]
+            self.item_chord.restype = ctypes.c_int32
         reader.check_result(self.library.rs3_snapshot_create(ctypes.byref(self.snapshot)))
 
+    def supports(self, action, binding):
+        """Reject unavailable old-DLL operations before spending a dispatch budget."""
+        if isinstance(action, ConsumeSlot):
+            if self.item_chord is None:
+                raise InputRejected("native_item_key_api_unmapped")
+            if (
+                type(action.expected_tracking_token) is not int
+                or action.expected_tracking_token <= 0
+            ):
+                raise InputRejected("native_item_tracking_token_required")
+        elif isinstance(action, ActivateAbility):
+            if binding.modifiers and self.ability_chord is None:
+                raise InputRejected("native_modified_ability_api_unmapped")
+        elif not isinstance(action, SetPrayer):
+            raise InputRejected("pointer_mapping_unavailable")
+
     def dispatch(self, action, binding, world):
+        self.supports(action, binding)
         lib, snapshot = self.library, self.snapshot
         if not snapshot or not self.reader.context:
             raise DeviceFault("native_device_closed")
@@ -485,9 +589,30 @@ class NativeSnapshotDevice:
         )
         if identity != world.session or self.info.sequence < world.sample_sequence:
             raise DeviceFault("native_snapshot_identity_changed")
+        from ..native import decode_text
+
+        expected_hash = world.raw.get("executable_sha256")
+        if not expected_hash or decode_text(self.info.executable_sha256) != expected_hash:
+            raise DeviceFault("native_snapshot_executable_changed")
+        if self.info.sequence != world.sample_sequence:
+            # Re-evaluate against a newer WorldState, including its bindings and inventory.
+            raise InputRejected("native_snapshot_advanced")
         if isinstance(action, SetPrayer):
             result = lib.rs3_set_prayer(
                 snapshot, PRAYER_IDS[action.prayer], binding.virtual_key, binding.modifiers
+            )
+        elif isinstance(action, ConsumeSlot):
+            result = self.item_chord(
+                snapshot,
+                action.slot,
+                action.expected_item_id,
+                action.expected_tracking_token,
+                binding.virtual_key,
+                binding.modifiers,
+            )
+        elif self.ability_chord is not None:
+            result = self.ability_chord(
+                snapshot, action.ability_id, binding.virtual_key, binding.modifiers
             )
         else:
             result = lib.rs3_activate_ability(snapshot, action.ability_id, binding.virtual_key)
@@ -506,9 +631,13 @@ class NativeSnapshotDevice:
 
 
 class SendInputActuator(SerializedActuator):
-    """Use existing guarded DLL input; generic modified/item keys need a C extension."""
+    """Use balanced native chords, with explicit capability rejection for older DLLs."""
 
     def _supported(self, action, binding):
+        supports = getattr(self.device, "supports", None)
+        if callable(supports):
+            supports(action, binding)
+            return
         if isinstance(action, ConsumeSlot):
             raise InputRejected("native_item_key_api_unmapped")
         if isinstance(action, ActivateAbility) and binding.modifiers:

@@ -87,3 +87,16 @@ Requests
   and pass fresh, validated account-specific bindings. Letter/digit HID usages
   require keyboard-layout calibration. D3/D4/D6 retain castability and cooldown
   policy; accepted device input needs later observation to acknowledge it.
+
+* A1 connection completed, 2026-11-14: the serialized native backend uses both
+  new chord exports, validates nonzero exact item tokens and retains explicit
+  old-DLL rejection. The optional binding provider is re-resolved before
+  dispatch and each serial key command. P5 observed-binding translation accepts
+  only validated plain/Ctrl function-key rows, with no stale/manual fallback.
+  The native private snapshot must match the policy frame's sequence and build;
+  a newer frame rejects for policy recomputation. Thirty-one A1 fake-device,
+  ABI and host-firmware tests pass; no OS/game inputs were sent.
+* L/D6: supply current binding_provider mappings when composing real A1
+  backends. A1 does not silently construct hardware from a producer or enable
+  a rung. Unknown item aliases/letter keys, full castability and pointer/view
+  dependencies remain explicit; native input acceptance needs observed outcomes.
