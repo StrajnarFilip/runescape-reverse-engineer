@@ -174,3 +174,11 @@ Requests
   one additive accessor. No existing public layout changes. P5 now wires its
   clear/stage/ctypes/telemetry paths and validates unavailable-frame handling.
   Menu data remains unvalidated and cannot authorize pointer actions.
+
+* P5 raw-menu capture preparation is complete: guarded C staging, worker copy,
+  owned-snapshot accessor, additive 304-byte ABI, ctypes and diagnostic JSON.
+  ``ui.pointer_candidate.value`` remains null and raw fields stay unvalidated.
+  All 15 CTest targets pass (300 Python tests, zero skips), with 18 native UI
+  groups and four local serializer/real-ABI checks. The game was closed.
+  ``docs/validation/telos-ladder-menu-candidate-2026-11-14.json`` lists the
+  required later labels. No hit-test, full castability or pointer input is enabled.

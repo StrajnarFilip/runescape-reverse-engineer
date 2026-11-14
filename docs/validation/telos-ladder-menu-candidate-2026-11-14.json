@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "track": "L",
+  "date": "2026-11-14",
+  "status": "waiting_for_live_calibration",
+  "source_commits": {
+    "decoder": "5e55b97",
+    "snapshot_registration": "dc754d9",
+    "collector_wiring": "ed8dfbd"
+  },
+  "profile_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+  "scope": "Read-only raw menu-record candidates; no semantic entity identity, pixel, click permission or castability.",
+  "source_report": "docs/validation/interface-validation.json",
+  "checks": {
+    "ctest_targets_passed": 15,
+    "python_tests_passed": 300,
+    "python_tests_skipped": 0,
+    "native_interface_groups": 18,
+    "local_serializer_real_abi_groups": 4,
+    "public_structure_bytes": 304,
+    "existing_public_structures_changed": false,
+    "snapshot_copy_and_unavailable_reset": "passed"
+  },
+  "telemetry": "ui.pointer_candidate; value always null; raw data under candidate with unvalidated_source",
+  "live_validation_performed": false,
+  "game_process_opened_for_this_work": false,
+  "pending": [
+    "Manual named NPC, ground, inventory and context-menu labels on the pinned executable.",
+    "Semantic action type/target and consumed pointer-event timing.",
+    "Physical UI/minimap geometry, view/route validation and serialized pointer bridge."
+  ],
+  "automatic_input_enabled": false,
+  "input_sent": false,
+  "ladder_rung_passed": false,
+  "raw_captures_game_binaries_and_tools_published": false
+}
