@@ -22,18 +22,26 @@ import time
 from contextlib import nullcontext
 from ctypes import wintypes
 from pathlib import Path
+from types import MappingProxyType
 
 from .native import REPOSITORY_ROOT, NPCActionFlags, Reader, Variable, decode_text
 from .prayer import Prayer
 from .telemetry import combat_record, player_hit_splats_record
 
-# Action sequence the user labeled as a Telos melee auto-attack.
+# User-labelled melee auto only in the isolated 300% phase-1 melee capture.
 MELEE_AUTO_SEQUENCE = 28929
+VK_F1 = 0x70
+VK_F2 = 0x71
 VK_F3 = 0x72
 VK_F4 = 0x73
 VK_CONTROL = 0x11
 # Bound keys, all pressed with Ctrl: virtual key -> (label, bound prayer).
-PRAYER_KEYS = {VK_F3: ("Ctrl+F3", Prayer.SOUL_SPLIT), VK_F4: ("Ctrl+F4", Prayer.MELEE)}
+PRAYER_KEYS = {
+    VK_F1: ("Ctrl+F1", Prayer.MAGIC),
+    VK_F2: ("Ctrl+F2", Prayer.RANGED),
+    VK_F3: ("Ctrl+F3", Prayer.SOUL_SPLIT),
+    VK_F4: ("Ctrl+F4", Prayer.MELEE),
+}
 TRIAL_KEYS = {prayer: virtual_key for virtual_key, (_, prayer) in PRAYER_KEYS.items()}
 # RS3_KEY_CTRL from include/rs3/prayer.h.
 PRAYER_MODIFIERS = 1
@@ -50,8 +58,124 @@ ACK_TIMEOUT_NS = 1_200_000_000
 TELOS_NAME = "telos"
 
 
+ATTACK_CATALOGUE_PATH = REPOSITORY_ROOT / "profiles" / "telos_attacks.json"
+
+
+def _freeze_catalogue(value):
+    if isinstance(value, dict):
+        return MappingProxyType({key: _freeze_catalogue(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze_catalogue(item) for item in value)
+    return value
+
+
+class AttackCatalogue:
+    """Immutable P6 metadata. D1 may use labels; D2 must require validated timing.
+
+    A cue-to-hit observation is NEVER substituted for a prayer-check window.
+    Lookup requires an executable hash and never falls back across phase,
+    enrage, sequence or client build. Unknown sequences return None.
+    """
+
+    def __init__(self, document):
+        if not isinstance(document, dict) or document.get("schema_version") != 1:
+            raise ValueError("Expected version-1 Telos attack catalogue")
+        rows = document.get("attacks")
+        if not isinstance(rows, list):
+            raise ValueError("Catalogue attacks must be an array")
+        keys = []
+        for row in rows:
+            phase, sequence = row.get("phase"), row.get("sequence")
+            band, digest = row.get("enrage_range"), row.get("client_sha256")
+            if (
+                type(phase) is not int
+                or not 1 <= phase <= 5
+                or type(sequence) is not int
+                or sequence < 0
+            ):
+                raise ValueError("Invalid phase/sequence")
+            if (
+                not isinstance(band, list)
+                or len(band) != 2
+                or any(type(v) is not int for v in band)
+                or not 0 <= band[0] <= band[1] <= MAX_ENRAGE
+            ):
+                raise ValueError("Invalid enrage band")
+            if (
+                not isinstance(digest, str)
+                or len(digest) != 64
+                or any(c not in "0123456789abcdef" for c in digest)
+            ):
+                raise ValueError("An exact executable SHA-256 is required")
+            if type(row.get("sample_count")) is not int or row["sample_count"] < 0:
+                raise ValueError("Invalid sample count")
+            for flag in ("validated", "classification_validated", "timing_validated"):
+                if type(row.get(flag)) is not bool:
+                    raise ValueError("Explicit validation flags are required")
+            if row["classification_validated"] and (
+                not row.get("name")
+                or row["sample_count"] == 0
+                or row.get("evidence_kind") != "user_labelled_native_capture"
+            ):
+                raise ValueError("Classification requires labelled native evidence")
+            window = row.get("cue_to_prayer_check_ms")
+            if row["timing_validated"] and (
+                not isinstance(window, list)
+                or len(window) != 2
+                or any(type(v) not in (int, float) or not math.isfinite(v) for v in window)
+                or window[0] > window[1]
+                or row.get("timing_evidence_kind") != "controlled_protection_trial"
+            ):
+                raise ValueError("Timing requires a measured protection-check window")
+            if row["validated"] and (
+                not row["classification_validated"]
+                or not row["timing_validated"]
+                or not row.get("damage_style")
+                or row.get("required_protection") is None
+                or not row.get("hit_components")
+            ):
+                raise ValueError("An incomplete row cannot authorize a protection decision")
+            for other_phase, other_sequence, other_digest, other_band, other_context in keys:
+                if (phase, sequence, digest, row.get("context")) == (
+                    other_phase,
+                    other_sequence,
+                    other_digest,
+                    other_context,
+                ) and max(band[0], other_band[0]) <= min(band[1], other_band[1]):
+                    raise ValueError("Ambiguous overlapping catalogue rows")
+            keys.append((phase, sequence, digest, band, row.get("context")))
+        if document.get("automatic_flick_ready") is not False:
+            raise ValueError(
+                "Full incoming-attack coverage is not calibrated; catalogue cannot arm input"
+            )
+        self.document = _freeze_catalogue(document)
+        self.attacks = self.document["attacks"]
+
+    def lookup(
+        self, phase, enrage, sequence, *, executable_sha256, context=None, require_validated=False
+    ):
+        if type(phase) is not int or type(enrage) is not int or type(sequence) is not int:
+            return None
+        for row in self.attacks:
+            if (
+                row["phase"] == phase
+                and row["sequence"] == sequence
+                and row["client_sha256"] == executable_sha256
+                and row.get("context") == context
+                and row["enrage_range"][0] <= enrage <= row["enrage_range"][1]
+                and (not require_validated or row["validated"])
+            ):
+                return row
+        return None
+
+
+def load_attack_catalogue(path=ATTACK_CATALOGUE_PATH):
+    """Load P6 metadata without opening a process or sending any input."""
+    return AttackCatalogue(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
 class ManualPrayerKeys:
-    """Samples Ctrl+F3/F4 down edges while the verified game process is in the foreground."""
+    """Samples Ctrl+F1/F2/F3/F4 down edges while the verified game process is in the foreground."""
 
     def __init__(self):
         user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -66,6 +190,7 @@ class ManualPrayerKeys:
         self.get_async_key_state.restype = ctypes.c_short
         self.focused_session_window = None
         self.held_keys = set()
+        self.previous_poll_ns = None
 
     def game_window(self, session):
         """Return the foreground window when it belongs to the session's process."""
@@ -85,9 +210,10 @@ class ManualPrayerKeys:
     def _lose_focus(self):
         self.focused_session_window = None
         self.held_keys.clear()
+        self.previous_poll_ns = None
 
     def sample(self, session, clock):
-        """Return the Ctrl+F3/F4 presses since the previous sample."""
+        """Return the four configured Ctrl+function-key presses since the previous sample."""
         window = self.game_window(session)
         if window is None:
             self._lose_focus()
@@ -99,6 +225,12 @@ class ManualPrayerKeys:
         )
         control_held = self.get_async_key_state(VK_CONTROL) < 0
         observed_ns = clock()
+        poll_ms = (
+            (observed_ns - self.previous_poll_ns) / 1_000_000
+            if self.previous_poll_ns is not None
+            else None
+        )
+        self.previous_poll_ns = observed_ns
         if self.get_foreground_window() != window:
             self._lose_focus()
             return []
@@ -117,6 +249,10 @@ class ManualPrayerKeys:
             {
                 "key": PRAYER_KEYS[key][0],
                 "bound_prayer": PRAYER_KEYS[key][1].name.lower(),
+                "prayer": PRAYER_KEYS[key][1].name.lower(),
+                "virtual_key": key,
+                "modifiers": PRAYER_MODIFIERS,
+                "poll_interval_ms": poll_ms,
                 "observed_ns": observed_ns,
             }
             for key in sorted(pressed_keys)
@@ -263,7 +399,7 @@ def telos_actions(events, session, sample_sequence, instance_ids):
                 if event.flags & NPCActionFlags.HAS_APPLICATION_STAMP
                 else None
             ),
-            "user_labeled_melee_auto": event.action_sequence == MELEE_AUTO_SEQUENCE,
+            "isolated_p1_melee_sequence_lead": event.action_sequence == MELEE_AUTO_SEQUENCE,
         }
         for event in events
         if (event.pid, event.process_creation_time, event.scene_epoch) == session
@@ -285,13 +421,14 @@ def telos_records(reader, info, npcs):
                 {
                     "instance_id": npc.instance_id,
                     "config_id": npc.config_id,
+                    "name": decode_text(npc.name),
                     "action_sequence": animation.action_sequence if animation.valid else None,
                 }
             )
     return records
 
 
-def observe(reader, duration, output, enrage, keys, trial_window=None, *, shadow=False):
+def observe(reader, duration, output, enrage, keys, trial_window=None, stop_file=None, *, shadow=False):
     """Write changed observations until the duration elapses. Returns completed cycles."""
 
     def send_prayer(prayer):
@@ -308,6 +445,8 @@ def observe(reader, duration, output, enrage, keys, trial_window=None, *, shadow
     end_time = math.inf if duration is None else time.monotonic() + duration
     previous_state, last_write = None, 0
     while time.monotonic() < end_time:
+        if stop_file is not None and stop_file.exists():
+            break
         started = time.monotonic()
         # Synchronous sampling keeps each native action event with its snapshot.
         info, player, npcs, _ = reader.sample()
@@ -328,7 +467,11 @@ def observe(reader, duration, output, enrage, keys, trial_window=None, *, shadow
                 target = (session, window, telos[0]["instance_id"], telos[0]["config_id"])
             active_prayer = Prayer[(combat["active_prayer"] or "unknown").upper()]
             cue_ns = max(
-                (action["observed_ns"] for action in actions if action["user_labeled_melee_auto"]),
+                (
+                    action["observed_ns"]
+                    for action in actions
+                    if action["isolated_p1_melee_sequence_lead"]
+                ),
                 default=None,
             )
             updates = trial.step(
@@ -356,7 +499,7 @@ def observe(reader, duration, output, enrage, keys, trial_window=None, *, shadow
             "player_hitmarks": player_hit_splats_record(reader, [], 0),
         }
         changed = (
-            state != previous_state or actions or lost or presses or updates or hits or hits_lost
+            state != previous_state or events or lost or presses or updates or hits or hits_lost
         )
         if changed or started - last_write >= HEARTBEAT_SECONDS:
             row = dict(
@@ -367,8 +510,59 @@ def observe(reader, duration, output, enrage, keys, trial_window=None, *, shadow
                 sample_duration_ns=info.sample_duration_ns,
                 client_logic_tick=info.logic_tick,
                 telos_actions=actions,
+                npc_action_events=[
+                    {
+                        field: getattr(event, field)
+                        for field in (
+                            "sequence",
+                            "observed_ns",
+                            "sample_sequence",
+                            "scene_epoch",
+                            "process_creation_time",
+                            "instance_id",
+                            "pid",
+                            "runtime_id",
+                            "config_id",
+                            "previous_action_sequence",
+                            "action_sequence",
+                            "logic_tick",
+                            "application_stamp",
+                            "flags",
+                        )
+                    }
+                    for event in events
+                ],
+                player_hit_events=[
+                    {
+                        **{
+                            field: getattr(event, field)
+                            for field in (
+                                "sequence",
+                                "observed_ns",
+                                "sample_sequence",
+                                "scene_epoch",
+                                "process_creation_time",
+                                "instance_id",
+                                "pid",
+                                "player_index",
+                            )
+                        },
+                        "hit": {
+                            "type_id": event.hit.type_id,
+                            "amount": event.hit.amount,
+                            "secondary_type_id": event.hit.secondary_type_id,
+                            "secondary_amount": event.hit.secondary_amount,
+                        },
+                    }
+                    for event in hits
+                ],
+                player_hit_events_lost=hits_lost,
+                phase_label=None,
+                phase_source="manual_annotation_required",
+                input_sent_by_calibration=bool(trial) and not shadow,
                 npc_action_events_lost=lost,
                 manual_prayer_presses=presses,
+                manual_prayer_keys=presses,
             )
             if hits or hits_lost:
                 row["player_hitmarks"] = player_hit_splats_record(reader, hits, hits_lost)
@@ -397,7 +591,7 @@ def parse_arguments():
     mode.add_argument(
         "--record-keys",
         action="store_true",
-        help="Timestamp manual Ctrl+F3/F4 presses in RuneScape",
+        help="Timestamp manual Ctrl+F1/F2/F3/F4 presses in RuneScape",
     )
     mode.add_argument(
         "--shadow-trial",
@@ -412,6 +606,7 @@ def parse_arguments():
     parser.add_argument(
         "--output", type=Path, help="Write a new local JSONL file instead of standard output"
     )
+    parser.add_argument("--stop-file", type=Path, help="Stop recording when this local file exists")
     arguments = parser.parse_args()
     if arguments.duration is not None and (
         not math.isfinite(arguments.duration) or arguments.duration <= 0
@@ -464,6 +659,7 @@ def main():
                     arguments.enrage,
                     keys if arguments.record_keys or arguments.shadow_trial else None,
                     keys.game_window if arguments.trial or arguments.shadow_trial else None,
+                    stop_file=arguments.stop_file,
                     shadow=arguments.shadow_trial,
                 )
                 if arguments.trial:

@@ -105,10 +105,34 @@ static void builds_chords_and_releases_partial_insertions(void)
     fixture_destroy(test_fixture);
 }
 
+static void rejects_invalid_or_ill_conditioned_minimap_calibration(void)
+{
+    rs3_position origin = {1, 3200, 3200, 0};
+    rs3_minimap minimap = {.anchor = origin,
+                           .screen_x = 100,
+                           .screen_y = 100,
+                           .east_dx = 4,
+                           .north_dy = -4,
+                           .radius_pixels = 30};
+    POINT point = {123, 456};
+    assert(input_project_minimap_tile(NULL, &minimap, 3201, 3200, 0, &point) == RS3_E_ARGUMENT);
+    assert(input_project_minimap_tile(&origin, NULL, 3201, 3200, 0, &point) == RS3_E_ARGUMENT);
+    assert(input_project_minimap_tile(&origin, &minimap, 3201, 3200, 0, NULL) == RS3_E_ARGUMENT);
+    minimap.north_dx = 4;
+    minimap.north_dy = 1e-10;
+    assert(input_project_minimap_tile(&origin, &minimap, 3201, 3200, 0, &point) == RS3_E_ARGUMENT);
+    assert(point.x == 123 && point.y == 456);
+    minimap.north_dx = 0;
+    minimap.north_dy = -4;
+    origin.valid = 2;
+    assert(input_project_minimap_tile(&origin, &minimap, 3201, 3200, 0, &point) == RS3_E_STATE);
+}
+
 int main(void)
 {
     RUN_TEST(projects_minimap_tiles_and_guards_actions);
     RUN_TEST(builds_chords_and_releases_partial_insertions);
+    RUN_TEST(rejects_invalid_or_ill_conditioned_minimap_calibration);
     puts("PASS: input tests");
     return 0;
 }

@@ -26,6 +26,7 @@ ABI_VERSION = 1
 # Capacities of the public C ABI.
 VARIABLE_COUNT = 10
 MAX_NPCS = 1024
+MAX_HAZARDS = 128
 MAX_HITS = 65536
 NAME_CAPACITY = 520
 MAX_ITEMS = 47
@@ -411,6 +412,62 @@ class Hit(ctypes.Structure):
     ]
 
 
+class InterfaceInfo(ctypes.Structure):
+    _fields_ = [
+        *(
+            (name, ctypes.c_uint32)
+            for name in (
+                "status",
+                "reason",
+                "interface_count",
+                "action_bar_count",
+                "open_complete",
+                "action_bar_complete",
+            )
+        ),
+        ("reserved", ctypes.c_uint32 * 2),
+    ]
+
+
+class InterfaceObservation(ctypes.Structure):
+    _fields_ = [
+        ("kind", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("interface_id", ctypes.c_int32),
+        ("open", ctypes.c_int32),
+    ]
+
+
+class ActionBarSlot(ctypes.Structure):
+    _fields_ = [
+        *(
+            (name, ctypes.c_uint32)
+            for name in (
+                "display_bar",
+                "preset_bar",
+                "slot",
+                "flags",
+                "reason",
+                "source_var",
+                "object_var",
+                "key_var",
+                "modifier_var",
+                "content_type",
+            )
+        ),
+        *((name, ctypes.c_int32) for name in ("content_id", "item_id", "ability_struct_id")),
+        *(
+            (name, ctypes.c_uint32)
+            for name in ("key_code", "modifier_code", "key_modifiers", "binding_reason", "reserved")
+        ),
+        *(
+            (name, ctypes.c_int64)
+            for name in ("raw_packed", "raw_object", "raw_key_packed", "raw_modifier_packed")
+        ),
+        ("name", ctypes.c_char * 128),
+    ]
+
+
 class PlayerHitInfo(ctypes.Structure):
     _fields_ = [
         ("status", ctypes.c_uint32),
@@ -521,6 +578,223 @@ class ItemEvent(ctypes.Structure):
     ]
 
 
+class ActorSpatial(ctypes.Structure):
+    """Caller-owned rs3_actor_spatial; validity bits are independent."""
+
+    _fields_ = [
+        ("instance_id", ctypes.c_uint64),
+        ("observed_ns", ctypes.c_uint64),
+        ("runtime_id", ctypes.c_uint32),
+        ("valid_mask", ctypes.c_uint32),
+        ("tile", Position),
+        ("footprint_size", ctypes.c_uint32),
+        ("tile_reason", ctypes.c_uint32),
+        ("fine_x", ctypes.c_float),
+        ("fine_height", ctypes.c_float),
+        ("fine_z", ctypes.c_float),
+        ("facing_degrees", ctypes.c_float),
+        ("facing_reason", ctypes.c_uint32),
+        ("target_reason", ctypes.c_uint32),
+        ("target_runtime_id", ctypes.c_int32),
+        ("target_kind", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32 * 2),
+    ]
+
+
+class SpatialFlags(IntFlag):
+    TILE = 1
+    FINE_POSITION = 2
+    FACING = 4
+    TARGET = 8
+    SAME_WORLD = 16
+
+
+class Camera(ctypes.Structure):
+    """rs3_camera; a complete physical projection requires all three validity bits."""
+
+    _fields_ = [
+        ("observed_ns", ctypes.c_uint64),
+        ("scene_epoch", ctypes.c_uint64),
+        ("pid", ctypes.c_uint32),
+        ("valid_mask", ctypes.c_uint32),
+        ("plane", ctypes.c_int32),
+        ("reason", ctypes.c_uint32),
+        ("world_to_clip", ctypes.c_float * 16),
+        ("viewport_x", ctypes.c_int32),
+        ("viewport_y", ctypes.c_int32),
+        ("viewport_width", ctypes.c_int32),
+        ("viewport_height", ctypes.c_int32),
+        ("client_screen_x", ctypes.c_int32),
+        ("client_screen_y", ctypes.c_int32),
+        ("process_creation_time", ctypes.c_uint64),
+        ("reserved", ctypes.c_uint32 * 2),
+    ]
+
+
+class SpatialInfo(ctypes.Structure):
+    _fields_ = [
+        ("sample_sequence", ctypes.c_uint64),
+        ("observed_ns", ctypes.c_uint64),
+        ("scene_epoch", ctypes.c_uint64),
+        ("process_creation_time", ctypes.c_uint64),
+        ("pid", ctypes.c_uint32),
+        ("status", ctypes.c_uint32),
+        ("npc_count", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("player", ActorSpatial),
+        ("camera", Camera),
+    ]
+
+
+class ScreenPoint(ctypes.Structure):
+    _fields_ = [
+        ("valid", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("x", ctypes.c_int32),
+        ("y", ctypes.c_int32),
+        ("clip_w", ctypes.c_float),
+        ("reserved", ctypes.c_uint32),
+    ]
+
+
+SIZED_SPATIAL_STRUCTURES = {1: ActorSpatial, 2: Camera, 3: SpatialInfo, 4: ScreenPoint}
+
+
+class HazardFlags(IntFlag):
+    """Validity bits from rs3/hazards.h; actor identity is separate from mechanics."""
+
+    IDENTITY = 1
+    TILE = 2
+    FOOTPRINT = 4
+    CLIENT_START = 8
+    CLIENT_END = 16
+    MECHANICS_VALIDATED = 32
+
+
+class Hazard(ctypes.Structure):
+    """Caller-owned rs3_hazard. Consult flags before using numeric fields."""
+
+    _fields_ = [
+        ("instance_id", ctypes.c_uint64),
+        ("observed_ns", ctypes.c_uint64),
+        ("runtime_id", ctypes.c_uint32),
+        ("config_id", ctypes.c_int32),
+        ("kind", ctypes.c_uint32),
+        ("variant", ctypes.c_uint32),
+        ("flags", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("tile", Position),
+        ("footprint_size", ctypes.c_uint32),
+        ("tile_reason", ctypes.c_uint32),
+        ("start_client_tick", ctypes.c_uint32),
+        ("end_client_tick", ctypes.c_uint32),
+        ("timing_reason", ctypes.c_uint32),
+        ("role_reason", ctypes.c_uint32),
+        ("role", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32),
+    ]
+
+
+class HazardInfo(ctypes.Structure):
+    """Coverage/provenance of the snapshot's bounded P4 array."""
+
+    _fields_ = [
+        ("observed_ns", ctypes.c_uint64),
+        ("sample_sequence", ctypes.c_uint64),
+        ("scene_epoch", ctypes.c_uint64),
+        ("process_creation_time", ctypes.c_uint64),
+        ("pid", ctypes.c_uint32),
+        ("status", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("count", ctypes.c_uint32),
+        ("observed_channels", ctypes.c_uint32),
+        ("complete_channels", ctypes.c_uint32),
+        ("unmapped_channels", ctypes.c_uint32),
+        ("candidate_count", ctypes.c_uint32),
+        ("dropped_count", ctypes.c_uint32),
+        ("unlocated_count", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32 * 2),
+    ]
+
+
+SIZED_HAZARD_STRUCTURES = {1: HazardInfo, 2: Hazard}
+
+class EncounterValue(ctypes.Structure):
+    _fields_ = [
+        ("value", ctypes.c_int64),
+        ("observed_ns", ctypes.c_uint64),
+        ("valid", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("source_varp", ctypes.c_uint32),
+        ("source_varbit", ctypes.c_uint32),
+    ]
+
+class EncounterRaw(ctypes.Structure):
+    _fields_ = [
+        ("value", ctypes.c_int64),
+        ("varp_id", ctypes.c_uint32),
+        ("valid", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32),
+        ("observed_ns", ctypes.c_uint64),
+    ]
+
+class GameTick(ctypes.Structure):
+    _fields_ = [
+        ("counter", ctypes.c_uint64),
+        ("observed_ns", ctypes.c_uint64),
+        ("valid", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("phase_ms", ctypes.c_float),
+        ("uncertainty_ms", ctypes.c_float),
+        ("reserved", ctypes.c_uint32 * 2),
+    ]
+
+class EncounterState(ctypes.Structure):
+    _fields_ = [
+        ("sample_sequence", ctypes.c_uint64),
+        ("observed_ns", ctypes.c_uint64),
+        ("scene_epoch", ctypes.c_uint64),
+        ("process_creation_time", ctypes.c_uint64),
+        ("pid", ctypes.c_uint32),
+        ("status", ctypes.c_uint32),
+        ("reason", ctypes.c_uint32),
+        ("raw_count", ctypes.c_uint32),
+        ("phase", EncounterValue),
+        ("enrage", EncounterValue),
+        ("streak", EncounterValue),
+        ("meter", EncounterValue),
+        ("freedom", EncounterValue),
+        ("stage_raw", EncounterValue),
+        ("raw", EncounterRaw * 6),
+        ("game_tick", GameTick),
+    ]
+
+SIZED_ENCOUNTER_STRUCTURES = {1: EncounterValue, 2: EncounterRaw, 3: GameTick, 4: EncounterState}
+
+class EffectsInfo(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_uint32) for name in ("status", "reason", "count", "complete")]
+
+class Effect(ctypes.Structure):
+    _fields_ = [
+        *(
+            (name, ctypes.c_uint32)
+            for name in (
+                "effect_id",
+                "flags",
+                "reason",
+                "source",
+                "expiry_var",
+                "stacks_var",
+                "active_var",
+                "raw_valid_mask",
+            )
+        ),
+        *((name, ctypes.c_int64) for name in ("raw_expiry", "raw_stacks", "raw_active")),
+        *((name, ctypes.c_int32) for name in ("active", "stacks", "remaining_ms")),
+        ("reserved", ctypes.c_uint32),
+    ]
+
 # Structures checked against rs3_sizeof() and rs3_combat_sizeof().
 SIZED_STRUCTURES = {
     Structure.OPTIONS: Options,
@@ -569,6 +843,32 @@ def _function_prototypes():
     return {
         "abi_version": (u32, []),
         "sizeof": (u32, [u32]),
+        "spatial_sizeof": (u32, [u32]),
+        "snapshot_spatial": (i32, [handle, ctypes.POINTER(SpatialInfo), u32]),
+        "snapshot_npc_spatial": (
+            i32,
+            [handle, ctypes.POINTER(ActorSpatial), u32, ctypes.POINTER(u32)],
+        ),
+        "project_tile": (
+            i32,
+            [
+                ctypes.POINTER(Camera),
+                ctypes.POINTER(Position),
+                ctypes.c_float,
+                ctypes.POINTER(ScreenPoint),
+                u32,
+            ],
+        ),
+        "project_actor": (
+            i32,
+            [
+                ctypes.POINTER(Camera),
+                ctypes.POINTER(ActorSpatial),
+                ctypes.c_float,
+                ctypes.POINTER(ScreenPoint),
+                u32,
+            ],
+        ),
         "monotonic_ns": (u64, []),
         "profile_sha256": (ctypes.c_char_p, []),
         "result_string": (ctypes.c_char_p, [i32]),
@@ -581,9 +881,17 @@ def _function_prototypes():
         "stop": (i32, [handle]),
         "copy_latest": (i32, [handle, handle]),
         "snapshot_info": (i32, [handle, ctypes.POINTER(Info), u32]),
+        "hazards_sizeof": (u32, [u32]),
+        "snapshot_hazard_info": (i32, [handle, ctypes.POINTER(HazardInfo), u32]),
+        "snapshot_hazards": (i32, [handle, ctypes.POINTER(Hazard), u32, ctypes.POINTER(u32)]),
         "snapshot_client_version": (ctypes.c_char_p, [handle]),
         "snapshot_player": (i32, [handle, ctypes.POINTER(Player), u32]),
         "snapshot_position": (i32, [handle, ctypes.POINTER(Position), u32]),
+        "effects_sizeof": (u32, [u32]),
+        "snapshot_effects_info": (i32, [handle, ctypes.POINTER(EffectsInfo), u32]),
+        "snapshot_effects": (i32, [handle, ctypes.POINTER(Effect), u32, ctypes.POINTER(u32)]),
+        "encounter_sizeof": (u32, [u32]),
+        "snapshot_encounter": (i32, [handle, ctypes.POINTER(EncounterState), u32]),
         "combat_sizeof": (u32, [u32]),
         "snapshot_combat": (i32, [handle, ctypes.POINTER(CombatState), u32]),
         "snapshot_npc_animations": (
@@ -593,6 +901,16 @@ def _function_prototypes():
         "npc_action_events_since": (
             i32,
             [handle, u64, ctypes.POINTER(NPCActionEvent), u32, *cursor_outputs],
+        ),
+        "interface_sizeof": (u32, [u32]),
+        "snapshot_interface_info": (i32, [handle, ctypes.POINTER(InterfaceInfo), u32]),
+        "snapshot_interfaces": (
+            i32,
+            [handle, ctypes.POINTER(InterfaceObservation), u32, ctypes.POINTER(u32)],
+        ),
+        "snapshot_action_bar": (
+            i32,
+            [handle, ctypes.POINTER(ActionBarSlot), u32, ctypes.POINTER(u32)],
         ),
         "snapshot_player_hit_info": (i32, [handle, ctypes.POINTER(PlayerHitInfo), u32]),
         "snapshot_player_hits": (i32, [handle, ctypes.POINTER(Hit), u32, ctypes.POINTER(u32)]),
@@ -614,6 +932,25 @@ def _function_prototypes():
 
 
 def _verify_layouts(library):
+    for structure_id, structure in ((1, EffectsInfo), (2, Effect)):
+        if library.rs3_effects_sizeof(structure_id) != ctypes.sizeof(structure):
+            raise RuntimeError("C/Python effect layout mismatch for " + structure.__name__)
+    for structure_id, structure in SIZED_ENCOUNTER_STRUCTURES.items():
+        if library.rs3_encounter_sizeof(structure_id) != ctypes.sizeof(structure):
+            raise RuntimeError("C/Python encounter layout mismatch: " + structure.__name__)
+    for structure_id, structure in (
+        (1, InterfaceInfo),
+        (2, InterfaceObservation),
+        (3, ActionBarSlot),
+    ):
+        if library.rs3_interface_sizeof(structure_id) != ctypes.sizeof(structure):
+            raise RuntimeError("C/Python interface layout mismatch for " + structure.__name__)
+    for structure_id, structure in SIZED_HAZARD_STRUCTURES.items():
+        if library.rs3_hazards_sizeof(structure_id) != ctypes.sizeof(structure):
+            raise RuntimeError("C/Python layout mismatch for " + structure.__name__)
+    for structure_id, structure in SIZED_SPATIAL_STRUCTURES.items():
+        if library.rs3_spatial_sizeof(structure_id) != ctypes.sizeof(structure):
+            raise RuntimeError("C/Python spatial layout mismatch: " + structure.__name__)
     for structure_id, structure in SIZED_STRUCTURES.items():
         if library.rs3_sizeof(structure_id) != ctypes.sizeof(structure):
             raise RuntimeError("C/Python layout mismatch for " + structure.__name__)
@@ -672,12 +1009,22 @@ class Reader:
         self.worker_hz = worker_hz
         # Reusable output buffers sized for the ABI limits.
         self.info = Info()
+        self.effects_info = EffectsInfo()
+        self.effects = (Effect * 14)()
+        self.encounter = EncounterState()
+        self.hazard_info = HazardInfo()
+        self.hazards = (Hazard * MAX_HAZARDS)()
         self.player = Player()
         self.position = Position()
         self.combat = CombatState()
+        self.spatial = SpatialInfo()
+        self.npc_spatial = (ActorSpatial * MAX_NPCS)()
         self.npcs = (NPC * MAX_NPCS)()
         self.npc_animations = (NPCAnimation * MAX_NPCS)()
         self.hits = (Hit * MAX_HITS)()
+        self.interface_info = InterfaceInfo()
+        self.interfaces = (InterfaceObservation * 5)()
+        self.action_bar = (ActionBarSlot * 70)()
         self.player_hit_info = PlayerHitInfo()
         self.player_hits = (Hit * MAX_PLAYER_HITS)()
         self.inventory_info = InventoryInfo()
@@ -743,12 +1090,22 @@ class Reader:
             )
 
         copy_record(library.rs3_snapshot_info, self.info)
+        copy_record(library.rs3_snapshot_effects_info, self.effects_info)
+        copy_array(library.rs3_snapshot_effects, self.effects)
+        copy_record(library.rs3_snapshot_encounter, self.encounter)
+        copy_record(library.rs3_snapshot_hazard_info, self.hazard_info)
+        copy_array(library.rs3_snapshot_hazards, self.hazards)
         copy_record(library.rs3_snapshot_player, self.player)
         copy_record(library.rs3_snapshot_position, self.position)
         copy_record(library.rs3_snapshot_combat, self.combat)
+        copy_record(library.rs3_snapshot_spatial, self.spatial)
+        copy_array(library.rs3_snapshot_npc_spatial, self.npc_spatial)
         copy_array(library.rs3_snapshot_npcs, self.npcs)
         copy_array(library.rs3_snapshot_npc_animations, self.npc_animations)
         copy_array(library.rs3_snapshot_hits, self.hits)
+        copy_record(library.rs3_snapshot_interface_info, self.interface_info)
+        copy_array(library.rs3_snapshot_interfaces, self.interfaces)
+        copy_array(library.rs3_snapshot_action_bar, self.action_bar)
         copy_record(library.rs3_snapshot_player_hit_info, self.player_hit_info)
         copy_array(library.rs3_snapshot_player_hits, self.player_hits)
         copy_record(library.rs3_snapshot_inventory_info, self.inventory_info)

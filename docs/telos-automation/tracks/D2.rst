@@ -1,7 +1,7 @@
 D2 - Prayer executor
 ====================
 
-:Status: open
+:Status: waiting for live session
 :Wave: 2
 :Branch: ``telos/D2``
 :Kind: Python
@@ -57,7 +57,50 @@ Needs the user
 
 Nothing in this track. Live use starts at rung 2 of track L.
 
+Offline implementation (2026-11-13)
+-----------------------------------
+
+``PrayerExecutor`` adapts D1/P6 state to the existing C planner; it does not
+reimplement timing. Import/construction opens no DLL. ``NativePrayerPlanner``
+loads the existing ABI lazily only for a calibrated band or explicit test.
+No method sends a key. D6 must call note_sent only after actual input acceptance.
+
+Validation is derived per exact phase/enrage/client/context from P6 native
+samples, measured windows and coverage. Profile booleans and guide labels
+cannot upgrade unvalidated P6 rows. Non-empty measured attack data is required;
+empty bands are not vacuously valid. Unknown phase, stale encounter state,
+unresolved threats, changed windows or wrong protection reject proposals.
+Coverage remains independent: measured protection may be proposed without a
+Soul Split gap; Soul Split requires explicit complete P6 and D1 coverage.
+
+Intents carry planner reasons and the configured Ctrl+F1/F2/F3/F4 binding.
+The four chords are preserved. P5 struct IDs were added from its decoder;
+when live bar data is available, changed/unmapped keys block the old profile
+binding. can_send re-runs the C planner and binding checks before dispatch.
+Only newer overhead feedback acknowledges accepted input. Planner FAULT and
+scene/build changes latch until explicit reset after re-observation.
+
+Twelve D2 tests pass, including the actual C planner's protect/WAIT_ACK/observed
+Melee/return-to-Soul-Split sequence on synthetic measured windows. This does
+not calibrate a real server deadline. A real-capture golden replay emits no
+toggle. All 10 CTest suites pass in the Windows x64 Release build (90 Python
+tests). Current global flags and every real P6 band remain unvalidated.
+
 Requests
 --------
 
-None yet.
+* P6/live session: real prayer-check windows and complete incoming coverage,
+  including phase 5 and other damage sources, remain missing. The adapter is
+  implemented; real-window replay acceptance cannot be claimed from synthetic
+  tests or from zero currently validated bands. No new session is requested
+  while the user is away.
+* D1/L: inject an encounter provider updated before D2 each frame; current D1
+  threats with null windows deliberately cannot enter the planner. Coverage
+  must have exact client/context scope. Multi-hit components need separate
+  measured windows and IDs, not one aggregate attack window.
+* D6/L: inject can_send as the prayer timing validator and wire note_sent and
+  note_rejected. Input acceptance must await observed overhead; no retry after
+  a planner fault. Preserve correct account/PID binding and validated key maps.
+* L: review lead/hold/ack configuration against controlled protection outcomes.
+  Existing profile lead is not evidence of a server deadline. P4, A2 and L
+  remain untouched, as requested while the user is away.

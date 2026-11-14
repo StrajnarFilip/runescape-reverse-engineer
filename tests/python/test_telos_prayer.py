@@ -1,6 +1,7 @@
 """Experimental Telos prayer trial, action-event filtering and manual key sampling."""
 
 import contextlib
+import copy
 import io
 import json
 import unittest
@@ -37,12 +38,12 @@ class PrayerTrialTests(unittest.TestCase):
                 "attack_coverage_validated": coverage_validated,
             }
             profile_path = Mock(read_text=Mock(return_value=json.dumps(profile)))
-            with self.subTest(timing=timing_validated, coverage=coverage_validated), patch(
-                "sys.argv", ["telos_prayer", "--trial"]
-            ), patch.object(telos_prayer, "PRAYER_FLICK_PROFILE", profile_path), patch.object(
-                telos_prayer, "Reader"
-            ) as reader, contextlib.redirect_stderr(
-                io.StringIO()
+            with (
+                self.subTest(timing=timing_validated, coverage=coverage_validated),
+                patch("sys.argv", ["telos_prayer", "--trial"]),
+                patch.object(telos_prayer, "PRAYER_FLICK_PROFILE", profile_path),
+                patch.object(telos_prayer, "Reader") as reader,
+                contextlib.redirect_stderr(io.StringIO()),
             ):
                 with self.assertRaises(SystemExit) as error:
                     telos_prayer.main()
@@ -177,7 +178,8 @@ class TelosActionTests(unittest.TestCase):
         ]
         rows = telos_actions(events, (1, 2, 3), 14, {7})
         self.assertEqual([row["event_sequence"] for row in rows], [1, 2])
-        self.assertTrue(all(row["user_labeled_melee_auto"] for row in rows))
+        self.assertTrue(all(row["isolated_p1_melee_sequence_lead"] for row in rows))
+        self.assertTrue(all("user_labeled_melee_auto" not in row for row in rows))
 
 
 class ManualPrayerKeyTests(unittest.TestCase):
@@ -207,7 +209,17 @@ class ManualPrayerKeyTests(unittest.TestCase):
         held_keys.add(VK_F4)
         self.assertEqual(
             keys.sample((1, 2, 3), clock),
-            [{"key": "Ctrl+F4", "bound_prayer": "melee", "observed_ns": 1000}],
+            [
+                {
+                    "key": "Ctrl+F4",
+                    "bound_prayer": "melee",
+                    "prayer": "melee",
+                    "observed_ns": 1000,
+                    "virtual_key": VK_F4,
+                    "modifiers": 1,
+                    "poll_interval_ms": 0.0,
+                }
+            ],
         )
         self.assertEqual(keys.sample((1, 2, 3), clock), [])  # No repeat while held.
         held_keys.remove(VK_CONTROL)
@@ -216,6 +228,85 @@ class ManualPrayerKeyTests(unittest.TestCase):
         held_keys.add(VK_CONTROL)
         # Adding Ctrl to an already held key is not a down edge.
         self.assertEqual(keys.sample((1, 2, 3), clock), [])
+
+
+class AttackCatalogueTests(unittest.TestCase):
+    def test_repository_catalogue_is_loadable_without_authorizing_input(self):
+        catalogue = telos_prayer.load_attack_catalogue()
+        self.assertEqual({row["phase"] for row in catalogue.document["coverage"]}, {1, 2, 3, 4, 5})
+        self.assertTrue(catalogue.attacks)
+        for row in catalogue.attacks:
+            if not row["timing_validated"]:
+                self.assertFalse(row["validated"])
+                self.assertIsNone(row["cue_to_prayer_check_ms"])
+            self.assertIsNone(
+                catalogue.lookup(
+                    row["phase"],
+                    row["enrage_range"][0],
+                    row["sequence"],
+                    executable_sha256="0" * 64,
+                    context=row.get("context"),
+                )
+            )
+
+    def document(self):
+        return {
+            "schema_version": 1,
+            "automatic_flick_ready": False,
+            "attacks": [
+                {
+                    "phase": 1,
+                    "enrage_range": [300, 300],
+                    "sequence": 28929,
+                    "client_sha256": "a" * 64,
+                    "context": "isolated_p1_melee",
+                    "sample_count": 2,
+                    "name": "melee auto",
+                    "classification_validated": True,
+                    "timing_validated": False,
+                    "validated": False,
+                    "cue_to_prayer_check_ms": None,
+                    "evidence_kind": "user_labelled_native_capture",
+                }
+            ],
+        }
+
+    def test_lookup_never_crosses_scope_or_authorizes_unmeasured_timing(self):
+        document = self.document()
+        catalogue = telos_prayer.AttackCatalogue(document)
+        lookup = lambda phase, enrage, sequence, **kwargs: catalogue.lookup(
+            phase, enrage, sequence, executable_sha256="a" * 64, **kwargs
+        )
+        self.assertIsNotNone(lookup(1, 300, 28929, context="isolated_p1_melee"))
+        self.assertIsNone(lookup(1, 300, 28929))
+        self.assertIsNone(lookup(2, 300, 28929, context="isolated_p1_melee"))
+        self.assertIsNone(lookup(1, 301, 28929, context="isolated_p1_melee"))
+        self.assertIsNone(lookup(1, 300, 28930, context="isolated_p1_melee"))
+        self.assertIsNone(
+            lookup(1, 300, 28929, context="isolated_p1_melee", require_validated=True)
+        )
+        self.assertIsNone(
+            catalogue.lookup(1, 300, 28929, executable_sha256="b" * 64, context="isolated_p1_melee")
+        )
+        document["attacks"][0]["sample_count"] = 99
+        self.assertEqual(catalogue.attacks[0]["sample_count"], 2)
+        with self.assertRaises(TypeError):
+            catalogue.attacks[0]["validated"] = True
+
+    def test_ambiguous_or_unsubstantiated_validation_is_rejected(self):
+        mutations = [
+            lambda doc: doc.update(automatic_flick_ready=True),
+            lambda doc: doc["attacks"].append(copy.deepcopy(doc["attacks"][0])),
+            lambda doc: doc["attacks"][0].update(validated=True),
+            lambda doc: doc["attacks"][0].update(timing_validated=True),
+            lambda doc: doc["attacks"][0].update(evidence_kind="guide_lead"),
+            lambda doc: doc["attacks"][0].update(client_sha256="unknown"),
+        ]
+        for mutation in mutations:
+            document = self.document()
+            mutation(document)
+            with self.subTest(document=document), self.assertRaises(ValueError):
+                telos_prayer.AttackCatalogue(document)
 
 
 if __name__ == "__main__":

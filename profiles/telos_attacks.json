@@ -1,0 +1,1026 @@
+{
+  "schema_version": 1,
+  "scope": "measured Telos cues; no automated input authorization",
+  "automatic_flick_ready": false,
+  "attacks": [
+    {
+      "phase": 1,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28929,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 7,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 7
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 1,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28929,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": "isolated_p1_melee",
+      "name": "melee auto",
+      "damage_style": "melee",
+      "required_protection": "melee",
+      "hit_components": null,
+      "counts_as_auto": true,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 25,
+      "sources": [
+        {
+          "capture_sha256": "37c9c4c99481db3f73bcb355174523cb7b2aba02a7815fd1f9e243004410af23",
+          "count": 13
+        },
+        {
+          "capture_sha256": "f998a1f4903e8e7eef08471bbd8f3e81e9769b44cfda626708dac8b94314b66c",
+          "count": 12
+        }
+      ],
+      "evidence_kind": "user_labelled_native_capture",
+      "classification_validated": true,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "protection_check_unmeasured"
+    },
+    {
+      "phase": 1,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28931,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 1,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 1
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 1,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28931,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": "isolated_p1_melee",
+      "name": "tendrils",
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 2,
+      "sources": [
+        {
+          "capture_sha256": "37c9c4c99481db3f73bcb355174523cb7b2aba02a7815fd1f9e243004410af23",
+          "count": 1
+        },
+        {
+          "capture_sha256": "f998a1f4903e8e7eef08471bbd8f3e81e9769b44cfda626708dac8b94314b66c",
+          "count": 1
+        }
+      ],
+      "evidence_kind": "user_labelled_native_capture",
+      "classification_validated": true,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "protection_check_unmeasured"
+    },
+    {
+      "phase": 1,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28932,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 1,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 1
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 1,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28932,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": "isolated_p1_melee",
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 2,
+      "sources": [
+        {
+          "capture_sha256": "37c9c4c99481db3f73bcb355174523cb7b2aba02a7815fd1f9e243004410af23",
+          "count": 1
+        },
+        {
+          "capture_sha256": "f998a1f4903e8e7eef08471bbd8f3e81e9769b44cfda626708dac8b94314b66c",
+          "count": 1
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 1,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28935,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": "isolated_p1_melee",
+      "name": "Hold Still",
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 2,
+      "sources": [
+        {
+          "capture_sha256": "37c9c4c99481db3f73bcb355174523cb7b2aba02a7815fd1f9e243004410af23",
+          "count": 1
+        },
+        {
+          "capture_sha256": "f998a1f4903e8e7eef08471bbd8f3e81e9769b44cfda626708dac8b94314b66c",
+          "count": 1
+        }
+      ],
+      "evidence_kind": "user_labelled_native_capture",
+      "classification_validated": true,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "protection_check_unmeasured"
+    },
+    {
+      "phase": 1,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28938,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": "isolated_p1_melee",
+      "name": "uppercut",
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 2,
+      "sources": [
+        {
+          "capture_sha256": "37c9c4c99481db3f73bcb355174523cb7b2aba02a7815fd1f9e243004410af23",
+          "count": 1
+        },
+        {
+          "capture_sha256": "f998a1f4903e8e7eef08471bbd8f3e81e9769b44cfda626708dac8b94314b66c",
+          "count": 1
+        }
+      ],
+      "evidence_kind": "user_labelled_native_capture",
+      "classification_validated": true,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "protection_check_unmeasured"
+    },
+    {
+      "phase": 1,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28962,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": "isolated_p1_melee",
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 2,
+      "sources": [
+        {
+          "capture_sha256": "37c9c4c99481db3f73bcb355174523cb7b2aba02a7815fd1f9e243004410af23",
+          "count": 1
+        },
+        {
+          "capture_sha256": "f998a1f4903e8e7eef08471bbd8f3e81e9769b44cfda626708dac8b94314b66c",
+          "count": 1
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 1,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28963,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 3,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 3
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 1,
+      "enrage_range": [
+        500,
+        500
+      ],
+      "sequence": 28929,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 12,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 12
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 1,
+      "enrage_range": [
+        500,
+        500
+      ],
+      "sequence": 28931,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 1,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 1
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 1,
+      "enrage_range": [
+        500,
+        500
+      ],
+      "sequence": 28932,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 1,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 1
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 1,
+      "enrage_range": [
+        500,
+        500
+      ],
+      "sequence": 28938,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 1,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 1
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 1,
+      "enrage_range": [
+        500,
+        500
+      ],
+      "sequence": 28963,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 4,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 4
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 2,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28929,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 3,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 3
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 2,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28930,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 1,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 1
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 2,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28959,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 6,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 6
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 2,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28963,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 3,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 3
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 2,
+      "enrage_range": [
+        500,
+        500
+      ],
+      "sequence": 28929,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 4,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 4
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 2,
+      "enrage_range": [
+        500,
+        500
+      ],
+      "sequence": 28930,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 1,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 1
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 2,
+      "enrage_range": [
+        500,
+        500
+      ],
+      "sequence": 28935,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 1,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 1
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 3,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28930,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 1,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 1
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 3,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28959,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 6,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 6
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 3,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28963,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 3,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 3
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 4,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28929,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 3,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 3
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 4,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28930,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 1,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 1
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    },
+    {
+      "phase": 4,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sequence": 28931,
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "context": null,
+      "name": null,
+      "damage_style": null,
+      "required_protection": null,
+      "hit_components": null,
+      "counts_as_auto": null,
+      "cue_to_prayer_check_ms": null,
+      "timing_evidence_kind": null,
+      "sample_count": 1,
+      "sources": [
+        {
+          "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+          "count": 1
+        }
+      ],
+      "evidence_kind": "unlabelled_native_capture",
+      "classification_validated": false,
+      "timing_validated": false,
+      "validated": false,
+      "reason": "sequence_unlabelled"
+    }
+  ],
+  "coverage": [
+    {
+      "phase": 1,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sample_count": 47,
+      "observed_sequences": [
+        28929,
+        28931,
+        28932,
+        28935,
+        28938,
+        28962,
+        28963
+      ],
+      "unlabelled_sequences": [
+        28929,
+        28931,
+        28932,
+        28962,
+        28963
+      ],
+      "complete": false,
+      "status": "observed_partial"
+    },
+    {
+      "phase": 2,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sample_count": 13,
+      "observed_sequences": [
+        28929,
+        28930,
+        28959,
+        28963
+      ],
+      "unlabelled_sequences": [
+        28929,
+        28930,
+        28959,
+        28963
+      ],
+      "complete": false,
+      "status": "observed_partial"
+    },
+    {
+      "phase": 3,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sample_count": 10,
+      "observed_sequences": [
+        28930,
+        28959,
+        28963
+      ],
+      "unlabelled_sequences": [
+        28930,
+        28959,
+        28963
+      ],
+      "complete": false,
+      "status": "observed_partial"
+    },
+    {
+      "phase": 4,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sample_count": 5,
+      "observed_sequences": [
+        28929,
+        28930,
+        28931
+      ],
+      "unlabelled_sequences": [
+        28929,
+        28930,
+        28931
+      ],
+      "complete": false,
+      "status": "observed_partial"
+    },
+    {
+      "phase": 5,
+      "enrage_range": [
+        300,
+        300
+      ],
+      "sample_count": 0,
+      "observed_sequences": [],
+      "unlabelled_sequences": [],
+      "complete": false,
+      "status": "not_captured"
+    }
+  ],
+  "sources": [
+    {
+      "capture_sha256": "f998a1f4903e8e7eef08471bbd8f3e81e9769b44cfda626708dac8b94314b66c",
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "annotation_reference": "docs/validation/telos-prayer-calibration-2026-11-10.json: two user-labelled 300% phase-1 attempts",
+      "phase_sources": [
+        "user"
+      ],
+      "unique_telos_cues": 17,
+      "npc_action_events_lost": 0,
+      "player_hit_events_lost": null
+    },
+    {
+      "capture_sha256": "37c9c4c99481db3f73bcb355174523cb7b2aba02a7815fd1f9e243004410af23",
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "annotation_reference": "docs/validation/telos-prayer-calibration-2026-11-10.json: two user-labelled 300% phase-1 attempts",
+      "phase_sources": [
+        "user"
+      ],
+      "unique_telos_cues": 18,
+      "npc_action_events_lost": 0,
+      "player_hit_events_lost": 0
+    },
+    {
+      "capture_sha256": "2571e1db5280fc4233945b35a71f77e1610188849fe288aa8c6955f8a2b06618",
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "annotation_reference": {
+        "commit": "754b7cc86df6904d04f4ef4e9d82da8e02f8d2fe",
+        "path": "docs/validation/encounter-validation.json",
+        "sha256": "3780c957e22118dea8d18d2119b4409a5bbccc8452721003ab0142d18a57ff89",
+        "guards": [
+          "exact original executable SHA-256",
+          "exactly one active Telos config 22891",
+          "VARP 6359 bit 29 set",
+          "stage 0..3 only",
+          "enrage 300 or 500"
+        ],
+        "boundary_exclusion_ms": 100
+      },
+      "phase_sources": [
+        "P2_live_report"
+      ],
+      "unique_telos_cues": 68,
+      "npc_action_events_lost": 0,
+      "player_hit_events_lost": 0
+    },
+    {
+      "capture_sha256": "5ce4223c413a357b71b082acd9718d3083eb9e3d4e4e1a4c5fff4d67d6039d29",
+      "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+      "annotation_reference": {
+        "user_label": "300% manual practice; reached second font of phase 4; manual prayers",
+        "phase_intervals": "not labelled; cues remain unassigned",
+        "reason": "Recorder lacks VARP 6359 active-encounter guard; no per-phase user timestamps"
+      },
+      "phase_sources": [],
+      "unique_telos_cues": 61,
+      "npc_action_events_lost": 0,
+      "player_hit_events_lost": 0
+    }
+  ],
+  "unassigned_sequences": {
+    "28962": 3,
+    "28963": 8,
+    "28929": 23,
+    "28931": 3,
+    "28932": 1,
+    "28930": 3,
+    "28959": 14,
+    "28935": 2,
+    "28928": 3,
+    "28938": 2,
+    "28966": 2
+  },
+  "limitations": [
+    "Hitmark observation times are not protection-check deadlines.",
+    "Phase/enrage/context annotations apply only to their bounded original session.",
+    "Names and styles do not transfer across phases, enrages, contexts or executable hashes.",
+    "Guide leads never validate a row; missing hit components/protection windows remain null.",
+    "Unlabelled sequences may be transitions or idle states, not attacks.",
+    "Incoming golem/projectile coverage and safe Soul Split windows remain uncalibrated."
+  ]
+}

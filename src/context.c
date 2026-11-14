@@ -12,6 +12,9 @@
 
 #include "clock.h"
 #include "frame.h"
+#include "interface.h"
+#include "hazards.h"
+#include "effects.h"
 #include "inventory.h"
 #include "memory.h"
 #include "position.h"
@@ -67,13 +70,28 @@ int context_reserve_buckets(rs3_context *context, uint64_t bucket_count)
 /** Copies a frame. Only the populated array prefixes are copied. */
 static void copy_frame(rs3_snapshot *destination, const rs3_snapshot *source)
 {
+    destination->hazard_info = source->hazard_info;
+    memcpy(destination->hazards, source->hazards,
+           source->hazard_info.count * sizeof(rs3_hazard));
     uint32_t item_count =
         source->inventory_info.backpack_count + source->inventory_info.equipment_count;
     destination->info = source->info;
     destination->player = source->player;
+    destination->interface_info = source->interface_info;
+    memcpy(destination->interfaces, source->interfaces,
+           source->interface_info.interface_count * sizeof(rs3_interface_observation));
+    memcpy(destination->action_bar, source->action_bar,
+           source->interface_info.action_bar_count * sizeof(rs3_action_bar_slot));
+    destination->effects_info = source->effects_info;
+    memcpy(destination->effects, source->effects,
+           source->effects_info.count * sizeof(rs3_effect));
     destination->profile = source->profile;
     destination->position = source->position;
     destination->combat = source->combat;
+    destination->spatial = source->spatial;
+    memcpy(destination->npc_spatial, source->npc_spatial,
+           source->spatial.npc_count * sizeof(rs3_actor_spatial));
+    destination->encounter = source->encounter;
     destination->player_hit_info = source->player_hit_info;
     destination->player_actor_address = source->player_actor_address;
     memcpy(destination->player_hits, source->player_hits,
@@ -92,6 +110,8 @@ static void copy_frame(rs3_snapshot *destination, const rs3_snapshot *source)
 static void clear_unavailable_frame(rs3_context *context, rs3_snapshot *snapshot)
 {
     snapshot->info.status = RS3_UNAVAILABLE;
+    hazards_commit(context, snapshot, 0);
+    snapshot->hazard_info.reason = context->failure_reason;
     snapshot->info.reason = context->failure_reason;
     snapshot->info.npc_count = 0;
     snapshot->info.hit_count = 0;
@@ -101,6 +121,8 @@ static void clear_unavailable_frame(rs3_context *context, rs3_snapshot *snapshot
 
     memset(&snapshot->player, 0, sizeof snapshot->player);
     snapshot->player.gcd_reason = RS3_NOT_SET;
+    interface_clear(snapshot);
+    effects_clear(snapshot);
 
     memset(&snapshot->inventory_info, 0, sizeof snapshot->inventory_info);
     snapshot->inventory_info.status = RS3_UNAVAILABLE;
@@ -109,6 +131,12 @@ static void clear_unavailable_frame(rs3_context *context, rs3_snapshot *snapshot
     memset(&snapshot->combat, 0, sizeof snapshot->combat);
     snapshot->combat.status = RS3_UNAVAILABLE;
     snapshot->combat.reason = context->failure_reason;
+    memset(&snapshot->spatial, 0, sizeof snapshot->spatial);
+    snapshot->spatial.status = RS3_UNAVAILABLE;
+    snapshot->spatial.reason = context->failure_reason;
+    memset(&snapshot->encounter, 0, sizeof snapshot->encounter);
+    snapshot->encounter.status = RS3_UNAVAILABLE;
+    snapshot->encounter.reason = context->failure_reason;
 
     memset(&snapshot->player_hit_info, 0, sizeof snapshot->player_hit_info);
     snapshot->player_hit_info.status = RS3_UNAVAILABLE;
@@ -158,8 +186,12 @@ static void sample_and_publish(rs3_context *context, rs3_snapshot *snapshot)
     uint64_t started_ns = clock_monotonic_ns();
     memset(&snapshot->info, 0, sizeof snapshot->info);
     memset(&snapshot->player, 0, sizeof snapshot->player);
+    interface_clear(snapshot);
+    effects_clear(snapshot);
     snapshot->position = (rs3_position){0};
     memset(&snapshot->combat, 0, sizeof snapshot->combat);
+    memset(&snapshot->spatial, 0, sizeof snapshot->spatial);
+    memset(&snapshot->encounter, 0, sizeof snapshot->encounter);
     memset(&snapshot->player_hit_info, 0, sizeof snapshot->player_hit_info);
     snapshot->player_actor_address = 0;
     memset(&snapshot->inventory_info, 0, sizeof snapshot->inventory_info);

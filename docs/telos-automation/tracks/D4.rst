@@ -1,7 +1,7 @@
 D4 - Melee rotation engine
 ==========================
 
-:Status: open
+:Status: done
 :Wave: 1
 :Branch: ``telos/D4``
 :Kind: Python
@@ -61,7 +61,58 @@ Needs the user
 The intended gear, weapons and unlocked abilities, written once into
 ``profiles/rotations/``. Live use starts at rung 4 of track L.
 
+Implementation and verification (2026-11-13)
+------------------------------------------
+
+``RotationEngine.step(WorldState)`` proposes one ROTATION-priority GCD intent.
+Five conservative phase files validate against a canonical SHA-256 of the
+ability definitions. Unknown IDs, inactive legacy definitions, duplicate rule
+IDs and changed definition metadata reject configuration. No removed ability
+is present in the shipped phase policies.
+
+Every rule requires known zero GCD and ability cooldown, full castable=True,
+allowed equipment match, a fresh melee weapon and living selected NPC, explicit
+phase, known adrenaline and a validated key binding. Adrenaline thresholds are
+reserve policies, not inferred raw-cache costs or old activation floors.
+Unknown buff conditions fail; a partial buff list cannot establish absence.
+Phase 4 omits the channel rules. These are forgiving baselines, not PVME
+speedkill scripts or live-validated phase-5 tactics.
+
+P5 observed ability chords override the manual profile section. A changed,
+unmapped or ambiguous observed bar blocks selection rather than falling back
+to a stale manual key. Only P5's currently decoded function-key forms are
+translated; game modifier codes are not native masks. ``can_send`` rechecks
+phase, gear, target, buffs and the chosen chord before D6 dispatch.
+
+``note_sent`` records accepted input only. A newer positive cooldown on the
+selected ability acknowledges it; GCD alone does not. Timeout latches a fault.
+``note_rejected`` never advances resource/buff state. ``create_stack`` is a
+proposal-only S0a adapter and imports no native input code.
+
+The intended setup and all handwritten keys remain explicitly unconfigured,
+as the user deferred live setup. Runtime native castability is currently null,
+so current captures do not generate offensive casts. Fourteen D4 tests pass,
+including all five phase profiles, legal synthetic readiness, unknown fields,
+buffs, equipment, changed bars, confirmation and a golden no-input replay of
+the native-hit capture. The Windows x64 Release build and all 10 CTest suites
+passed (92 Python tests).
+
 Requests
 --------
 
-None yet.
+* Later account session: fill intended weapon/unlock constraints and calibrated
+  keys once. Unknown setup is not silently populated from a guide or account
+  name. No input is needed while implementing the remaining offline tracks.
+* Perception/L: full castability remains unmapped. Provide verified unlock,
+  level, target/range, resources and ability-specific checks; equipment match
+  and cooldown alone cannot establish this. Do not change null to True merely
+  to enable the rotation.
+* P1/P2/P3/P5: fresh selected target/HP, phase, buffs and bindings are required;
+  missing fields block dependent rules. Per-profile live_validated remains
+  false until controlled rung-4 testing. New client hashes need review.
+* A1/D6/L: use the selected binding evidence when constructing/updating A1
+  mappings, including modifier translation. Wire can_send, note_sent and
+  note_rejected. A different bar chord must not execute through an old mapping.
+* Later tuning: shared cooldowns, cast acknowledgements for abilities without
+  individual timers, channel interruption, stored EoF specials and stall/release
+  remain separate unmapped work. No rotation rule invents those states.

@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "track": "A2",
+  "date": "2026-11-13",
+  "status": "waiting_for_upstream_mapping_and_supervised_live_validation",
+  "automatic_game_inputs_sent": false,
+  "images_used": false,
+  "perception_engine": "unchanged read-only Windows x64 C DLL",
+  "scope": "pure intent/calibration/confirmation logic and private native minimap projection guards",
+  "user_prioritization": {
+    "deferred": ["earlier beam handling", "falling-rock acquisition"],
+    "phase_5_beams": "later supervised work together once the automation reaches phase 5",
+    "extra_Telos_capture_requested": false,
+    "rotation_avoids_hazards": "user strategy assumption, not a measured guarantee"
+  },
+  "implementation": {
+    "python_module": "python/rs3_reader/bot/movement.py",
+    "operations": ["move_to", "click_entity", "select_target", "click_object", "use_movement_ability"],
+    "dispatch": "none; intents go to the D6 arbiter; missing native dependencies reject operations",
+    "identity": "PID, process creation, scene, executable hash, NPC lifetime/runtime/config",
+    "calibration": "minimum six confirmed click/arrival observations; fit two axes and center; last two held out; native UI safe radius required",
+    "calibration_guards": [
+      "mixed process/scene/view or plane rejected",
+      "unconfirmed arrivals and unknown native bounds rejected",
+      "collinear observations and numerically degenerate axes rejected",
+      "fit/holdout/center residual checked",
+      "fit uncertainty plus pixel rounding must remain inside one tile",
+      "C-compatible rounding on negative monitors",
+      "current native view geometry rechecked before dispatch"
+    ],
+    "movement_confirmation": "newer native destination tile after actual acceptance",
+    "target_confirmation": "newer exact native target identity; baseline target must also be known",
+    "object_confirmation": "explicit injected native interaction outcome; tile proximity is insufficient",
+    "movement_ability_confirmation": "explicit castability, route/geometry and GCD lane required; actual destination must be observed, not merely cooldown",
+    "outcome_failure_policy": "no blind retry; identity loss, stale observations or timeout latch a fault",
+    "native_changes": "private helper NULL/validity checks and relative-axis conditioning only; existing foreground input checks, profile checks and public ABI preserved",
+    "default_live_enablement": false
+  },
+  "latency": {
+    "configured_confirmation_timeout_ms": 3000,
+    "reporting_bound": "timeout plus caller polling delay, provided observations advance; supervisor must detect stalled clocks/frames",
+    "measured_live_maximum_ms": null,
+    "successful_action_guarantee": false
+  },
+  "software_validation": {
+    "ctest_targets_passed": 10,
+    "total_Python_tests_passed": 97,
+    "movement_Python_tests": 19,
+    "synthetic_consecutive_moves": 20,
+    "synthetic_consecutive_target_changes": 20,
+    "synthetic_is_live_acceptance": false,
+    "D6_recording_only_interop": {
+      "branch": "telos/D6",
+      "tested": ["move accepted then destination observed", "target click accepted then exact target observed"],
+      "confirmation_type": "Observation[bool], matching D6 producer callback contract",
+      "watchdog_faults": 0,
+      "real_inputs": 0
+    },
+    "recorded_P4_replay": {
+      "capture_sha256": "a17a7670d48b081dcf790e2ab5d8cf40add7416871579dbe6a16071d35f536bb",
+      "frames": 7904,
+      "movement_proposals": 0,
+      "target_proposals": 0,
+      "frames_with_known_combat_target": 0,
+      "interpretation": "missing native minimap/target evidence correctly authorizes no pointer action",
+      "real_inputs": 0,
+      "raw_capture_published": false
+    },
+    "C_projection_tests": ["NULL arguments", "near-parallel axes", "unchanged output on rejection", "invalid player tile flag"],
+    "checks": "Release build and CTest; source formatting and staged scope checks"
+  },
+  "live_acceptance": {
+    "consecutive_moves": 0,
+    "required_moves": 20,
+    "consecutive_target_selections": 0,
+    "required_target_selections": 20,
+    "status": "not_run"
+  },
+  "pending_dependencies": [
+    "native minimap UI geometry and complete view signature",
+    "verified native combat target and cleared-target decoder",
+    "same-actor tile/pose integration on selected runtime",
+    "current route/path and entity hit-test validation",
+    "serialized A1 native pointer route; serial remains keyboard-only",
+    "native object identity and explicit interaction acknowledgement",
+    "movement ability castability, lane and displacement mapping",
+    "verified server tick and L supervised enablement"
+  ],
+  "not_claimed": [
+    "live walking or targeting acceptance",
+    "image-derived calibration",
+    "safe paths inferred from screen projection",
+    "interaction success from a click or proximity",
+    "movement success from ability cooldown",
+    "universal arena coordinates",
+    "beam/rock absence or full Telos automation readiness"
+  ]
+}

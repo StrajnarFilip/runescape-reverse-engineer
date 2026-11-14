@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "phase": 2,
+  "name": "Conservative melee phase 2",
+  "definition_version": "951-3",
+  "ability_bindings_sha256": "4170332c15a5fa2dbf861eaaf5c863f22f2791542594d80a712be07f0040910c",
+  "client_sha256": [
+    "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+    "7a60c69fcf11eda42a328732721f5e89e1c85a6bc919038ff3451d4643e42dbf"
+  ],
+  "live_validated": false,
+  "maximum_age_ms": 150,
+  "intent_lifetime_ms": 100,
+  "acknowledgement_timeout_ms": 1800,
+  "intended_setup": {
+    "weapon_item_ids": null,
+    "unlocked_ability_ids": null,
+    "status": "Unconfigured; fill with the intended account later. Fresh full castability is required even after configuration."
+  },
+  "manual_bindings": {
+    "44244": {
+      "virtual_key": null,
+      "modifiers": 0,
+      "validated": false,
+      "source": null
+    },
+    "14686": {
+      "virtual_key": null,
+      "modifiers": 0,
+      "validated": false,
+      "source": null
+    },
+    "14685": {
+      "virtual_key": null,
+      "modifiers": 0,
+      "validated": false,
+      "source": null
+    },
+    "14684": {
+      "virtual_key": null,
+      "modifiers": 0,
+      "validated": false,
+      "source": null
+    },
+    "14704": {
+      "virtual_key": null,
+      "modifiers": 0,
+      "validated": false,
+      "source": null
+    },
+    "14701": {
+      "virtual_key": null,
+      "modifiers": 0,
+      "validated": false,
+      "source": null
+    },
+    "14682": {
+      "virtual_key": null,
+      "modifiers": 0,
+      "validated": false,
+      "source": null
+    },
+    "14700": {
+      "virtual_key": null,
+      "modifiers": 0,
+      "validated": false,
+      "source": null
+    }
+  },
+  "rules": [
+    {
+      "id": "dismember_priority",
+      "ability_id": 44244,
+      "name": "Dismember",
+      "enabled": true,
+      "minimum_adrenaline_percent": 0,
+      "effects": [],
+      "source_kind": "policy",
+      "source": "Conservative configurable priority; adrenaline bound is a reserve policy, not an inferred activation cost."
+    },
+    {
+      "id": "overpower_priority",
+      "ability_id": 14686,
+      "name": "Overpower",
+      "enabled": true,
+      "minimum_adrenaline_percent": 80,
+      "effects": [],
+      "source_kind": "policy",
+      "source": "Conservative configurable priority; adrenaline bound is a reserve policy, not an inferred activation cost."
+    },
+    {
+      "id": "hurricane_priority",
+      "ability_id": 14685,
+      "name": "Hurricane",
+      "enabled": true,
+      "minimum_adrenaline_percent": 50,
+      "effects": [],
+      "source_kind": "policy",
+      "source": "Conservative configurable priority; adrenaline bound is a reserve policy, not an inferred activation cost."
+    },
+    {
+      "id": "flurry_priority",
+      "ability_id": 14684,
+      "name": "Flurry",
+      "enabled": true,
+      "minimum_adrenaline_percent": 50,
+      "effects": [],
+      "source_kind": "policy",
+      "source": "Conservative configurable priority; adrenaline bound is a reserve policy, not an inferred activation cost."
+    },
+    {
+      "id": "assault_priority",
+      "ability_id": 14704,
+      "name": "Assault",
+      "enabled": true,
+      "minimum_adrenaline_percent": 50,
+      "effects": [
+        {
+          "id": "berserk",
+          "active": true
+        },
+        {
+          "id": "bloodlust",
+          "active": true,
+          "minimum_stacks": 1
+        }
+      ],
+      "source_kind": "policy",
+      "source": "Conservative configurable priority; adrenaline bound is a reserve policy, not an inferred activation cost."
+    },
+    {
+      "id": "fury_priority",
+      "ability_id": 14701,
+      "name": "Fury",
+      "enabled": true,
+      "minimum_adrenaline_percent": 0,
+      "effects": [],
+      "source_kind": "policy",
+      "source": "Conservative configurable priority; adrenaline bound is a reserve policy, not an inferred activation cost."
+    },
+    {
+      "id": "backhand_priority",
+      "ability_id": 14682,
+      "name": "Backhand",
+      "enabled": true,
+      "minimum_adrenaline_percent": 0,
+      "effects": [],
+      "source_kind": "policy",
+      "source": "Conservative configurable priority; adrenaline bound is a reserve policy, not an inferred activation cost."
+    },
+    {
+      "id": "punish_priority",
+      "ability_id": 14700,
+      "name": "Punish",
+      "enabled": true,
+      "minimum_adrenaline_percent": 0,
+      "effects": [],
+      "source_kind": "policy",
+      "source": "Conservative configurable priority; adrenaline bound is a reserve policy, not an inferred activation cost."
+    }
+  ],
+  "limitations": [
+    "No black-beam, virus or inherited-special prediction is assumed.",
+    "This is an intent policy, not live-validated combat execution.",
+    "P5 observed bindings take precedence; manual bindings are used only when that channel is unavailable.",
+    "No raw adrenaline-unit conversion, EoF stored special, queued ability or stall/release is inferred."
+  ]
+}
