@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "track": "L",
+  "date": "2026-11-14",
+  "status": "in_progress",
+  "source_commits": {
+    "A1": "1dfe8fc",
+    "D6": "a343301",
+    "D8": "48c66fb"
+  },
+  "problem": "A1 converted DeviceFault to a rejected SendResult while latching a private fault; D6 previously treated that result as an ordinary rejection.",
+  "fix": [
+    "Expose optional read-only A1 fault state as None or a latched reason.",
+    "D6 checks backend faults before processing and after each result, closes and stops the remaining batch.",
+    "Keep genuinely accepted input in the audit even if cleanup faults.",
+    "Propagate the resulting DecisionLog fault to the same-frame D8 stop."
+  ],
+  "checks": {
+    "ctest_targets_passed": 15,
+    "python_tests_passed": 300,
+    "python_tests_skipped": 0,
+    "a1_cases": 34,
+    "d6_cases": 25,
+    "d8_cases": 30,
+    "real_a1_and_d6_with_fake_native_device": "passed",
+    "real_d6_and_d8_with_fake_fault_reporting_recorder": "passed",
+    "physical_key_delivery_or_release_tested": false
+  },
+  "automatic_input_enabled": false,
+  "ladder_rung_passed": false,
+  "input_sent": false,
+  "raw_captures_published": false
+}

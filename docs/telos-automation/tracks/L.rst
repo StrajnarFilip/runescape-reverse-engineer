@@ -160,3 +160,11 @@ Requests
   latest-frame rejection. Seven native input groups, 33 A1 cases and all 15
   CTest targets pass (293 Python tests, zero skips). The copy-only microbenchmark
   median was 0.067 ms; this is not game-input latency or a collector benchmark.
+
+* Fault-handoff issue resolved: A1's latched uncertainty no longer looks like
+  an ordinary rejected send to D6. The arbiter closes the backend and stops
+  the remaining batch, and D8 stops in the same frame. Accepted input remains
+  recorded even if cleanup faults. All 15 CTest targets pass (300 Python tests,
+  zero skips), including real A1/D6 and D6/D8 integration against fake devices.
+  ``docs/validation/telos-ladder-fault-handoff-2026-11-14.json`` records scope.
+  Physical key delivery/release and every combat rung remain unvalidated here.
