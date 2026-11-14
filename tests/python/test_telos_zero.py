@@ -87,6 +87,23 @@ class PhaseOneTests(unittest.TestCase):
         phase.observe([event(2, RELEASE)])
         self.assertIsNone(phase.next_action(2 * SECOND_NS, timers, 0, Prayer.MELEE))
 
+    def test_anticipation_ignores_gcd_and_retries_once(self):
+        phase = PhaseOne()
+        phase.observe([event(1, UPPERCUT), event(2, AUTO), event(3, AUTO)])
+        timers = {"Anticipation": 0}
+        now = 3 * SECOND_NS
+        timeout = controller["ACK_TIMEOUT_NS"]
+        action = phase.next_action(now, timers, 1200, Prayer.SOUL_SPLIT, flicking=True)
+        self.assertEqual(action.ability, "Anticipation")
+        phase.sent(action, now)
+        retry = phase.next_action(now + timeout, timers, 1200, Prayer.SOUL_SPLIT, flicking=True)
+        self.assertEqual(phase.cast_result, ("Anticipation", False))
+        self.assertEqual(retry.ability, "Anticipation")
+        phase.sent(retry, now + timeout)
+        self.assertTrue(phase.forecast_handled)
+        later = now + 2 * timeout - 1
+        self.assertIsNone(phase.next_action(later, timers, 0, Prayer.SOUL_SPLIT, flicking=True))
+
     def test_uppercut_escape_uses_received_ticks_once(self):
         phase = PhaseOne()
         phase.observe([dict(event(1, UPPERCUT), received_tick=100)])
@@ -156,6 +173,15 @@ class MeleeFlickerTests(unittest.TestCase):
         flicker.observe([event(2, HOLD_STILL)], 10, 0)
         self.assertIsNone(flicker.observe([event(2, HOLD_STILL)], 11, 0))
         self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 10, 0), Prayer.MELEE)
+
+    def test_tendrils_release_holds_melee_through_unanimated_auto(self):
+        flicker = MeleeFlicker()
+        flicker.observe([event(1, RELEASE)], 20, 0)
+        for tick in (20, 21, 22):
+            self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, tick, 0), Prayer.MELEE)
+        flicker.observe([event(2, AUTO)], 21, 0)
+        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 22, 0), Prayer.MELEE)
+        self.assertEqual(flicker.next_prayer(Prayer.MELEE, 23, 0), Prayer.SOUL_SPLIT)
 
     def test_invalid_tick_falls_back_to_one_tick_duration(self):
         flicker = MeleeFlicker()

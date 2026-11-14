@@ -42,6 +42,7 @@ OPENING_AUTOS = 7
 LOOP_AUTOS = 3
 HOLD_STILL_PREP_AUTOS = 2
 HOLD_STILL_FORECAST_WINDOW_NS = 2_400_000_000
+ANTICIPATION_MAX_ATTEMPTS = 2
 PHASE_COUNT = 4
 FONT_SIXTEENTHS = (3, 2, 1)
 SIXTEENTHS = 16
@@ -66,6 +67,10 @@ TICK_FALLBACK_NS = 600_000_000
 DEFAULT_FLICK_MELEE_KEY = "F3"
 DEFAULT_FLICK_SOUL_SPLIT_KEY = "F4"
 FLICK_EXCLUDED_ANIMATIONS = frozenset({UPPERCUT})
+DEFAULT_FLICK_HOLD_TICKS = 1
+# After the Tendrils release an unanimated melee auto followed at +2 received ticks in both
+# 100% captures (1,470 and 1,076). Melee stays active through that tick.
+FLICK_HOLD_TICKS = {TENDRILS_RELEASE: 3}
 # Uppercut's 2,634 hitmark appeared 7 received ticks after 28938 on 2026-11-14 at 100%.
 # Escape is sent two to three ticks before that hitmark; the server hit deadline is unmeasured.
 UPPERCUT_ESCAPE_TICKS = (4, 5)
@@ -102,6 +107,7 @@ class PhaseOne:
         self.pending = None
         self.handled = set()
         self.forecast_handled = False
+        self.forecast_attempts = 0
         self.cast_result = None
 
     @property
@@ -132,6 +138,7 @@ class PhaseOne:
                 self.special_tick = action.get("received_tick")
                 self.handled.clear()
                 self.forecast_handled = False
+                self.forecast_attempts = 0
                 self.expected = {
                     TENDRILS: UPPERCUT,
                     UPPERCUT: HOLD_STILL,
@@ -201,8 +208,7 @@ class PhaseOne:
             if earliest_ns <= elapsed_ns <= latest_ns and "Surge" in cooldowns:
                 if not cooldowns["Surge"]:
                     return Action("Surge", reason)
-        if gcd_remaining_ms != 0:
-            return None
+        # The client queues an ability pressed during the GCD, so Anticipation does not wait for it.
         if (
             self.expected == HOLD_STILL
             and self.autos == HOLD_STILL_PREP_AUTOS
@@ -214,6 +220,8 @@ class PhaseOne:
             and not self.forecast_handled
         ):
             return Action("Anticipation", "Hold Still forecast after Uppercut")
+        if gcd_remaining_ms != 0:
+            return None
         if (
             active_special
             and self.special == TENDRILS
@@ -236,7 +244,9 @@ class PhaseOne:
         """Wait for the sampled cooldown before treating this command as a cast."""
         self.pending = (action.ability, now + ACK_TIMEOUT_NS)
         if action.ability == "Anticipation":
-            self.forecast_handled = True
+            # An unacknowledged press may be retried while the forecast window is still open.
+            self.forecast_attempts += 1
+            self.forecast_handled = self.forecast_attempts >= ANTICIPATION_MAX_ATTEMPTS
         else:
             self.handled.add(action.ability)
 
@@ -264,8 +274,9 @@ class MeleeFlicker:
     target and no earlier request is still awaiting its overhead acknowledgement.
     """
 
-    def __init__(self, excluded=FLICK_EXCLUDED_ANIMATIONS):
+    def __init__(self, excluded=FLICK_EXCLUDED_ANIMATIONS, hold_ticks=None):
         self.excluded = frozenset(excluded)
+        self.hold_ticks = dict(FLICK_HOLD_TICKS if hold_ticks is None else hold_ticks)
         self.last_event = 0
         self.return_tick = None
         self.return_ns = None
@@ -273,17 +284,31 @@ class MeleeFlicker:
         self.requested = None
 
     def observe(self, actions, tick, now):
-        """Hold melee until the tick after each new non-excluded animation. Return the cue."""
+        """Hold melee for each new non-excluded animation's tick count. Return the latest cue.
+
+        A cue never shortens a longer hold that is already running.
+        """
         trigger = None
         for action in actions:
             if action["event_sequence"] <= self.last_event:
                 continue
             self.last_event = action["event_sequence"]
-            if action["action_sequence"] not in self.excluded:
-                trigger = action
+            sequence = action["action_sequence"]
+            if sequence in self.excluded:
+                continue
+            trigger = action
+            hold = self.hold_ticks.get(sequence, DEFAULT_FLICK_HOLD_TICKS)
+            return_tick = None if tick is None else tick + hold
+            return_ns = now + hold * TICK_FALLBACK_NS
+            if self.return_ns is None or return_ns > self.return_ns:
+                self.return_ns = return_ns
+            if return_tick is not None and (
+                self.return_tick is None or return_tick > self.return_tick
+            ):
+                self.return_tick = return_tick
+            elif return_tick is None:
+                self.return_tick = None
         if trigger is not None:
-            self.return_tick = None if tick is None else tick + 1
-            self.return_ns = now + TICK_FALLBACK_NS
             self.cue_event = trigger["event_sequence"]
         return trigger
 
