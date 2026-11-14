@@ -1021,10 +1021,11 @@ def run(reader, args, board, attempt=None):
         timers = {
             name: value for name, value in cooldowns(reader, bindings).items() if name in bindings
         }
+        gcd_remaining_ms = player.gcd_remaining_ms if player.gcd_reason == Reason.NONE else None
         action = phase_one.next_action(
             now,
             timers,
-            player.gcd_remaining_ms if player.gcd_reason == Reason.NONE else None,
+            gcd_remaining_ms,
             prayer,
             received_tick=received_tick,
             timed_freedom=timed_freedom,
@@ -1057,6 +1058,9 @@ def run(reader, args, board, attempt=None):
                     ability=action.ability,
                     reason=action.reason,
                     cue_native_sequence=pending_cue,
+                    # Shows whether a Revolution GCD could delay this press past its target tick.
+                    gcd_remaining_ms=gcd_remaining_ms,
+                    received_tick=received_tick,
                 )
             board.tap(bindings[action.ability], KEY_HOLD_SECONDS, check_focus, time.sleep)
             sent_ns = reader.monotonic_ns()
