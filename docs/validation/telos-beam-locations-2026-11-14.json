@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "client_version": "6ada3f59-1a86000",
+  "practice_enrage": 500,
+  "attempt_log": "training-data/telos-20261114T134849.728786Z.jsonl",
+  "source": "Read-only location probe matched against rendered beam frames",
+  "location_tile_fields": ["config_id", "x", "y", "plane"],
+  "tick_alignment": "Align probe samples with the attempt by native sample time. The counters can diverge after a gap.",
+  "limits": "The snapshots show scene objects along the rendered beams. Server occupancy, red beam IDs, and virus cleansing are pending.",
+  "frames": [
+    {
+      "label": "before_green",
+      "probe_received_tick": 8404,
+      "sample_ns": 23978016167000,
+      "stage_meter_raw": 0,
+      "telos_tile": [13395, 3219, 0],
+      "location_tiles": []
+    },
+    {
+      "label": "green_first_observed",
+      "probe_received_tick": 8405,
+      "sample_ns": 23978596069100,
+      "stage_meter_raw": 3,
+      "telos_tile": [13395, 3219, 0],
+      "location_tiles": [[103546, 13397, 3222, 0], [103546, 13397, 3223, 0], [103545, 13397, 3224, 0], [103546, 13397, 3225, 0], [103546, 13397, 3226, 0], [103546, 13397, 3227, 0], [103545, 13397, 3228, 0], [103546, 13397, 3229, 0], [103546, 13397, 3230, 0], [103546, 13397, 3231, 0], [103546, 13397, 3232, 0], [103546, 13397, 3233, 0]]
+    },
+    {
+      "label": "green_last_observed",
+      "probe_received_tick": 8424,
+      "sample_ns": 23990029691300,
+      "stage_meter_raw": 60,
+      "telos_tile": [13395, 3210, 0],
+      "location_tiles": [[103545, 13397, 3215, 0], [103546, 13397, 3216, 0], [103546, 13397, 3217, 0], [103545, 13397, 3218, 0], [103545, 13397, 3219, 0], [103546, 13397, 3220, 0], [103546, 13397, 3221, 0], [103546, 13397, 3222, 0], [103546, 13397, 3223, 0], [103545, 13397, 3224, 0], [103546, 13397, 3225, 0], [103546, 13397, 3226, 0], [103546, 13397, 3227, 0], [103545, 13397, 3228, 0], [103546, 13397, 3229, 0], [103546, 13397, 3230, 0], [103546, 13397, 3231, 0], [103546, 13397, 3232, 0], [103546, 13397, 3233, 0]]
+    },
+    {
+      "label": "after_green",
+      "probe_received_tick": 8425,
+      "sample_ns": 23990610786000,
+      "stage_meter_raw": 60,
+      "telos_tile": [13395, 3210, 0],
+      "location_tiles": []
+    },
+    {
+      "label": "before_black",
+      "probe_received_tick": 8471,
+      "sample_ns": 24018209330200,
+      "stage_meter_raw": 2097158,
+      "telos_tile": [13461, 3221, 0],
+      "location_tiles": []
+    },
+    {
+      "label": "unstable_black_handoff",
+      "probe_received_tick": 8472,
+      "sample_ns": 24018789750000,
+      "stage_meter_raw": 2097163,
+      "telos_tile": [13461, 3221, 0],
+      "location_tiles": null
+    },
+    {
+      "label": "black_first_observed",
+      "probe_received_tick": 8473,
+      "sample_ns": 24019423179300,
+      "stage_meter_raw": 2097168,
+      "telos_tile": [13461, 3221, 0],
+      "location_tiles": [[103548, 13463, 3226, 0], [103547, 13463, 3227, 0], [103547, 13463, 3228, 0], [103548, 13463, 3229, 0], [103548, 13463, 3230, 0], [103547, 13463, 3231, 0], [103547, 13463, 3232, 0], [103548, 13463, 3233, 0]]
+    },
+    {
+      "label": "black_full_strip",
+      "probe_received_tick": 8477,
+      "sample_ns": 24021806581100,
+      "stage_meter_raw": 2097182,
+      "telos_tile": [13460, 3220, 0],
+      "location_tiles": [[103548, 13463, 3224, 0], [103548, 13463, 3225, 0], [103548, 13463, 3226, 0], [103547, 13463, 3227, 0], [103547, 13463, 3228, 0], [103548, 13463, 3229, 0], [103548, 13463, 3230, 0], [103547, 13463, 3231, 0], [103547, 13463, 3232, 0], [103548, 13463, 3233, 0]]
+    },
+    {
+      "label": "black_relocated",
+      "probe_received_tick": 8507,
+      "sample_ns": 24039886988500,
+      "stage_meter_raw": 2097229,
+      "telos_tile": [13459, 3219, 0],
+      "location_tiles": [[103547, 13461, 3224, 0], [103547, 13461, 3225, 0], [103547, 13461, 3226, 0], [103547, 13461, 3227, 0], [103547, 13461, 3228, 0], [103547, 13461, 3229, 0], [103548, 13461, 3230, 0], [103547, 13461, 3231, 0], [103548, 13461, 3232, 0], [103548, 13461, 3233, 0]]
+    },
+    {
+      "label": "return_to_staging",
+      "probe_received_tick": 8510,
+      "sample_ns": 24041844648800,
+      "stage_meter_raw": 2097225,
+      "telos_tile": [3795, 7059, 0],
+      "location_tiles": []
+    }
+  ]
+}
