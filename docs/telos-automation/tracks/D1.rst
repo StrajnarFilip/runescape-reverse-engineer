@@ -1,7 +1,7 @@
 D1 - Encounter tracker
 ======================
 
-:Status: done
+:Status: in progress
 :Wave: 1
 :Branch: ``telos/D1``
 :Kind: Python
