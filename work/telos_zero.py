@@ -6,8 +6,10 @@ import argparse
 import json
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
+from rs3_reader.bot.attempt_log import AttemptLog
 from rs3_reader.native import (
     PRAYER_POINTS_MASK,
     AbilityFlags,
@@ -71,10 +73,12 @@ class PhaseOne:
     def __init__(self):
         self.autos = 0
         self.last_auto_ns = None
+        self.last_auto_event = None
         self.opening = True
         self.expected = TENDRILS
         self.special = None
         self.special_ns = 0
+        self.special_event = None
         self.last_event = 0
         self.pending = None
         self.handled = set()
@@ -96,6 +100,7 @@ class PhaseOne:
             if sequence == MELEE_AUTO_SEQUENCE:
                 self.autos += 1
                 self.last_auto_ns = action["observed_ns"]
+                self.last_auto_event = action["event_sequence"]
             elif sequence == TENDRILS_RELEASE and self.special == TENDRILS:
                 self.autos += 1
                 self.special = None
@@ -104,6 +109,7 @@ class PhaseOne:
                 self.autos = 0
                 self.special = sequence
                 self.special_ns = action["observed_ns"]
+                self.special_event = action["event_sequence"]
                 self.handled.clear()
                 self.forecast_handled = False
                 self.expected = {
@@ -115,14 +121,12 @@ class PhaseOne:
     def next_action(self, now, cooldowns, gcd_remaining_ms, prayer):
         """Use cooldown acknowledgement and bound the number of attempts for each mechanic."""
         if self.pending:
-            ability, deadline = self.pending
-            if (cooldowns.get(ability) or 0) > 0:
-                self.cast_result = (ability, True)
-                self.pending = None
-            elif now >= deadline or (self.special == HOLD_STILL and ability == "Anticipation"):
-                self.cast_result = (ability, False)
-                self.pending = None
-            else:
+            self.cast_result = self.acknowledge(
+                cooldowns,
+                now,
+                ending=self.special == HOLD_STILL and self.pending[0] == "Anticipation",
+            )
+            if self.cast_result is None:
                 return None
 
         elapsed_ns = now - self.special_ns
@@ -171,6 +175,22 @@ class PhaseOne:
             self.forecast_handled = True
         else:
             self.handled.add(action.ability)
+
+    def acknowledge(self, timers, now, *, ending=False):
+        """Settle an outstanding cooldown when input ends or the phase changes."""
+        if self.pending is None:
+            return None
+        ability, deadline = self.pending
+        if (timers.get(ability) or 0) > 0:
+            observed = True
+        elif now >= deadline:
+            observed = False
+        elif ending:
+            observed = False if self.special == HOLD_STILL and ability == "Anticipation" else None
+        else:
+            return None
+        self.pending = None
+        return ability, observed
 
 
 def log(event, **fields):
@@ -305,20 +325,32 @@ def replay(path):
             )
 
 
-def observe(reader, duration):
+def observe(reader, duration, attempt=None):
     """Record post-transition cues without foreground focus or Arduino input."""
     deadline = time.monotonic() + duration
     last_state = None
     last_status = None
+    active_seen = attempt is not None and attempt.engaged
     while time.monotonic() < deadline:
         info, player, boss, phase, hp = boss_sample(reader)
         session = (info.pid, info.process_creation_time, reader.combat.scene_epoch)
         events, lost = reader.drain_npc_action_events()
         hits, hits_lost = reader.drain_player_hit_events()
+        if attempt:
+            attempt.frame(
+                reader,
+                info,
+                phase=phase,
+                actions=events,
+                action_loss=lost,
+                hits=hits,
+                hit_loss=hits_lost,
+            )
         if info.status != last_status:
             log("reader_status", status=info.status, reason=info.message.decode(errors="replace"))
             last_status = info.status
         if boss is not None:
+            active_seen |= boss.config_id == ACTIVE_TELOS
             actions = telos_actions(events, session, info.sequence, {boss.instance_id})
             tile = reader.position
             # Later phases add actors. Preserve their provenance until their roles are verified.
@@ -362,14 +394,24 @@ def observe(reader, duration):
         elif last_state is not None:
             log("telos_absent", session=session, sample_ns=info.monotonic_ns)
             last_state = None
+        if attempt and active_seen:
+            if hp == 0:
+                return "player_hp_zero"
+            if (
+                info.status in (Status.AVAILABLE, Status.PARTIAL)
+                and info.reason != Reason.READ_FAILED
+            ):
+                if boss is None or boss.config_id == DORMANT_TELOS:
+                    return "telos_disappeared"
         time.sleep(POLL_SECONDS)
-    return 0
+    return "time_limit" if attempt else 0
 
 
-def run(reader, args, board):
+def run(reader, args, board, attempt=None):
     """Track an attached practice encounter and dispatch only from fresh native state."""
     from game_console import GameWindow, frame_target, move_pointer
 
+    emit = attempt.write if attempt else log
     keys = ManualPrayerKeys()
     phase_one = PhaseOne()
     initial, _, _, _, _ = boss_sample(reader)
@@ -454,14 +496,28 @@ def run(reader, args, board):
     next_approach = 0
     previous_tile = None
     previous_prayer = None
+    pending_cue = None
     surge_origin = None
     surge_sent_ns = None
+    surge_cue = None
     phase_two_at = None
     reacquire_at = None
     reacquire_hp = None
     while time.monotonic() < deadline:
         check_focus()
         info, player, boss, phase, hp = boss_sample(reader)
+        events, lost = reader.drain_npc_action_events()
+        hits, hits_lost = reader.drain_player_hit_events()
+        if attempt:
+            attempt.frame(
+                reader,
+                info,
+                phase=phase,
+                actions=events,
+                action_loss=lost,
+                hits=hits,
+                hit_loss=hits_lost,
+            )
         if (info.pid, info.process_creation_time, reader.combat.scene_epoch) != identity:
             raise RuntimeError("Client session changed")
         now = reader.monotonic_ns()
@@ -472,11 +528,9 @@ def run(reader, args, board):
         ):
             raise RuntimeError("Native sample is unavailable or stale")
         if hp is None or hp <= 0:
-            raise RuntimeError("Player HP is unavailable or zero")
-        events, lost = reader.drain_npc_action_events()
-        hits, hits_lost = reader.drain_player_hit_events()
-        if lost:
-            raise RuntimeError("NPC action queue overflow")
+            raise RuntimeError("Player HP reached zero" if hp == 0 else "Player HP unavailable")
+        if lost or hits_lost:
+            raise RuntimeError("Combat event queue overflow")
         prayer = Prayer(reader.active_prayer())
         prayer_raw = player.variable(Variable.PRAYER_PACKED)
         if not initiated and boss is not None and boss.config_id == ACTIVE_TELOS:
@@ -489,7 +543,7 @@ def run(reader, args, board):
                     if next_prayer_check:
                         raise RuntimeError("Deflect Melee did not activate on the configured slot")
                     click_frame(args.melee, boss.instance_id)
-                    log("baseline_prayer_requested", prayer="melee")
+                    emit("baseline_prayer_requested", prayer="melee")
                     next_prayer_check = reader.monotonic_ns() + ACK_TIMEOUT_NS
                 time.sleep(POLL_SECONDS)
                 continue
@@ -497,10 +551,12 @@ def run(reader, args, board):
             if active_instance is not None:
                 raise RuntimeError("Active Telos disappeared")
             if not initiated and boss is not None and boss.config_id == DORMANT_TELOS:
+                if attempt and next_prayer_check:
+                    attempt.write("baseline_prayer_acknowledged", prayer="melee")
                 click_frame(args.approach, boss.instance_id, require_melee=True)
                 initiated = True
                 next_approach = reader.monotonic_ns() + APPROACH_TIMEOUT_NS
-                log("approach", overhead=prayer.name.lower())
+                emit("approach", overhead=prayer.name.lower())
             if initiated and next_approach and now >= next_approach:
                 raise RuntimeError("Approach did not wake Telos within the expected interval")
             time.sleep(POLL_SECONDS)
@@ -518,7 +574,7 @@ def run(reader, args, board):
             raise RuntimeError(f"Expected 400,000 maximum Telos HP, observed {boss.health_max}")
         if not phase_one_started:
             if phase == 1 and hp_known:
-                log("engaged", boss_hp=boss.health_current, phase=phase, player_hp=hp)
+                emit("engaged", boss_hp=boss.health_current, phase=phase, player_hp=hp)
                 phase_one_started = True
             elif now - engaged_at >= ENGAGE_TIMEOUT_NS:
                 raise RuntimeError(
@@ -536,17 +592,38 @@ def run(reader, args, board):
                 or encounter_checkpoint(phase, npc_health_record(boss)) is None
             ):
                 raise RuntimeError("Unexpected phase 3 checkpoint")
-            log("phase_three_observed", boss_hp=boss.health_current, player_hp=hp)
+            emit("phase_three_observed", boss_hp=boss.health_current, player_hp=hp)
+            if attempt and phase_one.pending:
+                ability, confirmed = phase_one.acknowledge(cooldowns(reader), now, ending=True)
+                attempt.write(
+                    "cooldown_acknowledgement",
+                    ability=ability,
+                    observed=confirmed,
+                    reason="input_ended",
+                    cue_native_sequence=pending_cue,
+                )
             if args.observe_transition:
                 board.close()
-                observe(reader, max(0, deadline - time.monotonic()))
+                reason = observe(reader, max(0, deadline - time.monotonic()), attempt)
+                if attempt:
+                    attempt.end_reason = reason
             return 2
         if phase == 2:
             if encounter_checkpoint(phase, npc_health_record(boss)) is None:
                 raise RuntimeError("Phase 2 bits disagree with the observed boss HP")
             first_phase_two_sample = phase_two_at is None
             if first_phase_two_sample:
-                log("phase_two_observed", boss_hp=boss.health_current, phase=phase, player_hp=hp)
+                emit("phase_two_observed", boss_hp=boss.health_current, phase=phase, player_hp=hp)
+                if attempt and phase_one.pending:
+                    ability, confirmed = phase_one.acknowledge(cooldowns(reader), now, ending=True)
+                    attempt.write(
+                        "cooldown_acknowledgement",
+                        ability=ability,
+                        observed=confirmed,
+                        reason="phase_changed",
+                        cue_native_sequence=pending_cue,
+                    )
+                    pending_cue = None
                 phase_two_at = now
                 if args.continue_phase_two:
                     # No P1 forecast or pending input is evidence in the new arena.
@@ -570,7 +647,7 @@ def run(reader, args, board):
                 if reacquire_at is not None:
                     damage_seen = boss.health_current < reacquire_hp
                     if damage_seen or now - reacquire_at >= REACQUIRE_TIMEOUT_NS:
-                        log(
+                        emit(
                             "phase_two_reacquire_result",
                             boss_hp=boss.health_current,
                             damage_observed=damage_seen,
@@ -579,7 +656,7 @@ def run(reader, args, board):
                         time.sleep(POLL_SECONDS)
                         continue
                 elif boss.health_current < PHASE_TWO_HP:
-                    log("phase_two_reacquire_skipped", reason="Boss HP already decreased")
+                    emit("phase_two_reacquire_skipped", reason="Boss HP already decreased")
                 elif phase_two_melee_cue(actions, prayer.name.lower()):
                     if reader.monotonic_ns() - info.monotonic_ns > MAX_SAMPLE_AGE_NS:
                         raise RuntimeError("Native sample aged out before target cycling")
@@ -587,21 +664,23 @@ def run(reader, args, board):
                     board.tap(bindings["Opening Attack"], KEY_HOLD_SECONDS, check_focus, time.sleep)
                     reacquire_at = reader.monotonic_ns()
                     reacquire_hp = boss.health_current
-                    log("phase_two_reacquire_sent", boss_hp=reacquire_hp)
+                    emit("phase_two_reacquire_sent", boss_hp=reacquire_hp)
                     time.sleep(POLL_SECONDS)
                     continue
                 elif now - phase_two_at < REACQUIRE_CUE_TIMEOUT_NS:
                     time.sleep(POLL_SECONDS)
                     continue
                 else:
-                    log(
+                    emit(
                         "phase_two_reacquire_skipped",
                         reason="No fresh melee cue with Deflect Melee",
                     )
             if not args.continue_phase_two:
                 if args.observe_transition:
                     board.close()
-                    observe(reader, max(0, deadline - time.monotonic()))
+                    reason = observe(reader, max(0, deadline - time.monotonic()), attempt)
+                    if attempt:
+                        attempt.end_reason = reason
                 return 2
         phase_boundary = PHASE_TWO_HP if phase == 1 else PHASE_THREE_HP
         if boss.health_current <= phase_boundary:
@@ -615,12 +694,12 @@ def run(reader, args, board):
         if surge_sent_ns is not None:
             displaced = tile is not None and tile != surge_origin
             if displaced or now - surge_sent_ns >= ACK_TIMEOUT_NS:
-                log(
+                emit(
                     "surge_displacement",
                     origin=surge_origin,
                     tile=tile,
                     observed=displaced,
-                    sample_ns=now,
+                    **({"cue_native_sequence": surge_cue} if attempt else {"sample_ns": now}),
                 )
                 surge_sent_ns = None
         if actions or hits or hits_lost or tile != previous_tile or prayer != previous_prayer:
@@ -650,7 +729,15 @@ def run(reader, args, board):
         )
         if phase_one.cast_result:
             ability, confirmed = phase_one.cast_result
+            if attempt:
+                attempt.write(
+                    "cooldown_acknowledgement",
+                    ability=ability,
+                    observed=confirmed,
+                    cue_native_sequence=pending_cue,
+                )
             log("cooldown_acknowledgement", ability=ability, observed=confirmed, sample_ns=now)
+            pending_cue = None
             phase_one.cast_result = None
         if action:
             if action.ability == "Surge" and tile is None:
@@ -658,15 +745,36 @@ def run(reader, args, board):
                 continue
             if reader.monotonic_ns() - info.monotonic_ns > MAX_SAMPLE_AGE_NS:
                 raise RuntimeError("Native sample aged out before submitting the action")
+            pending_cue = (
+                phase_one.last_auto_event
+                if action.ability == "Anticipation"
+                else phase_one.special_event
+            )
+            if attempt:
+                attempt.write(
+                    "ability_requested",
+                    ability=action.ability,
+                    reason=action.reason,
+                    cue_native_sequence=pending_cue,
+                )
             board.tap(bindings[action.ability], KEY_HOLD_SECONDS, check_focus, time.sleep)
             sent_ns = reader.monotonic_ns()
             phase_one.sent(action, sent_ns)
+            if attempt:
+                attempt.write(
+                    "ability_sent",
+                    ability=action.ability,
+                    reason=action.reason,
+                    sent_ns=attempt.relative_ns(sent_ns),
+                    cue_native_sequence=pending_cue,
+                )
             if action.ability == "Surge":
                 surge_origin = tile
                 surge_sent_ns = sent_ns
+                surge_cue = pending_cue
             log("ability_sent", ability=action.ability, reason=action.reason, sent_ns=sent_ns)
         time.sleep(POLL_SECONDS)
-    log("timeout", active=active_instance is not None)
+    emit("timeout", active=active_instance is not None)
     return 1
 
 
@@ -677,6 +785,7 @@ def main():
     parser.add_argument("--duration", type=int, default=MAX_PRACTICE_SECONDS)
     parser.add_argument("--port", help="Arduino COM port. Omit for observation only.")
     parser.add_argument("--replay", type=Path, help="Read a local Telos observation JSONL capture")
+    parser.add_argument("--record-attempt", action="store_true", help="Write under training-data/")
     parser.add_argument("--frame", type=Path, help="Fresh game_console.py screenshot")
     parser.add_argument(
         "--approach", type=int, nargs=2, help="Arena floor pixel near dormant Telos"
@@ -706,6 +815,8 @@ def main():
     args = parser.parse_args()
     if args.replay and args.port:
         parser.error("Replay does not open the Arduino")
+    if args.replay and args.record_attempt:
+        parser.error("An attempt log requires a live session")
     if args.continue_phase_two and args.reacquire:
         parser.error("Choose either phase 2 defenses or the one-shot target cycle trial")
     if not 0 < args.duration <= MAX_PRACTICE_SECONDS:
@@ -714,22 +825,57 @@ def main():
         parser.error(
             "Arduino input requires --practice-0-confirmed, --frame, --melee and --approach"
         )
-    board = None
+    board = stream = attempt = None
+    end_reason = "error"
+    outcome = "incomplete"
     try:
         if args.replay:
             replay(args.replay)
             return 0
         with Reader(pid=args.pid, worker_hz=0) as reader:
+            if args.port or args.record_attempt:
+                directory = Path(__file__).resolve().parents[1] / "training-data"
+                directory.mkdir(exist_ok=True)
+                date = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+                path = directory / f"telos-{date}.jsonl"
+                stream = path.open("x", encoding="utf-8", newline="\n")
+                attempt = AttemptLog(
+                    stream,
+                    mode="practice" if args.port else "observation",
+                    enrage=0 if args.practice_0_confirmed else None,
+                    monotonic_ns=reader.monotonic_ns,
+                )
+                print(f"Attempt log {path}", flush=True)
             if not args.port:
-                return observe(reader, args.duration)
-            board = ArduinoBackend(args.port)
-            return run(reader, args, board)
+                observed_end = observe(reader, args.duration, attempt)
+                end_reason = observed_end if attempt else "observation_ended"
+                result = 0
+            else:
+                board = ArduinoBackend(args.port)
+                result = run(reader, args, board, attempt)
+                end_reason = attempt.end_reason or ("phase_limit" if result == 2 else "time_limit")
+            return result
+    except KeyboardInterrupt:
+        end_reason = "interrupted"
+        return 130
     except (OSError, RuntimeError, ValueError) as error:
         log("stopped", reason=str(error))
+        if attempt:
+            if attempt.engaged and attempt.previous.get("hp") == 0:
+                end_reason = "player_hp_zero"
+            attempt.write("stopped", reason=str(error))
         return 1
     finally:
-        if board:
-            board.close()
+        try:
+            if board:
+                board.close()
+        finally:
+            if stream:
+                with stream:
+                    if attempt:
+                        if attempt.engaged and attempt.previous.get("hp") == 0:
+                            outcome = "player_hp_zero"
+                        attempt.write("attempt_ended", result=outcome, reason=end_reason)
 
 
 if __name__ == "__main__":

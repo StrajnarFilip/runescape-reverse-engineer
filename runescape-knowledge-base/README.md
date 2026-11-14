@@ -5,6 +5,7 @@ The current milestone is a verified 0% melee Telos kill. Start in Practice Mode 
 - [Getting to Telos](bosses/telos/access.md)
 - [0% encounter playbook](bosses/telos/zero-enrage.md)
 - [Telos animation cues and practice controller](bosses/telos/animation-cues.md)
+- [Mechanic coverage and required observations](bosses/telos/mechanic-coverage.md)
 - [Melee preparation and encounter controls](combat/melee-preparation.md)
 - [Soul Split and protection calibration](combat/prayer-calibration.md)
 - [Enrage progression](bosses/telos/enrage-progression.md)

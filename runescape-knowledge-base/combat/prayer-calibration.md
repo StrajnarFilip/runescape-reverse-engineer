@@ -10,3 +10,5 @@ python -m rs3_reader.telos_prayer --shadow-trial --enrage 0 --duration 300 --out
 ```
 
 Record the visual phase and expected attack alongside the trace. Compare ordinary attacks and multi-hit specials separately. A hitmark lacks attacker identity, and a client overhead acknowledgement does not identify the server's protection deadline. Require repeatable results, zero event losses, and enough coverage to justify returning to Soul Split. Keep the trace local. [Planner and prior calibration](../../docs/prayer-flick.rst)
+
+**Observed on 2026-11-14, 0% P2.** Both practice attempts entered P2 with Deflect Melee, sent Freedom for `28935`, and observed no cooldown acknowledgement. The overhead read `none` at 6,601 and 8,328 HP respectively, with 873.4 prayer points in both attempts. The traces preserve the overhead transitions and subsequent hitmarks. The cause of the overhead loss and the protection deadline remain open. [First attempt](../../training-data/telos-20261114T075101.613778Z.jsonl) · [Second attempt](../../training-data/telos-20261114T075957.862524Z.jsonl)

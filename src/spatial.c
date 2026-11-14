@@ -26,6 +26,9 @@
 #define DEGREES_PER_RADIAN         57.29577951308232
 #define MIN_CLIP_W                 0.0001
 #define POSITION_GETTER_RVA        0x6ee1f0u
+#define COMPAT_POSITION_GETTER_RVA 0x6ee110u
+#define COMPAT_ACTOR_WORLD_RVA     0x38523u
+#define ACTOR_POSITION_VTABLE_SLOT 0xb0u
 #define FACING_GETTER_RVA          0x44b690u
 #define PROJECTION_INSTRUCTION_RVA 0x5a34eu
 
@@ -58,6 +61,32 @@ static int spatial_layout_verified(rs3_context *context)
            memcmp(bytes, projection_instruction, sizeof projection_instruction) == 0;
 }
 
+/** Compatibility Mode shares the tile and world-owner fields across player and NPC actors. */
+static int compatibility_tiles_verified(rs3_context *context)
+{
+    const client_profile *profile = context->target.profile;
+    if (profile != &profile_compatibility)
+    {
+        return 0;
+    }
+    static const unsigned char position_getter[] = {0x48, 0x8d, 0x81, 0x80, 0x02, 0, 0, 0xc3};
+    static const unsigned char world_owner[] = {0x49, 0x8b, 0x40, 0x08, 0x48, 0x89, 0x41, 0x60};
+    unsigned char bytes[sizeof position_getter];
+    uint64_t base = context->target.module_base;
+    uint64_t player_getter, npc_getter;
+    return memory_read(context, base + COMPAT_POSITION_GETTER_RVA, bytes, sizeof bytes) &&
+           memcmp(bytes, position_getter, sizeof bytes) == 0 &&
+           memory_read(context, base + COMPAT_ACTOR_WORLD_RVA, bytes, sizeof bytes) &&
+           memcmp(bytes, world_owner, sizeof bytes) == 0 &&
+           memory_read_pointer(context,
+                               base + profile->player_actor_vtable_rva + ACTOR_POSITION_VTABLE_SLOT,
+                               &player_getter) &&
+           memory_read_pointer(context,
+                               base + profile->npc_entity_vtable_rva + ACTOR_POSITION_VTABLE_SLOT,
+                               &npc_getter) &&
+           player_getter == base + COMPAT_POSITION_GETTER_RVA && npc_getter == player_getter;
+}
+
 int spatial_decode_actor(rs3_context *context, uint64_t actor, uint32_t vtable_rva,
                          uint32_t runtime_id, rs3_actor_spatial *out)
 {
@@ -80,8 +109,8 @@ int spatial_decode_actor(rs3_context *context, uint64_t actor, uint32_t vtable_r
         return 0;
     }
     const uint32_t offsets[] = {ACTOR_PLANE_OFFSET, ACTOR_SIZE_OFFSET, ACTOR_FINE_OFFSET,
-                                ACTOR_QUATERNION_OFFSET, ACTOR_WORLD_OFFSET};
-    const uint32_t lengths[] = {4, 4, 12, 16, 8};
+                                ACTOR_WORLD_OFFSET};
+    const uint32_t lengths[] = {4, 4, 12, 8};
     for (unsigned index = 0; index < sizeof offsets / sizeof offsets[0]; index++)
     {
         if (memcmp(before + offsets[index], after + offsets[index], lengths[index]) != 0)
@@ -109,11 +138,18 @@ int spatial_decode_actor(rs3_context *context, uint64_t actor, uint32_t vtable_r
             out->tile_reason = RS3_REASON_NONE;
         }
     }
+    if (context->target.profile == &profile_compatibility)
+    {
+        out->facing_reason = RS3_SPATIAL_UNMAPPED;
+        out->observed_ns = clock_monotonic_ns();
+        return out->valid_mask != 0;
+    }
     float q[4];
     memcpy(q, before + ACTOR_QUATERNION_OFFSET, sizeof q);
     double norm =
         (double)q[0] * q[0] + (double)q[1] * q[1] + (double)q[2] * q[2] + (double)q[3] * q[3];
-    if (isfinite(norm) && fabs(norm - 1.0) <= QUATERNION_NORM_TOLERANCE)
+    if (memcmp(before + ACTOR_QUATERNION_OFFSET, after + ACTOR_QUATERNION_OFFSET, sizeof q) == 0 &&
+        isfinite(norm) && fabs(norm - 1.0) <= QUATERNION_NORM_TOLERANCE)
     {
         double yaw =
             atan2(2.0 * (q[0] * q[2] + q[3] * q[1]), 1.0 - 2.0 * (q[0] * q[0] + q[1] * q[1])) *
@@ -238,7 +274,8 @@ void spatial_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_
     info->reason = RS3_UNSUPPORTED_CLIENT;
     info->player.target_reason = RS3_SPATIAL_UNMAPPED;
     info->camera.reason = RS3_UNSUPPORTED_CLIENT;
-    if (!spatial_layout_verified(context))
+    int full_layout = spatial_layout_verified(context);
+    if (!full_layout && !compatibility_tiles_verified(context))
     {
         return;
     }
@@ -258,8 +295,11 @@ void spatial_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_
             {
                 info->player.valid_mask |= RS3_SPATIAL_SAME_WORLD;
             }
-            read_camera(context, world_state, actor, &info->camera);
-            info->camera.plane = info->player.tile.plane;
+            if (full_layout)
+            {
+                read_camera(context, world_state, actor, &info->camera);
+                info->camera.plane = info->player.tile.plane;
+            }
         }
     }
     info->npc_count = snapshot->info.npc_count;

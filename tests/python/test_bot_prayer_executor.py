@@ -1,8 +1,8 @@
 """D2 uses synthetic measured windows; real current metadata never authorizes input."""
 
+import hashlib
 import io
 import json
-import hashlib
 import os
 import unittest
 from pathlib import Path
@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from rs3_reader.bot.prayer_executor import (
     NativePrayerPlanner,
     PrayerExecutor,
+    PythonPrayerPlanner,
     derive_validation_bands,
 )
 from rs3_reader.bot.replay import replay
@@ -278,6 +279,12 @@ class PrayerExecutorTests(unittest.TestCase):
             self.skipTest("Build the native DLL for this adapter check")
         planner = NativePrayerPlanner(settings(), str(library))
         self.addCleanup(planner.close)
+        self.check_protection_then_soul_split(planner)
+
+    def test_python_planner_protects_then_returns_to_soul_split_with_ack(self):
+        self.check_protection_then_soul_split(PythonPrayerPlanner(settings()))
+
+    def check_protection_then_soul_split(self, planner):
         executor = self.executor(planner=planner)
         first = world()
         proposal = executor.step(first, encounter(first))[0]
@@ -288,7 +295,9 @@ class PrayerExecutorTests(unittest.TestCase):
         self.assertTrue(executor.last_report.waiting_ack)
         third = world(1380, 3, active="melee")
         self.assertEqual(executor.step(third, encounter(third)), ())
-        fourth = world(1601, 4, active="melee")
+        inside_hold = world(1600, 4, active="melee")
+        self.assertEqual(executor.step(inside_hold, encounter(inside_hold)), ())
+        fourth = world(1601, 5, active="melee")
         self.assertEqual(
             executor.step(fourth, encounter(fourth, threats=False))[0].action.prayer, "soul_split"
         )

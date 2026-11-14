@@ -42,3 +42,8 @@
 - Entered `0` at the second Roots prompt and crossed onto the arena. Used one Super restore dose before engagement to restore prayer points. No food or brews were used.
 - The controller activated Deflect Melee and woke Telos at 400,000 HP. Auto-retaliate and Revolution dealt damage. Freedom was acknowledged by its cooldown during Hold Still. Hurricane and Anticipation inputs had no observed cooldown acknowledgement.
 - Entered P2 at 300,000 boss HP and 3,412 player HP. Read-only observation continued while Revolution brought Telos to 271,753 HP. The last sample had 2,493 player HP and no active overhead. No full kill was recorded.
+
+## 2026-11-14 0% Practice Mode attempts
+
+- Entered P2 at 300,000 boss HP and 7,771 player HP with Deflect Melee active. The controller sent Anticipation from its P1 forecast and Freedom for `28935` in P2. Freedom had no cooldown acknowledgement. Input stopped at P3 with 2,511 player HP. Observation continued to zero player HP at 159,715 boss HP. The client showed the Defence cape save and returned the character to staging. [First attempt](../../../training-data/telos-20261114T075101.613778Z.jsonl)
+- The updated DLL published enrage 0 and native phases 1 and 2. Compatibility Mode reported same-world actor tiles during both phases. The character entered P2 at 8,294 HP. Anticipation and Freedom produced no cooldown acknowledgement. Player HP reached zero at 206,503 boss HP. Both logs show zero NPC animation or player hitmark queue losses. [Second attempt](../../../training-data/telos-20261114T075957.862524Z.jsonl)

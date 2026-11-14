@@ -1,8 +1,7 @@
-"""D2 gated adapter to the existing C prayer planner; proposes, never sends.
+"""D2 deterministic prayer rules; proposes, never sends.
 
-Import and construction do not open a DLL. The native adapter is loaded only
-for an explicitly calibrated band or direct test construction. P6 supplies
-validation, D1 supplies pending threats/coverage, and D6 reports accepted input.
+P6 supplies validation, D1 supplies pending threats/coverage, and D6 reports
+accepted input. The native adapter remains available for parity checks.
 Unknown scope or timing produces no toggle, including no Soul Split toggle.
 """
 
@@ -10,9 +9,9 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Optional
 
 from .intents import ActionLane, Evidence, Intent, Priority, SetPrayer
 from .world_state import Observation, WorldState, freeze
@@ -27,6 +26,7 @@ RAW_PRAYER_UNITS_PER_DISPLAY_POINT = (
 PRAYERS = {"none": 1, "melee": 2, "magic": 3, "ranged": 4, "soul_split": 5, "necromancy": 6}
 PRAYER_NAMES = {value: key for key, value in PRAYERS.items()}
 ACTION_SET, ACTION_WAIT_ACK, ACTION_FAULT = 2, 3, 4
+ACTION_BLOCKED, ACTION_HOLD = 0, 1
 CONNECTED, ACTIVE_KNOWN, POINTS_KNOWN, COVERAGE_KNOWN = 1, 2, 4, 8
 
 
@@ -156,16 +156,166 @@ class NativePrayerPlanner:
         self.planner.close()
 
 
+class PythonPrayerPlanner:
+    """Prioritize measured protection windows over Soul Split and confirm every switch."""
+
+    def __init__(self, settings):
+        self.idle = PRAYERS[settings["idle_prayer"]]
+        timing = settings["timing"]
+        self.lead = timing["lead_ms"] * NS_PER_MS
+        self.hold = timing["hold_ms"] * NS_PER_MS
+        self.min_idle = timing["min_idle_ms"] * NS_PER_MS
+        self.ack_timeout = timing["ack_timeout_ms"] * NS_PER_MS
+        self.max_age = timing["max_age_ms"] * NS_PER_MS
+        self.command_id = 0
+        self.reset()
+
+    def reset(self):
+        """Clear proposed and pending inputs while retaining unique command IDs."""
+        self.offer = self.pending = self.fault = None
+
+    def close(self):
+        self.reset()
+
+    def note_sent(self, command_id, sent_ns):
+        """Wait for a newer observation before considering the requested prayer active."""
+        if self.offer is None or self.pending or command_id != self.offer[0]:
+            raise ValueError("Unknown prayer command")
+        _, prayer, sequence, offered_ns = self.offer
+        if not offered_ns <= sent_ns <= offered_ns + self.max_age:
+            raise ValueError("Expired prayer command")
+        self.pending = (prayer, sequence, sent_ns)
+        self.offer = None
+
+    def step(self, frame, threats):
+        """Choose an overhead from the caller's validated threats and coverage horizon."""
+        now, active = frame["now_ns"], frame["active_prayer"]
+        decision = {
+            "action": ACTION_HOLD,
+            "prayer": active,
+            "command_id": 0,
+            "threat_id": 0,
+            "next_wakeup_ns": 0,
+            "check_earliest_ns": 0,
+            "check_latest_ns": 0,
+            "flags": 0,
+            "reason": "ready",
+        }
+        if self.fault:
+            return dict(decision, action=ACTION_FAULT, reason=self.fault)
+        relevant = sorted(
+            (
+                threat
+                for threat in threats
+                if threat["prayer"] != PRAYERS["none"]
+                and threat["check_latest_ns"] + self.hold >= now
+            ),
+            key=lambda threat: (threat["check_earliest_ns"], threat["event_id"]),
+        )
+        if self.pending:
+            prayer, sequence, sent_ns = self.pending
+            if (
+                frame["sequence"] > sequence
+                and frame["observed_ns"] >= sent_ns
+                and active == prayer
+            ):
+                self.pending = None
+            elif now >= sent_ns + self.ack_timeout:
+                self.fault = "acknowledgement_timeout"
+                return dict(decision, action=ACTION_FAULT, reason=self.fault)
+            else:
+                missed = next(
+                    (
+                        threat
+                        for threat in relevant
+                        if threat["check_earliest_ns"] <= now and threat["prayer"] != active
+                    ),
+                    None,
+                )
+                if missed:
+                    self.fault = "protection_deadline_missed"
+                    return dict(
+                        decision,
+                        action=ACTION_FAULT,
+                        reason=self.fault,
+                        flags=1,
+                        threat_id=missed["event_id"],
+                        check_earliest_ns=missed["check_earliest_ns"],
+                        check_latest_ns=missed["check_latest_ns"],
+                    )
+                return dict(
+                    decision,
+                    action=ACTION_WAIT_ACK,
+                    prayer=prayer,
+                    reason="awaiting_game_acknowledgement",
+                )
+        available = frame["available_mask"]
+        coverage = frame["coverage_until_ns"] if frame["flags"] & COVERAGE_KNOWN else 0
+        due = [threat for threat in relevant if threat["check_earliest_ns"] <= now + self.lead]
+        selected = relevant[0] if relevant else None
+        next_switch = selected["check_earliest_ns"] - self.lead if selected else None
+        if due:
+            desired = due[0]["prayer"]
+            if any(threat["prayer"] != desired for threat in due):
+                self.offer = None
+                return dict(
+                    decision, action=ACTION_BLOCKED, reason="incompatible_protection_windows"
+                )
+        else:
+            safe_until = coverage - self.lead
+            if next_switch is not None:
+                safe_until = min(safe_until, next_switch)
+            # The safe interval has to include time to observe an idle-prayer change.
+            needed = self.min_idle + (0 if active == self.idle else self.ack_timeout)
+            if (
+                self.idle == PRAYERS["soul_split"]
+                and available & (1 << self.idle)
+                and safe_until > now
+                and safe_until - now >= needed
+            ):
+                desired, selected = self.idle, None
+                decision["next_wakeup_ns"] = safe_until
+            elif selected and coverage >= selected["check_earliest_ns"]:
+                desired = selected["prayer"]
+                decision["next_wakeup_ns"] = next_switch
+            else:
+                self.offer = None
+                return dict(decision, reason="incomplete_attack_coverage")
+        if not available & (1 << desired):
+            self.offer = None
+            return dict(decision, action=ACTION_BLOCKED, reason="prayer_unavailable")
+        decision["prayer"] = desired
+        if selected:
+            earliest = selected["check_earliest_ns"]
+            decision.update(
+                threat_id=selected["event_id"],
+                check_earliest_ns=earliest,
+                check_latest_ns=selected["check_latest_ns"],
+            )
+            if active != desired and now >= earliest:
+                self.offer = None
+                return dict(
+                    decision, action=ACTION_BLOCKED, flags=1, reason="protection_deadline_missed"
+                )
+        if desired == active:
+            self.offer = None
+            return decision
+        if self.offer is None or self.offer[1] != desired:
+            self.command_id += 1
+        self.offer = (self.command_id, desired, frame["sequence"], now)
+        return dict(decision, action=ACTION_SET, command_id=self.command_id)
+
+
 @dataclass(frozen=True)
 class PrayerReport:
     reason: str
-    fault: Optional[str]
-    phase: Optional[int]
+    fault: str | None
+    phase: int | None
     waiting_ack: bool = False
 
 
 class PrayerExecutor:
-    """Feed validated D1/P6 observations to C and propose PRAYER-priority intents.
+    """Feed validated D1/P6 observations to the planner and propose prayer intents.
 
     A supplied planner is caller-owned. The lazily created default planner is
     owned and closed here. Calls must be serialized. reset() requires explicit
@@ -363,7 +513,7 @@ class PrayerExecutor:
         if assembled is None:
             return None, reason
         if self.planner is None:
-            self.planner = NativePrayerPlanner(self.settings)
+            self.planner = PythonPrayerPlanner(self.settings)
         frame, threats, band = assembled
         decision = self.planner.step(frame, threats)
         if decision["action"] == ACTION_FAULT:
@@ -442,7 +592,7 @@ class PrayerExecutor:
                         "binding": dict(binding),
                     },
                     0,
-                    "validated_C_prayer_planner",
+                    "validated_prayer_planner",
                 ),
             ),
         )
@@ -469,7 +619,7 @@ class PrayerExecutor:
         return (intent,)
 
     def can_send(self, intent, world):
-        """D6 prayer validator: re-run C against fresh exact-scope evidence."""
+        """D6 prayer validator: re-run the rules against fresh exact-scope evidence."""
         offer = self._offers.get(intent.intent_id)
         if (
             self._closed
@@ -491,7 +641,7 @@ class PrayerExecutor:
         )
 
     def note_sent(self, intent_id, sent_ns):
-        """Pass only actual input acceptance to rs3_prayer_note_sent()."""
+        """Report actual input acceptance to the planner."""
         offer = self._offers.get(intent_id)
         if (
             offer is None
@@ -503,7 +653,7 @@ class PrayerExecutor:
         del self._offers[intent_id]
 
     def note_rejected(self, intent_id, reason, sent_ns):
-        """Rejected input is not reported as sent to the C planner."""
+        """Record why the actuator rejected a proposal."""
         self.last_report = PrayerReport(
             "send_rejected:" + str(reason), self._fault, self.last_report.phase
         )

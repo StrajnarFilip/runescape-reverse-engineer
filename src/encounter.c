@@ -6,17 +6,20 @@
 #include "clock.h"
 #include "variables.h"
 
-#define TELOS_PACKED_VARP        6363u
-#define TELOS_STAGE_VARBIT       32640u
-#define TELOS_STAGE_SHIFT        21u
-#define TELOS_STAGE_MASK         7u
-#define TELOS_INSTANCE_VARP      6359u
-#define TELOS_ENRAGE_VARBIT      32626u
-#define TELOS_ENRAGE_MASK        4095u
-#define MAX_SUPPORTED_ENRAGE     4000u
-#define ACTIVE_TELOS_CONFIG_ID   22891
-#define LAST_VALIDATED_STAGE     3u
-#define TELOS_INSTANCE_GUARD_BIT (1u << 29)
+#define TELOS_PACKED_VARP          6363u
+#define TELOS_STAGE_VARBIT         32640u
+#define TELOS_STAGE_SHIFT          21u
+#define TELOS_STAGE_MASK           7u
+#define TELOS_INSTANCE_VARP        6359u
+#define TELOS_ENRAGE_VARBIT        32626u
+#define TELOS_ENRAGE_MASK          4095u
+#define MAX_SUPPORTED_ENRAGE       4000u
+#define ACTIVE_TELOS_CONFIG_ID     22891
+#define LAST_VALIDATED_STAGE       3u
+#define TELOS_INSTANCE_GUARD_BIT   (1u << 29)
+#define ZERO_ENRAGE_MAX_HP         400000u
+#define ZERO_ENRAGE_PHASE_HP       100000u
+#define COMPAT_LAST_OBSERVED_STAGE 2u
 
 /* Raw channels include calibrated sources and neighbouring candidates; presence alone proves no
  * semantics. */
@@ -43,15 +46,19 @@ static void invalidate_semantics(rs3_encounter_state *state)
 
 /** Match the single captured active form; dormant entities and duplicate forms cannot authorize
  * data. */
-static int has_active_telos(const rs3_snapshot *snapshot)
+static const rs3_npc *active_telos(const rs3_snapshot *snapshot)
 {
-    unsigned matches = 0;
+    const rs3_npc *active = NULL;
     for (uint32_t index = 0; index < snapshot->info.npc_count; index++)
     {
         const rs3_npc *npc = &snapshot->npcs[index];
         if ((npc->flags & RS3_NPC_CONFIG) && npc->config_id == ACTIVE_TELOS_CONFIG_ID)
         {
-            matches++;
+            if (active != NULL)
+            {
+                return NULL;
+            }
+            active = npc;
         }
     }
     int instance_guard = 0;
@@ -63,7 +70,46 @@ static int has_active_telos(const rs3_snapshot *snapshot)
             instance_guard = ((uint32_t)raw->value & TELOS_INSTANCE_GUARD_BIT) != 0;
         }
     }
-    return matches == 1 && instance_guard;
+    return instance_guard ? active : NULL;
+}
+
+/** Calibrated 0% phases on Compatibility Mode, with corroborating transmitted HP. */
+static void decode_compatibility_attempt(rs3_encounter_state *state, const rs3_npc *active)
+{
+    if (active == NULL)
+    {
+        state->phase.reason = RS3_ENCOUNTER_NOT_ACTIVE;
+        state->enrage.reason = RS3_ENCOUNTER_NOT_ACTIVE;
+        return;
+    }
+    if (!(active->flags & RS3_NPC_HEALTH) || active->health_max != ZERO_ENRAGE_MAX_HP)
+    {
+        return;
+    }
+    for (uint32_t index = 0; index < state->raw_count; index++)
+    {
+        const rs3_encounter_raw *raw = &state->raw[index];
+        if (raw->varp_id == TELOS_INSTANCE_VARP && raw->valid && raw->value >= INT32_MIN &&
+            raw->value <= UINT32_MAX && ((uint32_t)raw->value & TELOS_ENRAGE_MASK) == 0)
+        {
+            state->enrage = (rs3_encounter_value){.observed_ns = raw->observed_ns,
+                                                  .valid = 1,
+                                                  .source_varp = TELOS_INSTANCE_VARP,
+                                                  .source_varbit = TELOS_ENRAGE_VARBIT};
+            break;
+        }
+    }
+    if (state->enrage.valid && state->stage_raw.valid &&
+        state->stage_raw.value <= COMPAT_LAST_OBSERVED_STAGE)
+    {
+        int64_t upper = ZERO_ENRAGE_MAX_HP - state->stage_raw.value * ZERO_ENRAGE_PHASE_HP;
+        if (active->health_current >= upper - ZERO_ENRAGE_PHASE_HP &&
+            active->health_current <= upper)
+        {
+            state->phase = state->stage_raw;
+            state->phase.value++;
+        }
+    }
 }
 
 void encounter_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t player_address)
@@ -134,7 +180,7 @@ void encounter_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t play
     /* These semantics were calibrated only on the original profile, phases 1..4. */
     if (context->target.profile == &profile_primary)
     {
-        if (!has_active_telos(snapshot))
+        if (active_telos(snapshot) == NULL)
         {
             state->phase.reason = RS3_ENCOUNTER_NOT_ACTIVE;
             state->enrage.reason = RS3_ENCOUNTER_NOT_ACTIVE;
@@ -178,6 +224,10 @@ void encounter_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t play
                 }
             }
         }
+    }
+    else if (context->target.profile == &profile_compatibility)
+    {
+        decode_compatibility_attempt(state, active_telos(snapshot));
     }
     /* A predicted cadence or client_logic_tick / 30 never validates a game tick. */
 }

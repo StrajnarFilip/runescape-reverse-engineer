@@ -124,6 +124,33 @@ static void labelled_phases_and_enrage_require_active_telos(void)
     fixture_destroy(test_fixture);
 }
 
+static void compatibility_phase_requires_zero_enrage_and_matching_hp(void)
+{
+    fixture *test_fixture = fixture_create_for_profile(&profile_compatibility);
+    const uint64_t enrage_node = RAW_NODE + FIXTURE_VARIABLE_NODE_BYTES;
+    fixture_add_block(test_fixture, RAW_NODE, FIXTURE_VARIABLE_NODE_BYTES * 2);
+    fixture_put_variable(test_fixture, FIXTURE_PLAYER_TABLE, RAW_NODE, PACKED_VARP, 2u << 21);
+    fixture_put_variable(test_fixture, FIXTURE_PLAYER_TABLE, enrage_node, 6359, 0x78360000u);
+    rs3_snapshot *snapshot = test_fixture->snapshot;
+    snapshot->info.npc_count = 1;
+    snapshot->npcs[0] = (rs3_npc){.flags = RS3_NPC_CONFIG | RS3_NPC_HEALTH,
+                                  .config_id = 22891,
+                                  .health_current = 200000,
+                                  .health_max = 400000};
+    encounter_stage(test_fixture->context, snapshot, FIXTURE_PLAYER);
+    assert(snapshot->encounter.phase.valid && snapshot->encounter.phase.value == 3);
+    assert(snapshot->encounter.enrage.valid && snapshot->encounter.enrage.value == 0);
+    assert(!snapshot->encounter.game_tick.valid);
+    snapshot->npcs[0].health_current++;
+    encounter_stage(test_fixture->context, snapshot, FIXTURE_PLAYER);
+    assert(!snapshot->encounter.phase.valid);
+    snapshot->npcs[0].health_current--;
+    fixture_put_u64(test_fixture, enrage_node + LAYOUT_VARIABLE_NODE_VALUE_OFFSET, 0x7836012cu);
+    encounter_stage(test_fixture->context, snapshot, FIXTURE_PLAYER);
+    assert(!snapshot->encounter.phase.valid && !snapshot->encounter.enrage.valid);
+    fixture_destroy(test_fixture);
+}
+
 int main(void)
 {
     RUN_TEST(present_stage_is_not_a_phase_or_game_tick);
@@ -131,5 +158,6 @@ int main(void)
     RUN_TEST(changed_table_invalidates_raw_fields);
     RUN_TEST(snapshot_accessor_and_commit_preserve_provenance);
     RUN_TEST(labelled_phases_and_enrage_require_active_telos);
+    RUN_TEST(compatibility_phase_requires_zero_enrage_and_matching_hp);
     return 0;
 }

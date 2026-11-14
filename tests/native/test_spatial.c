@@ -63,6 +63,48 @@ static void rejects_torn_and_nonfinite_poses(void)
     fixture_destroy(test_fixture);
 }
 
+static void compatibility_npc_tiles_require_the_shared_position_getter(void)
+{
+    const uint64_t getter = FIXTURE_MODULE_BASE + 0x6ee110u;
+    const uint64_t owner_instruction = FIXTURE_MODULE_BASE + 0x38523u;
+    const uint64_t player_slot =
+        FIXTURE_MODULE_BASE + profile_compatibility.player_actor_vtable_rva + 0xb0u;
+    const uint64_t npc_slot =
+        FIXTURE_MODULE_BASE + profile_compatibility.npc_entity_vtable_rva + 0xb0u;
+    const unsigned char getter_bytes[] = {0x48, 0x8d, 0x81, 0x80, 0x02, 0, 0, 0xc3};
+    const unsigned char owner_bytes[] = {0x49, 0x8b, 0x40, 0x08, 0x48, 0x89, 0x41, 0x60};
+    fixture *test_fixture = fixture_create_for_profile(&profile_compatibility);
+    fixture_add_block(test_fixture, getter, sizeof getter_bytes);
+    fixture_add_block(test_fixture, owner_instruction, sizeof owner_bytes);
+    fixture_add_block(test_fixture, player_slot, sizeof getter);
+    fixture_add_block(test_fixture, npc_slot, sizeof getter);
+    memcpy(fixture_bytes(test_fixture, getter, sizeof getter_bytes), getter_bytes,
+           sizeof getter_bytes);
+    memcpy(fixture_bytes(test_fixture, owner_instruction, sizeof owner_bytes), owner_bytes,
+           sizeof owner_bytes);
+    fixture_put_u64(test_fixture, player_slot, getter);
+    fixture_put_u64(test_fixture, npc_slot, getter);
+    fixture_put_u32(test_fixture, FIXTURE_ACTOR + POSE_PLANE_OFFSET, 1);
+    fixture_put_u32(test_fixture, FIXTURE_ACTOR + POSE_SIZE_OFFSET, 2);
+    const float fine[] = {512.0f * 3001.5f, 100.0f, 512.0f * 3002.5f};
+    memcpy(fixture_bytes(test_fixture, FIXTURE_ACTOR + POSE_FINE_OFFSET, sizeof fine), fine,
+           sizeof fine);
+    rs3_snapshot *snapshot = test_fixture->snapshot;
+    snapshot->info.npc_count = 1;
+    snapshot->npcs[0].runtime_id = FIXTURE_NPC_RUNTIME_ID;
+    test_fixture->context->npcs.staged_actor_addresses[0] = FIXTURE_ACTOR;
+    spatial_stage(test_fixture->context, snapshot, FIXTURE_WORLD);
+    assert(snapshot->spatial.npc_count == 1);
+    const rs3_actor_spatial *pose = &snapshot->npc_spatial[0];
+    assert(pose->tile.valid && pose->tile.x == 3000 && pose->tile.y == 3001 &&
+           pose->tile.plane == 1);
+    assert(pose->facing_reason == RS3_SPATIAL_UNMAPPED && !snapshot->spatial.camera.valid_mask);
+    fixture_put_u64(test_fixture, npc_slot, getter + 1);
+    spatial_stage(test_fixture->context, snapshot, FIXTURE_WORLD);
+    assert(snapshot->spatial.status == RS3_UNAVAILABLE && snapshot->spatial.npc_count == 0);
+    fixture_destroy(test_fixture);
+}
+
 static rs3_camera test_camera(void)
 {
     rs3_camera camera = {.valid_mask = RS3_CAMERA_COMPLETE,
@@ -141,6 +183,7 @@ int main(void)
 {
     RUN_TEST(decodes_pose_but_does_not_fabricate_target);
     RUN_TEST(rejects_torn_and_nonfinite_poses);
+    RUN_TEST(compatibility_npc_tiles_require_the_shared_position_getter);
     RUN_TEST(projects_with_physical_origin_and_y_inversion);
     RUN_TEST(rejects_unknown_height_plane_and_abi);
     RUN_TEST(snapshot_accessors_enforce_capacity_and_preserve_identity);

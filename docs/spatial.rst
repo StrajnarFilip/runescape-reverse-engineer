@@ -13,9 +13,12 @@ The installed, running executable on 2026-11-11 is the original 951-3 profile
 (``fd8afd32...358d45``), not the Compatibility Mode executable selected by S0b.
 P1 currently enables these new fields only on that original profile, after
 checking additional position, facing and projection instruction signatures.
-Compatibility Mode remains explicitly unsupported by P1 until its additional
-spatial layouts/signatures can be checked; its existing position reader remains
-unchanged. This does not change the roadmap's chosen eventual runtime profile.
+Compatibility Mode ``6ada3f59-1a86000`` now supplies player and NPC tiles. The
+player and NPC vtable entries at ``+0xb0`` both resolve to the guarded getter at
+``0x6ee110``. The base constructor stores the world owner at ``+0x60`` (guarded
+instruction at ``0x38523``). Actor poses require the matching vtable, runtime
+ID and two consistent reads. Compatibility Mode camera, facing and combat
+target remain unmapped.
 
 Actor fields on the original profile:
 
