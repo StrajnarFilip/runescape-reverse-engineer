@@ -79,6 +79,11 @@ FLICK_HOLD_TICKS = {TENDRILS_RELEASE: 3}
 # Uppercut's 2,634 hitmark appeared 7 received ticks after 28938 on 2026-11-14 at 100%.
 # Escape is sent two to three ticks before that hitmark; the server hit deadline is unmeasured.
 UPPERCUT_ESCAPE_TICKS = (4, 5)
+# Hold Still lands a smaller melee hit at +2 received ticks and a 4,000+ melee hit at +4
+# (250%: 1,094 then 4,384; 1,170 then 4,488). Resonance must miss the first and absorb the
+# second, so it is sent once the +2 hit is seen, or at +3 at the latest.
+RESONANCE_FIRST_HIT_TICK = 2
+RESONANCE_LATEST_TICK = 3
 UPPERCUT_ESCAPE_FALLBACK_NS = (2_400_000_000, 3_000_000_000)
 MOVEMENT_ABILITIES = frozenset({"Surge", "Escape"})
 MOVEMENT_WINDOWS = {
@@ -113,6 +118,7 @@ class PhaseOne:
         self.handled = set()
         self.forecast_handled = False
         self.forecast_attempts = 0
+        self.first_hit_tick = None
         self.cast_result = None
 
     @property
@@ -144,6 +150,7 @@ class PhaseOne:
                 self.handled.clear()
                 self.forecast_handled = False
                 self.forecast_attempts = 0
+                self.first_hit_tick = None
                 self.expected = {
                     TENDRILS: UPPERCUT,
                     UPPERCUT: HOLD_STILL,
@@ -166,6 +173,9 @@ class PhaseOne:
         With ``flicking``, the melee flicker owns protection, so Anticipation no longer
         requires Deflect Melee to be the current overhead.
         """
+        # Resonance is tick-critical, so it precedes any acknowledgement still pending.
+        if self.resonance_due(cooldowns, received_tick):
+            return Action("Resonance", "Hold Still second melee hit")
         if self.pending:
             self.cast_result = self.acknowledge(
                 cooldowns,
@@ -245,8 +255,41 @@ class PhaseOne:
         earliest_ns, latest_ns = UPPERCUT_ESCAPE_FALLBACK_NS
         return earliest_ns <= elapsed_ns <= latest_ns
 
+    def observe_hits(self, hit_count, received_tick):
+        """Record the first player hitmark from Hold Still's +2 hit onwards."""
+        if (
+            hit_count
+            and self.special == HOLD_STILL
+            and self.first_hit_tick is None
+            and isinstance(received_tick, int)
+            and isinstance(self.special_tick, int)
+            and received_tick - self.special_tick >= RESONANCE_FIRST_HIT_TICK
+        ):
+            self.first_hit_tick = received_tick
+
+    def resonance_due(self, cooldowns, received_tick):
+        """Send after the first Hold Still hit at +2, or at +3 when it was not observed."""
+        if (
+            self.special != HOLD_STILL
+            or "Resonance" in self.handled
+            or "Resonance" not in cooldowns
+            or cooldowns["Resonance"]
+            or not isinstance(received_tick, int)
+            or not isinstance(self.special_tick, int)
+        ):
+            return False
+        tick_delta = received_tick - self.special_tick
+        if tick_delta == RESONANCE_FIRST_HIT_TICK:
+            return self.first_hit_tick is not None
+        return tick_delta == RESONANCE_LATEST_TICK
+
     def sent(self, action, now):
         """Wait for the sampled cooldown before treating this command as a cast."""
+        if action.ability == "Resonance":
+            # Never displace another ability's pending acknowledgement.
+            self.handled.add("Resonance")
+            if self.pending is not None:
+                return
         self.pending = (action.ability, now + ACK_TIMEOUT_NS)
         if action.ability == "Anticipation":
             # An unacknowledged press may be retried while the forecast window is still open.
@@ -639,6 +682,8 @@ def run(reader, args, board, attempt=None):
         labels["Surge"] = args.surge
     if getattr(args, "escape", None):
         labels["Escape"] = args.escape
+    if getattr(args, "resonance", None):
+        labels["Resonance"] = args.resonance
     if args.reacquire:
         labels["Target Cycle"], labels["Opening Attack"] = args.reacquire
     layout = None
@@ -922,12 +967,13 @@ def run(reader, args, board, attempt=None):
         autos_before = phase_one.autos
         timed_freedom = getattr(args, "timed_freedom", False)
         received_tick = None
-        if timed_freedom or "Escape" in bindings:
+        if timed_freedom or "Escape" in bindings or "Resonance" in bindings:
             tick = reader.encounter.game_tick
             if tick.valid:
                 received_tick = tick.counter
             actions = [dict(action, received_tick=received_tick) for action in actions]
         phase_one.observe(actions)
+        phase_one.observe_hits(len(hits), received_tick)
         position = reader.position
         tile = (position.x, position.y, position.plane) if position.valid else None
         if surge_sent_ns is not None:
@@ -1075,6 +1121,10 @@ def main():
     parser.add_argument("--surge", help="Optional Surge binding for experimental movement")
     parser.add_argument(
         "--escape", help="Optional Escape binding, sent 4-5 received ticks after Uppercut"
+    )
+    parser.add_argument(
+        "--resonance",
+        help="Optional Resonance binding, sent after Hold Still's +2 hit to absorb the +4 hit",
     )
     parser.add_argument(
         "--continue-phase-two",

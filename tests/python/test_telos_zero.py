@@ -104,6 +104,38 @@ class PhaseOneTests(unittest.TestCase):
         later = now + 2 * timeout - 1
         self.assertIsNone(phase.next_action(later, timers, 0, Prayer.SOUL_SPLIT, flicking=True))
 
+    def test_resonance_waits_for_first_hold_still_hit(self):
+        phase = PhaseOne()
+        phase.observe([dict(event(1, HOLD_STILL), received_tick=50)])
+        timers = {"Resonance": 0}
+        phase.observe_hits(1, 51)
+        self.assertIsNone(
+            phase.next_action(SECOND_NS, timers, 1200, Prayer.SOUL_SPLIT, received_tick=51)
+        )
+        self.assertIsNone(
+            phase.next_action(SECOND_NS, timers, 1200, Prayer.SOUL_SPLIT, received_tick=52)
+        )
+        phase.observe_hits(1, 52)
+        action = phase.next_action(SECOND_NS, timers, 1200, Prayer.SOUL_SPLIT, received_tick=52)
+        self.assertEqual(action, controller["Action"]("Resonance", "Hold Still second melee hit"))
+        phase.sent(action, SECOND_NS)
+        self.assertIsNone(
+            phase.next_action(SECOND_NS, timers, 1200, Prayer.SOUL_SPLIT, received_tick=53)
+        )
+
+    def test_resonance_falls_back_to_third_tick_and_not_later(self):
+        phase = PhaseOne()
+        phase.observe([dict(event(1, HOLD_STILL), received_tick=50)])
+        timers = {"Resonance": 0}
+        self.assertIsNone(phase.next_action(SECOND_NS, timers, 0, Prayer.MELEE, received_tick=54))
+        self.assertEqual(
+            phase.next_action(SECOND_NS, timers, 0, Prayer.MELEE, received_tick=53).ability,
+            "Resonance",
+        )
+        self.assertIsNone(
+            phase.next_action(SECOND_NS, {"Resonance": 3000}, 0, Prayer.MELEE, received_tick=53)
+        )
+
     def test_uppercut_escape_uses_received_ticks_once(self):
         phase = PhaseOne()
         phase.observe([dict(event(1, UPPERCUT), received_tick=100)])
