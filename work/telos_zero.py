@@ -289,6 +289,7 @@ class PhaseOne:
     """Track confirmed animation applications and prepare for the next special."""
 
     def __init__(self, phase=1, carried_expected=None):
+        self.phase = phase
         self.next_special = NEXT_SPECIAL_BY_PHASE[phase]
         self.auto_sequences = {MELEE_AUTO_SEQUENCE}
         if phase == 2:
@@ -335,6 +336,21 @@ class PhaseOne:
     def expected_after(self):
         """Number of ordinary attacks that precede the expected special."""
         return self.opening_autos if self.opening else LOOP_AUTOS
+
+    @property
+    def anticipation_auto(self):
+        """Auto count at which Anticipation is pressed for a forecast Hold Still.
+
+        Normally one auto before the stun (the second of three, the sixth of the P3 opening).
+        In P2, 28959 is both a lone magic attack and each Onslaught projectile: at 500% a lone
+        28959 and two autos were followed by a five-projectile Onslaught, so pressing on the
+        second auto spent Anticipation 40 ticks early. P2 therefore waits for the last auto.
+        """
+        # The carried-over P2 opening keeps the earlier press: there Hold Still followed 28930
+        # and only one animated auto in one 500% capture.
+        if self.phase == 2 and self.special is not None:
+            return self.expected_after
+        return self.expected_after - 1
 
     def observe(self, actions):
         """Apply each new animation once. Treat the Tendrils release as a count offset."""
@@ -426,8 +442,7 @@ class PhaseOne:
         # The client queues an ability pressed during the GCD, so Anticipation does not wait for it.
         if (
             self.expected == HOLD_STILL
-            # One auto before the stun: the second of three, or the sixth of the P3 opening.
-            and self.autos == self.expected_after - 1
+            and self.autos == self.anticipation_auto
             and self.last_auto_ns is not None
             and 0 <= now - self.last_auto_ns < HOLD_STILL_FORECAST_WINDOW_NS
             and (prayer == Prayer.MELEE or flicking)

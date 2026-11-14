@@ -298,8 +298,30 @@ class PhaseOneTests(unittest.TestCase):
         self.assertEqual(phase.expected, onslaught)
         phase.observe([event(1, onslaught), event(2, onslaught), event(3, AUTO), event(4, AUTO)])
         self.assertEqual(phase.expected, HOLD_STILL)
+        # 28959 is also a lone magic attack, so P2 waits for the third auto.
+        self.assertIsNone(
+            phase.next_action(
+                4 * SECOND_NS, {"Anticipation": 0}, 0, Prayer.SOUL_SPLIT, flicking=True
+            )
+        )
+        phase.observe([event(5, AUTO)])
         action = phase.next_action(
-            4 * SECOND_NS, {"Anticipation": 0}, 0, Prayer.SOUL_SPLIT, flicking=True
+            5 * SECOND_NS, {"Anticipation": 0}, 0, Prayer.SOUL_SPLIT, flicking=True
+        )
+        self.assertEqual(action.ability, "Anticipation")
+        # 500% capture: lone 28959, two autos, a five-projectile Onslaught, three autos, Hold Still.
+        phase = PhaseOne(phase=2, carried_expected=TENDRILS)
+        phase.observe([event(10, controller["P2_OPENING_ATTACK"]), event(11, onslaught)])
+        phase.observe([event(12, AUTO), event(13, AUTO)])
+        self.assertIsNone(
+            phase.next_action(
+                13 * SECOND_NS, {"Anticipation": 0}, 0, Prayer.SOUL_SPLIT, flicking=True
+            )
+        )
+        phase.observe([event(14 + index, onslaught) for index in range(5)])
+        phase.observe([event(19, AUTO), event(20, AUTO), event(21, AUTO)])
+        action = phase.next_action(
+            21 * SECOND_NS, {"Anticipation": 0}, 0, Prayer.SOUL_SPLIT, flicking=True
         )
         self.assertEqual(action.ability, "Anticipation")
         phase = PhaseOne(phase=2, carried_expected=TENDRILS)
