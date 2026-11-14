@@ -59,23 +59,25 @@ _Static_assert(sizeof(rs3_pointer_candidate) == 304, "ABI pointer candidate layo
 #define UI_MAX_COMPONENTS           4096u
 
 /* Static 951-3 menu paths; the record's semantic meaning is not live calibrated. */
-#define POINTER_MANAGER_OFFSET    0x19938u
-#define POINTER_OWNER_OFFSET      8u
-#define POINTER_MENU_STATE_OFFSET 0x68u
-#define POINTER_RECORD_OFFSET     0x1400u
-#define POINTER_RECORD_BYTES      0x60u
-#define POINTER_VERB_OFFSET       0x18u
-#define POINTER_TYPE_OFFSET       0x38u
-#define POINTER_ITEM_OFFSET       0x44u
-#define POINTER_REFERENCE_OFFSET  0x48u
-#define POINTER_ARG1_OFFSET       0x4cu
-#define POINTER_ARG2_OFFSET       0x50u
-#define POINTER_TEXT_HEADER_BYTES 24u
-#define POINTER_TEXT_TAG_OFFSET   23u
-#define POINTER_TEXT_HEAP_FLAG    0x80u
-#define POINTER_TEXT_CAPACITY     RS3_POINTER_TEXT_CAPACITY
-#define POINTER_MANAGER_GUARD_RVA 0x320c2fu
-#define POINTER_RECORD_GUARD_RVA  0x391305u
+#define POINTER_MANAGER_OFFSET     0x19938u
+#define POINTER_OWNER_OFFSET       8u
+#define POINTER_LEGACY_MENU_OFFSET 0x68u
+#define POINTER_MENU_MODE_OFFSET   0x1428u
+#define POINTER_MODERN_MENU_OFFSET 0x17b0u
+#define POINTER_RECORD_OFFSET      0x1400u
+#define POINTER_RECORD_BYTES       0x60u
+#define POINTER_VERB_OFFSET        0x18u
+#define POINTER_TYPE_OFFSET        0x38u
+#define POINTER_ITEM_OFFSET        0x44u
+#define POINTER_REFERENCE_OFFSET   0x48u
+#define POINTER_ARG1_OFFSET        0x4cu
+#define POINTER_ARG2_OFFSET        0x50u
+#define POINTER_TEXT_HEADER_BYTES  24u
+#define POINTER_TEXT_TAG_OFFSET    23u
+#define POINTER_TEXT_HEAP_FLAG     0x80u
+#define POINTER_TEXT_CAPACITY      RS3_POINTER_TEXT_CAPACITY
+#define POINTER_MANAGER_GUARD_RVA  0x320c2fu
+#define POINTER_RECORD_GUARD_RVA   0x391305u
 
 static const char enrage_heading[] = "Choose initial enrage.";
 
@@ -603,18 +605,39 @@ void interface_pointer_clear(rs3_pointer_candidate *out)
     out->raw_menu_state = -1;
 }
 
-/** Pin the current menu manager load and candidate-slot load, independent of old comments. */
+/** Pin manager/record loads and the active menu backend's selector/open/close instructions. */
 static int pointer_code_matches(rs3_context *context)
 {
-    static const unsigned char manager_guard[] = {0x48, 0x8b, 0x81, 0x38, 0x99, 0x01, 0x00};
-    static const unsigned char record_guard[] = {0x48, 0x8b, 0x86, 0x00, 0x14, 0x00, 0x00};
-    unsigned char bytes[sizeof manager_guard];
-    return memory_read(context, context->target.module_base + POINTER_MANAGER_GUARD_RVA, bytes,
-                       sizeof bytes) &&
-           memcmp(bytes, manager_guard, sizeof bytes) == 0 &&
-           memory_read(context, context->target.module_base + POINTER_RECORD_GUARD_RVA, bytes,
-                       sizeof bytes) &&
-           memcmp(bytes, record_guard, sizeof bytes) == 0;
+    static const ui_code_guard guards[] = {
+        {POINTER_MANAGER_GUARD_RVA, 7, {0x48, 0x8b, 0x81, 0x38, 0x99, 0x01, 0x00}},
+        {POINTER_RECORD_GUARD_RVA, 7, {0x48, 0x8b, 0x86, 0x00, 0x14, 0x00, 0x00}},
+        {0x391d3f, 7, {0x80, 0xb9, 0x28, 0x14, 0x00, 0x00, 0x00}},
+        {0x391d52, 7, {0xc6, 0x81, 0xb0, 0x17, 0x00, 0x00, 0x01}},
+        {0x392689, 7, {0x44, 0x88, 0xb3, 0xb0, 0x17, 0x00, 0x00}},
+    };
+    unsigned char bytes[32];
+    for (unsigned index = 0; index < sizeof guards / sizeof *guards; index++)
+    {
+        const ui_code_guard *guard = &guards[index];
+        if (!memory_read(context, context->target.module_base + guard->rva, bytes, guard->size) ||
+            memcmp(bytes, guard->bytes, guard->size))
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/** Select the active native menu backend; neither byte grants click permission. */
+static int pointer_read_menu_state(rs3_context *context, uint64_t manager, unsigned char *mode,
+                                   unsigned char *state)
+{
+    if (!memory_read(context, manager + POINTER_MENU_MODE_OFFSET, mode, sizeof *mode) || *mode > 1)
+    {
+        return 0;
+    }
+    uint32_t offset = *mode ? POINTER_MODERN_MENU_OFFSET : POINTER_LEGACY_MENU_OFFSET;
+    return memory_read(context, manager + offset, state, sizeof *state) && *state <= 1;
 }
 
 /** Copy a bounded client string. The caller double-checks the complete owning record. */
@@ -664,15 +687,14 @@ void interface_pointer_stage(rs3_context *context, uint64_t world_state, rs3_poi
     out->reason = RS3_UI_READ_FAILED;
     uint64_t manager, owner, record, manager_after, owner_after, record_after;
     uint32_t state, state_after;
-    unsigned char menu_state, menu_state_after;
+    unsigned char menu_mode, menu_mode_after, menu_state, menu_state_after;
     if (!world_state ||
         !memory_read(context, world_state + LAYOUT_GAME_STATE_OFFSET, &state, sizeof state) ||
         state != LAYOUT_IN_GAME_STATE ||
         !memory_read_pointer(context, world_state + POINTER_MANAGER_OFFSET, &manager) || !manager ||
         !memory_read_pointer(context, manager + POINTER_OWNER_OFFSET, &owner) ||
         owner != world_state ||
-        !memory_read(context, manager + POINTER_MENU_STATE_OFFSET, &menu_state,
-                     sizeof menu_state) ||
+        !pointer_read_menu_state(context, manager, &menu_mode, &menu_state) ||
         !memory_read_pointer(context, manager + POINTER_RECORD_OFFSET, &record))
     {
         return;
@@ -681,6 +703,10 @@ void interface_pointer_stage(rs3_context *context, uint64_t world_state, rs3_poi
     interface_pointer_clear(&staged);
     staged.raw_menu_state = menu_state;
     staged.flags = RS3_POINTER_RAW_MENU;
+    if (menu_mode)
+    {
+        staged.flags |= RS3_POINTER_MODERN_MENU;
+    }
     if (record)
     {
         unsigned char before[POINTER_RECORD_BYTES], after[POINTER_RECORD_BYTES];
@@ -711,9 +737,8 @@ void interface_pointer_stage(rs3_context *context, uint64_t world_state, rs3_poi
         owner_after != owner ||
         !memory_read_pointer(context, manager + POINTER_RECORD_OFFSET, &record_after) ||
         record_after != record ||
-        !memory_read(context, manager + POINTER_MENU_STATE_OFFSET, &menu_state_after,
-                     sizeof menu_state_after) ||
-        menu_state_after != menu_state ||
+        !pointer_read_menu_state(context, manager, &menu_mode_after, &menu_state_after) ||
+        menu_mode_after != menu_mode || menu_state_after != menu_state ||
         !memory_read(context, world_state + LAYOUT_GAME_STATE_OFFSET, &state_after,
                      sizeof state_after) ||
         state_after != state)

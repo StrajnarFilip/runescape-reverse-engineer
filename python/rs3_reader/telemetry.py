@@ -170,6 +170,11 @@ def interface_records(reader):
                     "raw_menu_state": (
                         pointer.raw_menu_state if flags & PointerCandidateFlags.RAW_MENU else None
                     ),
+                    "raw_menu_backend": (
+                        ("modern" if flags & PointerCandidateFlags.MODERN_MENU else "legacy")
+                        if flags & PointerCandidateFlags.RAW_MENU
+                        else None
+                    ),
                     "raw_type_rva": (
                         pointer.raw_type_rva if flags & PointerCandidateFlags.RAW_TYPE else None
                     ),

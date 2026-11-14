@@ -422,6 +422,7 @@ class PointerCandidateFlags(IntFlag):
     RAW_RECORD = 2
     RAW_TEXT = 4
     RAW_TYPE = 8
+    MODERN_MENU = 16
 
 
 class PointerCandidate(ctypes.Structure):

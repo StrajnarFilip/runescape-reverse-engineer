@@ -14,36 +14,40 @@
 #define MODIFIER_NODE         (KEY_NODE + FIXTURE_VARIABLE_NODE_BYTES)
 #define FIRST_ADDITIONAL_SLOT RS3_ACTION_BAR_SLOTS
 
-#define UI_MANAGER                0xb10000ull
-#define UI_CACHE                  0xb20000ull
-#define UI_RECORDS                0xb30000ull
-#define UI_NODE                   0xb40000ull
-#define UI_VALUE                  0xb40100ull
-#define UI_BUCKETS                0xb50000ull
-#define UI_CACHE_RECORD_COUNT     1478u
-#define UI_BANK_KEY               ((1477u << 16) | 706u)
-#define UI_ENRAGE_KEY             ((1477u << 16) | 748u)
-#define UI_COMPONENTS             0xb60000ull
-#define UI_HEADING                0xb70000ull
-#define UI_TEXT_HEAP              0xb80000ull
-#define POINTER_MANAGER           0xb90000ull
-#define POINTER_RECORD            0xba0000ull
-#define POINTER_TEXT_HEAP         0xbb0000ull
-#define POINTER_ROOT_OFFSET       0x19938u
-#define POINTER_SLOT_OFFSET       0x1400u
-#define POINTER_NAME_BYTES        24u
-#define POINTER_TAG_OFFSET        23u
-#define POINTER_VERB_OFFSET       0x18u
-#define POINTER_TYPE_OFFSET       0x38u
-#define POINTER_REF_OFFSET        0x48u
-#define POINTER_DESCRIPTOR        0x1721ce0u
-#define POINTER_OWNER_OFFSET      8u
-#define POINTER_RECORD_BYTES      0x60u
-#define POINTER_ITEM_OFFSET       0x44u
-#define POINTER_MANAGER_GUARD_RVA 0x320c2fu
-#define POINTER_RECORD_GUARD_RVA  0x391305u
-#define POINTER_HEAP_FLAG         0x80u
-#define POINTER_MODULE_SIZE       0x2000000u
+#define UI_MANAGER                 0xb10000ull
+#define UI_CACHE                   0xb20000ull
+#define UI_RECORDS                 0xb30000ull
+#define UI_NODE                    0xb40000ull
+#define UI_VALUE                   0xb40100ull
+#define UI_BUCKETS                 0xb50000ull
+#define UI_CACHE_RECORD_COUNT      1478u
+#define UI_BANK_KEY                ((1477u << 16) | 706u)
+#define UI_ENRAGE_KEY              ((1477u << 16) | 748u)
+#define UI_COMPONENTS              0xb60000ull
+#define UI_HEADING                 0xb70000ull
+#define UI_TEXT_HEAP               0xb80000ull
+#define POINTER_MANAGER            0xb90000ull
+#define POINTER_RECORD             0xba0000ull
+#define POINTER_TEXT_HEAP          0xbb0000ull
+#define POINTER_ROOT_OFFSET        0x19938u
+#define POINTER_SLOT_OFFSET        0x1400u
+#define POINTER_MENU_MODE_OFFSET   0x1428u
+#define POINTER_MODERN_MENU_OFFSET 0x17b0u
+#define POINTER_LEGACY_MENU_OFFSET 0x68u
+#define POINTER_MANAGER_BYTES      0x1800u
+#define POINTER_NAME_BYTES         24u
+#define POINTER_TAG_OFFSET         23u
+#define POINTER_VERB_OFFSET        0x18u
+#define POINTER_TYPE_OFFSET        0x38u
+#define POINTER_REF_OFFSET         0x48u
+#define POINTER_DESCRIPTOR         0x1721ce0u
+#define POINTER_OWNER_OFFSET       8u
+#define POINTER_RECORD_BYTES       0x60u
+#define POINTER_ITEM_OFFSET        0x44u
+#define POINTER_MANAGER_GUARD_RVA  0x320c2fu
+#define POINTER_RECORD_GUARD_RVA   0x391305u
+#define POINTER_HEAP_FLAG          0x80u
+#define POINTER_MODULE_SIZE        0x2000000u
 
 static fixture *prayer_bar_fixture(void);
 
@@ -408,7 +412,7 @@ static fixture *pointer_fixture(void)
 {
     fixture *test_fixture = fixture_create();
     test_fixture->context->target.module_size = POINTER_MODULE_SIZE;
-    fixture_add_block(test_fixture, POINTER_MANAGER, POINTER_SLOT_OFFSET + sizeof(uint64_t));
+    fixture_add_block(test_fixture, POINTER_MANAGER, POINTER_MANAGER_BYTES);
     fixture_add_block(test_fixture, POINTER_RECORD, POINTER_RECORD_BYTES);
     fixture_put_u64(test_fixture, FIXTURE_WORLD + POINTER_ROOT_OFFSET, POINTER_MANAGER);
     fixture_put_u64(test_fixture, POINTER_MANAGER + POINTER_OWNER_OFFSET, FIXTURE_WORLD);
@@ -438,7 +442,77 @@ static fixture *pointer_fixture(void)
     memcpy(fixture_bytes(test_fixture, FIXTURE_MODULE_BASE + POINTER_RECORD_GUARD_RVA,
                          sizeof record_guard),
            record_guard, sizeof record_guard);
+    const uint32_t backend_addresses[] = {0x391d3f, 0x391d52, 0x392689};
+    const unsigned char backend_code[][7] = {
+        {0x80, 0xb9, 0x28, 0x14, 0x00, 0x00, 0x00},
+        {0xc6, 0x81, 0xb0, 0x17, 0x00, 0x00, 0x01},
+        {0x44, 0x88, 0xb3, 0xb0, 0x17, 0x00, 0x00},
+    };
+    for (unsigned index = 0; index < sizeof backend_addresses / sizeof *backend_addresses; index++)
+    {
+        uint64_t address = FIXTURE_MODULE_BASE + backend_addresses[index];
+        fixture_add_block(test_fixture, address, sizeof backend_code[index]);
+        memcpy(fixture_bytes(test_fixture, address, sizeof backend_code[index]),
+               backend_code[index], sizeof backend_code[index]);
+    }
     return test_fixture;
+}
+
+static void pointer_selects_modern_or_legacy_menu_without_changing_abi(void)
+{
+    fixture *test_fixture = pointer_fixture();
+    rs3_pointer_candidate candidate;
+    fixture_put_u32(test_fixture, POINTER_MANAGER + POINTER_MENU_MODE_OFFSET, 1);
+    fixture_put_u32(test_fixture, POINTER_MANAGER + POINTER_LEGACY_MENU_OFFSET, 1);
+    for (unsigned state = 0; state <= 1; state++)
+    {
+        fixture_put_u32(test_fixture, POINTER_MANAGER + POINTER_MODERN_MENU_OFFSET, state);
+        interface_pointer_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+        assert(candidate.status == RS3_PARTIAL && candidate.reason == RS3_UI_UNVALIDATED_SOURCE);
+        assert(candidate.flags & RS3_POINTER_MODERN_MENU);
+        assert(candidate.raw_menu_state == (int32_t)state);
+        assert(candidate.reserved == 0 && sizeof candidate == 304);
+    }
+    fixture_put_u32(test_fixture, POINTER_MANAGER + POINTER_MENU_MODE_OFFSET, 0);
+    fixture_put_u32(test_fixture, POINTER_MANAGER + POINTER_MODERN_MENU_OFFSET, 0);
+    interface_pointer_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(!(candidate.flags & RS3_POINTER_MODERN_MENU) && candidate.raw_menu_state == 1);
+    fixture_destroy(test_fixture);
+}
+
+static void pointer_rejects_changing_or_invalid_menu_backend_and_state(void)
+{
+    const uint32_t fields[] = {POINTER_MENU_MODE_OFFSET, POINTER_MODERN_MENU_OFFSET};
+    for (unsigned index = 0; index < sizeof fields / sizeof *fields; index++)
+    {
+        fixture *test_fixture = pointer_fixture();
+        rs3_pointer_candidate candidate;
+        fixture_put_u32(test_fixture, POINTER_MANAGER + POINTER_MENU_MODE_OFFSET, 1);
+        fixture_mutate_on_read(test_fixture, POINTER_MANAGER + fields[index], 2,
+                               POINTER_MANAGER + fields[index], index == 0 ? 0 : 1);
+        interface_pointer_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+        assert(candidate.status == RS3_UNAVAILABLE && candidate.flags == 0);
+        fixture_clear_mutation(test_fixture);
+        fixture_put_u32(test_fixture, POINTER_MANAGER + POINTER_MENU_MODE_OFFSET, 1);
+        fixture_put_u32(test_fixture, POINTER_MANAGER + fields[index], 2);
+        interface_pointer_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+        assert(candidate.status == RS3_UNAVAILABLE && candidate.flags == 0);
+        fixture_destroy(test_fixture);
+    }
+}
+
+static void pointer_backend_instruction_guards_are_required(void)
+{
+    const uint32_t addresses[] = {0x391d3f, 0x391d52, 0x392689};
+    for (unsigned index = 0; index < sizeof addresses / sizeof *addresses; index++)
+    {
+        fixture *test_fixture = pointer_fixture();
+        rs3_pointer_candidate candidate;
+        fixture_bytes(test_fixture, FIXTURE_MODULE_BASE + addresses[index], 1)[0] = 0;
+        interface_pointer_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+        assert(candidate.reason == RS3_UI_UNSUPPORTED_PROFILE && candidate.flags == 0);
+        fixture_destroy(test_fixture);
+    }
 }
 
 static void pointer_raw_fields_never_become_semantic_hit_tests(void)
@@ -571,5 +645,8 @@ int main(void)
     RUN_TEST(pointer_rejects_torn_record_root_and_changed_code);
     RUN_TEST(pointer_heap_text_is_bounded_and_double_read);
     RUN_TEST(pointer_snapshot_wiring_copy_and_unavailable_reset);
+    RUN_TEST(pointer_selects_modern_or_legacy_menu_without_changing_abi);
+    RUN_TEST(pointer_rejects_changing_or_invalid_menu_backend_and_state);
+    RUN_TEST(pointer_backend_instruction_guards_are_required);
     return 0;
 }
