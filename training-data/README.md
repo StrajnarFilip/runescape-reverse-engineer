@@ -2,6 +2,27 @@
 
 Use the 0% Practice Mode controller from the repository root. Stage the character across the gap with Telos dormant, the melee action bar selected and auto-retaliate active. Identify the Deflect Melee slot and a walkable approach tile from the fresh client image. The controller handles every phase it reaches through P3: Deflect Melee flicks in P1/P2, Deflect Magic in P3. Input ends at the P4 checkpoint. `--observe-transition` continues recording after input ends. F12 stops input. [Setup and bindings](../runescape-knowledge-base/bosses/telos/animation-cues.md)
 
+### Running it yourself
+
+Stand on the staging platform with Telos dormant and Revolution on bar 18. Put Freedom,
+Anticipation, Escape, Resonance and the Deflect Magic, Deflect Melee and Soul Split prayers on
+any displayed action bar. The controller reads their keys from game memory
+(`rs3_reader.action_bar_keys`) and logs them as `keys_resolved`; a key passed on the command line
+takes precedence. Start the script, click into RuneScape within 60 s, and wake Telos yourself.
+The controller turns on Deflect Melee with its key and takes over when the fight starts. F12 stops it.
+
+```powershell
+$env:PYTHONPATH = 'python'
+python work/telos_zero.py --port COM8 --manual-engage --practice-enrage 250 `
+    --timed-freedom --observe-transition --record-attempt --flick-melee
+```
+
+Set `--practice-enrage` to the enrage in chat. Game key codes and slot contents were calibrated
+against this account's bars on 2026-11-14. Raw modifier bits are logged but not used: Soul Split
+reported a modifier while plain F4 works. An unexpected key shows up in `keys_resolved`.
+
+### Automatic approach
+
 ```powershell
 $env:PYTHONPATH = 'python'
 $frame = Join-Path $env:TEMP 'telos-practice.png'

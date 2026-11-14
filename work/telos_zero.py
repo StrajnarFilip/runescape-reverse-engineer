@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from rs3_reader.action_bar_keys import displayed_bindings
 from rs3_reader.bot.attempt_log import AttemptLog
 from rs3_reader.native import (
     PRAYER_POINTS_MASK,
@@ -58,6 +59,7 @@ MAX_PRACTICE_SECONDS = 300
 ZERO_ENRAGE_HP = 400_000
 F12 = 0x7B
 APPROACH_TIMEOUT_NS = 30_000_000_000
+FOREGROUND_WAIT_SECONDS = 60
 ENGAGE_TIMEOUT_NS = 2_000_000_000
 REACQUIRE_TIMEOUT_NS = 3_600_000_000
 REACQUIRE_CUE_TIMEOUT_NS = 10_000_000_000
@@ -691,7 +693,17 @@ def run(reader, args, board, attempt=None):
         reason = initial.message.decode(errors="replace")
         raise RuntimeError(f"Cannot start in the current client scene ({reason})")
     identity = (initial.pid, initial.process_creation_time, reader.combat.scene_epoch)
+    manual_engage = getattr(args, "manual_engage", False)
     window = keys.game_window(identity)
+    if not window and manual_engage:
+        # Started from a terminal: wait for the operator to click into RuneScape.
+        log("waiting_for_foreground")
+        focus_deadline = time.monotonic() + FOREGROUND_WAIT_SECONDS
+        while not window and time.monotonic() < focus_deadline:
+            if keys.get_async_key_state(F12) < 0:
+                raise RuntimeError("F12 stop")
+            time.sleep(POLL_SECONDS)
+            window = keys.game_window(identity)
     if not window:
         raise RuntimeError("RuneScape must be foreground before starting")
 
@@ -701,12 +713,14 @@ def run(reader, args, board, attempt=None):
         if keys.game_window(identity) != window:
             raise RuntimeError("RuneScape lost foreground focus")
 
-    game = GameWindow()
-    if args.approach == args.melee:
-        raise ValueError("Approach and Deflect Melee require different screenshot points")
-    # Validate both points before changing the character's overhead.
-    frame_target(game, args.frame, *args.approach)
-    frame_target(game, args.frame, *args.melee)
+    game = None
+    if not manual_engage:
+        game = GameWindow()
+        if args.approach == args.melee:
+            raise ValueError("Approach and Deflect Melee require different screenshot points")
+        # Validate both points before changing the character's overhead.
+        frame_target(game, args.frame, *args.approach)
+        frame_target(game, args.frame, *args.melee)
 
     def click_frame(point, expected_boss, *, require_melee=False):
         bounds, target = frame_target(game, args.frame, *point)
@@ -770,10 +784,14 @@ def run(reader, args, board, attempt=None):
         raise ValueError("Combat bindings must exclude prayer chords and F12")
     flicker = PrayerFlicker() if getattr(args, "flick_melee", False) else None
     prayer_chords = {
-        Prayer.MELEE: parse_chord(getattr(args, "flick_melee_key", DEFAULT_FLICK_MELEE_KEY)),
-        Prayer.MAGIC: parse_chord(getattr(args, "flick_magic_key", DEFAULT_FLICK_MAGIC_KEY)),
+        Prayer.MELEE: parse_chord(
+            getattr(args, "flick_melee_key", None) or DEFAULT_FLICK_MELEE_KEY
+        ),
+        Prayer.MAGIC: parse_chord(
+            getattr(args, "flick_magic_key", None) or DEFAULT_FLICK_MAGIC_KEY
+        ),
         Prayer.SOUL_SPLIT: parse_chord(
-            getattr(args, "flick_soul_split_key", DEFAULT_FLICK_SOUL_SPLIT_KEY)
+            getattr(args, "flick_soul_split_key", None) or DEFAULT_FLICK_SOUL_SPLIT_KEY
         ),
     }
     if flicker is not None and (
@@ -880,7 +898,12 @@ def run(reader, args, board, attempt=None):
                 if now >= next_prayer_check:
                     if next_prayer_check:
                         raise RuntimeError("Deflect Melee did not activate on the configured slot")
-                    click_frame(args.melee, boss.instance_id)
+                    if manual_engage:
+                        board.tap(
+                            prayer_chords[Prayer.MELEE], KEY_HOLD_SECONDS, check_focus, time.sleep
+                        )
+                    else:
+                        click_frame(args.melee, boss.instance_id)
                     emit("baseline_prayer_requested", prayer="melee")
                     next_prayer_check = reader.monotonic_ns() + ACK_TIMEOUT_NS
                 time.sleep(POLL_SECONDS)
@@ -891,10 +914,14 @@ def run(reader, args, board, attempt=None):
             if not initiated and boss is not None and boss.config_id == DORMANT_TELOS:
                 if attempt and next_prayer_check:
                     attempt.write("baseline_prayer_acknowledged", prayer="melee")
-                click_frame(args.approach, boss.instance_id, require_melee=True)
                 initiated = True
-                next_approach = reader.monotonic_ns() + APPROACH_TIMEOUT_NS
-                emit("approach", overhead=prayer.name.lower())
+                if manual_engage:
+                    # The operator walks in; the session duration bounds the wait.
+                    emit("waiting_for_engage", overhead=prayer.name.lower())
+                else:
+                    click_frame(args.approach, boss.instance_id, require_melee=True)
+                    next_approach = reader.monotonic_ns() + APPROACH_TIMEOUT_NS
+                    emit("approach", overhead=prayer.name.lower())
             if initiated and next_approach and now >= next_approach:
                 raise RuntimeError("Approach did not wake Telos within the expected interval")
             time.sleep(POLL_SECONDS)
@@ -1165,6 +1192,54 @@ def run(reader, args, board, attempt=None):
     return 1
 
 
+ACTION_BAR_KEY_ARGUMENTS = {
+    "freedom": "Freedom",
+    "anticipation": "Anticipation",
+    "escape": "Escape",
+    "resonance": "Resonance",
+    "flick_melee_key": "Deflect Melee",
+    "flick_magic_key": "Deflect Magic",
+    "flick_soul_split_key": "Soul Split",
+}
+FLICK_KEY_FALLBACKS = {
+    "flick_melee_key": DEFAULT_FLICK_MELEE_KEY,
+    "flick_magic_key": DEFAULT_FLICK_MAGIC_KEY,
+    "flick_soul_split_key": DEFAULT_FLICK_SOUL_SPLIT_KEY,
+}
+
+
+def resolve_action_bar_keys(reader, args, attempt=None):
+    """Fill unset key arguments from the displayed action bars and record their source.
+
+    Explicit command-line keys win. Labels are displayed glyphs, so letter keys are translated
+    through the RuneScape window's keyboard layout. Freedom and Anticipation are required.
+    """
+    reader.sample()
+    bindings = displayed_bindings(reader)
+    sources = {}
+    for argument, name in ACTION_BAR_KEY_ARGUMENTS.items():
+        if getattr(args, argument, None):
+            sources[argument] = "command_line"
+        elif name in bindings:
+            setattr(args, argument, bindings[name].key_label)
+            sources[argument] = f"action_bar {bindings[name].display_bar}:{bindings[name].slot}"
+            args.displayed_keys = True
+        elif argument in FLICK_KEY_FALLBACKS:
+            setattr(args, argument, FLICK_KEY_FALLBACKS[argument])
+            sources[argument] = "default"
+    missing = [
+        ACTION_BAR_KEY_ARGUMENTS[argument]
+        for argument in ("freedom", "anticipation")
+        if not getattr(args, argument, None)
+    ]
+    resolved = {argument: getattr(args, argument, None) for argument in ACTION_BAR_KEY_ARGUMENTS}
+    log("keys_resolved", keys=resolved, sources=sources)
+    if attempt:
+        attempt.write("keys_resolved", keys=resolved, sources=sources)
+    if missing:
+        raise RuntimeError(f"Put {', '.join(missing)} on a displayed action bar or pass its key")
+
+
 def main():
     """Start with bar 18 active and Practice Mode 0% confirmed in the client."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -1197,15 +1272,18 @@ def main():
         help="Unvalidated trial: Deflect Melee (Deflect Magic for 28959) on every Telos "
         "animation except Uppercut, then Soul Split after the hold (phases 1-2)",
     )
-    parser.add_argument("--flick-melee-key", default=DEFAULT_FLICK_MELEE_KEY)
+    # Unset keys are read from the displayed action bars (rs3_reader.action_bar_keys).
+    parser.add_argument("--flick-melee-key", help="Deflect Melee key (default: from action bar)")
+    parser.add_argument("--flick-magic-key", help="Deflect Magic key (default: from action bar)")
+    parser.add_argument("--flick-soul-split-key", help="Soul Split key (default: from action bar)")
+    parser.add_argument("--freedom", help="Freedom key (default: from action bar)")
+    parser.add_argument("--anticipation", help="Anticipation key (default: from action bar)")
     parser.add_argument(
-        "--flick-magic-key",
-        default=DEFAULT_FLICK_MAGIC_KEY,
-        help="Deflect Magic key used for the 28959 magic attack",
+        "--manual-engage",
+        action="store_true",
+        help="Operator-run mode: no screenshot points; Deflect Melee by key, then wait for the "
+        "operator to wake Telos",
     )
-    parser.add_argument("--flick-soul-split-key", default=DEFAULT_FLICK_SOUL_SPLIT_KEY)
-    parser.add_argument("--freedom", help="Current Freedom binding")
-    parser.add_argument("--anticipation", help="Current Anticipation binding")
     parser.add_argument(
         "--displayed-keys",
         action="store_true",
@@ -1243,12 +1321,15 @@ def main():
     args.continue_phase_two = not args.reacquire
     if not 0 < args.duration <= MAX_PRACTICE_SECONDS:
         parser.error(f"Duration must be between 1 and {MAX_PRACTICE_SECONDS} seconds")
-    if args.port and not all((args.frame, args.approach, args.melee, args.practice_0_confirmed)):
+    if (
+        args.port
+        and not args.manual_engage
+        and not all((args.frame, args.approach, args.melee, args.practice_0_confirmed))
+    ):
         parser.error(
-            "Arduino input requires --practice-0-confirmed, --frame, --melee and --approach"
+            "Automatic approach requires --practice-0-confirmed, --frame, --melee and --approach;"
+            " use --manual-engage to wake Telos yourself"
         )
-    if args.port and not (args.freedom and args.anticipation):
-        parser.error("Set --freedom and --anticipation from the current action bar")
     board = stream = attempt = None
     end_reason = "error"
     outcome = "incomplete"
@@ -1270,6 +1351,8 @@ def main():
                     monotonic_ns=reader.monotonic_ns,
                 )
                 print(f"Attempt log {path}", flush=True)
+            if args.port:
+                resolve_action_bar_keys(reader, args, attempt)
             if not args.port:
                 observed_end = observe(reader, args.duration, attempt)
                 end_reason = observed_end if attempt else "observation_ended"

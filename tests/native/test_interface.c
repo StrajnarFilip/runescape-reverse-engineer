@@ -242,10 +242,29 @@ static void ui_unknown_and_frame_reset(void)
     assert(snapshot->interface_info.status == RS3_UNAVAILABLE);
     assert(snapshot->action_bar[FIRST_ADDITIONAL_SLOT].flags == 0);
     fixture_destroy(test_fixture);
-    test_fixture = fixture_create_for_profile(&profile_compatibility);
+    /* Compatibility Mode decodes action bars from the same server variables, but leaves the
+     * primary-only UI roots unmapped. */
+    test_fixture = prayer_bar_fixture();
+    test_fixture->context->target.profile = &profile_compatibility;
     interface_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_PLAYER, FIXTURE_CLIENT);
-    assert(test_fixture->snapshot->interface_info.reason == RS3_UI_UNSUPPORTED_PROFILE);
-    assert(test_fixture->snapshot->interface_info.action_bar_count == 0);
+    snapshot = test_fixture->snapshot;
+    assert(snapshot->interface_info.status == RS3_PARTIAL);
+    assert(snapshot->interface_info.action_bar_count == RS3_MAX_ACTION_BAR_SLOTS);
+    for (unsigned index = 0; index < RS3_REQUIRED_INTERFACES; index++)
+    {
+        assert(snapshot->interfaces[index].reason == RS3_UI_UNMAPPED);
+        assert(snapshot->interfaces[index].interface_id == -1);
+    }
+    int prayer_slots = 0;
+    for (unsigned index = 0; index < snapshot->interface_info.action_bar_count; index++)
+    {
+        if (snapshot->action_bar[index].flags & RS3_BAR_PACKED_KNOWN &&
+            snapshot->action_bar[index].content_type == 7)
+        {
+            prayer_slots++;
+        }
+    }
+    assert(prayer_slots == 4);
     fixture_destroy(test_fixture);
 }
 

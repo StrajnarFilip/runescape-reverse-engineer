@@ -404,6 +404,71 @@ class PracticeRunTests(unittest.TestCase):
         self.assertFalse(cue([event(1, 28930)], "melee"))
         self.assertFalse(cue([], "melee"))
 
+    def test_manual_engage_uses_prayer_key_and_waits_for_operator(self):
+        run = controller["run"]
+        reader, board, keys = Mock(), Mock(), Mock()
+        keys.get_async_key_state.return_value = 0
+        reader.combat.scene_epoch = 1
+        reader.position.valid = False
+        reader.abilities = []
+        reader.drain_npc_action_events.return_value = ([], 0)
+        reader.drain_player_hit_events.return_value = ([], 0)
+        reader.active_prayer.side_effect = [Prayer.NONE] + [Prayer.MELEE] * 5
+        clock = 10 * SECOND_NS
+        reader.monotonic_ns.return_value = clock
+        info = SimpleNamespace(
+            pid=1, process_creation_time=2, monotonic_ns=clock, status=Status.AVAILABLE, sequence=1
+        )
+        player = Mock(clock_stalled_ns=0, gcd_reason=Reason.NONE, gcd_remaining_ms=0)
+        player.variable.side_effect = {Variable.PRAYER_PACKED: 990}.__getitem__
+        dormant = SimpleNamespace(config_id=22892, instance_id=3)
+        active = SimpleNamespace(
+            config_id=22891,
+            instance_id=4,
+            flags=NPCFlags.HEALTH,
+            health_max=400_000,
+            health_current=400_000,
+        )
+        phase_two = SimpleNamespace(**vars(active))
+        phase_two.health_current = 300_000
+        samples = [(info, player, dormant, None, 9900)] * 3 + [
+            (info, player, active, 1, 9900),
+            (info, player, phase_two, 2, 9000),
+        ]
+        args = SimpleNamespace(
+            duration=30,
+            freedom="U",
+            anticipation="A",
+            hurricane=None,
+            surge=None,
+            reacquire=None,
+            continue_phase_two=False,
+            frame=None,
+            melee=None,
+            approach=None,
+            observe_transition=False,
+            manual_engage=True,
+            flick_melee_key="F3",
+        )
+        console = SimpleNamespace(GameWindow=Mock(), frame_target=Mock(), move_pointer=Mock())
+        mock_globals = {
+            "ManualPrayerKeys": Mock(return_value=keys),
+            "boss_sample": Mock(side_effect=samples),
+            "player_hit_splats_record": Mock(return_value={}),
+            "log": Mock(),
+        }
+        with patch.dict(sys.modules, {"game_console": console}), patch("time.sleep"):
+            with patch.dict(run.__globals__, mock_globals):
+                self.assertEqual(run(reader, args, board), 2)
+        console.GameWindow.assert_not_called()
+        console.frame_target.assert_not_called()
+        board.command.assert_not_called()
+        self.assertEqual(
+            [[key.name for key in call.args[0]] for call in board.tap.call_args_list], [["F3"]]
+        )
+        logged = [call.args[0] for call in mock_globals["log"].call_args_list]
+        self.assertIn("waiting_for_engage", logged)
+
     def test_input_waits_for_baseline_prayer_and_stops_at_phase_two(self):
         run = controller["run"]
         reader = Mock()

@@ -792,14 +792,20 @@ void interface_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t play
             (rs3_interface_observation){index + 1, RS3_UI_UNMAPPED, -1, -1};
     }
     info->reason = RS3_UI_UNSUPPORTED_PROFILE;
-    if (context->target.profile != &profile_primary)
+    int primary_profile = context->target.profile == &profile_primary;
+    if (!primary_profile && context->target.profile != &profile_compatibility)
     {
         return;
     }
     info->status = RS3_PARTIAL;
     info->reason =
         RS3_UI_UNMAPPED; /* Other dialogs, preset visibility and options remain unmapped. */
-    stage_ui_roots(context, snapshot, client_address);
+    /* UI roots use primary-client code addresses. Action bars below are decoded only from the
+     * server-defined player and client variables, whose IDs are the same in both clients. */
+    if (primary_profile)
+    {
+        stage_ui_roots(context, snapshot, client_address);
+    }
     uint64_t headers[2] = {player_address + LAYOUT_PLAYER_VARIABLE_TABLE_OFFSET,
                            client_address + LAYOUT_CLIENT_VARIABLE_TABLE_OFFSET};
     interface_variables variables[2] = {0};
