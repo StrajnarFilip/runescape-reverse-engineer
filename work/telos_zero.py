@@ -520,8 +520,11 @@ def magic_flick_ticks(distance):
 # and both still landed for 1,782 and 3,093. Damage is probably fixed when Telos fires, and the
 # overhead was never Deflect Magic at a 28959 in any log. Onslaught projectiles and P3 magic autos
 # repeat every 4 received ticks (one gap of 5), so Deflect Magic is also raised ahead of the next
-# one: during these offsets after each 28959 (inclusive). Unvalidated experiment.
-MAGIC_PREFLICK_TICKS = (3, 5)
+# one: during these offsets after each 28959 (inclusive). 500% run of 181758 with +3: when the
+# overhead already showed Deflect Magic at the cast, 9 of 20 hits did 1 damage (1 of 5 without),
+# but a press sent one tick ahead still gave 1,294 and 1,966 at times, so the press goes out two
+# ticks ahead of the expected cast.
+MAGIC_PREFLICK_TICKS = (2, 5)
 # Uppercut's 2,634 hitmark appeared 7 received ticks after 28938 on 2026-11-14 at 100%.
 # Escape is sent two to three ticks before that hitmark; the server hit deadline is unmeasured.
 UPPERCUT_ESCAPE_TICKS = (4, 5)

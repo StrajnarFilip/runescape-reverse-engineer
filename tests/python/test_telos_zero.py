@@ -590,7 +590,7 @@ class PrayerFlickerTests(unittest.TestCase):
         flicker.observe([event(1, magic)], 100, 0, distance=1)
         self.assertEqual(
             [flicker.active_prayer(tick, 0) for tick in range(100, 107)],
-            [Prayer.MAGIC, None, None, Prayer.MAGIC, Prayer.MAGIC, Prayer.MAGIC, None],
+            [Prayer.MAGIC, None, Prayer.MAGIC, Prayer.MAGIC, Prayer.MAGIC, Prayer.MAGIC, None],
         )
         # A melee auto during a pending long-range window deflects melee on its own tick.
         flicker = PrayerFlicker()
@@ -611,7 +611,7 @@ class PrayerFlickerTests(unittest.TestCase):
         flicker.observe([event(1, magic)], 30, 0)
         self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 30, 0), Prayer.MAGIC)
         flicker.sent(Prayer.MAGIC, 0)
-        # No positions: Deflect Magic covers +0 to +2, then the pre-flick covers +3 to +5.
+        # No positions: Deflect Magic covers +0 to +2, then the pre-flick covers +2 to +5.
         self.assertIsNone(flicker.next_prayer(Prayer.MAGIC, 32, 1))
         self.assertIsNone(flicker.next_prayer(Prayer.MAGIC, 35, 1))
         self.assertEqual(flicker.next_prayer(Prayer.MAGIC, 36, 1), Prayer.SOUL_SPLIT)
