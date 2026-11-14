@@ -44,7 +44,7 @@
   "software_gaps_still_open": [
     "Native minimap/view/hit-test/route and encounter-result mapping.",
     "Full ability castability and intended-account bindings/rotation configuration.",
-    "P3 semantic effects on the current original profile; older profile evidence is not transferred.",
+    "P3 presence/stacks/consumption remain uncalibrated. Original-profile overload expiry has labelled evidence; unset timer variables in this sample do not establish absence.",
     "Pointer backend composition and remaining live-ladder wiring."
   ],
   "live_checks_deferred": [

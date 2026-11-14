@@ -152,3 +152,11 @@ Requests
   Copying the worker's newer latest frame must keep rejecting until the policy
   is re-evaluated, but a stable consumer snapshot should not be rejected merely
   because the 100 Hz worker advanced independently. Keep old-DLL fallback safe.
+
+* Exact snapshot handoff is integrated: a local copy preserves original frame
+  identity/time, item tokens and targets even after source mutation/destruction.
+  A1 now uses the examined consumer snapshot while the worker keeps sampling;
+  consumer refresh and dispatch must remain serialized. Older DLLs keep safe
+  latest-frame rejection. Seven native input groups, 33 A1 cases and all 15
+  CTest targets pass (293 Python tests, zero skips). The copy-only microbenchmark
+  median was 0.067 ms; this is not game-input latency or a collector benchmark.

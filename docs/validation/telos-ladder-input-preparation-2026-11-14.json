@@ -11,7 +11,7 @@
   "public_header_registration": "include/rs3/rs3.h; two additive declarations only",
   "native_input_fixture_groups": 6,
   "ctest_targets_passed": 15,
-  "python_tests_passed": 283,
+  "python_tests_passed": 293,
   "public_abi_layouts_changed": false,
   "input_sent": false,
   "positive_path_tests": "Pure chord preparation; no foreground dispatch",
@@ -25,10 +25,32 @@
   "automatic_input_enabled": false,
   "ladder_rung_passed": false,
   "native_backend_commit": "46b9b8a",
-  "a1_tests_passed": 31,
+  "a1_tests_passed": 33,
   "python_tests_skipped": 0,
   "binding_provider_revalidated": true,
   "old_dll_rejection_tested": true,
   "exact_policy_frame_required": true,
-  "same_tick_independent_lanes_tested": true
+  "same_tick_independent_lanes_tested": true,
+  "owned_snapshot_follow_up": {
+    "native_api_commit": "3669d82",
+    "native_regression_commit": "9ce8406",
+    "backend_commit": "2543b35",
+    "api": "rs3_snapshot_copy",
+    "native_input_fixture_groups": 7,
+    "a1_tests": 33,
+    "consumer_frame_preserved": true,
+    "worker_can_advance_independently": true,
+    "source_refresh_must_be_serialized": true,
+    "old_dll_safe_fallback": true,
+    "copy_refreshes_timestamps": false,
+    "microbenchmark": {
+      "scope": "Local caller-owned empty-snapshot copy microbenchmark; no game process/input or end-to-end latency claim.",
+      "samples": 120,
+      "warmup_copies": 5,
+      "median_ms": 0.06705,
+      "p95_ms": 0.1034,
+      "maximum_ms": 0.1096,
+      "input_sent": false
+    }
+  }
 }
