@@ -8,6 +8,7 @@
 !/work/ghidra_scripts/
 /work/ghidra_scripts/*
 !/work/ghidra_scripts/ExportFunctions.java
+!/work/ghidra_scripts/FindStringRefs.java
 
 # Runtime output and Python bytecode
 **/logs/
