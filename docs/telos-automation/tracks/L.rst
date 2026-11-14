@@ -182,3 +182,12 @@ Requests
   groups and four local serializer/real-ABI checks. The game was closed.
   ``docs/validation/telos-ladder-menu-candidate-2026-11-14.json`` lists the
   required later labels. No hit-test, full castability or pointer input is enabled.
+
+* A1 pointer bridge is integrated: explicit current MinimapBinding and
+  NpcClickBinding records connect the existing native exports to the serialized
+  policy. No built-in provider supplies them. Native geometry/path/hit-test
+  acquisition remains P1/P5/A2 work; raw menu candidates authorize nothing.
+  Serial stays keyboard-only. All 15 CTest targets pass (309 Python tests,
+  zero skips), including 43 actuator cases. See
+  ``docs/validation/telos-ladder-pointer-backend-2026-11-14.json``. No live input
+  was sent and no ladder rung was enabled.

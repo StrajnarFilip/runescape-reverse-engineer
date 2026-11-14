@@ -160,3 +160,11 @@ Requests
   and is destroyed. Chord preparation accepts the old exact item only in the
   owned copy; moved/dose-changed source state rejects. NULL/self-copy paths are
   covered. Seven native input fixture groups pass without dispatching input.
+
+* A1/L pointer plumbing resolved offline, 2026-11-14: the serialized native
+  backend accepts explicit same-frame MinimapBinding and NpcClickBinding
+  records with the current transform/path or exact default-action hit test.
+  Existing C exports are connected; serial remains keyboard-only. Runtime
+  providers, D6/A2 validation and the brief's live acceptance trials remain
+  required. P5 raw menu candidates are deliberately unvalidated and do not
+  establish target identity or physical click permission.

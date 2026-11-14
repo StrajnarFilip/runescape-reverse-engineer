@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "track": "L",
+  "date": "2026-11-14",
+  "status": "software_preparation_passed_runtime_providers_pending",
+  "source_commit": "a4e0066",
+  "scope": "Optional native pointer dispatch through the existing serialized A1 policy; fake devices only.",
+  "checks": {
+    "ctest_targets_passed": 15,
+    "python_tests_passed": 309,
+    "python_tests_skipped": 0,
+    "actuator_cases": 43,
+    "new_pointer_cases": 9,
+    "native_minimap_layout_bytes": 64,
+    "existing_c_abi_changed": false,
+    "fake_device_paths": [
+      "Same-tick native movement, NPC selection and prayer.",
+      "Missing provider, native capability and serial pointer rejection.",
+      "Current player anchor, plane, safe radius and exact view/transform checks.",
+      "Unvalidated path, physical geometry and NPC hit-test rejection.",
+      "Stale, future, foreign, changed-build and changed-sequence evidence rejection.",
+      "Changed point before dispatch, recycled/duplicate NPC and already-targeted rejection.",
+      "Unsupported object/menu actions and invalid physical coordinates.",
+      "Signed physical pixels, typed C arguments and minimap layout mismatch.",
+      "Copied-frame change, native target rejection and uncertain input fault propagation."
+    ]
+  },
+  "policy": {
+    "default_enabled": false,
+    "built_in_pointer_binding_provider": false,
+    "maximum_default_age_ms": 150,
+    "serial_pointer_support": false,
+    "raw_menu_candidate_authorizes_click": false,
+    "accepted_input_confirms_success": false
+  },
+  "pending": [
+    "P1/P5: measured physical minimap bounds and a current complete native view signature.",
+    "P1/P5/A2: native walkability/path checks and exact visible NPC default-action hit tests.",
+    "L: compose those providers with D6's independent A2 pointer validator and outcome watcher.",
+    "A2/L: controlled safe-area click-to-native-arrival and exact target acceptance trials.",
+    "Object, interface and menu-option pointer routes remain unsupported."
+  ],
+  "game_process_opened_for_this_work": false,
+  "live_input_sent": false,
+  "automatic_input_enabled": false,
+  "ladder_rung_passed": false,
+  "raw_captures_game_binaries_and_tools_published": false
+}
