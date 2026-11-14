@@ -6,6 +6,7 @@
 
 #include "clock.h"
 #include "context.h"
+#include "inventory.h"
 #include "player.h"
 #include "process.h"
 
@@ -13,7 +14,9 @@
 #define ACTION_MAX_AGE_NS 1000000000ull
 /** Maximum snapshot age and clock stall for prayer toggles. */
 #define PRAYER_MAX_AGE_NS 150000000ull
-#define MAX_PLANE         3
+/** Modified ability/item chords require the same 150 ms freshness ceiling as prayer input. */
+#define KEY_CHORD_MAX_AGE_NS 150000000ull
+#define MAX_PLANE            3
 /** Absolute mouse coordinates span 0..65535 across the virtual desktop. */
 #define ABSOLUTE_MOUSE_RANGE 65536
 #define MODIFIER_COUNT       3u
@@ -189,7 +192,7 @@ static int window_belongs_to(HWND window, DWORD expected_pid)
  * and foreground ownership immediately before dispatch.
  */
 static int32_t send_to_game(const rs3_snapshot *snapshot, HWND window, INPUT *events,
-                            UINT event_count)
+                            UINT event_count, uint64_t maximum_age_ns)
 {
     if (!window_belongs_to(window, snapshot->info.pid) || !IsWindowVisible(window) ||
         IsIconic(window) || !IsWindowEnabled(window))
@@ -211,7 +214,8 @@ static int32_t send_to_game(const rs3_snapshot *snapshot, HWND window, INPUT *ev
     if (same_live_process && GetForegroundWindow() == window &&
         window_belongs_to(window, snapshot->info.pid))
     {
-        if (is_fresh_game_frame(snapshot))
+        if (is_fresh_game_frame(snapshot) &&
+            clock_monotonic_ns() - snapshot->info.monotonic_ns <= maximum_age_ns)
         {
             UINT sent_count = SendInput(event_count, events, sizeof *events);
             /*
@@ -278,7 +282,7 @@ int32_t rs3_set_prayer(const rs3_snapshot *snapshot, uint32_t prayer, uint32_t v
     {
         return RS3_E_STATE;
     }
-    return send_to_game(snapshot, GetForegroundWindow(), chord, chord_length);
+    return send_to_game(snapshot, GetForegroundWindow(), chord, chord_length, PRAYER_MAX_AGE_NS);
 }
 
 /** Returns nonzero when point lies in the unobscured client area of window. */
@@ -348,7 +352,7 @@ static int32_t click_game(const rs3_snapshot *snapshot, POINT point, int right_b
                            MOUSEEVENTF_MOVE_NOCOALESCE;
     events[1].mi.dwFlags = right_button ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN;
     events[2].mi.dwFlags = right_button ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP;
-    return send_to_game(snapshot, window, events, 3);
+    return send_to_game(snapshot, window, events, 3, ACTION_MAX_AGE_NS);
 }
 
 int32_t rs3_move_to_tile(const rs3_snapshot *snapshot, int32_t x, int32_t y, int32_t plane,
@@ -408,7 +412,100 @@ int32_t rs3_activate_ability(const rs3_snapshot *snapshot, uint32_t struct_id, u
     events[0].ki.wVk = (WORD)virtual_key;
     events[1].ki.wVk = (WORD)virtual_key;
     events[1].ki.dwFlags = KEYEVENTF_KEYUP;
-    return send_to_game(snapshot, GetForegroundWindow(), events, 2);
+    return send_to_game(snapshot, GetForegroundWindow(), events, 2, ACTION_MAX_AGE_NS);
+}
+
+/** New chord APIs require an active scene and a fresh advancing client clock. */
+static int is_fresh_key_chord_frame(const rs3_snapshot *snapshot)
+{
+    return is_fresh_game_frame(snapshot) &&
+           clock_monotonic_ns() - snapshot->info.monotonic_ns <= KEY_CHORD_MAX_AGE_NS &&
+           snapshot->player.clock_stalled_ns <= KEY_CHORD_MAX_AGE_NS &&
+           snapshot->combat.scene_epoch != 0 &&
+           snapshot->combat.scene_state == LAYOUT_IN_GAME_STATE;
+}
+
+int32_t input_prepare_ability_chord(const rs3_snapshot *snapshot, uint32_t struct_id,
+                                    uint32_t virtual_key, uint32_t modifiers,
+                                    INPUT chord[MAX_CHORD_INPUTS], uint32_t *input_count)
+{
+    if (snapshot == NULL ||
+        input_build_key_chord(virtual_key, modifiers, chord, input_count) != RS3_OK)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    if (!is_fresh_key_chord_frame(snapshot) ||
+        snapshot->inventory_info.ability_count > RS3_MAX_ABILITIES)
+    {
+        return RS3_E_STATE;
+    }
+    unsigned matches = 0;
+    for (uint32_t index = 0; index < snapshot->inventory_info.ability_count; index++)
+    {
+        matches += snapshot->abilities[index].struct_id == struct_id;
+    }
+    return matches == 1 ? RS3_OK : RS3_E_TARGET;
+}
+
+int32_t input_prepare_item_chord(const rs3_snapshot *snapshot, uint32_t slot,
+                                 int32_t expected_item_id, uint64_t expected_token,
+                                 uint32_t virtual_key, uint32_t modifiers,
+                                 INPUT chord[MAX_CHORD_INPUTS], uint32_t *input_count)
+{
+    if (snapshot == NULL || slot >= BACKPACK_SLOT_COUNT || expected_item_id < 0 ||
+        expected_token == 0 ||
+        input_build_key_chord(virtual_key, modifiers, chord, input_count) != RS3_OK)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    if (!is_fresh_key_chord_frame(snapshot) ||
+        !(snapshot->inventory_info.flags & RS3_INVENTORY_BACKPACK_READ) ||
+        snapshot->inventory_info.backpack_count != BACKPACK_SLOT_COUNT)
+    {
+        return RS3_E_STATE;
+    }
+    const rs3_item *item = &snapshot->items[slot];
+    if (item->container_id != RS3_CONTAINER_BACKPACK || item->slot != slot ||
+        item->item_id != expected_item_id || item->token != expected_token || item->quantity == 0 ||
+        (item->flags & RS3_ITEM_AMBIGUOUS_IDENTITY))
+    {
+        return RS3_E_TARGET;
+    }
+    return RS3_OK;
+}
+
+/** The DLL owns only its inserted chord; partial insertion cleanup stays in send_to_game. */
+static int32_t send_prepared_key_chord(const rs3_snapshot *snapshot, uint32_t virtual_key,
+                                       INPUT chord[MAX_CHORD_INPUTS], uint32_t input_count)
+{
+    if (user_holds_modifier() || GetAsyncKeyState((int)virtual_key) < 0)
+    {
+        return RS3_E_STATE;
+    }
+    return send_to_game(snapshot, GetForegroundWindow(), chord, input_count, KEY_CHORD_MAX_AGE_NS);
+}
+
+int32_t rs3_activate_ability_chord(const rs3_snapshot *snapshot, uint32_t struct_id,
+                                   uint32_t virtual_key, uint32_t modifiers)
+{
+    INPUT chord[MAX_CHORD_INPUTS];
+    uint32_t input_count = 0;
+    int32_t result = input_prepare_ability_chord(snapshot, struct_id, virtual_key, modifiers, chord,
+                                                 &input_count);
+    return result == RS3_OK ? send_prepared_key_chord(snapshot, virtual_key, chord, input_count)
+                            : result;
+}
+
+int32_t rs3_activate_item_chord(const rs3_snapshot *snapshot, uint32_t slot,
+                                int32_t expected_item_id, uint64_t expected_token,
+                                uint32_t virtual_key, uint32_t modifiers)
+{
+    INPUT chord[MAX_CHORD_INPUTS];
+    uint32_t input_count = 0;
+    int32_t result = input_prepare_item_chord(snapshot, slot, expected_item_id, expected_token,
+                                              virtual_key, modifiers, chord, &input_count);
+    return result == RS3_OK ? send_prepared_key_chord(snapshot, virtual_key, chord, input_count)
+                            : result;
 }
 
 static int snapshot_has_npc(const rs3_snapshot *snapshot, uint64_t instance_id)

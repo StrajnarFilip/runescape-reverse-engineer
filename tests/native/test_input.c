@@ -4,7 +4,12 @@
 #include <math.h>
 
 #include "input.h"
+#include "inventory.h"
 #include "process.h"
+
+#define KEY_CHORD_FRESHNESS_NS 150000000ull
+#define FIXTURE_ABILITY_ID     103u
+#define FIXTURE_ITEM_TOKEN     99ull
 
 static void projects_minimap_tiles_and_guards_actions(void)
 {
@@ -128,11 +133,130 @@ static void rejects_invalid_or_ill_conditioned_minimap_calibration(void)
     assert(input_project_minimap_tile(&origin, &minimap, 3201, 3200, 0, &point) == RS3_E_STATE);
 }
 
+/** Prepare only; no positive-path test calls a foreground-input entry point. */
+static fixture *key_chord_fixture(void)
+{
+    fixture *test_fixture = fixture_create_empty();
+    rs3_snapshot *snapshot = test_fixture->snapshot;
+    snapshot->profile = &profile_primary;
+    snapshot->info.status = RS3_AVAILABLE;
+    snapshot->info.pid = FIXTURE_PID;
+    snapshot->info.process_creation_time = FIXTURE_PROCESS_CREATION_TIME;
+    snapshot->info.monotonic_ns = rs3_monotonic_ns();
+    snapshot->combat.scene_epoch = 1;
+    snapshot->combat.scene_state = LAYOUT_IN_GAME_STATE;
+    snapshot->inventory_info.ability_count = 1;
+    snapshot->abilities[0].struct_id = FIXTURE_ABILITY_ID;
+    snapshot->inventory_info.flags = RS3_INVENTORY_BACKPACK_READ;
+    snapshot->inventory_info.backpack_count = BACKPACK_SLOT_COUNT;
+    snapshot->items[0] = (rs3_item){.container_id = RS3_CONTAINER_BACKPACK,
+                                    .slot = 0,
+                                    .item_id = FIXTURE_ITEM_BREW_6,
+                                    .quantity = 1,
+                                    .token = FIXTURE_ITEM_TOKEN};
+    return test_fixture;
+}
+
+static void prepares_modified_abilities_and_rejects_missing_or_ambiguous_ids(void)
+{
+    fixture *test_fixture = key_chord_fixture();
+    INPUT chord[MAX_CHORD_INPUTS];
+    uint32_t count = 0;
+    rs3_snapshot *snapshot = test_fixture->snapshot;
+    assert(input_prepare_ability_chord(snapshot, FIXTURE_ABILITY_ID, 'G', RS3_KEY_ALT, chord,
+                                       &count) == RS3_OK);
+    assert(count == 4 && chord[0].ki.wVk == VK_MENU && chord[1].ki.wVk == 'G');
+    assert(input_prepare_ability_chord(snapshot, FIXTURE_ABILITY_ID + 1, 'G', 0, chord, &count) ==
+           RS3_E_TARGET);
+    snapshot->inventory_info.ability_count = 2;
+    snapshot->abilities[1].struct_id = FIXTURE_ABILITY_ID;
+    assert(input_prepare_ability_chord(snapshot, FIXTURE_ABILITY_ID, 'G', 0, chord, &count) ==
+           RS3_E_TARGET);
+    snapshot->inventory_info.ability_count = RS3_MAX_ABILITIES + 1;
+    assert(input_prepare_ability_chord(snapshot, FIXTURE_ABILITY_ID, 'G', 0, chord, &count) ==
+           RS3_E_STATE);
+    assert(rs3_activate_ability_chord(NULL, FIXTURE_ABILITY_ID, 'G', 0) == RS3_E_ARGUMENT);
+    fixture_destroy(test_fixture);
+}
+
+static void item_chord_requires_exact_slot_dose_token_and_quantity(void)
+{
+    fixture *test_fixture = key_chord_fixture();
+    INPUT chord[MAX_CHORD_INPUTS];
+    uint32_t count = 0;
+    rs3_snapshot *snapshot = test_fixture->snapshot;
+    assert(input_prepare_item_chord(snapshot, 0, FIXTURE_ITEM_BREW_6, FIXTURE_ITEM_TOKEN, VK_F5,
+                                    RS3_KEY_CTRL | RS3_KEY_SHIFT, chord, &count) == RS3_OK);
+    assert(count == 6 && chord[0].ki.wVk == VK_CONTROL && chord[1].ki.wVk == VK_SHIFT);
+    snapshot->items[0].item_id = FIXTURE_ITEM_BREW_5;
+    assert(input_prepare_item_chord(snapshot, 0, FIXTURE_ITEM_BREW_6, FIXTURE_ITEM_TOKEN, VK_F5, 0,
+                                    chord, &count) == RS3_E_TARGET);
+    snapshot->items[0].item_id = FIXTURE_ITEM_BREW_6;
+    snapshot->items[0].slot = 1;
+    assert(input_prepare_item_chord(snapshot, 0, FIXTURE_ITEM_BREW_6, FIXTURE_ITEM_TOKEN, VK_F5, 0,
+                                    chord, &count) == RS3_E_TARGET);
+    snapshot->items[0].slot = 0;
+    snapshot->items[0].token++;
+    assert(input_prepare_item_chord(snapshot, 0, FIXTURE_ITEM_BREW_6, FIXTURE_ITEM_TOKEN, VK_F5, 0,
+                                    chord, &count) == RS3_E_TARGET);
+    snapshot->items[0].token = FIXTURE_ITEM_TOKEN;
+    snapshot->items[0].quantity = 0;
+    assert(input_prepare_item_chord(snapshot, 0, FIXTURE_ITEM_BREW_6, FIXTURE_ITEM_TOKEN, VK_F5, 0,
+                                    chord, &count) == RS3_E_TARGET);
+    snapshot->items[0].quantity = 1;
+    snapshot->items[0].flags = RS3_ITEM_AMBIGUOUS_IDENTITY;
+    assert(input_prepare_item_chord(snapshot, 0, FIXTURE_ITEM_BREW_6, FIXTURE_ITEM_TOKEN, VK_F5, 0,
+                                    chord, &count) == RS3_E_TARGET);
+    fixture_destroy(test_fixture);
+}
+
+static void key_chords_reject_stale_scene_clock_and_unknown_inventory(void)
+{
+    fixture *test_fixture = key_chord_fixture();
+    INPUT chord[MAX_CHORD_INPUTS];
+    uint32_t count;
+    rs3_snapshot *snapshot = test_fixture->snapshot;
+    snapshot->info.monotonic_ns = rs3_monotonic_ns() - KEY_CHORD_FRESHNESS_NS - 1;
+    assert(input_prepare_ability_chord(snapshot, FIXTURE_ABILITY_ID, VK_F5, 0, chord, &count) ==
+           RS3_E_STATE);
+    snapshot->info.monotonic_ns = rs3_monotonic_ns() + KEY_CHORD_FRESHNESS_NS;
+    assert(input_prepare_ability_chord(snapshot, FIXTURE_ABILITY_ID, VK_F5, 0, chord, &count) ==
+           RS3_E_STATE);
+    snapshot->info.monotonic_ns = rs3_monotonic_ns();
+    snapshot->player.clock_stalled_ns = KEY_CHORD_FRESHNESS_NS + 1;
+    assert(input_prepare_ability_chord(snapshot, FIXTURE_ABILITY_ID, VK_F5, 0, chord, &count) ==
+           RS3_E_STATE);
+    snapshot->player.clock_stalled_ns = 0;
+    snapshot->combat.scene_epoch = 0;
+    assert(input_prepare_ability_chord(snapshot, FIXTURE_ABILITY_ID, VK_F5, 0, chord, &count) ==
+           RS3_E_STATE);
+    snapshot->combat.scene_epoch = 1;
+    snapshot->combat.scene_state = 0;
+    assert(input_prepare_ability_chord(snapshot, FIXTURE_ABILITY_ID, VK_F5, 0, chord, &count) ==
+           RS3_E_STATE);
+    snapshot->combat.scene_state = LAYOUT_IN_GAME_STATE;
+    snapshot->inventory_info.flags = 0;
+    assert(input_prepare_item_chord(snapshot, 0, FIXTURE_ITEM_BREW_6, FIXTURE_ITEM_TOKEN, VK_F5, 0,
+                                    chord, &count) == RS3_E_STATE);
+    snapshot->inventory_info.flags = RS3_INVENTORY_BACKPACK_READ;
+    snapshot->inventory_info.backpack_count = 0;
+    assert(input_prepare_item_chord(snapshot, 0, FIXTURE_ITEM_BREW_6, FIXTURE_ITEM_TOKEN, VK_F5, 0,
+                                    chord, &count) == RS3_E_STATE);
+    assert(rs3_activate_item_chord(snapshot, BACKPACK_SLOT_COUNT, FIXTURE_ITEM_BREW_6,
+                                   FIXTURE_ITEM_TOKEN, VK_F5, 0) == RS3_E_ARGUMENT);
+    assert(rs3_activate_item_chord(snapshot, 0, FIXTURE_ITEM_BREW_6, 0, VK_F5, 0) ==
+           RS3_E_ARGUMENT);
+    fixture_destroy(test_fixture);
+}
+
 int main(void)
 {
     RUN_TEST(projects_minimap_tiles_and_guards_actions);
     RUN_TEST(builds_chords_and_releases_partial_insertions);
     RUN_TEST(rejects_invalid_or_ill_conditioned_minimap_calibration);
+    RUN_TEST(prepares_modified_abilities_and_rejects_missing_or_ambiguous_ids);
+    RUN_TEST(item_chord_requires_exact_slot_dose_token_and_quantity);
+    RUN_TEST(key_chords_reject_stale_scene_clock_and_unknown_inventory);
     puts("PASS: input tests");
     return 0;
 }
