@@ -104,6 +104,29 @@ class PhaseOneTests(unittest.TestCase):
         later = now + 2 * timeout - 1
         self.assertIsNone(phase.next_action(later, timers, 0, Prayer.SOUL_SPLIT, flicking=True))
 
+    def test_unknown_equipment_match_is_accepted_only_when_bound(self):
+        from rs3_reader.native import AbilityFlags, EquipmentMatch
+
+        def ability(name, match, reason, flags=0):
+            return SimpleNamespace(
+                name=name.encode(),
+                equipment_match=match,
+                reason=reason,
+                flags=flags,
+                remaining_ms=0,
+            )
+
+        reader = SimpleNamespace(
+            abilities=[
+                ability("Resonance", EquipmentMatch.UNKNOWN, Reason.NOT_SET),
+                ability("Barricade", EquipmentMatch.UNKNOWN, Reason.NOT_SET),
+                ability("Escape", EquipmentMatch.ALLOWED, Reason.NONE, AbilityFlags.TIMER_VALID),
+                ability("Surge", EquipmentMatch.BLOCKED, Reason.NOT_SET),
+            ]
+        )
+        timers = controller["cooldowns"](reader, {"Resonance", "Surge"})
+        self.assertEqual(timers, {"Resonance": None, "Escape": 0})
+
     def test_resonance_waits_for_first_hold_still_hit(self):
         phase = PhaseOne()
         phase.observe([dict(event(1, HOLD_STILL), received_tick=50)])

@@ -410,13 +410,20 @@ def boss_sample(reader):
     return info, player, boss, phase, hp
 
 
-def cooldowns(reader):
-    """Separate valid cooldowns from mapped timers absent in the sparse table."""
+def cooldowns(reader, operator_bound=()):
+    """Separate valid cooldowns from mapped timers absent in the sparse table.
+
+    An unknown equipment match is accepted for abilities the operator bound explicitly. The
+    cache lists Resonance as shield-only, so the DLL reports it as unknown with a two-handed
+    weapon; the operator's binding and the later cooldown acknowledgement decide instead.
+    """
     timers = {}
     for ability in reader.abilities:
-        if ability.equipment_match != EquipmentMatch.ALLOWED:
-            continue
         name = ability.name.decode("utf-8", errors="replace")
+        if ability.equipment_match != EquipmentMatch.ALLOWED and not (
+            ability.equipment_match == EquipmentMatch.UNKNOWN and name in operator_bound
+        ):
+            continue
         if ability.flags & AbilityFlags.TIMER_VALID:
             timers[name] = ability.remaining_ms
         elif ability.reason == Reason.NOT_SET:
@@ -873,7 +880,9 @@ def run(reader, args, board, attempt=None):
                 raise RuntimeError("Unexpected phase 3 checkpoint")
             emit("phase_three_observed", boss_hp=boss.health_current, player_hp=hp)
             if attempt and phase_one.pending:
-                ability, confirmed = phase_one.acknowledge(cooldowns(reader), now, ending=True)
+                ability, confirmed = phase_one.acknowledge(
+                    cooldowns(reader, bindings), now, ending=True
+                )
                 attempt.write(
                     "cooldown_acknowledgement",
                     ability=ability,
@@ -894,7 +903,9 @@ def run(reader, args, board, attempt=None):
             if first_phase_two_sample:
                 emit("phase_two_observed", boss_hp=boss.health_current, phase=phase, player_hp=hp)
                 if attempt and phase_one.pending:
-                    ability, confirmed = phase_one.acknowledge(cooldowns(reader), now, ending=True)
+                    ability, confirmed = phase_one.acknowledge(
+                        cooldowns(reader, bindings), now, ending=True
+                    )
                     attempt.write(
                         "cooldown_acknowledgement",
                         ability=ability,
@@ -1007,7 +1018,9 @@ def run(reader, args, board, attempt=None):
             )
             previous_tile, previous_prayer = tile, prayer
 
-        timers = {name: value for name, value in cooldowns(reader).items() if name in bindings}
+        timers = {
+            name: value for name, value in cooldowns(reader, bindings).items() if name in bindings
+        }
         action = phase_one.next_action(
             now,
             timers,
