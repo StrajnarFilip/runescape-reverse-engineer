@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "track": "L",
+  "date": "2026-11-14",
+  "source_commit": "e8770f0",
+  "status": "offline_dispatch_revalidation_passed",
+  "problem": "Generic arbiter item/ability readiness did not re-evaluate the survival purpose after health, prayer, effects, protection or threat evidence changed.",
+  "behavior": {
+    "hook": "SurvivalManager.can_send(intent, world)",
+    "current_policy": "Reuses the proposal rules on an isolated decision-state copy; no duplicate eligibility implementation.",
+    "requires_unchanged": "Original offered action/purpose, exact item ID/token/quantity or exact threatened component/protection window.",
+    "rechecks": "Current thresholds, potion priority, blockers, protection, stun, virus route and emergency-exit need.",
+    "encounter_provider": "Optional current immutable D1 provider; otherwise the most recent step state with its original age guards.",
+    "preview_mutates_live_pending_report_or_fault": false,
+    "food_and_potion_remain_independent_lanes": true,
+    "unknown_or_zero_item_token_proposes_input": false,
+    "unknown_threat_identity_or_option_list_authorizes_defensive": false
+  },
+  "checks": {
+    "ctest_targets_passed": 15,
+    "python_tests_passed": 332,
+    "python_tests_skipped": 0,
+    "survival_cases": 36,
+    "new_regression_cases": 11,
+    "real_D6_with_recording_actuator": "Healed food offer rejected before any send attempt",
+    "existing_local_golden_replay": "unchanged"
+  },
+  "live_input_sent": false,
+  "effect_castability_or_timing_gaps_inferred": false,
+  "ladder_rung_passed": false,
+  "raw_captures_published": false
+}

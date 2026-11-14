@@ -102,6 +102,12 @@ intents. Decision producers may consume its state after each step.
 Requests
 --------
 
+* L follow-up, 2026-11-14: only promote a timing-calibrated cue when its current
+  native NPC target is the exact observed local player. Unknown, clear, foreign
+  or stale target evidence must leave it unresolved. The P1 entity reference
+  alone is not an attack declaration; still require the calibrated attack row.
+  Keep historical label/cycle observations separate from usable threat flags.
+
 * P6: supply measured per-component protection windows and complete incoming
   coverage, including golems/projectiles. Current labelled threats are useful
   observations, not authorization to flick. Multi-hit rows without separately

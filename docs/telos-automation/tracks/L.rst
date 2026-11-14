@@ -213,3 +213,16 @@ Requests
   generic item/ability readiness does not recheck changed resource thresholds,
   protection, stun/defensive blockers or threat identity after proposal. Keep
   validation side-effect free and preserve simultaneous food/potion lanes.
+
+* D3 current-purpose validation is integrated at e8770f0. Revalidation rejects
+  changed resource/potion policy, defensive protection/blockers and threatened
+  components, exact item changes and obsolete cleanse/exit needs before send.
+  Preview reconciliation cannot change real pending state or fault/report.
+  All 15 CTest targets pass (332 Python tests, zero skips), including 36 survival
+  scenarios and the unchanged real-capture golden replay. See
+  ``docs/validation/telos-ladder-survival-revalidation-2026-11-14.json``.
+  Live composition should supply D3's current encounter provider if it refreshes
+  perception independently of the producer step. No live input is enabled.
+* D1/P1: guard promotion of classified cues to usable calibrated threats with
+  fresh exact local-player target evidence. A nearby Telos cue alone must not
+  acquire a protection deadline. Preserve historical uncalibrated label counts.
