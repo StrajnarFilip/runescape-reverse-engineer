@@ -534,7 +534,8 @@ class BeamTests(unittest.TestCase):
             project_tile=lambda r, tile, plane, height: (520, 530) if tile[0] == 98 else None,
         ):
             self.assertEqual(choose(reader, 2, player, boss), (((98, 100), 0, 103548), (520, 530)))
-            self.assertIsNone(choose(reader, 2, player, boss, destination=((100, 99), 0, 103547)))
+            self.assertIsNone(choose(reader, 2, player, boss, use_tile=(100, 99, 0)))
+            self.assertIsNone(choose(reader, 2, player, boss, rejected={(520, 530)}))
 
     def test_virus_timer_preserves_unknown_and_decodes_countdown(self):
         timer = controller["virus_timer"]

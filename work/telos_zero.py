@@ -366,7 +366,7 @@ VIRUS_TIMER_START = 3840
 VIRUS_TIMER_STEP = 128
 VIRUS_BEAM_BY_PHASE = {2: BLACK_BEAM_KIND, 3: RED_BEAM_KIND}
 VIRUS_CLEANSE_GRACE_TICKS = 2
-VIRUS_CLICK_RECHECK_PIXELS = 3
+VIRUS_HOVER_SETTLE_SECONDS = 0.05
 
 
 def footprint_distance(tile, boss_tile, size):
@@ -440,6 +440,7 @@ class VirusResponse:
         self.move_tick = None
         self.next_move = None
         self.arrival = None
+        self.rejected = set()
 
     def observe(self, phase, remaining, tick, client_tick, message):
         """Return a new onset and any completed outcome from this observation."""
@@ -482,7 +483,7 @@ class VirusResponse:
         return moved
 
 
-def virus_beam_destination(reader, phase, player, boss, *, destination=None):
+def virus_beam_destination(reader, phase, player, boss, *, use_tile=None, rejected=()):
     """Choose the nearest projected stream tile outside Telos's footprint."""
     mask = SpatialFlags.TILE | SpatialFlags.SAME_WORLD
     pose = next(
@@ -508,12 +509,12 @@ def virus_beam_destination(reader, phase, player, boss, *, destination=None):
             or hazard.tile.plane != player.tile.plane
             or tile == player_tile
             or not footprint_distance(tile, boss_tile, pose.footprint_size or 1)
-            or (destination is not None and identity != destination)
+            or (use_tile is not None and (*tile, hazard.tile.plane) != use_tile)
         ):
             continue
         height = reader.hazard_terrain_height(hazard)
         point = project_tile(reader, tile, hazard.tile.plane, height)
-        if point is not None:
+        if point is not None and point not in rejected:
             routes.append((chebyshev(tile, player_tile), identity, point))
     if not routes:
         return None
@@ -1681,13 +1682,20 @@ def run(reader, args, board, attempt=None):
             )
         ):
             return
-        route = virus_beam_destination(reader, phase, player, boss)
+        route = virus_beam_destination(reader, phase, player, boss, rejected=virus.rejected)
         if route is None:
+            virus.rejected.clear()
+            virus.next_move = received_tick + 1
             return
         destination, screen_point = route
         boss_id = boss.instance_id
+        previous_menu_cycle = reader.pointer_walk.menu_cycle
+        hover = {}
+        actual_destination = None
 
         def destination_current():
+            nonlocal actual_destination
+            time.sleep(VIRUS_HOVER_SETTLE_SECONDS)
             latest, _, current_boss, current_phase, hp = boss_sample(reader)
             if (
                 (latest.pid, latest.process_creation_time, reader.combat.scene_epoch) != identity
@@ -1705,13 +1713,20 @@ def run(reader, args, board, attempt=None):
             current_player = reader.spatial.player
             if not current_player.valid_mask & SpatialFlags.TILE:
                 return False
+            pointer = reader.pointer_walk
+            if pointer.valid:
+                hover["action"] = pointer.action
+                if pointer.tile.valid:
+                    hover["tile"] = (pointer.tile.x, pointer.tile.y, pointer.tile.plane)
+            if pointer.menu_cycle == previous_menu_cycle or "tile" not in hover:
+                return False
             current_route = virus_beam_destination(
-                reader, phase, current_player, current_boss, destination=destination
+                reader, phase, current_player, current_boss, use_tile=hover["tile"]
             )
-            return (
-                current_route is not None
-                and chebyshev(current_route[1], screen_point) <= VIRUS_CLICK_RECHECK_PIXELS
-            )
+            if current_route is None:
+                return False
+            actual_destination = current_route[0]
+            return True
 
         sent = click_point(
             screen_point,
@@ -1723,6 +1738,10 @@ def run(reader, args, board, attempt=None):
         virus.next_move = (dispatch_tick or received_tick) + (BEAM_MOVE_RETRY_TICKS if sent else 1)
         if sent and virus.move_tick is None:
             virus.move_tick = dispatch_tick or received_tick
+        if sent:
+            virus.rejected.clear()
+        elif hover:
+            virus.rejected.add(screen_point)
         target, plane, config = destination
         emit(
             "anima_virus_move",
@@ -1733,7 +1752,10 @@ def run(reader, args, board, attempt=None):
             timer=remaining,
             tile=player_tile,
             target=(*target, plane),
+            walk_target=hover.get("tile") if sent else None,
+            walk_target_config=actual_destination[2] if sent else None,
             beam_config=config,
+            hover=hover,
             player_fine_height=(
                 player.fine_height if player.valid_mask & SpatialFlags.FINE_POSITION else None
             ),
@@ -1868,7 +1890,7 @@ def run(reader, args, board, attempt=None):
             bounds = pointer_window.bounds()
             move_pointer(board, pointer_window, bounds, point)
             if validate is not None and not validate():
-                emit(failure_event, reason="Destination changed before click", screen_point=point)
+                emit(failure_event, reason="Ground destination unconfirmed", screen_point=point)
                 return None
             if pointer_window.bounds() != bounds:
                 return None

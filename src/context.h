@@ -71,6 +71,7 @@ struct rs3_snapshot
     rs3_position position;
     rs3_combat_state combat;
     rs3_spatial_info spatial;
+    rs3_pointer_walk pointer_walk;
     rs3_actor_spatial npc_spatial[RS3_MAX_NPCS];
     rs3_encounter_state encounter;
     rs3_telos_cleanse telos_cleanse;

@@ -664,7 +664,16 @@ class ScreenPoint(ctypes.Structure):
     ]
 
 
-SIZED_SPATIAL_STRUCTURES = {1: ActorSpatial, 2: Camera, 3: SpatialInfo, 4: ScreenPoint}
+class PointerWalk(ctypes.Structure):
+    _fields_ = [
+        ("menu_cycle", ctypes.c_uint64),
+        ("tile", Position),
+        ("action", ctypes.c_int32),
+        ("valid", ctypes.c_uint32),
+    ]
+
+
+SIZED_SPATIAL_STRUCTURES = {1: ActorSpatial, 2: Camera, 3: SpatialInfo, 4: ScreenPoint, 5: PointerWalk}
 
 
 class HazardFlags(IntFlag):
@@ -867,6 +876,7 @@ def _function_prototypes():
         "sizeof": (u32, [u32]),
         "spatial_sizeof": (u32, [u32]),
         "snapshot_spatial": (i32, [handle, ctypes.POINTER(SpatialInfo), u32]),
+        "snapshot_pointer_walk": (i32, [handle, ctypes.POINTER(PointerWalk), u32]),
         "snapshot_npc_spatial": (
             i32,
             [handle, ctypes.POINTER(ActorSpatial), u32, ctypes.POINTER(u32)],
@@ -1043,6 +1053,7 @@ class Reader:
         self.position = Position()
         self.combat = CombatState()
         self.spatial = SpatialInfo()
+        self.pointer_walk = PointerWalk()
         self.npc_spatial = (ActorSpatial * MAX_NPCS)()
         self.npcs = (NPC * MAX_NPCS)()
         self.npc_animations = (NPCAnimation * MAX_NPCS)()
@@ -1125,6 +1136,7 @@ class Reader:
         copy_record(library.rs3_snapshot_position, self.position)
         copy_record(library.rs3_snapshot_combat, self.combat)
         copy_record(library.rs3_snapshot_spatial, self.spatial)
+        copy_record(library.rs3_snapshot_pointer_walk, self.pointer_walk)
         copy_array(library.rs3_snapshot_npc_spatial, self.npc_spatial)
         copy_array(library.rs3_snapshot_npcs, self.npcs)
         copy_array(library.rs3_snapshot_npc_animations, self.npc_animations)

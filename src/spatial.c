@@ -21,6 +21,7 @@
 #define VIEWPORT_OFFSET            0x84u
 #define FINE_UNITS_PER_TILE        512.0
 #define MAX_FOOTPRINT              64u
+#define MAX_SPATIAL_PLANE          3
 #define MAX_VIEWPORT_DIMENSION     32768
 #define QUATERNION_NORM_TOLERANCE  0.02
 #define DEGREES_PER_RADIAN         57.29577951308232
@@ -41,11 +42,25 @@
 #define TARGET_UID_GUARD_RVA       0x3fff90u
 #define COMPAT_TARGET_KIND_RVA     0x3ffe86u
 #define COMPAT_TARGET_UID_RVA      0x3ffeb0u
+#define MENU_OWNER_OFFSET          0x19938u
+#define MENU_VTABLE_RVA            0x150d5b0u
+#define MENU_GUARD_RVA             0x39024bu
+#define MENU_VECTOR_OFFSET         0x90u
+#define MENU_OPEN_OFFSET           0x17b0u
+#define MENU_CYCLE_OFFSET          0x21d0u
+#define MENU_REFERENCE_BYTES       16u
+#define MENU_ENTRY_ACTION_OFFSET   0x38u
+#define MENU_ENTRY_TILE_OFFSET     0x48u
+#define MENU_ACTION_ID_OFFSET      0x40u
+#define MENU_WALK_ACTION_RVA       0x16be960u
+#define MENU_WALK_ACTION           23
+#define MENU_MAX_ENTRIES           512u
 
 _Static_assert(sizeof(rs3_actor_spatial) == 88, "ABI spatial actor");
 _Static_assert(sizeof(rs3_camera) == 136, "ABI camera");
 _Static_assert(sizeof(rs3_spatial_info) == 272, "ABI spatial info");
 _Static_assert(sizeof(rs3_screen_point) == 24, "ABI screen point");
+_Static_assert(sizeof(rs3_pointer_walk) == 32, "ABI pointer walk");
 
 /** Exact additional instruction guards for the original profile's newly followed fields. */
 static int spatial_layout_verified(rs3_context *context)
@@ -211,8 +226,8 @@ int spatial_decode_actor(rs3_context *context, uint64_t actor, uint32_t vtable_r
     uint32_t size = decode_u32(before + ACTOR_SIZE_OFFSET);
     float position[3];
     memcpy(position, before + ACTOR_FINE_OFFSET, sizeof position);
-    if (plane >= 0 && plane <= 3 && size >= 1 && size <= MAX_FOOTPRINT && isfinite(position[0]) &&
-        isfinite(position[1]) && isfinite(position[2]))
+    if (plane >= 0 && plane <= MAX_SPATIAL_PLANE && size >= 1 && size <= MAX_FOOTPRINT &&
+        isfinite(position[0]) && isfinite(position[1]) && isfinite(position[2]))
     {
         double x = floor(position[0] / FINE_UNITS_PER_TILE - size / 2u);
         double y = floor(position[2] / FINE_UNITS_PER_TILE - size / 2u);
@@ -363,6 +378,55 @@ static void read_camera(rs3_context *context, uint64_t world_state, uint64_t act
     camera->observed_ns = clock_monotonic_ns();
 }
 
+/** Read the top closed-menu action and only decode the ground fields of Walk. */
+static void stage_pointer_walk(rs3_context *context, uint64_t world_state, rs3_pointer_walk *out)
+{
+    static const unsigned char cycle_increment[] = {0xff, 0x81, 0xd0, 0x21, 0, 0};
+    unsigned char instruction[sizeof cycle_increment];
+    uint64_t module = context->target.module_base, menu, vtable, cycle, cycle_after;
+    uint64_t entries[2], entries_after[2], entry, entry_after, action;
+    unsigned char open, open_after;
+    int32_t action_id, tile[3] = {0};
+    if (context->target.profile != &profile_compatibility ||
+        !memory_read(context, module + MENU_GUARD_RVA, instruction, sizeof instruction) ||
+        memcmp(instruction, cycle_increment, sizeof cycle_increment) ||
+        !memory_read_pointer(context, world_state + MENU_OWNER_OFFSET, &menu) || !menu ||
+        !memory_read_pointer(context, menu, &vtable) || vtable != module + MENU_VTABLE_RVA ||
+        !memory_read_pointer(context, menu + sizeof(uint64_t), &vtable) || vtable != world_state ||
+        !memory_read(context, menu + MENU_OPEN_OFFSET, &open, sizeof open) || open ||
+        !memory_read(context, menu + MENU_CYCLE_OFFSET, &cycle, sizeof cycle) ||
+        !memory_read(context, menu + MENU_VECTOR_OFFSET, entries, sizeof entries) ||
+        entries[1] <= entries[0] || (entries[1] - entries[0]) % MENU_REFERENCE_BYTES != 0 ||
+        (entries[1] - entries[0]) / MENU_REFERENCE_BYTES > MENU_MAX_ENTRIES ||
+        !memory_read_pointer(context, entries[1] - sizeof(uint64_t), &entry) || !entry ||
+        !memory_read_pointer(context, entry + MENU_ENTRY_ACTION_OFFSET, &action) || !action ||
+        !memory_read(context, action + MENU_ACTION_ID_OFFSET, &action_id, sizeof action_id))
+    {
+        return;
+    }
+    int walk = action == module + MENU_WALK_ACTION_RVA && action_id == MENU_WALK_ACTION;
+    if ((walk && !memory_read(context, entry + MENU_ENTRY_TILE_OFFSET, tile, sizeof tile)) ||
+        !memory_read_pointer(context, entries[1] - sizeof(uint64_t), &entry_after) ||
+        entry_after != entry ||
+        !memory_read(context, menu + MENU_VECTOR_OFFSET, entries_after, sizeof entries_after) ||
+        memcmp(entries, entries_after, sizeof entries) ||
+        !memory_read(context, menu + MENU_OPEN_OFFSET, &open_after, sizeof open_after) ||
+        open_after ||
+        !memory_read(context, menu + MENU_CYCLE_OFFSET, &cycle_after, sizeof cycle_after) ||
+        cycle_after != cycle)
+    {
+        return;
+    }
+    out->menu_cycle = cycle;
+    out->action = action_id;
+    out->valid = 1;
+    if (walk && tile[0] >= 0 && tile[0] <= MAX_SPATIAL_PLANE && tile[1] >= 0 &&
+        tile[1] < MAX_TILE_COORDINATE && tile[2] >= 0 && tile[2] < MAX_TILE_COORDINATE)
+    {
+        out->tile = (rs3_position){1, tile[1], tile[2], tile[0]};
+    }
+}
+
 void spatial_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_state)
 {
     rs3_spatial_info *info = &snapshot->spatial;
@@ -379,6 +443,7 @@ void spatial_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_
     {
         return;
     }
+    stage_pointer_walk(context, world_state, &snapshot->pointer_walk);
     info->status = RS3_PARTIAL;
     info->reason = RS3_SPATIAL_UNMAPPED;
     info->player.tile_reason = RS3_READ_FAILED;
@@ -468,6 +533,8 @@ uint32_t rs3_spatial_sizeof(uint32_t structure)
             return sizeof(rs3_spatial_info);
         case RS3_SPATIAL_SIZE_SCREEN_POINT:
             return sizeof(rs3_screen_point);
+        case RS3_SPATIAL_SIZE_POINTER_WALK:
+            return sizeof(rs3_pointer_walk);
         default:
             return 0;
     }

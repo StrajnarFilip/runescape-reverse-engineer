@@ -56,6 +56,8 @@ The practice controller reads encounter VARP `6362` in P2 and P3. Join `anima_vi
 the same phase. The outcome `cleanse_confirmed` requires the countdown reset and a matching
 `anima_stream_cleanse_observed` message ID. `timer_cleared` means the countdown ended without
 the message. The nearest logged beam row can be one tile away when a cleanse occurs.
+Movement rows include the projected target, the observed default action and tile in `hover`,
+and the verified `walk_target` and `dispatch_tick` when a click is sent.
 A log with no `attempt_ended` was interrupted before the writer could record its outcome.
 
 Join an `ability_sent` row to the `npc_animation` row whose `native_sequence` matches `cue_native_sequence`. Use `cooldown_acknowledgement` and `surge_displacement` for later observations. A cooldown acknowledges a cast. Dodge success, damage prevention and healing each require their own evidence. Inspect `queue_loss` and `attempt_ended` before interpreting a run. The first practice trace predates NPC tile and NPC hitmark logging and has no explicit Anticipation acknowledgement at the phase boundary.
