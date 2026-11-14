@@ -916,11 +916,9 @@ def run(reader, args, board, attempt=None):
                     if attempt:
                         attempt.end_reason = reason
                 return 2
-        phase_boundary = phase_end_hp(expected_max_hp, phase)
-        if boss.health_current <= phase_boundary:
-            time.sleep(POLL_SECONDS)
-            continue
-
+        # Specials still resolve after boss HP reaches the phase threshold: a 250% Uppercut at
+        # 454,018 HP landed after the 450,000 boundary, so responses continue until the phase
+        # field changes. Inputs during the transition lockout simply have no effect.
         autos_before = phase_one.autos
         timed_freedom = getattr(args, "timed_freedom", False)
         received_tick = None
