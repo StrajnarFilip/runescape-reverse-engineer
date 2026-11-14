@@ -93,6 +93,7 @@ static void copy_frame(rs3_snapshot *destination, const rs3_snapshot *source)
     memcpy(destination->npc_spatial, source->npc_spatial,
            source->spatial.npc_count * sizeof(rs3_actor_spatial));
     destination->encounter = source->encounter;
+    destination->telos_cleanse = source->telos_cleanse;
     destination->encounter_tick_owner = source->encounter_tick_owner;
     destination->encounter_tick_world_state = source->encounter_tick_world_state;
     destination->encounter_tick_last_change_ns = source->encounter_tick_last_change_ns;

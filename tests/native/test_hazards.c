@@ -458,12 +458,46 @@ static void compatibility_scene_beam_tiles_follow_the_live_location_lists(void)
            (RS3_HAZARD_IDENTITY | RS3_HAZARD_TILE | RS3_HAZARD_SCENE_LOCATION));
     assert(snapshot->hazards[0].tile.x == TEST_TILE_X &&
            snapshot->hazards[0].tile.y == TEST_TILE_Y);
+    float height;
+    assert(rs3_hazard_terrain_height(&snapshot->hazards[0], &height) == RS3_E_STATE);
+
+    const uint64_t terrain = 0x969000, planes = 0x969400, plane = 0x969500, grid = 0x96a000,
+                   vertices_a = 0x96b000, vertices_b = 0x96c000;
+    const uint64_t terrain_getter = FIXTURE_MODULE_BASE + 0xcdc40fu;
+    const unsigned char height_guard[] = {0x80, 0xb9, 0x69, 0x01, 0, 0, 0};
+    fixture_add_block(sample, terrain_getter, sizeof height_guard);
+    memcpy(fixture_bytes(sample, terrain_getter, sizeof height_guard), height_guard,
+           sizeof height_guard);
+    fixture_add_block(sample, terrain, 0x190);
+    fixture_add_block(sample, planes, 0x20);
+    fixture_add_block(sample, plane, 8);
+    fixture_add_block(sample, grid, 66 * 0x18);
+    fixture_add_block(sample, vertices_a, 66 * 4);
+    fixture_add_block(sample, vertices_b, 66 * 4);
+    fixture_put_u64(sample, square + 0xa0, terrain);
+    fixture_put_u64(sample, terrain + 0x170, planes);
+    fixture_put_u64(sample, terrain + 0x178, planes + 0x20);
+    fixture_put_u64(sample, planes + 0x18, plane);
+    fixture_put_u64(sample, plane, grid);
+    const unsigned local_x = TEST_TILE_X % 64 + 1, local_y = TEST_TILE_Y % 64 + 1;
+    fixture_put_u64(sample, grid + local_x * 0x18, vertices_a);
+    fixture_put_u64(sample, grid + (local_x + 1) * 0x18, vertices_b);
+    fixture_put_u32(sample, vertices_a + local_y * 4, 4500);
+    fixture_put_u32(sample, vertices_a + (local_y + 1) * 4, 4504);
+    fixture_put_u32(sample, vertices_b + local_y * 4, 4508);
+    fixture_put_u32(sample, vertices_b + (local_y + 1) * 4, 4512);
 
     snapshot->encounter.stage_raw.value = 1;
     fixture_put_u32(sample, config + 8, 103548);
     hazards_commit(sample->context, snapshot, 1);
     hazards_read_telos_beams(sample->context, snapshot, FIXTURE_WORLD);
     assert(snapshot->hazard_info.count == 1 && snapshot->hazards[0].kind == RS3_HAZARD_BLACK_BEAM);
+    assert(rs3_hazard_terrain_height(&snapshot->hazards[0], &height) == RS3_OK && height == 4506);
+    snapshot->encounter.stage_raw.value = 2;
+    fixture_put_u32(sample, config + 8, 103550);
+    hazards_commit(sample->context, snapshot, 1);
+    hazards_read_telos_beams(sample->context, snapshot, FIXTURE_WORLD);
+    assert(snapshot->hazard_info.count == 1 && snapshot->hazards[0].kind == RS3_HAZARD_RED_BEAM);
     fixture_mutate_on_read(sample, location + 0x170, 2, location + 0x178, TEST_TILE_Y + 1);
     hazards_commit(sample->context, snapshot, 1);
     hazards_read_telos_beams(sample->context, snapshot, FIXTURE_WORLD);

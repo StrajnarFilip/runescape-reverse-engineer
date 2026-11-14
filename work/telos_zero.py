@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from rs3_reader.action_bar_keys import displayed_bindings
-from rs3_reader.bot.attempt_log import AttemptLog
+from rs3_reader.bot.attempt_log import CLEANSE_MAX_AGE_CLIENT_TICKS, AttemptLog
 from rs3_reader.native import (
     PRAYER_POINTS_MASK,
     AbilityFlags,
@@ -348,6 +348,7 @@ METER_MASK = (1 << PHASE_SHIFT) - 1
 # enum rs3_hazard_kind: scene-location strips read on Compatibility Mode (commit ca6f117).
 GREEN_BEAM_KIND = 1
 BLACK_BEAM_KIND = 2
+RED_BEAM_KIND = 3
 # Only the black stream is blocked. In the 300% run of 175142 the green P1 strip stopped short
 # of Telos and moved, so following it dragged the player away from Telos for 50 ticks.
 BEAM_KIND_BY_PHASE = {2: BLACK_BEAM_KIND}
@@ -360,6 +361,12 @@ BEAM_MOVE_RETRY_TICKS = 3
 BEAM_BLOCKING_ENABLED = False
 # Escape (Uppercut +4/+5) and the stomp Dive (Hold Still +4..+7) own movement for this long.
 BEAM_SPECIAL_HOLD_TICKS = 10
+VIRUS_TIMER_VARP = 6362
+VIRUS_TIMER_START = 3840
+VIRUS_TIMER_STEP = 128
+VIRUS_BEAM_BY_PHASE = {2: BLACK_BEAM_KIND, 3: RED_BEAM_KIND}
+VIRUS_CLEANSE_GRACE_TICKS = 2
+VIRUS_CLICK_RECHECK_PIXELS = 3
 
 
 def footprint_distance(tile, boss_tile, size):
@@ -411,6 +418,107 @@ class BeamBlocker:
     def blocked(self):
         """The player has reached the stream: forget the rises seen while it fed Telos."""
         self.rise_ticks.clear()
+
+
+def virus_timer(encounter):
+    """Read the scoped countdown, preserving an absent or unrecognized sample as unknown."""
+    for sample in encounter.raw[: encounter.raw_count]:
+        if sample.varp_id == VIRUS_TIMER_VARP and sample.valid:
+            value = sample.value
+            if 0 <= value <= VIRUS_TIMER_START and value % VIRUS_TIMER_STEP == 0:
+                return value
+    return None
+
+
+class VirusResponse:
+    """Track infection, movement and the independent acknowledgement within one phase."""
+
+    def __init__(self):
+        self.phase = None
+        self.started = None
+        self.zero_tick = None
+        self.move_tick = None
+        self.next_move = None
+        self.arrival = None
+
+    def observe(self, phase, remaining, tick, client_tick, message):
+        """Return a new onset and any completed outcome from this observation."""
+        if phase != self.phase:
+            outcome = "phase_changed" if self.started is not None else None
+            self.__init__()
+            self.phase = phase
+        else:
+            outcome = None
+        if phase not in VIRUS_BEAM_BY_PHASE or tick is None:
+            return None, outcome
+
+        if self.started is None:
+            if remaining:
+                self.started = (tick, client_tick)
+                return self.started, outcome
+            return None, outcome
+
+        if remaining == 0 and self.zero_tick is None:
+            self.zero_tick = tick
+        if self.zero_tick is not None:
+            message_after_onset = (
+                message.valid
+                and ((message.client_logic_tick - self.started[1]) & 0xFFFFFFFF) < 0x80000000
+                and ((client_tick - message.client_logic_tick) & 0xFFFFFFFF)
+                <= CLEANSE_MAX_AGE_CLIENT_TICKS
+            )
+            if message_after_onset:
+                return None, "cleanse_confirmed"
+            if tick - self.zero_tick >= VIRUS_CLEANSE_GRACE_TICKS:
+                return None, "timer_cleared"
+        return None, outcome
+
+    def finish(self):
+        """Forget the completed infection and report whether a click interrupted combat."""
+        moved = self.move_tick is not None
+        phase = self.phase
+        self.__init__()
+        self.phase = phase
+        return moved
+
+
+def virus_beam_destination(reader, phase, player, boss, *, destination=None):
+    """Choose the nearest projected stream tile outside Telos's footprint."""
+    mask = SpatialFlags.TILE | SpatialFlags.SAME_WORLD
+    pose = next(
+        (
+            candidate
+            for candidate in reader.npc_spatial[: reader.spatial.npc_count]
+            if candidate.instance_id == boss.instance_id and candidate.valid_mask & mask == mask
+        ),
+        None,
+    )
+    if pose is None:
+        return None
+    player_tile = (player.tile.x, player.tile.y)
+    boss_tile = (pose.tile.x, pose.tile.y)
+    required = HazardFlags.TILE | HazardFlags.SCENE_LOCATION | HazardFlags.TERRAIN_HEIGHT
+    routes = []
+    for hazard in reader.hazards[: reader.hazard_info.count]:
+        tile = (hazard.tile.x, hazard.tile.y)
+        identity = (tile, hazard.tile.plane, hazard.config_id)
+        if (
+            hazard.flags & required != required
+            or hazard.kind != VIRUS_BEAM_BY_PHASE[phase]
+            or hazard.tile.plane != player.tile.plane
+            or tile == player_tile
+            or not footprint_distance(tile, boss_tile, pose.footprint_size or 1)
+            or (destination is not None and identity != destination)
+        ):
+            continue
+        height = reader.hazard_terrain_height(hazard)
+        point = project_tile(reader, tile, hazard.tile.plane, height)
+        if point is not None:
+            routes.append((chebyshev(tile, player_tile), identity, point))
+    if not routes:
+        return None
+    _, identity, point = min(routes)
+    return identity, point
 
 
 class TargetPicker:
@@ -1497,6 +1605,140 @@ def run(reader, args, board, attempt=None):
             emit("font_resonance", sent=send_chord(bindings["Resonance"]))
 
     beam_blocker = BeamBlocker()
+    virus = VirusResponse()
+
+    def virus_step(phase, boss, received_tick, *, movement_busy):
+        """Walk to the live strip while the debuff is active and log its resolution."""
+        if not isinstance(received_tick, int):
+            return
+        prior_phase = virus.phase
+        prior_onset, prior_move, prior_arrival = virus.started, virus.move_tick, virus.arrival
+        remaining = virus_timer(reader.encounter) if phase in VIRUS_BEAM_BY_PHASE else None
+        if prior_onset is None and not remaining:
+            return
+        message = reader.telos_cleanse
+        onset, outcome = virus.observe(phase, remaining, received_tick, reader.info.logic_tick, message)
+        player = reader.spatial.player
+        player_tile = (
+            (player.tile.x, player.tile.y, player.tile.plane)
+            if player.valid_mask & SpatialFlags.TILE
+            else None
+        )
+        beam_distance = min(
+            (
+                chebyshev((hazard.tile.x, hazard.tile.y), player_tile)
+                for hazard in reader.hazards[: reader.hazard_info.count]
+                if player_tile
+                and hazard.kind == VIRUS_BEAM_BY_PHASE.get(phase)
+                and hazard.flags & HazardFlags.SCENE_LOCATION
+                and hazard.tile.plane == player_tile[2]
+            ),
+            default=None,
+        )
+        if virus.started and virus.arrival is None and beam_distance == 0:
+            virus.arrival = received_tick
+            emit("anima_virus_beam_arrival", onset_tick=virus.started[0], tile=player_tile)
+        if outcome:
+            emit(
+                "anima_virus_outcome",
+                outcome=outcome,
+                phase=prior_phase,
+                onset_tick=prior_onset[0] if prior_onset else None,
+                move_tick=prior_move,
+                arrival_tick=prior_arrival if outcome == "phase_changed" else virus.arrival,
+                timer=remaining,
+                tile=player_tile,
+                beam_distance=beam_distance,
+                message_id=message.message_id if outcome == "cleanse_confirmed" else None,
+            )
+            if outcome != "phase_changed":
+                moved = virus.finish()
+                if moved and not movement_busy:
+                    reengage_telos(boss, player)
+        if onset:
+            emit(
+                "anima_virus_detected",
+                phase=phase,
+                onset_tick=onset[0],
+                observed_client_tick=onset[1],
+                timer=remaining,
+                tile=player_tile,
+                beam_distance=beam_distance,
+            )
+        if virus.started is None or virus.zero_tick is not None or not remaining or not player_tile:
+            return
+        if (
+            movement_busy
+            or not input_allowed
+            or (virus.next_move is not None and received_tick < virus.next_move)
+            or (
+                beam_distance in (0, 1)
+                and received_tick - virus.started[0] < VIRUS_CLEANSE_GRACE_TICKS
+            )
+            or (
+                virus.arrival is not None
+                and received_tick - virus.arrival < VIRUS_CLEANSE_GRACE_TICKS
+            )
+        ):
+            return
+        route = virus_beam_destination(reader, phase, player, boss)
+        if route is None:
+            return
+        destination, screen_point = route
+        boss_id = boss.instance_id
+
+        def destination_current():
+            latest, _, current_boss, current_phase, hp = boss_sample(reader)
+            if (
+                (latest.pid, latest.process_creation_time, reader.combat.scene_epoch) != identity
+                or latest.status not in (Status.AVAILABLE, Status.PARTIAL)
+                or not 0 <= reader.monotonic_ns() - latest.monotonic_ns <= MAX_SAMPLE_AGE_NS
+                or hp is None
+                or hp <= 0
+                or current_phase != phase
+                or current_boss is None
+                or current_boss.config_id != ACTIVE_TELOS
+                or current_boss.instance_id != boss_id
+                or not virus_timer(reader.encounter)
+            ):
+                return False
+            current_player = reader.spatial.player
+            if not current_player.valid_mask & SpatialFlags.TILE:
+                return False
+            current_route = virus_beam_destination(
+                reader, phase, current_player, current_boss, destination=destination
+            )
+            return (
+                current_route is not None
+                and chebyshev(current_route[1], screen_point) <= VIRUS_CLICK_RECHECK_PIXELS
+            )
+
+        sent = click_point(
+            screen_point,
+            select_dive=False,
+            validate=destination_current,
+            failure_event="anima_virus_move_skipped",
+        )
+        dispatch_tick = received_tick_counter() if sent else None
+        virus.next_move = (dispatch_tick or received_tick) + (BEAM_MOVE_RETRY_TICKS if sent else 1)
+        if sent and virus.move_tick is None:
+            virus.move_tick = dispatch_tick or received_tick
+        target, plane, config = destination
+        emit(
+            "anima_virus_move",
+            sent=sent,
+            phase=phase,
+            onset_tick=virus.started[0],
+            dispatch_tick=dispatch_tick,
+            timer=remaining,
+            tile=player_tile,
+            target=(*target, plane),
+            beam_config=config,
+            player_fine_height=(
+                player.fine_height if player.valid_mask & SpatialFlags.FINE_POSITION else None
+            ),
+            screen_point=screen_point,
+        )
 
     def beam_step(phase, phase_one, boss, meter, received_tick):
         """Walk into the stream feeding Telos, then click Telos to keep attacking."""
@@ -1613,7 +1855,7 @@ def run(reader, args, board, attempt=None):
         emit("telos_reengage", sent=sent, tile=centre)
         return bool(sent)
 
-    def click_point(point, *, select_dive):
+    def click_point(point, *, select_dive, validate=None, failure_event="stomp_dodge_skipped"):
         """Move the pointer to a physical pixel and left-click, after Dive if requested.
 
         Returns True when sent, False when focus was lost, None when the pointer could not be
@@ -1623,7 +1865,13 @@ def run(reader, args, board, attempt=None):
         try:
             if pointer_window is None:
                 pointer_window = GameWindow()
-            move_pointer(board, pointer_window, pointer_window.bounds(), point)
+            bounds = pointer_window.bounds()
+            move_pointer(board, pointer_window, bounds, point)
+            if validate is not None and not validate():
+                emit(failure_event, reason="Destination changed before click", screen_point=point)
+                return None
+            if pointer_window.bounds() != bounds:
+                return None
             if select_dive:
                 # P only selects Dive; the left click on the pointed tile performs it.
                 if not send_chord(bindings["Dive"]):
@@ -1637,7 +1885,7 @@ def run(reader, args, board, attempt=None):
         except RuntimeError as error:
             if "F12" in str(error):
                 raise
-            emit("stomp_dodge_skipped", reason=str(error), screen_point=point)
+            emit(failure_event, reason=str(error), screen_point=point)
             return None
         return True
 
@@ -2208,6 +2456,13 @@ def run(reader, args, board, attempt=None):
             meter = None if telos_raw is None else telos_raw & METER_MASK
             beam_step(phase, phase_one, boss, meter, received_tick)
         stomp_dodge(phase_one, boss, received_tick, timers)
+        movement_busy = (
+            phase_one.special in (UPPERCUT, HOLD_STILL)
+            and isinstance(phase_one.special_tick, int)
+            and isinstance(received_tick, int)
+            and received_tick - phase_one.special_tick <= BEAM_SPECIAL_HOLD_TICKS
+        )
+        virus_step(phase, boss, received_tick, movement_busy=movement_busy)
         time.sleep(POLL_SECONDS)
     emit("timeout", active=active_instance is not None)
     return 1

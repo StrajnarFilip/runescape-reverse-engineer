@@ -18,6 +18,7 @@ from ..prayer import Prayer
 from ..telemetry import hit_record, spatial_actor_record
 
 SCHEMA_VERSION = 1
+CLEANSE_MAX_AGE_CLIENT_TICKS = 50
 
 
 class AttemptLog:
@@ -35,6 +36,7 @@ class AttemptLog:
         self.session = None
         self.session_index = 0
         self.engaged = False
+        self.last_cleanse = None
         self.end_reason = None
         self.write("attempt_started", mode=mode, enrage_label=enrage)
 
@@ -88,6 +90,11 @@ class AttemptLog:
             for pose in reader.npc_spatial[: reader.spatial.npc_count]
             if pose.valid_mask & SpatialFlags.TILE
         }
+        beams = [
+            hazard
+            for hazard in reader.hazards[: reader.hazard_info.count]
+            if hazard.flags & HazardFlags.SCENE_LOCATION
+        ]
         state = {
             "session": self.session_index,
             "status": info.status,
@@ -123,6 +130,11 @@ class AttemptLog:
             },
             "adrenaline_tenths": player.variable(Variable.ADRENALINE),
             "tile": (tile.x, tile.y, tile.plane) if tile.valid else None,
+            "player_fine_height": (
+                reader.spatial.player.fine_height
+                if reader.spatial.player.valid_mask & SpatialFlags.FINE_POSITION
+                else None
+            ),
             "combat_target": target["value"],
             "combat_target_reason": target["reason"],
             "gcd_end_client_tick": player.variable(Variable.GCD_CLIENT_END),
@@ -173,8 +185,12 @@ class AttemptLog:
             },
             "beam_tiles": sorted(
                 (hazard.kind, hazard.tile.x, hazard.tile.y, hazard.tile.plane, hazard.config_id)
-                for hazard in reader.hazards[: reader.hazard_info.count]
-                if hazard.flags & HazardFlags.SCENE_LOCATION
+                for hazard in beams
+            ),
+            "beam_ground_heights": sorted(
+                (hazard.tile.x, hazard.tile.y, hazard.tile.plane, reader.hazard_terrain_height(hazard))
+                for hazard in beams
+                if hazard.flags & HazardFlags.TERRAIN_HEIGHT
             ),
             "hazard_observation_reason": reader.hazard_info.reason,
             "hazard_candidates_dropped": reader.hazard_info.dropped_count,
@@ -187,6 +203,19 @@ class AttemptLog:
         self.previous = state
         if changes:
             self.write("state", observed_ns=self.relative_ns(info.monotonic_ns), changes=changes)
+        cleanse = reader.telos_cleanse
+        if self.engaged and cleanse.valid and self.client_logic_tick is not None:
+            message = (self.session_index, cleanse.message_id, cleanse.client_logic_tick)
+            age = (self.client_logic_tick - cleanse.client_logic_tick) & 0xFFFFFFFF
+            if age <= CLEANSE_MAX_AGE_CLIENT_TICKS and message != self.last_cleanse:
+                self.last_cleanse = message
+                self.write(
+                    "anima_stream_cleanse_observed",
+                    message_id=cleanse.message_id,
+                    observed_client_tick=cleanse.client_logic_tick,
+                    phase_candidate=phase,
+                    tile=state["tile"],
+                )
         if action_loss or hit_loss or npc_hit_loss:
             self.write(
                 "queue_loss", npc_actions=action_loss, player_hits=hit_loss, npc_hits=npc_hit_loss

@@ -316,6 +316,63 @@ static void tick_wraps_without_regressing_and_clear_removes_baseline(void)
     fixture_destroy(test_fixture);
 }
 
+static void compatibility_cleanse_requires_a_scoped_exact_system_message(void)
+{
+    const uint64_t getter = FIXTURE_MODULE_BASE + 0x350f49u;
+    const uint64_t manager = 0x9a0000, buckets = 0x9a1000, node = 0x9a2000, text = 0x9a3000;
+    const uint32_t message_id = 10, logic_tick = 12345, bucket_count = 16;
+    const unsigned char guard[] = {0x48, 0x8b, 0x98, 0x88, 0x98, 1, 0};
+    const char line[] = "<col=EB2F2F>The anima stream cleanses you.";
+    fixture *sample = fixture_create_for_profile(&profile_compatibility);
+    rs3_snapshot *snapshot = sample->snapshot;
+    fixture_add_block(sample, getter, sizeof guard);
+    fixture_add_block(sample, manager, 0x8cc);
+    fixture_add_block(sample, buckets, (bucket_count + 1) * sizeof(uint64_t));
+    fixture_add_block(sample, node, 0xc0);
+    fixture_add_block(sample, text, sizeof line);
+    memcpy(fixture_bytes(sample, getter, sizeof guard), guard, sizeof guard);
+    memcpy(fixture_bytes(sample, text, sizeof line), line, sizeof line);
+    fixture_put_u64(sample, FIXTURE_WORLD + 0x19888, manager);
+    fixture_put_u64(sample, manager, FIXTURE_MODULE_BASE + 0x150d828);
+    fixture_put_u32(sample, manager + 0x18, message_id + 1);
+    fixture_put_u64(sample, manager + 0x8c0, buckets);
+    fixture_put_u32(sample, manager + 0x8c8, bucket_count);
+    fixture_put_u64(sample, buckets + bucket_count * sizeof(uint64_t), UINT64_MAX);
+    fixture_put_u64(sample, buckets + (message_id + 1) * sizeof(uint64_t), UINT64_MAX);
+    fixture_put_u64(sample, buckets + message_id * sizeof(uint64_t), node);
+    fixture_put_u32(sample, node, message_id);
+    fixture_put_u32(sample, node + 0x10, message_id);
+    fixture_put_u32(sample, node + 0x14, logic_tick);
+    fixture_put_u64(sample, node + 0x90, text);
+    fixture_put_u64(sample, node + 0x98, sizeof line - 1);
+    fixture_bytes(sample, node + 0xa7, 1)[0] = 0x80;
+
+    encounter_clear(snapshot);
+    snapshot->info.npc_count = 1;
+    snapshot->npcs[0].config_id = 22891;
+    snapshot->npcs[0].flags = RS3_NPC_CONFIG;
+    snapshot->encounter.raw_count = 1;
+    snapshot->encounter.raw[0] =
+        (rs3_encounter_raw){.varp_id = 6359, .valid = 1, .value = 1u << 29};
+    snapshot->encounter.stage_raw.valid = 1;
+    encounter_stage_cleanse(sample->context, snapshot, FIXTURE_WORLD);
+    assert(!snapshot->telos_cleanse.valid);
+    snapshot->encounter.stage_raw.value = 1;
+    encounter_stage_cleanse(sample->context, snapshot, FIXTURE_WORLD);
+    rs3_telos_cleanse result;
+    assert(rs3_snapshot_telos_cleanse(snapshot, &result, sizeof result) == RS3_OK);
+    assert(result.valid && result.message_id == message_id &&
+           result.client_logic_tick == logic_tick);
+    assert(rs3_snapshot_telos_cleanse(snapshot, &result, 1) == RS3_E_ABI);
+    assert(rs3_encounter_sizeof(RS3_ENCOUNTER_SIZE_TELOS_CLEANSE) == sizeof result);
+
+    fixture_put_u32(sample, node + 0x20, 1);
+    fixture_put_u32(sample, manager + 0x18, message_id + 2);
+    encounter_stage_cleanse(sample->context, snapshot, FIXTURE_WORLD);
+    assert(!snapshot->telos_cleanse.valid && snapshot->telos_cleanse.reason == RS3_NOT_SET);
+    fixture_destroy(sample);
+}
+
 int main(void)
 {
     RUN_TEST(present_stage_is_not_a_phase_or_game_tick);
@@ -329,5 +386,6 @@ int main(void)
     RUN_TEST(tick_rejects_torn_owner_counter_and_instruction_guard);
     RUN_TEST(tick_stall_reset_and_identity_changes_drop_validity);
     RUN_TEST(tick_wraps_without_regressing_and_clear_removes_baseline);
+    RUN_TEST(compatibility_cleanse_requires_a_scoped_exact_system_message);
     return 0;
 }

@@ -677,6 +677,7 @@ class HazardFlags(IntFlag):
     CLIENT_END = 16
     MECHANICS_VALIDATED = 32
     SCENE_LOCATION = 64
+    TERRAIN_HEIGHT = 128
 
 
 class Hazard(ctypes.Structure):
@@ -778,7 +779,20 @@ class EncounterState(ctypes.Structure):
         ("game_tick", GameTick),
     ]
 
-SIZED_ENCOUNTER_STRUCTURES = {1: EncounterValue, 2: EncounterRaw, 3: GameTick, 4: EncounterState}
+class TelosCleanse(ctypes.Structure):
+    _fields_ = [
+        (name, ctypes.c_uint32) for name in ("message_id", "client_logic_tick", "valid", "reason")
+    ]
+
+
+SIZED_ENCOUNTER_STRUCTURES = {
+    1: EncounterValue,
+    2: EncounterRaw,
+    3: GameTick,
+    4: EncounterState,
+    5: TelosCleanse,
+}
+
 
 class EffectsInfo(ctypes.Structure):
     _fields_ = [(name, ctypes.c_uint32) for name in ("status", "reason", "count", "complete")]
@@ -892,6 +906,7 @@ def _function_prototypes():
         "hazards_sizeof": (u32, [u32]),
         "snapshot_hazard_info": (i32, [handle, ctypes.POINTER(HazardInfo), u32]),
         "snapshot_hazards": (i32, [handle, ctypes.POINTER(Hazard), u32, ctypes.POINTER(u32)]),
+        "hazard_terrain_height": (i32, [ctypes.POINTER(Hazard), ctypes.POINTER(ctypes.c_float)]),
         "snapshot_client_version": (ctypes.c_char_p, [handle]),
         "snapshot_player": (i32, [handle, ctypes.POINTER(Player), u32]),
         "snapshot_position": (i32, [handle, ctypes.POINTER(Position), u32]),
@@ -900,6 +915,7 @@ def _function_prototypes():
         "snapshot_effects": (i32, [handle, ctypes.POINTER(Effect), u32, ctypes.POINTER(u32)]),
         "encounter_sizeof": (u32, [u32]),
         "snapshot_encounter": (i32, [handle, ctypes.POINTER(EncounterState), u32]),
+        "snapshot_telos_cleanse": (i32, [handle, ctypes.POINTER(TelosCleanse), u32]),
         "combat_sizeof": (u32, [u32]),
         "snapshot_combat": (i32, [handle, ctypes.POINTER(CombatState), u32]),
         "snapshot_npc_animations": (
@@ -1020,6 +1036,7 @@ class Reader:
         self.effects_info = EffectsInfo()
         self.effects = (Effect * 14)()
         self.encounter = EncounterState()
+        self.telos_cleanse = TelosCleanse()
         self.hazard_info = HazardInfo()
         self.hazards = (Hazard * MAX_HAZARDS)()
         self.player = Player()
@@ -1101,6 +1118,7 @@ class Reader:
         copy_record(library.rs3_snapshot_effects_info, self.effects_info)
         copy_array(library.rs3_snapshot_effects, self.effects)
         copy_record(library.rs3_snapshot_encounter, self.encounter)
+        copy_record(library.rs3_snapshot_telos_cleanse, self.telos_cleanse)
         copy_record(library.rs3_snapshot_hazard_info, self.hazard_info)
         copy_array(library.rs3_snapshot_hazards, self.hazards)
         copy_record(library.rs3_snapshot_player, self.player)
@@ -1120,6 +1138,16 @@ class Reader:
         copy_array(library.rs3_snapshot_items, self.items, Container.ALL)
         copy_array(library.rs3_snapshot_abilities, self.abilities)
         return self.info, self.player, self.npcs, self.hits
+
+    def hazard_terrain_height(self, hazard):
+        """Return the sampled beam tile's ground height in fine coordinates."""
+        if not hazard.flags & HazardFlags.TERRAIN_HEIGHT:
+            return None
+        height = ctypes.c_float()
+        self.check_result(
+            self.library.rs3_hazard_terrain_height(ctypes.byref(hazard), ctypes.byref(height))
+        )
+        return height.value
 
     def _drain(self, read_events, cursor, batch, structure, max_batches):
         """Drain one event queue. Returns (owned events, lost count, next cursor)."""

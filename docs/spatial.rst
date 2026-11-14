@@ -70,8 +70,9 @@ This does not move/focus the window or pointer and reads no screenshot.
 
 ``rs3_project_actor`` projects the observed actor position plus a supplied
 vertical offset. ``rs3_project_tile`` requires an explicit terrain height in
-fine units: the height map is not yet mapped, and unknown height must not
-default to zero. Both reject an unknown camera, wrong plane, non-finite inputs,
+fine units. The Compatibility Mode beam reader also exposes a sampled height
+per tile through ``rs3_hazard_terrain_height``. Both projection calls reject an unknown
+camera, wrong plane, non-finite inputs,
 nonpositive clip W and points outside the viewport. A projected point does not
 establish visibility through occluding geometry or UI overlays.
 

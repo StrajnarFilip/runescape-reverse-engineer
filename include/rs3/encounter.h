@@ -78,12 +78,22 @@ typedef struct rs3_encounter_state
     rs3_game_tick game_tick;
 } rs3_encounter_state;
 
+/** Most recent exact Telos system message reporting a stream cleanse. */
+typedef struct rs3_telos_cleanse
+{
+    uint32_t message_id; /**< Client chat sequence, qualified by process lifetime. */
+    uint32_t client_logic_tick;
+    uint32_t valid;
+    uint32_t reason;
+} rs3_telos_cleanse;
+
 enum rs3_encounter_structure
 {
     RS3_ENCOUNTER_SIZE_VALUE = 1,
     RS3_ENCOUNTER_SIZE_RAW,
     RS3_ENCOUNTER_SIZE_GAME_TICK,
-    RS3_ENCOUNTER_SIZE_STATE
+    RS3_ENCOUNTER_SIZE_STATE,
+    RS3_ENCOUNTER_SIZE_TELOS_CLEANSE
 };
 
 /** Return an encounter structure's byte size, or zero. */
@@ -97,6 +107,10 @@ RS3_API uint32_t rs3_encounter_sizeof(uint32_t structure);
  */
 RS3_API int32_t rs3_snapshot_encounter(const rs3_snapshot *snapshot, rs3_encounter_state *out,
                                        uint32_t out_size);
+
+/** Copy the newest recognized cleanse message within the last 64 chat lines. */
+RS3_API int32_t rs3_snapshot_telos_cleanse(const rs3_snapshot *snapshot, rs3_telos_cleanse *out,
+                                           uint32_t out_size);
 
 #ifdef __cplusplus
 }

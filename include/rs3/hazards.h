@@ -66,7 +66,8 @@ enum rs3_hazard_flags
     RS3_HAZARD_CLIENT_START = 8u,
     RS3_HAZARD_CLIENT_END = 16u,
     RS3_HAZARD_MECHANICS_VALIDATED = 32u,
-    RS3_HAZARD_SCENE_LOCATION = 64u /**< Observed location tile with a classified config. */
+    RS3_HAZARD_SCENE_LOCATION = 64u, /**< Observed location tile with a classified config. */
+    RS3_HAZARD_TERRAIN_HEIGHT = 128u /**< Tile-centre terrain height is available. */
 };
 
 enum rs3_hazard_reason
@@ -104,7 +105,7 @@ typedef struct rs3_hazard
     uint32_t timing_reason;
     uint32_t role_reason;
     uint32_t role; /**< Reserved: font/meter effects remain unmapped. */
-    uint32_t reserved;
+    uint32_t reserved; /**< Use rs3_hazard_terrain_height when TERRAIN_HEIGHT is set. */
 } rs3_hazard;
 
 /**
@@ -153,6 +154,9 @@ RS3_API int32_t rs3_snapshot_hazard_info(const rs3_snapshot *snapshot, rs3_hazar
  */
 RS3_API int32_t rs3_snapshot_hazards(const rs3_snapshot *snapshot, rs3_hazard *out,
                                      uint32_t capacity, uint32_t *required);
+
+/** Copy the center height in fine units. Returns RS3_E_STATE when height is unavailable. */
+RS3_API int32_t rs3_hazard_terrain_height(const rs3_hazard *hazard, float *fine_height);
 
 #ifdef __cplusplus
 }

@@ -40,6 +40,14 @@ _Static_assert(sizeof(rs3_hazard_info) == 80, "ABI hazard info");
 #define LOCATION_GRID_GETTER_RVA        0xccf1e0u
 #define LOCATION_MAP_ITERATOR_RVA       0xc219dau
 #define SCENE_HAZARD_KEY_FLAG           (UINT64_C(1) << 63)
+#define MAP_SQUARE_TERRAIN_OFFSET       0xa0u
+#define MAP_SQUARE_TERRAIN_FALLBACK     0xebb0u
+#define TERRAIN_GETTER_GUARD_RVA        0xcdc40fu
+#define TERRAIN_FLAGS_OFFSET            0x21u
+#define TERRAIN_DISABLED_OFFSET         0x169u
+#define TERRAIN_PLANES_OFFSET           0x170u
+#define TERRAIN_GRID_PADDING            1u
+#define MAX_TERRAIN_HEIGHT              (1 << 20)
 
 /** Identity evidence: original-profile manual captures, 2026-11-11 and 2026-11-13. */
 typedef struct captured_npc_identity
@@ -170,7 +178,7 @@ static int read_scene_vector(rs3_context *context, uint64_t address, uint32_t st
            (vector->begin == vector->end || is_valid_remote_pointer(vector->begin));
 }
 
-/** Spawned strip and centre locations observed along the rendered P1 and P2 streams. */
+/** Spawned strip and centre locations observed along the rendered P1 through P3 streams. */
 static uint32_t beam_kind(int32_t config, int phase)
 {
     if (phase == 1 && (config == 103545 || config == 103546))
@@ -180,6 +188,10 @@ static uint32_t beam_kind(int32_t config, int phase)
     if (phase == 2 && (config == 103547 || config == 103548))
     {
         return RS3_HAZARD_BLACK_BEAM;
+    }
+    if (phase == 3 && (config == 103549 || config == 103550))
+    {
+        return RS3_HAZARD_RED_BEAM;
     }
     return RS3_HAZARD_UNKNOWN;
 }
@@ -362,6 +374,101 @@ static int map_reference(rs3_context *context, uint64_t vectors, uint32_t stride
     return !object || memory_read_pointer(context, *out + REFERENCE_OBJECT_OFFSET, out);
 }
 
+/** Follow the plane's padded vertex grid and interpolate the four tile corners. */
+static int read_terrain_once(rs3_context *context, uint64_t square, const rs3_position *tile,
+                             int32_t *height)
+{
+    uint64_t terrain, plane, grid;
+    const uint32_t terrain_offsets[] = {MAP_SQUARE_TERRAIN_OFFSET, MAP_SQUARE_TERRAIN_FALLBACK};
+    for (unsigned index = 0; index < sizeof terrain_offsets / sizeof *terrain_offsets; index++)
+    {
+        if (!memory_read_pointer(context, square + terrain_offsets[index], &terrain))
+        {
+            return 0;
+        }
+        if (!terrain)
+        {
+            continue;
+        }
+        unsigned char flags[2], disabled;
+        if (!memory_read(context, terrain + TERRAIN_FLAGS_OFFSET, flags, sizeof flags) ||
+            !memory_read(context, terrain + TERRAIN_DISABLED_OFFSET, &disabled, sizeof disabled))
+        {
+            return 0;
+        }
+        if (disabled || flags[0] != flags[1])
+        {
+            continue;
+        }
+        unsigned x = (unsigned)tile->x % MAP_SQUARE_TILES + TERRAIN_GRID_PADDING;
+        unsigned y = (unsigned)tile->y % MAP_SQUARE_TILES + TERRAIN_GRID_PADDING;
+        if (!map_reference(context, terrain + TERRAIN_PLANES_OFFSET, REFERENCE_STRIDE, tile->plane,
+                           MAX_HAZARD_PLANE + 1u, 1, &plane) ||
+            !plane || !memory_read_pointer(context, plane, &grid) || !grid)
+        {
+            return 0;
+        }
+        int32_t corners[2][2];
+        for (unsigned row = 0; row < 2; row++)
+        {
+            uint64_t values;
+            if (!memory_read_pointer(context, grid + (x + row) * VECTOR_STRIDE, &values) ||
+                !values ||
+                !memory_read(context, values + y * sizeof(int32_t), corners[row],
+                             sizeof corners[row]))
+            {
+                return 0;
+            }
+            if (corners[row][0] < -MAX_TERRAIN_HEIGHT || corners[row][0] > MAX_TERRAIN_HEIGHT ||
+                corners[row][1] < -MAX_TERRAIN_HEIGHT || corners[row][1] > MAX_TERRAIN_HEIGHT)
+            {
+                return 0;
+            }
+        }
+        int32_t left = (corners[0][0] + corners[1][0]) / 2;
+        int32_t right = (corners[0][1] + corners[1][1]) / 2;
+        *height = (left + right) / 2;
+        return 1;
+    }
+    return 0;
+}
+
+/** Resolve the actual map square of each location, including locations on chunk borders. */
+static void attach_terrain_height(rs3_context *context, uint64_t root, const int32_t map_base[2],
+                                  rs3_hazard *hazard)
+{
+    const rs3_position *tile = &hazard->tile;
+    uint64_t row, square;
+    int32_t height, after;
+    if (map_reference(context, root + MAP_ROW_VECTOR_OFFSET, VECTOR_STRIDE,
+                      tile->x / MAP_SQUARE_TILES - map_base[0], 64, 0, &row) &&
+        row &&
+        map_reference(context, row, VECTOR_STRIDE, tile->y / MAP_SQUARE_TILES - map_base[1], 64, 1,
+                      &square) &&
+        square && read_terrain_once(context, square, tile, &height) &&
+        read_terrain_once(context, square, tile, &after) && height == after)
+    {
+        float fine_height = (float)height;
+        memcpy(&hazard->reserved, &fine_height, sizeof fine_height);
+        hazard->flags |= RS3_HAZARD_TERRAIN_HEIGHT;
+    }
+}
+
+int32_t rs3_hazard_terrain_height(const rs3_hazard *hazard, float *fine_height)
+{
+    if (!hazard || !fine_height)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    *fine_height = 0;
+    if (!(hazard->flags & RS3_HAZARD_TERRAIN_HEIGHT))
+    {
+        return RS3_E_STATE;
+    }
+    memcpy(fine_height, &hazard->reserved, sizeof *fine_height);
+    return RS3_OK;
+}
+
 static int read_scene_root(rs3_context *context, uint64_t world_state, uint64_t *root)
 {
     uint64_t manager, scenes;
@@ -429,6 +536,18 @@ static int read_beam_tiles(rs3_context *context, uint64_t world_state, int phase
         }
     }
     int32_t map_after[2];
+    static const unsigned char height_guard[] = {0x80, 0xb9, 0x69, 0x01, 0, 0, 0};
+    unsigned char instruction[sizeof height_guard];
+    if (tiles->count &&
+        memory_read(context, context->target.module_base + TERRAIN_GETTER_GUARD_RVA, instruction,
+                    sizeof instruction) &&
+        memcmp(instruction, height_guard, sizeof height_guard) == 0)
+    {
+        for (uint32_t index = 0; index < tiles->count; index++)
+        {
+            attach_terrain_height(context, root, map_base, &tiles->entries[index]);
+        }
+    }
     return read_scene_root(context, world_state, &root_after) && root_after == root &&
            memory_read(context, root + MAP_BASE_OFFSET, map_after, sizeof map_after) &&
            memcmp(map_base, map_after, sizeof map_base) == 0;
@@ -437,7 +556,7 @@ static int read_beam_tiles(rs3_context *context, uint64_t world_state, int phase
 void hazards_read_telos_beams(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_state)
 {
     if (context->target.profile != &profile_compatibility || !snapshot->encounter.stage_raw.valid ||
-        snapshot->encounter.stage_raw.value < 0 || snapshot->encounter.stage_raw.value >= 2)
+        snapshot->encounter.stage_raw.value < 0 || snapshot->encounter.stage_raw.value >= 3)
     {
         return;
     }
@@ -472,8 +591,9 @@ void hazards_read_telos_beams(rs3_context *context, rs3_snapshot *snapshot, uint
     }
     if (tiles.count)
     {
-        info->observed_channels |=
-            phase == 1 ? RS3_HAZARD_CHANNEL_GREEN_BEAM : RS3_HAZARD_CHANNEL_BLACK_BEAM;
+        const uint32_t channels[] = {RS3_HAZARD_CHANNEL_GREEN_BEAM, RS3_HAZARD_CHANNEL_BLACK_BEAM,
+                                     RS3_HAZARD_CHANNEL_RED_BEAM};
+        info->observed_channels |= channels[phase - 1];
     }
     info->candidate_count += tiles.count + tiles.dropped;
     info->dropped_count += tiles.dropped;

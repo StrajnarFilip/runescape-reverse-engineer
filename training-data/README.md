@@ -49,6 +49,15 @@ Each file starts with `attempt_started`. The first `state` row includes the init
 
 `actors` maps attempt-local instance IDs to `[config_id, current_hp, max_hp, action_animation, movement_animation]`. `actor_tiles` maps the same IDs to `[x, y, plane, same_world_confirmed]` when the reader has a tile. `ability_cooldowns` maps ability struct IDs to `[reason, start_client_tick, end_client_tick, active]`. A missing timer stays unknown. NPC and player hitmark rows retain native timing and recipient evidence. Hitmarks lack an attacker field.
 
+`beam_tiles` contains `[kind, x, y, plane, config_id]` tuples for the green, black and red
+streams. `beam_ground_heights` adds `[x, y, plane, fine_height]` for tiles the reader can project.
+The practice controller reads encounter VARP `6362` in P2 and P3. Join `anima_virus_detected`,
+`anima_virus_move`, `anima_virus_beam_arrival` and `anima_virus_outcome` by `onset_tick` in
+the same phase. The outcome `cleanse_confirmed` requires the countdown reset and a matching
+`anima_stream_cleanse_observed` message ID. `timer_cleared` means the countdown ended without
+the message. The nearest logged beam row can be one tile away when a cleanse occurs.
+A log with no `attempt_ended` was interrupted before the writer could record its outcome.
+
 Join an `ability_sent` row to the `npc_animation` row whose `native_sequence` matches `cue_native_sequence`. Use `cooldown_acknowledgement` and `surge_displacement` for later observations. A cooldown acknowledges a cast. Dodge success, damage prevention and healing each require their own evidence. Inspect `queue_loss` and `attempt_ended` before interpreting a run. The first practice trace predates NPC tile and NPC hitmark logging and has no explicit Anticipation acknowledgement at the phase boundary.
 
 ```powershell

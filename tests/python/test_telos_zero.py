@@ -9,7 +9,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from rs3_reader.native import NPCFlags, Reason, Status, Variable
+from rs3_reader.native import (
+    EncounterState,
+    HazardFlags,
+    NPCFlags,
+    Reason,
+    SpatialFlags,
+    Status,
+    TelosCleanse,
+    Variable,
+)
 from rs3_reader.prayer import Prayer
 
 controller = runpy.run_path(str(Path(__file__).resolve().parents[2] / "work" / "telos_zero.py"))
@@ -487,6 +496,78 @@ beam_target = controller["beam_target"]
 
 
 class BeamTests(unittest.TestCase):
+    def test_virus_destination_checks_colour_plane_projection_and_footprint(self):
+        choose = controller["virus_beam_destination"]
+        player = SimpleNamespace(tile=SimpleNamespace(x=100, y=100, plane=0))
+        boss = SimpleNamespace(instance_id=7)
+        pose = SimpleNamespace(
+            instance_id=7,
+            tile=SimpleNamespace(x=101, y=101, plane=0),
+            footprint_size=3,
+            valid_mask=SpatialFlags.TILE | SpatialFlags.SAME_WORLD,
+        )
+        flags = HazardFlags.SCENE_LOCATION | HazardFlags.TILE | HazardFlags.TERRAIN_HEIGHT
+        hazards = [
+            SimpleNamespace(
+                tile=SimpleNamespace(x=x, y=y, plane=plane),
+                flags=flags,
+                kind=kind,
+                config_id=config,
+            )
+            for x, y, plane, kind, config in (
+                (101, 101, 0, 2, 103547),
+                (99, 100, 0, 3, 103549),
+                (100, 101, 1, 2, 103547),
+                (100, 99, 0, 2, 103547),
+                (98, 100, 0, 2, 103548),
+            )
+        ]
+        reader = SimpleNamespace(
+            hazard_info=SimpleNamespace(count=len(hazards)),
+            hazards=hazards,
+            spatial=SimpleNamespace(npc_count=1),
+            npc_spatial=[pose],
+            hazard_terrain_height=lambda hazard: 4544.0,
+        )
+        with patch.dict(
+            choose.__globals__,
+            project_tile=lambda r, tile, plane, height: (520, 530) if tile[0] == 98 else None,
+        ):
+            self.assertEqual(choose(reader, 2, player, boss), (((98, 100), 0, 103548), (520, 530)))
+            self.assertIsNone(choose(reader, 2, player, boss, destination=((100, 99), 0, 103547)))
+
+    def test_virus_timer_preserves_unknown_and_decodes_countdown(self):
+        timer = controller["virus_timer"]
+        encounter = EncounterState()
+        encounter.raw_count = 1
+        sample = encounter.raw[0]
+        sample.varp_id = 6362
+        self.assertIsNone(timer(encounter))
+        sample.valid = 1
+        for value, expected in ((3840, 3840), (3712, 3712), (7, None), (0, 0)):
+            sample.value = value
+            self.assertEqual(timer(encounter), expected)
+
+    def test_virus_clear_requires_recent_message_after_onset(self):
+        response = controller["VirusResponse"]()
+        old = TelosCleanse(1, 1000, 1, 0)
+        self.assertEqual(response.observe(2, 3840, 42, 1001, old), ((42, 1001), None))
+        self.assertEqual(response.observe(2, 0, 44, 1061, old), (None, None))
+        message = TelosCleanse(2, 1061, 1, 0)
+        self.assertEqual(
+            response.observe(2, 0, 44, 1061, message), (None, "cleanse_confirmed")
+        )
+
+    def test_virus_phase_change_and_unacknowledged_clear(self):
+        response = controller["VirusResponse"]()
+        absent = TelosCleanse()
+        self.assertEqual(response.observe(1, 3840, 40, 1000, absent), (None, None))
+        response.observe(2, 3840, 42, 1060, absent)
+        self.assertEqual(response.observe(3, 0, 43, 1090, absent), (None, "phase_changed"))
+        response.observe(3, 3840, 44, 1120, absent)
+        self.assertEqual(response.observe(3, 0, 46, 1180, absent), (None, None))
+        self.assertEqual(response.observe(3, 0, 48, 1240, absent), (None, "timer_cleared"))
+
     def test_target_is_stream_tile_against_telos(self):
         # 250% P2 death (telos-20261114T174445): black strip x=7509, y=2456..2465; Telos 5x5
         # at (7507, 2451); player at (7505, 2449).

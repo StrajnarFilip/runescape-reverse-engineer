@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "clock.h"
+#include "decode_utils.h"
 #include "memory.h"
 #include "variables.h"
 
@@ -30,6 +31,21 @@
 #define TICK_MAX_SAMPLE_GAP_NS     150000000ull
 #define TICK_MAX_STALL_NS          1500000000ull
 #define TICK_MAX_FORWARD_STEP      4u
+#define CHAT_MANAGER_OFFSET        0x19888u
+#define CHAT_MANAGER_VTABLE_RVA    0x150d828u
+#define CHAT_GETTER_RVA            0x350f49u
+#define CHAT_NEXT_SEQUENCE         0x18u
+#define CHAT_BUCKET_ARRAY          0x8c0u
+#define CHAT_BUCKET_COUNT          0x8c8u
+#define CHAT_NODE_NEXT             0xb8u
+#define CHAT_NODE_MESSAGE_ID       0x10u
+#define CHAT_NODE_LOGIC_TICK       0x14u
+#define CHAT_NODE_TYPE             0x20u
+#define CHAT_NODE_MESSAGE          0x90u
+#define CHAT_INLINE_BYTES          24u
+#define CHAT_LOOKBACK              64u
+#define CHAT_MAX_BUCKETS           65536u
+#define CHAT_MAX_CHAIN             32u
 
 /* Raw channels include calibrated sources and neighbouring candidates; presence alone proves no
  * semantics. */
@@ -40,10 +56,12 @@ _Static_assert(sizeof(rs3_encounter_value) == 32, "ABI encounter value");
 _Static_assert(sizeof(rs3_encounter_raw) == 32, "ABI encounter raw");
 _Static_assert(sizeof(rs3_game_tick) == 40, "ABI game tick");
 _Static_assert(sizeof(rs3_encounter_state) == 472, "ABI encounter state");
+_Static_assert(sizeof(rs3_telos_cleanse) == 16, "ABI Telos cleanse");
 
 void encounter_clear(rs3_snapshot *snapshot)
 {
     memset(&snapshot->encounter, 0, sizeof snapshot->encounter);
+    snapshot->telos_cleanse = (rs3_telos_cleanse){.reason = RS3_ENCOUNTER_UNMAPPED};
     snapshot->encounter.game_tick.phase_ms = NAN;
     snapshot->encounter.game_tick.uncertainty_ms = NAN;
     snapshot->encounter_tick_owner = 0;
@@ -184,6 +202,144 @@ static const rs3_npc *active_telos(const rs3_snapshot *snapshot)
         }
     }
     return instance_guard ? active : NULL;
+}
+
+/** Read just the exact system line confirmed by the 250% P2 capture. */
+static int read_cleanse_node(rs3_context *context, uint64_t node, uint32_t message,
+                             rs3_telos_cleanse *out)
+{
+    static const char expected[] = "<col=EB2F2F>The anima stream cleanses you.";
+    unsigned char metadata[CHAT_NODE_TYPE + sizeof(uint32_t)];
+    unsigned char string[CHAT_INLINE_BYTES];
+    if (!memory_read(context, node, metadata, sizeof metadata))
+    {
+        return 0;
+    }
+    if (decode_u32(metadata) != message || decode_u32(metadata + CHAT_NODE_MESSAGE_ID) != message ||
+        decode_u32(metadata + CHAT_NODE_TYPE) != 0)
+    {
+        return 1;
+    }
+    if (!memory_read(context, node + CHAT_NODE_MESSAGE, string, sizeof string))
+    {
+        return 0;
+    }
+    if (!(string[CHAT_INLINE_BYTES - 1] & 0x80u) || decode_u64(string + 8) != sizeof expected - 1)
+    {
+        return 1;
+    }
+    char text[sizeof expected];
+    unsigned char after[sizeof metadata];
+    unsigned char string_after[sizeof string];
+    if (!memory_read(context, decode_u64(string), text, sizeof text))
+    {
+        return 0;
+    }
+    if (memcmp(text, expected, sizeof expected) != 0)
+    {
+        return 1;
+    }
+    if (!memory_read(context, node, after, sizeof after) ||
+        memcmp(metadata, after, sizeof metadata) ||
+        !memory_read(context, node + CHAT_NODE_MESSAGE, string_after, sizeof string_after) ||
+        memcmp(string, string_after, sizeof string))
+    {
+        return 0;
+    }
+    *out = (rs3_telos_cleanse){message, decode_u32(metadata + CHAT_NODE_LOGIC_TICK), 1,
+                               RS3_REASON_NONE};
+    return 1;
+}
+
+void encounter_stage_cleanse(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_state)
+{
+    rs3_telos_cleanse *out = &snapshot->telos_cleanse;
+    if (context->target.profile != &profile_compatibility || !snapshot->encounter.stage_raw.valid ||
+        snapshot->encounter.stage_raw.value < 1 || active_telos(snapshot) == NULL)
+    {
+        return;
+    }
+    static const unsigned char getter[] = {0x48, 0x8b, 0x98, 0x88, 0x98, 1, 0};
+    unsigned char bytes[sizeof getter];
+    uint64_t module = context->target.module_base;
+    if (!memory_read(context, module + CHAT_GETTER_RVA, bytes, sizeof bytes) ||
+        memcmp(getter, bytes, sizeof bytes))
+    {
+        return;
+    }
+    out->reason = RS3_READ_FAILED;
+    uint64_t manager, vtable, buckets;
+    uint32_t next, count;
+    if (!memory_read_pointer(context, world_state + CHAT_MANAGER_OFFSET, &manager) || !manager ||
+        !memory_read_pointer(context, manager, &vtable) ||
+        vtable != module + CHAT_MANAGER_VTABLE_RVA ||
+        !memory_read(context, manager + CHAT_NEXT_SEQUENCE, &next, sizeof next) ||
+        !memory_read_pointer(context, manager + CHAT_BUCKET_ARRAY, &buckets) || !buckets ||
+        !memory_read(context, manager + CHAT_BUCKET_COUNT, &count, sizeof count) || !count ||
+        count > CHAT_MAX_BUCKETS)
+    {
+        return;
+    }
+    if (context->cleanse_chat_manager == manager && context->cleanse_chat_next == next &&
+        context->cleanse_process_creation_time == context->target.process_creation_time)
+    {
+        *out = context->cleanse_chat_cached;
+        return;
+    }
+    rs3_telos_cleanse candidate = {.reason = RS3_NOT_SET};
+    uint64_t sentinel;
+    if (!memory_read(context, buckets + count * sizeof(uint64_t), &sentinel, sizeof sentinel))
+    {
+        return;
+    }
+    for (uint32_t offset = 1; offset <= CHAT_LOOKBACK && offset <= next && !candidate.valid;
+         offset++)
+    {
+        uint32_t message = next - offset;
+        uint64_t node;
+        if (!memory_read(context, buckets + (message % count) * sizeof(uint64_t), &node,
+                         sizeof node))
+        {
+            return;
+        }
+        for (unsigned link = 0; node && node != sentinel; link++)
+        {
+            uint32_t key;
+            if (link == CHAT_MAX_CHAIN || !memory_read(context, node, &key, sizeof key))
+            {
+                return;
+            }
+            if (key == message)
+            {
+                if (!read_cleanse_node(context, node, message, &candidate))
+                {
+                    return;
+                }
+                break;
+            }
+            if (!memory_read(context, node + CHAT_NODE_NEXT, &node, sizeof node))
+            {
+                return;
+            }
+        }
+    }
+    uint64_t manager_after, buckets_after;
+    uint32_t next_after, count_after;
+    if (memory_read_pointer(context, world_state + CHAT_MANAGER_OFFSET, &manager_after) &&
+        manager == manager_after &&
+        memory_read(context, manager + CHAT_NEXT_SEQUENCE, &next_after, sizeof next_after) &&
+        next == next_after &&
+        memory_read_pointer(context, manager + CHAT_BUCKET_ARRAY, &buckets_after) &&
+        buckets == buckets_after &&
+        memory_read(context, manager + CHAT_BUCKET_COUNT, &count_after, sizeof count_after) &&
+        count == count_after)
+    {
+        *out = candidate;
+        context->cleanse_chat_manager = manager;
+        context->cleanse_chat_next = next;
+        context->cleanse_process_creation_time = context->target.process_creation_time;
+        context->cleanse_chat_cached = candidate;
+    }
 }
 
 /** Calibrated 0% phases on Compatibility Mode, with corroborating transmitted HP. */
@@ -378,6 +534,8 @@ uint32_t rs3_encounter_sizeof(uint32_t structure)
             return sizeof(rs3_game_tick);
         case RS3_ENCOUNTER_SIZE_STATE:
             return sizeof(rs3_encounter_state);
+        case RS3_ENCOUNTER_SIZE_TELOS_CLEANSE:
+            return sizeof(rs3_telos_cleanse);
         default:
             return 0;
     }

@@ -12,5 +12,7 @@ void encounter_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t play
 void encounter_clear(rs3_snapshot *snapshot);
 /** Bind observations to the parent frame's committed scene/process identity. */
 void encounter_commit(rs3_context *context, rs3_snapshot *snapshot);
+/** Stage only an explicitly recognized in-game cleanse message, without exposing chat. */
+void encounter_stage_cleanse(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_state);
 
 #endif
