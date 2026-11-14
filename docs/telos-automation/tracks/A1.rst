@@ -100,3 +100,9 @@ Requests
   backends. A1 does not silently construct hardware from a producer or enable
   a rung. Unknown item aliases/letter keys, full castability and pointer/view
   dependencies remain explicit; native input acceptance needs observed outcomes.
+
+* Native snapshot/L: add a deep copy between caller-owned snapshots. A1 can
+  then copy the exact consumer frame under the existing ownership contract;
+  the independent native worker must not race the examined policy frame. Keep
+  exact metadata checks and reject if the consumer itself advanced. No game
+  memory or function calls are involved in a local snapshot copy.

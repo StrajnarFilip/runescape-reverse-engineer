@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "track": "L",
+  "date": "2026-11-14",
+  "status": "in_progress",
+  "supervisor_commit": "5314073",
+  "ctest_targets_passed": 15,
+  "python_tests_passed": 291,
+  "d8_test_groups": 29,
+  "python_tests_skipped": 0,
+  "default_stop_key": "Ctrl+Shift+F12",
+  "readiness_replay": {
+    "samples": 40,
+    "scope": "Historical native dormant-Telos records; not a new live check.",
+    "single_process_scene_identity": true,
+    "last_sample_available_fields": [
+      "action_bar",
+      "equipment",
+      "frame_identity_and_age",
+      "global_cooldown",
+      "inventory",
+      "player_entity_target",
+      "player_resources",
+      "player_tile_and_facing",
+      "queue_inventory_changes",
+      "queue_npc_actions",
+      "queue_npc_hits",
+      "queue_player_hits",
+      "received_tick_ordinal"
+    ],
+    "last_sample_unobserved_fields": [
+      "telos_phase",
+      "telos_enrage",
+      "telos_meter",
+      "telos_freedom",
+      "player_effects",
+      "sampled_ability_castability",
+      "active_telos_local_player_reference",
+      "validated_encounter_result"
+    ],
+    "sampled_abilities": 169,
+    "known_full_castability_values": 0
+  },
+  "software_gaps_still_open": [
+    "Native minimap/view/hit-test/route and encounter-result mapping.",
+    "Full ability castability and intended-account bindings/rotation configuration.",
+    "P3 semantic effects on the current original profile; older profile evidence is not transferred.",
+    "Pointer backend composition and remaining live-ladder wiring."
+  ],
+  "live_checks_deferred": [
+    "Active Telos production target, attack styles/components/protection deadlines.",
+    "Buff presence/duration/consumption and gear/consumable binding calibration.",
+    "Safe-area movement/target selection and observed acknowledgements.",
+    "Phase 5 and repeated full-stack ladder runs."
+  ],
+  "availability_is_live_validation": false,
+  "automatic_input_enabled": false,
+  "ladder_rung_passed": false,
+  "input_sent": false,
+  "raw_captures_published": false
+}

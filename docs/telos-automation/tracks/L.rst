@@ -140,3 +140,15 @@ Requests
   A newer native copy rejects for policy re-evaluation instead of executing an
   old decision. All 15 CTest targets pass (283 Python tests, zero skips),
   including 31 A1 fake-device/ABI/host-firmware cases. No live input is enabled.
+
+* D8 readiness inspection is merged. It is bounded and read-only, imports no
+  controllers/devices on capture replay, and reports availability per process/
+  scene/sample. All 15 CTest targets pass (291 Python tests, zero skips).
+  Ctrl+Shift+F12 is now the default; the earlier stop-key check remains the
+  physical evidence. The forty-row historical native audit is in
+  ``docs/validation/telos-ladder-readiness-2026-11-14.json``.
+* Native snapshot owner/A1: add a caller-owned snapshot-copy accessor so the
+  backend can use the same immutable reader sample examined by its policy.
+  Copying the worker's newer latest frame must keep rejecting until the policy
+  is re-evaluated, but a stable consumer snapshot should not be rejected merely
+  because the 100 Hz worker advanced independently. Keep old-DLL fallback safe.
