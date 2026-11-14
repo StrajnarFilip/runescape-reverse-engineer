@@ -66,6 +66,11 @@ TICK_FALLBACK_NS = 600_000_000
 # change the overhead in that session.
 DEFAULT_FLICK_MELEE_KEY = "F3"
 DEFAULT_FLICK_SOUL_SPLIT_KEY = "F4"
+DEFAULT_FLICK_MAGIC_KEY = "F1"
+# The account owner identified 28959 as a Telos magic attack. Its type 139 hits rose from 1,139
+# to 3,828 in P2 at 250% while Deflect Melee was flicked (2026-11-14).
+MAGIC_ATTACK = 28959
+FLICK_PRAYER_BY_ANIMATION = {MAGIC_ATTACK: Prayer.MAGIC}
 FLICK_EXCLUDED_ANIMATIONS = frozenset({UPPERCUT})
 DEFAULT_FLICK_HOLD_TICKS = 1
 # After the Tendrils release an unanimated melee auto followed at +2 received ticks in both
@@ -267,26 +272,30 @@ class PhaseOne:
         return ability, observed
 
 
-class MeleeFlicker:
-    """Unvalidated practice trial: Deflect Melee on each Telos animation, Soul Split a tick later.
+class PrayerFlicker:
+    """Unvalidated practice trial: deflect on each Telos animation, Soul Split after the hold.
 
+    Most animations select Deflect Melee; FLICK_PRAYER_BY_ANIMATION overrides the style.
     Prayer keybinds toggle, so a chord is only requested when the overhead differs from the
     target and no earlier request is still awaiting its overhead acknowledgement.
     """
 
-    def __init__(self, excluded=FLICK_EXCLUDED_ANIMATIONS, hold_ticks=None):
+    def __init__(self, excluded=FLICK_EXCLUDED_ANIMATIONS, hold_ticks=None, prayers=None):
         self.excluded = frozenset(excluded)
         self.hold_ticks = dict(FLICK_HOLD_TICKS if hold_ticks is None else hold_ticks)
+        self.prayers = dict(FLICK_PRAYER_BY_ANIMATION if prayers is None else prayers)
         self.last_event = 0
         self.return_tick = None
         self.return_ns = None
+        self.hold_prayer = Prayer.MELEE
         self.cue_event = None
         self.requested = None
 
     def observe(self, actions, tick, now):
-        """Hold melee for each new non-excluded animation's tick count. Return the latest cue.
+        """Hold the cue's deflect for its tick count. Return the latest cue.
 
-        A cue never shortens a longer hold that is already running.
+        A cue never shortens a longer hold that is already running. The latest cue selects
+        the deflect style.
         """
         trigger = None
         for action in actions:
@@ -297,6 +306,7 @@ class MeleeFlicker:
             if sequence in self.excluded:
                 continue
             trigger = action
+            self.hold_prayer = self.prayers.get(sequence, Prayer.MELEE)
             hold = self.hold_ticks.get(sequence, DEFAULT_FLICK_HOLD_TICKS)
             return_tick = None if tick is None else tick + hold
             return_ns = now + hold * TICK_FALLBACK_NS
@@ -312,8 +322,8 @@ class MeleeFlicker:
             self.cue_event = trigger["event_sequence"]
         return trigger
 
-    def holding_melee(self, tick, now):
-        """Whether the melee window opened by the latest cue is still running."""
+    def holding(self, tick, now):
+        """Whether the deflect window opened by the latest cue is still running."""
         if self.return_ns is None:
             return False
         if self.return_tick is not None and tick is not None:
@@ -326,7 +336,7 @@ class MeleeFlicker:
 
     def next_prayer(self, prayer, tick, now):
         """Return the prayer to request now, or None while it is active or awaiting acknowledgement."""
-        target = Prayer.MELEE if self.holding_melee(tick, now) else Prayer.SOUL_SPLIT
+        target = self.hold_prayer if self.holding(tick, now) else Prayer.SOUL_SPLIT
         if self.requested is not None:
             requested, deadline = self.requested
             if prayer != requested and now < deadline:
@@ -647,9 +657,10 @@ def run(reader, args, board, attempt=None):
         for binding in bindings.values()
     ):
         raise ValueError("Combat bindings must exclude prayer chords and F12")
-    flicker = MeleeFlicker() if getattr(args, "flick_melee", False) else None
+    flicker = PrayerFlicker() if getattr(args, "flick_melee", False) else None
     prayer_chords = {
         Prayer.MELEE: parse_chord(getattr(args, "flick_melee_key", DEFAULT_FLICK_MELEE_KEY)),
+        Prayer.MAGIC: parse_chord(getattr(args, "flick_magic_key", DEFAULT_FLICK_MAGIC_KEY)),
         Prayer.SOUL_SPLIT: parse_chord(
             getattr(args, "flick_soul_split_key", DEFAULT_FLICK_SOUL_SPLIT_KEY)
         ),
@@ -922,13 +933,15 @@ def run(reader, args, board, attempt=None):
         position = reader.position
         tile = (position.x, position.y, position.plane) if position.valid else None
         if surge_sent_ns is not None:
-            displaced = tile is not None and tile != surge_origin
+            tiles_known = tile is not None and surge_origin is not None
+            displaced = tiles_known and tile != surge_origin
             if displaced or now - surge_sent_ns >= ACK_TIMEOUT_NS:
                 emit(
                     "surge_displacement",
                     origin=surge_origin,
                     tile=tile,
-                    observed=displaced,
+                    # None: the player tile was unavailable, so displacement is unknown.
+                    observed=displaced if tiles_known else None,
                     **({"cue_native_sequence": surge_cue} if attempt else {"sample_ns": now}),
                 )
                 surge_sent_ns = None
@@ -973,9 +986,7 @@ def run(reader, args, board, attempt=None):
             pending_cue = None
             phase_one.cast_result = None
         if action:
-            if action.ability in MOVEMENT_ABILITIES and tile is None:
-                time.sleep(POLL_SECONDS)
-                continue
+            # Movement does not depend on the tile; a missing tile only makes displacement unknown.
             if reader.monotonic_ns() - info.monotonic_ns > MAX_SAMPLE_AGE_NS:
                 raise RuntimeError("Native sample aged out before submitting the action")
             pending_cue = (
@@ -1040,10 +1051,15 @@ def main():
     parser.add_argument(
         "--flick-melee",
         action="store_true",
-        help="Unvalidated trial: Deflect Melee on every Telos animation except Uppercut, "
-        "then Soul Split on the next received tick (phases 1-2)",
+        help="Unvalidated trial: Deflect Melee (Deflect Magic for 28959) on every Telos "
+        "animation except Uppercut, then Soul Split after the hold (phases 1-2)",
     )
     parser.add_argument("--flick-melee-key", default=DEFAULT_FLICK_MELEE_KEY)
+    parser.add_argument(
+        "--flick-magic-key",
+        default=DEFAULT_FLICK_MAGIC_KEY,
+        help="Deflect Magic key used for the 28959 magic attack",
+    )
     parser.add_argument("--flick-soul-split-key", default=DEFAULT_FLICK_SOUL_SPLIT_KEY)
     parser.add_argument("--freedom", help="Current Freedom binding")
     parser.add_argument("--anticipation", help="Current Anticipation binding")

@@ -150,12 +150,12 @@ class PhaseOneTests(unittest.TestCase):
         self.assertEqual(phase.cast_result, ("Surge", True))
 
 
-MeleeFlicker = controller["MeleeFlicker"]
+PrayerFlicker = controller["PrayerFlicker"]
 
 
-class MeleeFlickerTests(unittest.TestCase):
+class PrayerFlickerTests(unittest.TestCase):
     def test_animation_holds_melee_until_next_received_tick(self):
-        flicker = MeleeFlicker()
+        flicker = PrayerFlicker()
         self.assertEqual(flicker.next_prayer(Prayer.MELEE, 10, 0), Prayer.SOUL_SPLIT)
         flicker.sent(Prayer.SOUL_SPLIT, 0)
         self.assertIsNone(flicker.next_prayer(Prayer.SOUL_SPLIT, 10, 1))
@@ -167,15 +167,26 @@ class MeleeFlickerTests(unittest.TestCase):
         self.assertEqual(flicker.next_prayer(Prayer.MELEE, 11, 6), Prayer.SOUL_SPLIT)
 
     def test_uppercut_and_repeated_events_do_not_flick(self):
-        flicker = MeleeFlicker()
+        flicker = PrayerFlicker()
         self.assertIsNone(flicker.observe([event(1, UPPERCUT)], 10, 0))
         self.assertIsNone(flicker.next_prayer(Prayer.SOUL_SPLIT, 10, 0))
         flicker.observe([event(2, HOLD_STILL)], 10, 0)
         self.assertIsNone(flicker.observe([event(2, HOLD_STILL)], 11, 0))
         self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 10, 0), Prayer.MELEE)
 
+    def test_magic_attack_selects_deflect_magic(self):
+        flicker = PrayerFlicker()
+        magic = controller["MAGIC_ATTACK"]
+        flicker.observe([event(1, magic)], 30, 0)
+        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 30, 0), Prayer.MAGIC)
+        flicker.sent(Prayer.MAGIC, 0)
+        self.assertEqual(flicker.next_prayer(Prayer.MAGIC, 31, 1), Prayer.SOUL_SPLIT)
+        flicker.sent(Prayer.SOUL_SPLIT, 1)
+        flicker.observe([event(2, AUTO)], 31, 2)
+        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 31, 3), Prayer.MELEE)
+
     def test_tendrils_release_holds_melee_through_unanimated_auto(self):
-        flicker = MeleeFlicker()
+        flicker = PrayerFlicker()
         flicker.observe([event(1, RELEASE)], 20, 0)
         for tick in (20, 21, 22):
             self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, tick, 0), Prayer.MELEE)
@@ -184,14 +195,14 @@ class MeleeFlickerTests(unittest.TestCase):
         self.assertEqual(flicker.next_prayer(Prayer.MELEE, 23, 0), Prayer.SOUL_SPLIT)
 
     def test_invalid_tick_falls_back_to_one_tick_duration(self):
-        flicker = MeleeFlicker()
+        flicker = PrayerFlicker()
         fallback = controller["TICK_FALLBACK_NS"]
         flicker.observe([event(1, TENDRILS)], None, 0)
         self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, None, fallback - 1), Prayer.MELEE)
         self.assertEqual(flicker.next_prayer(Prayer.MELEE, None, fallback), Prayer.SOUL_SPLIT)
 
     def test_unacknowledged_toggle_is_not_repeated_before_timeout(self):
-        flicker = MeleeFlicker()
+        flicker = PrayerFlicker()
         timeout = controller["ACK_TIMEOUT_NS"]
         flicker.observe([event(1, AUTO)], 10, 0)
         flicker.sent(Prayer.MELEE, 0)
