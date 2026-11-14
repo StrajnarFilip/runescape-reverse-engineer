@@ -168,3 +168,9 @@ Requests
   zero skips), including real A1/D6 and D6/D8 integration against fake devices.
   ``docs/validation/telos-ladder-fault-handoff-2026-11-14.json`` records scope.
   Physical key delivery/release and every combat rung remain unvalidated here.
+
+* P5's raw-menu decoder is integrated. Route its requested minimal shared
+  storage registration: one private snapshot field, one worker-copy line and
+  one additive accessor. No existing public layout changes. P5 now wires its
+  clear/stage/ctypes/telemetry paths and validates unavailable-frame handling.
+  Menu data remains unvalidated and cannot authorize pointer actions.

@@ -72,20 +72,19 @@ int context_reserve_buckets(rs3_context *context, uint64_t bucket_count)
 static void copy_frame(rs3_snapshot *destination, const rs3_snapshot *source)
 {
     destination->hazard_info = source->hazard_info;
-    memcpy(destination->hazards, source->hazards,
-           source->hazard_info.count * sizeof(rs3_hazard));
+    memcpy(destination->hazards, source->hazards, source->hazard_info.count * sizeof(rs3_hazard));
     uint32_t item_count =
         source->inventory_info.backpack_count + source->inventory_info.equipment_count;
     destination->info = source->info;
     destination->player = source->player;
     destination->interface_info = source->interface_info;
+    destination->pointer_candidate = source->pointer_candidate;
     memcpy(destination->interfaces, source->interfaces,
            source->interface_info.interface_count * sizeof(rs3_interface_observation));
     memcpy(destination->action_bar, source->action_bar,
            source->interface_info.action_bar_count * sizeof(rs3_action_bar_slot));
     destination->effects_info = source->effects_info;
-    memcpy(destination->effects, source->effects,
-           source->effects_info.count * sizeof(rs3_effect));
+    memcpy(destination->effects, source->effects, source->effects_info.count * sizeof(rs3_effect));
     destination->profile = source->profile;
     destination->position = source->position;
     destination->combat = source->combat;

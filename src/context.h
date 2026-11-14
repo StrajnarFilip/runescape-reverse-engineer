@@ -64,6 +64,7 @@ struct rs3_snapshot
     const client_profile *profile;
     rs3_player player;
     rs3_interface_info interface_info;
+    rs3_pointer_candidate pointer_candidate;
     rs3_interface_observation interfaces[RS3_REQUIRED_INTERFACES];
     rs3_action_bar_slot action_bar[RS3_MAX_ACTION_BAR_SLOTS];
     rs3_effects_info effects_info;

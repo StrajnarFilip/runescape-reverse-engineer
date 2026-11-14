@@ -265,6 +265,16 @@ int32_t rs3_snapshot_items(const rs3_snapshot *snapshot, uint32_t container_id, 
     return RS3_OK;
 }
 
+int32_t rs3_snapshot_pointer_candidate(const rs3_snapshot *snapshot, rs3_pointer_candidate *out,
+                                       uint32_t out_size)
+{
+    if (snapshot == NULL || out == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    return copy_record(&snapshot->pointer_candidate, sizeof *out, out, out_size);
+}
+
 int32_t rs3_snapshot_interface_info(const rs3_snapshot *snapshot, rs3_interface_info *out,
                                     uint32_t out_size)
 {

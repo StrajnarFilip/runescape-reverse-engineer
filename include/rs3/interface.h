@@ -151,6 +151,9 @@ typedef struct rs3_action_bar_slot
 
 /** 1=info, 2=interface observation, 3=slot, 4=raw pointer candidate; unknown IDs return 0. */
 RS3_API uint32_t rs3_interface_sizeof(uint32_t structure);
+/** Copy raw unvalidated menu data from one owned snapshot; it is never a click hit-test. */
+RS3_API int32_t rs3_snapshot_pointer_candidate(const rs3_snapshot *snapshot,
+                                               rs3_pointer_candidate *out, uint32_t out_size);
 RS3_API int32_t rs3_snapshot_interface_info(const rs3_snapshot *snapshot, rs3_interface_info *out,
                                             uint32_t out_size);
 /** Copy required-interface observations; unknown entries do not mean closed. */
