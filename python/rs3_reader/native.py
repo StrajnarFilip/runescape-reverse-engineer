@@ -610,10 +610,11 @@ class SpatialFlags(IntFlag):
 
 
 class SpatialTargetKind(IntEnum):
-    """Mapped local-player target kinds; require SpatialFlags.TARGET."""
+    """Typed entity references, not attack declarations; require SpatialFlags.TARGET."""
 
     NONE = 0
     NPC = 1
+    PLAYER = 2
 
 
 class Camera(ctypes.Structure):

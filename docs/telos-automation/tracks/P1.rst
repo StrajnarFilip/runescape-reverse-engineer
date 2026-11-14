@@ -65,11 +65,13 @@ on the running original 951-3 executable. Before marking this track done:
 1. Completed: the two manual encounters recorded changing player/NPC poses.
    The user then confirmed 22 Training dummy projections through 22 distinct
    camera orientations using the read-only marker. No game inputs were sent.
-2. The original-profile local player's NPC/cleared target reference is now
+2. The original-profile actor NPC/player/cleared entity reference is now
    mapped through actor+0x1c4/+0x238. Two manually selected dummies matched
-   distinct registry identities and one explicit clear was recorded. NPC attack
-   targets, player-versus-player targets and A2's twenty selection/retention
-   trials remain pending. The old context+0x98 candidate remains rejected.
+   distinct registry identities and one explicit clear was recorded. A later
+   manual Telos check recorded 692 references to the exact local player index.
+   Active-Telos production C/JSON confirmation, attack classification,
+   player-versus-player targets and A2's twenty selection/retention trials
+   remain pending. The old context+0x98 candidate remains rejected.
 3. Repeat layout/signature verification on the Compatibility Mode executable
    before enabling P1 there. The running binary currently hashes to the original.
 
@@ -97,8 +99,19 @@ The user authorized P1/P2 include and snapshot-storage registration in
 
 No changes to another track's module are requested. Static layouts, limits,
 the public ABI and pending validation are documented in ``docs/spatial.rst``
-and ``docs/validation/spatial-validation.json``. NPC attack targets and player
-targets remain unknown; ``facingTarget`` is not a target-entity mapping.
+and ``docs/validation/spatial-validation.json``. NPC entity references are now
+mapped, with local-player lifetime resolution in telemetry. Attack declaration,
+other-player lifetimes and player-versus-player targets remain unknown;
+``facingTarget`` is not a target-entity mapping.
+
+P6/D2/L: Telos's kind-2 entity reference matched the exact local player index
+in 692 research samples on 2026-11-14. Enrage and phases were unlabelled.
+Familiars also use this path for other-player references. Combine a current
+resolved target with separately validated attack cues/styles and protection
+timing; the entity reference alone must not trigger prayer input. Native
+fixtures and seven local serializer regression groups pass. A fresh 60-sample
+C/JSON check confirmed dormant-Telos clears; active-Telos C/JSON confirmation
+can share the next planned manual attack-calibration session.
 
 L/S0b: the original runtime now has equal legacy/P1 tile views and an available
 player-hit channel. Review the eventual runtime choice against the currently

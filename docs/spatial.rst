@@ -40,10 +40,13 @@ Actor fields on the original profile:
   typed entity target is a separate int32 UID at ``+0x1c4`` and byte kind at
   ``+0x238``. Original-profile resolver ``0x3fff60`` branches on kind 1 for the
   NPC registry, kind 2 for the player registry, and skips resolution for 127.
-  Extra loaded-code guards pin the kind and UID reads. Only the observed NPC
-  kind and explicit clear are enabled; player-versus-player and NPC attack
-  targets remain unmapped. Torn target reads preserve a usable pose while
-  making the target unknown.
+  Extra loaded-code guards pin the kind and UID reads. The NPC update path at
+  callsite ``0x3f40ec`` and player update path at ``0x405174`` both call this
+  resolver. NPC actors now expose NPC, player and explicit-clear references;
+  local-player actors expose NPC and clear only. Player-versus-player remains
+  unmapped. Torn target reads preserve a usable pose while making the target
+  unknown. An entity reference can also identify a familiar's owner or follow
+  target: it does not declare an attack, damage style or protection deadline.
 
 Camera and projection
 ---------------------
@@ -88,10 +91,15 @@ Telemetry adds ``player.tile/facing/target`` and the corresponding NPC fields
 using S0a observation envelopes. Unknown values have reasons; targets remain
 null when unmapped. A mapped local NPC target is resolved against exactly one
 current same-world NPC pose/registry entry, adding its config and instance IDs.
-Missing, ambiguous or other-world entries give ``target_not_observed``. A
-verified clear is ``{kind: "none"}``. Actor ``screen_point`` fields contain
-C-computed physical pixels. C callers resolve target runtime IDs against their
-owned NPC snapshot; a raw UID is not a persistent instance ID.
+Missing, ambiguous or other-world entries give ``target_not_observed``. NPC
+player references resolve only to the local player, whose pose and available
+hit channel must agree on the runtime index and nonzero lifetime. Other-player
+lifetimes remain unmapped. Source and destination must have current same-world
+poses and lifetimes before a nonempty reference is published. A verified clear
+is ``{kind: "none"}``. Actor ``screen_point`` fields contain C-computed physical
+pixels. C callers resolve target runtime IDs against their owned snapshot;
+a raw UID is not a persistent instance ID. ``RS3_SPATIAL_TARGET_PLAYER`` is
+additive; all existing structure sizes remain unchanged.
 
 Validation
 ----------
@@ -101,7 +109,8 @@ read-only live observations and controlled checks. On 2026-11-11 the user
 confirmed 22 projected ground points on a Training dummy through 22 distinct
 camera orientations using a click-through marker. The observer sent no game
 input. This validates the checked physical projections, not occlusion handling,
-body-click hitboxes or all target identities. NPC attack targets remain unmapped.
+body-click hitboxes or all target identities. Attack classification remains
+separate from the typed entity references below.
 
 On 2026-11-13, all 1,911 research samples contained equal legacy/P1 position
 views across 73 distinct player tiles in one original-profile session. An
@@ -122,5 +131,24 @@ The two selected IDs matched separate current Training dummy registry instances
 (config 16027). One clear transition was observed; a second clear was not
 captured. A fresh C/JSON check then resolved the second dummy with its current
 config and instance ID. These observations validate the checked actor-reference
-transitions; the twenty A2 selection trials, movement retention, NPC attack
-targets, player targets and other executable profiles remain separate checks.
+transitions; the twenty A2 selection trials, movement retention, player-versus-
+player targets and other executable profiles remain separate checks.
+
+The subsequent NPC check on 2026-11-14 recorded 2,858 samples over 164 seconds.
+The user tested Telos instead of the suggested weak monster. In 692 samples,
+Telos (config 22891, runtime 133) referenced the local player with kind 2 and
+UID 1915, matching the independently resolved player index in the same world.
+There were also 410 explicit-clear samples for that Telos and references from
+familiars to other players. Three recorded event queues reported zero loss.
+Enrage and phases were not labelled; this check establishes neither protection
+timing nor complete incoming-attack coverage. A fresh production C/JSON check
+after the encounter recorded 60 explicit clears on dormant Telos. Active-Telos
+production C/JSON confirmation remains pending; its target reference was
+recorded by the independent read-only research decoder before this C update.
+
+Four added native fixture cases cover NPC player/NPC/clear kinds, invalid IDs,
+torn UID/kind reads, code/profile guards and wrong-world publication limits.
+Local serializer checks cover typed player identity and reject unresolved,
+wrong-world, missing-lifetime or hit-channel mismatches. A suggested NPC-only
+field at ``+0x1374`` was not used: local code search found stack-offset uses,
+and nearby familiar/NPC samples returned zero at that candidate field.

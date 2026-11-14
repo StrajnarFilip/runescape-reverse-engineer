@@ -431,11 +431,13 @@ def spatial_actor_record(reader, actor):
 
     target = None
     unresolved_target = False
+    required_flags = SpatialFlags.TILE | SpatialFlags.SAME_WORLD
     if actor.valid_mask & SpatialFlags.TARGET:
         if actor.target_kind == SpatialTargetKind.NONE:
             target = {"kind": "none"}
+        elif not actor.instance_id or actor.valid_mask & required_flags != required_flags:
+            unresolved_target = True
         elif actor.target_kind == SpatialTargetKind.NPC:
-            required_flags = SpatialFlags.TILE | SpatialFlags.SAME_WORLD
             matches = []
             for index in range(min(reader.info.npc_count, reader.spatial.npc_count)):
                 candidate = reader.npcs[index]
@@ -456,6 +458,26 @@ def spatial_actor_record(reader, actor):
                     "config_id": (
                         candidate.config_id if candidate.flags & NPCFlags.CONFIG else None
                     ),
+                }
+            else:
+                unresolved_target = True
+        elif actor.target_kind == SpatialTargetKind.PLAYER:
+            # Only the local player's lifetime is mapped. Other players stay unresolved.
+            player_pose = reader.spatial.player
+            player_hits = reader.player_hit_info
+            if (
+                player_pose.runtime_id == actor.target_runtime_id
+                and player_pose.instance_id
+                and player_pose.valid_mask & required_flags == required_flags
+                and player_hits.status == Status.AVAILABLE
+                and player_hits.player_index == player_pose.runtime_id
+                and player_hits.instance_id == player_pose.instance_id
+            ):
+                target = {
+                    "kind": "player",
+                    "runtime_id": player_pose.runtime_id,
+                    "player_index": player_pose.runtime_id,
+                    "instance_id": player_pose.instance_id,
                 }
             else:
                 unresolved_target = True

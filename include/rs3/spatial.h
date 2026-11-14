@@ -29,11 +29,13 @@ enum rs3_spatial_reason
     RS3_SPATIAL_WRONG_WORLD
 };
 
-/** Target kinds currently mapped for the original-profile local player. */
+/** Original-profile entity references; a target may be a follow/owner reference, not an attack. */
 enum rs3_spatial_target_kind
 {
     RS3_SPATIAL_TARGET_NONE = 0,
-    RS3_SPATIAL_TARGET_NPC = 1
+    RS3_SPATIAL_TARGET_NPC = 1,
+    /** NPC references only; player-versus-player remains unmapped. */
+    RS3_SPATIAL_TARGET_PLAYER = 2
 };
 
 enum rs3_camera_flags
@@ -60,8 +62,8 @@ typedef struct rs3_actor_spatial
     float facing_degrees; /**< Client-facing yaw; zero points south, increasing towards west. */
     uint32_t facing_reason;
     uint32_t target_reason;
-    int32_t target_runtime_id;
-    uint32_t target_kind; /**< rs3_spatial_target_kind; meaningful only with TARGET set. */
+    int32_t target_runtime_id; /**< Registry UID; resolve identity in the same owned snapshot. */
+    uint32_t target_kind;      /**< rs3_spatial_target_kind; meaningful only with TARGET set. */
     uint32_t reserved[2];
 } rs3_actor_spatial;
 

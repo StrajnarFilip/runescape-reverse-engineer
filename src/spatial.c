@@ -28,9 +28,9 @@
 #define POSITION_GETTER_RVA        0x6ee1f0u
 #define FACING_GETTER_RVA          0x44b690u
 #define PROJECTION_INSTRUCTION_RVA 0x5a34eu
-#define PLAYER_TARGET_UID_OFFSET   0x1c4u
-#define PLAYER_TARGET_KIND_OFFSET  0x238u
-#define PLAYER_TARGET_NONE_VALUE   127u
+#define ACTOR_TARGET_UID_OFFSET    0x1c4u
+#define ACTOR_TARGET_KIND_OFFSET   0x238u
+#define ACTOR_TARGET_NONE_VALUE    127u
 #define TARGET_KIND_GUARD_RVA      0x3fff66u
 #define TARGET_UID_GUARD_RVA       0x3fff90u
 
@@ -64,7 +64,7 @@ static int spatial_layout_verified(rs3_context *context)
 }
 
 /** Verify the original client's typed entity-target resolver, independent of pose guards. */
-static int player_target_layout_verified(rs3_context *context)
+static int actor_target_layout_verified(rs3_context *context)
 {
     if (context->target.profile != &profile_primary)
     {
@@ -82,32 +82,33 @@ static int player_target_layout_verified(rs3_context *context)
            memcmp(observed, uid_guard, sizeof uid_guard) == 0;
 }
 
-/** Decode only calibrated local-player NPC/cleared references; other target kinds stay unknown. */
-static void decode_player_target(rs3_context *context, const unsigned char *before,
-                                 const unsigned char *after, rs3_actor_spatial *out)
+/** Decode the shared entity reference, which alone does not establish an attack or its style. */
+static void decode_actor_target(rs3_context *context, const unsigned char *before,
+                                const unsigned char *after, int npc_actor, rs3_actor_spatial *out)
 {
-    if (!player_target_layout_verified(context))
+    if (!actor_target_layout_verified(context))
     {
         return;
     }
-    if (memcmp(before + PLAYER_TARGET_UID_OFFSET, after + PLAYER_TARGET_UID_OFFSET,
+    if (memcmp(before + ACTOR_TARGET_UID_OFFSET, after + ACTOR_TARGET_UID_OFFSET,
                sizeof(int32_t)) ||
-        before[PLAYER_TARGET_KIND_OFFSET] != after[PLAYER_TARGET_KIND_OFFSET])
+        before[ACTOR_TARGET_KIND_OFFSET] != after[ACTOR_TARGET_KIND_OFFSET])
     {
         out->target_reason = RS3_READ_FAILED;
         return;
     }
-    uint32_t kind = before[PLAYER_TARGET_KIND_OFFSET];
-    int32_t runtime_id = decode_i32(before + PLAYER_TARGET_UID_OFFSET);
-    if (kind == PLAYER_TARGET_NONE_VALUE)
+    uint32_t kind = before[ACTOR_TARGET_KIND_OFFSET];
+    int32_t runtime_id = decode_i32(before + ACTOR_TARGET_UID_OFFSET);
+    if (kind == ACTOR_TARGET_NONE_VALUE)
     {
         /* The native resolver ignores the retained UID when the kind is explicitly clear. */
         out->target_kind = RS3_SPATIAL_TARGET_NONE;
         out->target_runtime_id = -1;
     }
-    else if (kind == RS3_SPATIAL_TARGET_NPC && runtime_id >= 0 && runtime_id <= UINT16_MAX)
+    else if ((kind == RS3_SPATIAL_TARGET_NPC || (npc_actor && kind == RS3_SPATIAL_TARGET_PLAYER)) &&
+             runtime_id >= 0 && runtime_id <= UINT16_MAX)
     {
-        out->target_kind = RS3_SPATIAL_TARGET_NPC;
+        out->target_kind = kind;
         out->target_runtime_id = runtime_id;
     }
     else
@@ -182,9 +183,10 @@ int spatial_decode_actor(rs3_context *context, uint64_t actor, uint32_t vtable_r
         out->valid_mask |= RS3_SPATIAL_FACING;
         out->facing_reason = RS3_REASON_NONE;
     }
-    if (vtable_rva == context->target.profile->player_actor_vtable_rva)
+    int npc_actor = vtable_rva == context->target.profile->npc_entity_vtable_rva;
+    if (npc_actor || vtable_rva == context->target.profile->player_actor_vtable_rva)
     {
-        decode_player_target(context, before, after, out);
+        decode_actor_target(context, before, after, npc_actor, out);
     }
     out->observed_ns = clock_monotonic_ns();
     return out->valid_mask != 0;
