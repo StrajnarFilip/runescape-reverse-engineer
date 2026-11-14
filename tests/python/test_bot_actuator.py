@@ -18,9 +18,11 @@ from rs3_reader.bot.actuator_sendinput import (
     Bindings,
     DeviceFault,
     InputPolicy,
+    InputRejected,
     KeyBinding,
     NativeSnapshotDevice,
     SendInputActuator,
+    observed_binding,
 )
 from rs3_reader.bot.actuator_serial import SerialActuator, SerialKeyboardDevice
 from rs3_reader.bot.intents import (
@@ -52,6 +54,16 @@ class FakeDLL:
     def __init__(self):
         self.actions, self.releases, self.closes = [], 0, 0
         self.fail, self.hook = False, None
+        self.chords_supported = False
+
+    def supports(self, action, binding):
+        if isinstance(action, ConsumeSlot):
+            if not self.chords_supported:
+                raise InputRejected("native_item_key_api_unmapped")
+            if not action.expected_tracking_token:
+                raise InputRejected("native_item_tracking_token_required")
+        if isinstance(action, ActivateAbility) and binding.modifiers and not self.chords_supported:
+            raise InputRejected("native_modified_ability_api_unmapped")
 
     def dispatch(self, action, binding, world):
         if self.hook:
@@ -123,6 +135,7 @@ class FakeChannel:
 class BackendTests(unittest.TestCase):
     def world(self):
         row = json.loads(FIXTURE.read_text().splitlines()[0])
+        row["executable_sha256"] = "a" * 64
         row["game_tick"] = {"value": {"index": 20}, "source": "synthetic_fixture", "age_ms": 5}
         row["inventory"]["slots"] = [
             {"slot": 0, "item_id": 200, "tracking_token": 50},
@@ -375,6 +388,71 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(backend.send(intent).reason, "native_item_key_api_unmapped")
         self.assertEqual(device.actions, [])
 
+    def test_both_backends_support_independent_lanes_with_native_chord_api(self):
+        for kind in ("native", "serial"):
+            backend, state, clock, device, channel = self.make_backend(kind)
+            if kind == "native":
+                device.chords_supported = True
+            actions = (
+                (ConsumeSlot(0, 200, "eat", 50), ActionLane.FOOD),
+                (ConsumeSlot(1, 201, "drink", 51), ActionLane.POTION),
+                (ActivateAbility(103), ActionLane.GCD),
+                (SetPrayer("magic"), ActionLane.PRAYER),
+            )
+            for index, (action, lane) in enumerate(actions):
+                self.assertTrue(
+                    backend.send(self.intent(state, clock, str(index), action, lane)).accepted
+                )
+            self.assertEqual(len(device.actions) if kind == "native" else len(channel.taps), 4)
+
+    def test_native_requires_exact_item_token_and_supports_modified_abilities(self):
+        backend, state, clock, device, _ = self.make_backend("native")
+        device.chords_supported = True
+        tokenless = self.intent(
+            state, clock, action=ConsumeSlot(0, 200, "eat"), lane=ActionLane.FOOD
+        )
+        self.assertEqual(backend.send(tokenless).reason, "native_item_tracking_token_required")
+        backend.bindings = Bindings(abilities={103: KeyBinding(0x47, 4, True, "fixture")})
+        ability = self.intent(state, clock, "ability", ActivateAbility(103), ActionLane.GCD)
+        self.assertTrue(backend.send(ability).accepted)
+        self.assertEqual(device.actions[-1][1].modifiers, 4)
+
+    def test_changed_binding_rejects_before_native_or_serial_dispatch(self):
+        for kind in ("native", "serial"):
+            count = [0]
+
+            def provider(action, world):
+                count[0] += 1
+                return KeyBinding(0x70 if count[0] == 1 else 0x71, CTRL, True, "fixture")
+
+            backend, state, clock, device, channel = self.make_backend(
+                kind, binding_provider=provider
+            )
+            result = backend.send(self.intent(state, clock))
+            self.assertEqual(result.reason, "binding_changed_during_dispatch")
+            self.assertEqual(device.actions if kind == "native" else channel.taps, [])
+
+    def test_serial_binding_change_after_modifier_press_releases_without_tap(self):
+        current_key = [0x70]
+        backend, state, clock, _, channel = self.make_backend(
+            "serial",
+            binding_provider=lambda action, world: KeyBinding(
+                current_key[0], CTRL, True, "fixture"
+            ),
+        )
+        original_write = channel.write
+
+        def change_after_press(data):
+            result = original_write(data)
+            if b"PRESS E0" in data:
+                current_key[0] = 0x71
+            return result
+
+        channel.write = change_after_press
+        result = backend.send(self.intent(state, clock))
+        self.assertEqual(result.reason, "binding_changed_during_dispatch")
+        self.assertFalse(channel.held or channel.taps)
+
     def test_queue_capacity_and_shutdown_wake_waiters(self):
         for kind in ("native", "serial"):
             backend, state, clock, device, channel = self.make_backend(
@@ -432,6 +510,94 @@ class BackendTests(unittest.TestCase):
             self.assertEqual(backend.send(self.intent(state, clock)).reason, "prayer_state_unknown")
 
 
+class ObservedBindingTests(unittest.TestCase):
+    def world(self, rows, *, age=5, reason=None):
+        return replace(
+            BackendTests().world(),
+            action_bar=Observation(tuple(rows), age, "native_memory", reason=reason),
+        )
+
+    def row(self, kind="prayer", identity=14594, key="Ctrl+F1", **updates):
+        row = {
+            "kind": kind,
+            "item_id" if kind == "item" else "ability_struct_id": identity,
+            "key": key,
+            "reason": None,
+            "binding_reason": None,
+            "source": "native_memory",
+        }
+        return dict(row, **updates)
+
+    def resolve(self, action, world, *, now=None):
+        return observed_binding(
+            action,
+            world,
+            prayer_struct_ids={"magic": 14594},
+            now_ns=world.now_ns if now is None else now,
+        )
+
+    def test_current_native_prayer_ability_and_item_rows_translate_function_keys(self):
+        for action, row in (
+            (SetPrayer("magic"), self.row()),
+            (ActivateAbility(103), self.row("ability", 103)),
+            (ConsumeSlot(0, 200, "eat", 50), self.row("item", 200)),
+        ):
+            binding = self.resolve(action, self.world([row]))
+            self.assertEqual((binding.virtual_key, binding.modifiers), (0x70, CTRL))
+            self.assertTrue(binding.validated)
+        plain = self.resolve(SetPrayer("magic"), self.world([self.row(key="F12")]))
+        self.assertEqual((plain.virtual_key, plain.modifiers), (0x7B, 0))
+
+    def test_missing_duplicate_and_wrong_kind_rows_never_fall_back(self):
+        for rows in ([], [self.row(), self.row()], [self.row("ability")]):
+            with self.assertRaisesRegex(InputRejected, "binding_missing_or_ambiguous"):
+                self.resolve(SetPrayer("magic"), self.world(rows))
+
+    def test_undecoded_modifier_label_and_invalid_rows_reject(self):
+        for row in (
+            self.row(key=None, modifier_code=6),
+            self.row(key="Alt+G"),
+            self.row(key="Ctrl+F13"),
+            self.row(binding_reason="unmapped"),
+            self.row(reason="unmapped"),
+            self.row(source=None),
+        ):
+            with self.assertRaises(InputRejected):
+                self.resolve(SetPrayer("magic"), self.world([row]))
+        with self.assertRaises(InputRejected):
+            self.resolve(SetPrayer("magic"), self.world([123]))
+
+    def test_binding_age_includes_time_waiting_since_world_construction(self):
+        world = self.world([self.row()], age=100)
+        with self.assertRaisesRegex(InputRejected, "action_bar_unavailable_or_stale"):
+            self.resolve(SetPrayer("magic"), world, now=world.now_ns + 51 * MS)
+        with self.assertRaises(InputRejected):
+            self.resolve(SetPrayer("magic"), world, now=world.now_ns - 1)
+        for world in (
+            self.world([self.row()], age=151),
+            self.world([self.row()], reason="invalid"),
+        ):
+            with self.assertRaises(InputRejected):
+                self.resolve(SetPrayer("magic"), world)
+
+    def test_binding_provider_uses_changed_observed_key_instead_of_static_mapping(self):
+        state = [self.world([self.row(key="Ctrl+F2")])]
+        clock, device = FakeClock(state[0].now_ns), FakeDLL()
+        backend = SendInputActuator(
+            device,
+            world_provider=lambda: state[0],
+            clock=clock,
+            session=state[0].session,
+            bindings=Bindings(prayers={"magic": KeyBinding(0x70, CTRL, True, "static fixture")}),
+            binding_provider=lambda action, world: self.resolve(action, world),
+            guard=lambda *args: True,
+            enabled=True,
+        )
+        self.addCleanup(backend.close)
+        self.assertTrue(backend.send(BackendTests().intent(state, clock)).accepted)
+        self.assertEqual(device.actions[-1][1].virtual_key, 0x71)
+
+
 class SerialProtocolTests(unittest.TestCase):
     def test_fragmented_writes_and_replies(self):
         channel = FakeChannel()
@@ -474,11 +640,92 @@ class FakeFunction:
 
 
 class NativeAdapterTests(unittest.TestCase):
+    def device(self, *, chord_api=True):
+        from rs3_reader.native import CombatState, Info
+
+        info, combat, calls = Info(), CombatState(), []
+        info.pid, info.process_creation_time, info.sequence = 111, 222, 1
+        info.executable_sha256 = b"a" * 64
+        combat.scene_epoch = 3
+
+        def allocate(out):
+            ctypes.cast(out, ctypes.POINTER(ctypes.c_void_p))[0] = ctypes.c_void_p(1234)
+            return 0
+
+        def copy(source, out):
+            ctypes.memmove(out, ctypes.byref(source), ctypes.sizeof(source))
+            return 0
+
+        functions = {
+            "rs3_snapshot_create": allocate,
+            "rs3_copy_latest": lambda *args: 0,
+            "rs3_snapshot_info": lambda handle, out, size: copy(info, out),
+            "rs3_snapshot_combat": lambda handle, out, size: copy(combat, out),
+            "rs3_activate_ability": lambda *args: calls.append(("legacy", args[1:])) or 0,
+            "rs3_set_prayer": lambda *args: calls.append(("prayer", args[1:])) or 0,
+            "rs3_snapshot_destroy": lambda *args: None,
+        }
+        if chord_api:
+            functions.update(
+                {
+                    "rs3_activate_ability_chord": lambda *args: calls.append(("ability", args[1:]))
+                    or 0,
+                    "rs3_activate_item_chord": lambda *args: calls.append(("item", args[1:])) or 0,
+                }
+            )
+        library = SimpleNamespace(
+            **{name: FakeFunction(function) for name, function in functions.items()}
+        )
+        reader = SimpleNamespace(
+            library=library,
+            context=ctypes.c_void_p(42),
+            check_result=lambda result: self.assertEqual(result, 0),
+        )
+        device = NativeSnapshotDevice(reader)
+        self.addCleanup(device.close)
+        return device, info, calls
+
+    def test_modified_ability_and_exact_item_use_typed_chord_exports(self):
+        device, _, calls = self.device()
+        world = BackendTests().world()
+        binding = KeyBinding(0x47, 4, True, "fixture")
+        device.dispatch(ActivateAbility(103), binding, world)
+        device.dispatch(ConsumeSlot(0, 200, "eat", 50), binding, world)
+        self.assertEqual(calls, [("ability", (103, 0x47, 4)), ("item", (0, 200, 50, 0x47, 4))])
+        self.assertIs(device.item_chord.argtypes[3], ctypes.c_uint64)
+        self.assertIs(device.item_chord.argtypes[2], ctypes.c_int32)
+
+    def test_old_dll_keeps_unmodified_ability_and_rejects_new_operations(self):
+        device, _, calls = self.device(chord_api=False)
+        world = BackendTests().world()
+        device.dispatch(ActivateAbility(103), KeyBinding(0x70, 0, True, "fixture"), world)
+        with self.assertRaisesRegex(InputRejected, "native_modified_ability_api_unmapped"):
+            device.dispatch(ActivateAbility(103), KeyBinding(0x70, CTRL, True, "fixture"), world)
+        with self.assertRaisesRegex(InputRejected, "native_item_key_api_unmapped"):
+            device.dispatch(
+                ConsumeSlot(0, 200, "eat", 50), KeyBinding(0x70, 0, True, "fixture"), world
+            )
+        self.assertEqual(calls, [("legacy", (103, 0x70))])
+
+    def test_new_native_sample_requires_policy_revalidation_and_hash_change_faults(self):
+        device, info, calls = self.device()
+        world = BackendTests().world()
+        binding = KeyBinding(0x70, CTRL, True, "fixture")
+        info.sequence = 2
+        with self.assertRaisesRegex(InputRejected, "native_snapshot_advanced"):
+            device.dispatch(SetPrayer("magic"), binding, world)
+        info.sequence = 1
+        info.executable_sha256 = b"b" * 64
+        with self.assertRaisesRegex(DeviceFault, "native_snapshot_executable_changed"):
+            device.dispatch(SetPrayer("magic"), binding, world)
+        self.assertEqual(calls, [])
+
     def test_private_snapshot_and_real_abi_calls_against_fake_dll(self):
         from rs3_reader.native import CombatState, Info
 
         info, combat = Info(), CombatState()
-        info.pid, info.process_creation_time, info.sequence = 111, 222, 2
+        info.pid, info.process_creation_time, info.sequence = 111, 222, 1
+        info.executable_sha256 = b"a" * 64
         combat.scene_epoch = 3
         calls = []
 
