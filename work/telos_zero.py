@@ -544,20 +544,12 @@ def magic_flick_ticks(distance):
     return 1, 3  # Beyond any logged distance: also cover a +4 hit.
 
 
-# Reactive flicks alone are not reliable. Over all logs, with Soul Split shown at the hit 1 of 27
-# hits did 1 damage, and with Deflect Magic shown at the hit 43 of 167. In the 250% run of 180906
-# Deflect Magic was up for the whole tick before two delayed hits at 6 tiles (9152 +2, 9168 +2)
-# and both still landed for 1,782 and 3,093. Damage is probably fixed when Telos fires, and the
-# overhead was never Deflect Magic at a 28959 in any log. Onslaught projectiles and P3 magic autos
-# repeat every 4 received ticks (one gap of 5), so Deflect Magic is also raised ahead of the next
-# one: during these offsets after each 28959 (inclusive). 500% run of 181758 with +3: when the
-# overhead already showed Deflect Magic at the cast, 9 of 20 hits did 1 damage (1 of 5 without),
-# but a press sent one tick ahead still gave 1,294 and 1,966 at times, so the press goes out two
-# ticks ahead of the expected cast.
-MAGIC_PREFLICK_TICKS = (2, 5)
-# Right next to Telos one tick of Deflect Magic is enough (account owner, 2026-11-14): no
-# pre-flick at this grid distance from his footprint or closer.
-MAGIC_SINGLE_TICK_DISTANCE = 1
+# Deflect Magic only halves Onslaught hits (account owner); 1-damage hits are misses. Comparing
+# the same projectile index over all logs, the prayer at the hit is what counts: at 250% the
+# fourth and fifth projectiles did 2,277-5,080 with Soul Split at the hit and mostly 352-909 with
+# Deflect Magic at the hit, while Deflect Magic already up at the cast made no visible
+# difference. A pre-flick ahead of the next cast (tried in 94e721b and 8920630) is therefore not
+# used: magic flicks are the one- or two-tick windows of magic_flick_ticks only.
 # Uppercut's 2,634 hitmark appeared 7 received ticks after 28938 on 2026-11-14 at 100%.
 # Escape is sent two to three ticks before that hitmark; the server hit deadline is unmeasured.
 UPPERCUT_ESCAPE_TICKS = (4, 5)
@@ -934,11 +926,6 @@ class PrayerFlicker:
                 first, last = 0, self.hold_ticks.get(sequence, DEFAULT_FLICK_HOLD_TICKS) - 1
             if tick is not None:
                 self.windows.append((tick + first, tick + last + 1, prayer))
-                if sequence == MAGIC_ATTACK and (
-                    distance is None or distance > MAGIC_SINGLE_TICK_DISTANCE
-                ):
-                    early, late = MAGIC_PREFLICK_TICKS
-                    self.windows.append((tick + early, tick + late + 1, prayer))
             self.hold_prayer = prayer
             return_ns = now + (last + 1) * TICK_FALLBACK_NS
             if self.return_ns is None or return_ns > self.return_ns:

@@ -603,20 +603,14 @@ class PrayerFlickerTests(unittest.TestCase):
             [flicker.active_prayer(tick, 0) for tick in range(8080, 8083)],
             [None, Prayer.MAGIC, Prayer.MAGIC],
         )
-        # Right next to Telos: one tick on the animation tick only.
-        flicker = PrayerFlicker()
-        flicker.observe([event(1, magic)], 100, 0, distance=1)
-        self.assertEqual(
-            [flicker.active_prayer(tick, 0) for tick in range(100, 107)],
-            [Prayer.MAGIC, None, None, None, None, None, None],
-        )
-        # Two tiles away: the animation tick, then the pre-flick for the next one at +4.
-        flicker = PrayerFlicker()
-        flicker.observe([event(1, magic)], 100, 0, distance=2)
-        self.assertEqual(
-            [flicker.active_prayer(tick, 0) for tick in range(100, 107)],
-            [Prayer.MAGIC, None, Prayer.MAGIC, Prayer.MAGIC, Prayer.MAGIC, Prayer.MAGIC, None],
-        )
+        # Up to 4 tiles away: one tick, on the animation tick only (no pre-flick).
+        for distance in (1, 4):
+            flicker = PrayerFlicker()
+            flicker.observe([event(1, magic)], 100, 0, distance=distance)
+            self.assertEqual(
+                [flicker.active_prayer(tick, 0) for tick in range(100, 106)],
+                [Prayer.MAGIC, None, None, None, None, None],
+            )
         # A melee auto during a pending long-range window deflects melee on its own tick.
         flicker = PrayerFlicker()
         flicker.observe([event(1, magic)], 200, 0, distance=8)
@@ -636,13 +630,12 @@ class PrayerFlickerTests(unittest.TestCase):
         flicker.observe([event(1, magic)], 30, 0)
         self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 30, 0), Prayer.MAGIC)
         flicker.sent(Prayer.MAGIC, 0)
-        # No positions: Deflect Magic covers +0 to +2, then the pre-flick covers +2 to +5.
+        # No positions: Deflect Magic covers +0 to +2.
         self.assertIsNone(flicker.next_prayer(Prayer.MAGIC, 32, 1))
-        self.assertIsNone(flicker.next_prayer(Prayer.MAGIC, 35, 1))
-        self.assertEqual(flicker.next_prayer(Prayer.MAGIC, 36, 1), Prayer.SOUL_SPLIT)
+        self.assertEqual(flicker.next_prayer(Prayer.MAGIC, 33, 1), Prayer.SOUL_SPLIT)
         flicker.sent(Prayer.SOUL_SPLIT, 1)
-        flicker.observe([event(2, AUTO)], 36, 2)
-        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 36, 3), Prayer.MELEE)
+        flicker.observe([event(2, AUTO)], 33, 2)
+        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 33, 3), Prayer.MELEE)
 
     def test_phase_three_default_is_deflect_magic(self):
         flicker = PrayerFlicker()
