@@ -104,6 +104,9 @@ client rectangle with MSS and converting it to RGB took a median of 34 ms.
 Pillow's desktop capture and crop took 136 ms. These figures exclude scaling
 and saving the PNG and use a capture session kept open between MSS frames.
 
+See `RuneScape screen capture <screen-capture.rst>`_ for the later DXGI
+benchmark, standalone capture tool, and successful native window-capture test.
+
 In a live run on World 10, Leonardo clicks opened the lodestone network. The
 Leonardo keyboard sent ``V`` to teleport to Varrock, and minimap clicks guided
 the character to the exchange counter. The world map confirmed the final location
