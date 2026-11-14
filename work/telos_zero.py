@@ -866,18 +866,24 @@ def run(reader, args, board, attempt=None):
         if keys.game_window(identity) != window:
             raise FocusLost("RuneScape lost foreground focus")
 
-    def wait_for_focus():
-        """Between presses: pause all input while RuneScape is not focused. Only F12 stops."""
+    input_allowed = True
+
+    def update_focus():
+        """Allow input only while RuneScape is focused; observation never pauses.
+
+        While unfocused, animations, hits and phases are still tracked so the rotation counts
+        stay correct; send_chord and the stomp dodge simply do nothing. Only F12 stops.
+        """
+        nonlocal input_allowed
         if keys.get_async_key_state(F12) < 0:
             raise RuntimeError("F12 stop")
-        if keys.game_window(identity) == window:
-            return
-        emit("input_paused", reason="RuneScape lost foreground focus")
-        while keys.game_window(identity) != window:
-            if keys.get_async_key_state(F12) < 0:
-                raise RuntimeError("F12 stop")
-            time.sleep(POLL_SECONDS)
-        emit("input_resumed")
+        focused = keys.game_window(identity) == window
+        if focused != input_allowed:
+            emit(
+                "input_resumed" if focused else "input_paused",
+                **({} if focused else {"reason": "RuneScape lost foreground focus"}),
+            )
+            input_allowed = focused
 
     pointer_window = None
 
@@ -885,7 +891,8 @@ def run(reader, args, board, attempt=None):
         """Dive out from under Telos before the Hold Still stomp, once per Hold Still."""
         nonlocal pointer_window
         if (
-            "Dive" not in bindings
+            not input_allowed
+            or "Dive" not in bindings
             or phase_one.special != HOLD_STILL
             or phase_one.stomp_checked
             or not isinstance(received_tick, int)
@@ -978,7 +985,9 @@ def run(reader, args, board, attempt=None):
             return
 
     def send_chord(chord):
-        """Press a chord; return False when focus was lost during the press."""
+        """Press a chord; return False when RuneScape is unfocused or focus was lost mid-press."""
+        if not input_allowed:
+            return False
         try:
             board.tap(chord, KEY_HOLD_SECONDS, check_focus, time.sleep)
         except FocusLost:
@@ -1147,7 +1156,7 @@ def run(reader, args, board, attempt=None):
             emit("waiting", reason=reason)
 
     while time.monotonic() < deadline:
-        wait_for_focus()
+        update_focus()
         info, player, boss, phase, hp = boss_sample(reader)
         events, lost = reader.drain_npc_action_events()
         hits, hits_lost = reader.drain_player_hit_events()
@@ -1502,6 +1511,7 @@ def run(reader, args, board, attempt=None):
                 # Interrupted by focus loss; the decision is made again after focus returns.
                 if action.ability == "Freedom":
                     phase_one.last_freedom_stun = None
+                time.sleep(POLL_SECONDS)
                 continue
             sent_ns = reader.monotonic_ns()
             phase_one.sent(action, sent_ns)

@@ -549,7 +549,7 @@ class PracticeRunTests(unittest.TestCase):
         reader.abilities = []
         reader.drain_npc_action_events.return_value = ([], 0)
         reader.drain_player_hit_events.return_value = ([], 0)
-        reader.active_prayer.side_effect = [Prayer.MELEE] * 6
+        reader.active_prayer.side_effect = [Prayer.MELEE] * 10
         clock = 10 * SECOND_NS
         reader.monotonic_ns.return_value = clock
         info = SimpleNamespace(
@@ -565,9 +565,12 @@ class PracticeRunTests(unittest.TestCase):
             health_max=400_000,
             health_current=400_000,
         )
+        # Observation continues while unfocused, so every loop consumes a sample.
         samples = [
             (info, player, dormant, None, 9900),
             (info, player, dormant, None, 9900),
+            (info, player, active, 1, 9900),
+            (info, player, active, 1, 9900),
             (info, player, active, 1, 9900),
             (info, player, active, 1, 0),
         ]
