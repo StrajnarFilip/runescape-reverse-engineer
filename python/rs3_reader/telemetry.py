@@ -553,18 +553,19 @@ def hazards_record(reader):
     entries = []
     for hazard in reader.hazards[: info.count] if available else ():
         flags = HazardFlags(hazard.flags)
+        is_location = bool(flags & HazardFlags.SCENE_LOCATION)
         entries.append(
             {
-                "id": "npc:" + str(hazard.instance_id),
+                "id": ("location:" if is_location else "npc:") + str(hazard.instance_id),
                 "instance_id": hazard.instance_id,
-                "runtime_id": hazard.runtime_id,
+                "runtime_id": None if is_location else hazard.runtime_id,
                 "config_id": hazard.config_id if hazard.config_id >= 0 else None,
                 "kind": kinds[hazard.kind] if hazard.kind < len(kinds) else "unknown",
                 "variant": variants[hazard.variant] if hazard.variant < len(variants) else None,
                 "identity_validated": bool(flags & HazardFlags.IDENTITY),
                 "validated": bool(flags & HazardFlags.MECHANICS_VALIDATED),
                 "present": True,
-                "presence_scope": "loaded_npc_registry",
+                "presence_scope": "loaded_scene_locations" if is_location else "loaded_npc_registry",
                 "same_world": True if flags & HazardFlags.TILE else None,
                 "active": None,
                 "dangerous": None,

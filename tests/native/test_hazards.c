@@ -387,6 +387,90 @@ static void unavailable_samples_clear_and_publish_the_hazard_channel(void)
     rs3_destroy(context);
 }
 
+/** Match the scene chain used by the Compatibility Mode LocList implementation. */
+static void compatibility_scene_beam_tiles_follow_the_live_location_lists(void)
+{
+    const uint64_t manager = 0x900000, map = 0x920000, square = 0x940000, maps = 0x960000,
+                   rows = 0x961000, columns = 0x962000, chunk_rows = 0x963000,
+                   chunk_refs = 0x964000, chunk = 0x965000, locations = 0x966000,
+                   location = 0x967000, config = 0x968000;
+    fixture *sample = fixture_create_for_profile(&profile_compatibility);
+    rs3_snapshot *snapshot = sample->snapshot;
+    snapshot->info.status = RS3_AVAILABLE;
+    snapshot->info.npc_count = 1;
+    snapshot->info.monotonic_ns = FIXTURE_TIMESTAMP_NS;
+    snapshot->encounter.stage_raw.valid = 1;
+    put_candidate(sample, 0, 22891, "Telos, the Warden");
+    fixture_add_block(sample, manager, 0x100);
+    fixture_add_block(sample, map, 0x14780);
+    fixture_add_block(sample, square, 0xeba0);
+    const uint64_t vectors[] = {maps, rows, columns, chunk_rows, chunk_refs, locations};
+    for (unsigned index = 0; index < sizeof vectors / sizeof *vectors; index++)
+    {
+        fixture_add_block(sample, vectors[index], 0x100);
+    }
+    fixture_add_block(sample, chunk, 0x500);
+    fixture_add_block(sample, location, 0x190);
+    fixture_add_block(sample, config, 0x10);
+    const uint64_t map_iterator = FIXTURE_MODULE_BASE + 0xc219dau;
+    const uint64_t grid_getter = FIXTURE_MODULE_BASE + 0xccf1e0u;
+    const unsigned char map_guard[] = {0x48, 0x8b, 0xb1, 0x60, 0x47, 1, 0};
+    const unsigned char grid_guard[] = {0x48, 0x8d, 0x81, 0x70, 1, 0, 0, 0xc3};
+    fixture_add_block(sample, map_iterator, sizeof map_guard);
+    fixture_add_block(sample, grid_getter, sizeof grid_guard);
+    memcpy(fixture_bytes(sample, map_iterator, sizeof map_guard), map_guard, sizeof map_guard);
+    memcpy(fixture_bytes(sample, grid_getter, sizeof grid_guard), grid_guard, sizeof grid_guard);
+    fixture_put_u64(sample, FIXTURE_WORLD + 0x199e8, manager);
+    fixture_put_u32(sample, FIXTURE_WORLD + POSITION_CLIENT_STATE_OFFSET, POSITION_IN_GAME_STATE);
+    const uint64_t scene_global = FIXTURE_MODULE_BASE + POSITION_CLIENT_POINTER_RVA;
+    fixture_add_block(sample, scene_global, sizeof(uint64_t));
+    fixture_put_u64(sample, scene_global, FIXTURE_WORLD);
+    fixture_put_u64(sample, manager + 0x58, maps);
+    fixture_put_u64(sample, maps + 8, map);
+    fixture_put_u32(sample, map + 0x14714, TEST_TILE_X / 64);
+    fixture_put_u32(sample, map + 0x14718, TEST_TILE_Y / 64);
+    fixture_put_u64(sample, map + 0x14760, rows);
+    fixture_put_u64(sample, map + 0x14768, rows + 0x18);
+    fixture_put_u64(sample, rows, columns);
+    fixture_put_u64(sample, rows + 8, columns + 0x18);
+    fixture_put_u64(sample, columns + 8, square);
+    fixture_put_u64(sample, square + 0xeb90, chunk_rows);
+    fixture_put_u64(sample, square + 0xeb98, chunk_rows + 4 * 0x18);
+    uint64_t row = chunk_rows + ((TEST_TILE_X / 16) % 4) * 0x18;
+    fixture_put_u64(sample, row, chunk_refs);
+    fixture_put_u64(sample, row + 8, chunk_refs + 4 * 0x10);
+    fixture_put_u64(sample, chunk_refs + ((TEST_TILE_Y / 16) % 4) * 0x10 + 8, chunk);
+    fixture_put_u64(sample, chunk + 0x308, locations);
+    fixture_put_u64(sample, chunk + 0x310, locations + 0x20);
+    fixture_put_u64(sample, locations + 8, location);
+    fixture_put_u64(sample, locations + 0x18, location);
+    fixture_put_u64(sample, location, FIXTURE_MODULE_BASE + 0x15b52d8);
+    fixture_put_u64(sample, location + 0xd0, config);
+    fixture_put_u32(sample, location + 0x170, 1);
+    fixture_put_u32(sample, location + 0x174, TEST_TILE_X);
+    fixture_put_u32(sample, location + 0x178, TEST_TILE_Y);
+    fixture_put_u32(sample, config + 8, 103546);
+    hazards_commit(sample->context, snapshot, 1);
+    hazards_read_telos_beams(sample->context, snapshot, FIXTURE_WORLD);
+    assert(snapshot->hazard_info.count == 1 && snapshot->hazard_info.complete_channels == 0);
+    assert(snapshot->hazards[0].kind == RS3_HAZARD_GREEN_BEAM);
+    assert(snapshot->hazards[0].flags ==
+           (RS3_HAZARD_IDENTITY | RS3_HAZARD_TILE | RS3_HAZARD_SCENE_LOCATION));
+    assert(snapshot->hazards[0].tile.x == TEST_TILE_X &&
+           snapshot->hazards[0].tile.y == TEST_TILE_Y);
+
+    snapshot->encounter.stage_raw.value = 1;
+    fixture_put_u32(sample, config + 8, 103548);
+    hazards_commit(sample->context, snapshot, 1);
+    hazards_read_telos_beams(sample->context, snapshot, FIXTURE_WORLD);
+    assert(snapshot->hazard_info.count == 1 && snapshot->hazards[0].kind == RS3_HAZARD_BLACK_BEAM);
+    fixture_mutate_on_read(sample, location + 0x170, 2, location + 0x178, TEST_TILE_Y + 1);
+    hazards_commit(sample->context, snapshot, 1);
+    hazards_read_telos_beams(sample->context, snapshot, FIXTURE_WORLD);
+    assert(snapshot->hazard_info.count == 0 && snapshot->hazard_info.reason == RS3_READ_FAILED);
+    fixture_destroy(sample);
+}
+
 int main(void)
 {
     RUN_TEST(recognizes_captured_identity_without_inventing_mechanics);
@@ -401,5 +485,6 @@ int main(void)
     RUN_TEST(public_abi_checks_arguments_and_caller_ownership);
     RUN_TEST(frame_wiring_uses_committed_npc_lifetimes);
     RUN_TEST(unavailable_samples_clear_and_publish_the_hazard_channel);
+    RUN_TEST(compatibility_scene_beam_tiles_follow_the_live_location_lists);
     return 0;
 }

@@ -169,7 +169,14 @@ class AttemptLog:
                     bool(hazard.flags & HazardFlags.MECHANICS_VALIDATED),
                 )
                 for hazard in reader.hazards[: reader.hazard_info.count]
+                if not hazard.flags & HazardFlags.SCENE_LOCATION
             },
+            "beam_tiles": sorted(
+                (hazard.kind, hazard.tile.x, hazard.tile.y, hazard.tile.plane, hazard.config_id)
+                for hazard in reader.hazards[: reader.hazard_info.count]
+                if hazard.flags & HazardFlags.SCENE_LOCATION
+            ),
+            "hazard_observation_reason": reader.hazard_info.reason,
             "hazard_candidates_dropped": reader.hazard_info.dropped_count,
             "player_hit_status": reader.player_hit_info.status,
         }

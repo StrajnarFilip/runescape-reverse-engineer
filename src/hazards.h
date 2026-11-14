@@ -11,4 +11,7 @@
  */
 void hazards_commit(rs3_context *context, rs3_snapshot *snapshot, int npcs_decoded);
 
+/** Append freshly observed Telos scene-location tiles on the pinned profile. */
+void hazards_read_telos_beams(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_state);
+
 #endif /* RS3_HAZARDS_INTERNAL_H */

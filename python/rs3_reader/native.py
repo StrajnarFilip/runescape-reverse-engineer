@@ -676,6 +676,7 @@ class HazardFlags(IntFlag):
     CLIENT_START = 8
     CLIENT_END = 16
     MECHANICS_VALIDATED = 32
+    SCENE_LOCATION = 64
 
 
 class Hazard(ctypes.Structure):
