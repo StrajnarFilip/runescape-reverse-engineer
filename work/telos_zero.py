@@ -481,11 +481,29 @@ FLICK_EXCLUDED_ANIMATIONS = frozenset({UPPERCUT})
 DEFAULT_FLICK_HOLD_TICKS = 1
 # After the Tendrils release an unanimated melee auto followed at +2 received ticks in both
 # 100% captures (1,470 and 1,076). Melee stays active through that tick.
-# 28959 projectile hits land 1-3 received ticks after the animation, later with distance. A hit
-# under Deflect Magic did 1 damage; the 250% P2 deaths of 174445 and 175845 came from hits of
-# 2,255-5,080 landing after the one-tick hold had already restored Soul Split (+2 and +3 at
-# about 8 tiles). Deflect Magic therefore stays up through +3.
-FLICK_HOLD_TICKS = {TENDRILS_RELEASE: 3, MAGIC_ATTACK: 4}
+FLICK_HOLD_TICKS = {TENDRILS_RELEASE: 3}
+
+
+def magic_flick_ticks(distance):
+    """Received-tick offsets after a 28959 during which Deflect Magic must be up (inclusive).
+
+    A hit landing at +N was protected when Deflect Magic was up at +(N-1): with the prayer on
+    only at +0, a +1 hit did 1 damage but +2 and +3 hits landed in full (2,255-5,080, the 250%
+    P2 deaths of 174445 and 175845). Hit delay against the player's grid distance to Telos's
+    footprint over all 2026-11-14 logs: up to 4 tiles always +1 (154 hits); 5 tiles +1 (3) or
+    +2 (1); 6 tiles +2 (10) or +1 (3); 7 and 9 tiles +2 or +3. The window covers every delay
+    seen at that distance, so the flick stays one or two ticks long. ``None`` (no positions)
+    covers +1 to +3.
+    """
+    if distance is None:
+        return 0, 2
+    if distance <= 4:
+        return 0, 0
+    if distance <= 6:
+        return 0, 1
+    if distance <= 9:
+        return 1, 2
+    return 1, 3  # Beyond any logged distance: also cover a +4 hit.
 # Uppercut's 2,634 hitmark appeared 7 received ticks after 28938 on 2026-11-14 at 100%.
 # Escape is sent two to three ticks before that hitmark; the server hit deadline is unmeasured.
 UPPERCUT_ESCAPE_TICKS = (4, 5)
@@ -830,7 +848,9 @@ class PrayerFlicker:
         self.hold_ticks = dict(FLICK_HOLD_TICKS if hold_ticks is None else hold_ticks)
         self.prayers = dict(FLICK_PRAYER_BY_ANIMATION if prayers is None else prayers)
         self.last_event = 0
-        self.return_tick = None
+        # Received-tick windows (first tick, end tick exclusive, prayer), one per cue.
+        self.windows = []
+        # Without a received tick, the latest cue holds from now (nanosecond fallback).
         self.return_ns = None
         self.hold_prayer = Prayer.MELEE
         # Deflect for animations without an override; P3 switches this to Deflect Magic.
@@ -838,11 +858,11 @@ class PrayerFlicker:
         self.cue_event = None
         self.requested = None
 
-    def observe(self, actions, tick, now):
-        """Hold the cue's deflect for its tick count. Return the latest cue.
+    def observe(self, actions, tick, now, distance=None):
+        """Open each cue's deflect window. Return the latest cue.
 
-        A cue never shortens a longer hold that is already running. The latest cue selects
-        the deflect style.
+        Most cues deflect from their own tick for their hold count. A 28959 magic attack
+        deflects during magic_flick_ticks(distance), later for a player far from Telos.
         """
         trigger = None
         for action in actions:
@@ -853,37 +873,40 @@ class PrayerFlicker:
             if sequence in self.excluded:
                 continue
             trigger = action
-            self.hold_prayer = self.prayers.get(sequence, self.default_prayer)
-            hold = self.hold_ticks.get(sequence, DEFAULT_FLICK_HOLD_TICKS)
-            return_tick = None if tick is None else tick + hold
-            return_ns = now + hold * TICK_FALLBACK_NS
+            prayer = self.prayers.get(sequence, self.default_prayer)
+            if sequence == MAGIC_ATTACK:
+                first, last = magic_flick_ticks(distance)
+            else:
+                first, last = 0, self.hold_ticks.get(sequence, DEFAULT_FLICK_HOLD_TICKS) - 1
+            if tick is not None:
+                self.windows.append((tick + first, tick + last + 1, prayer))
+            self.hold_prayer = prayer
+            return_ns = now + (last + 1) * TICK_FALLBACK_NS
             if self.return_ns is None or return_ns > self.return_ns:
                 self.return_ns = return_ns
-            if return_tick is not None and (
-                self.return_tick is None or return_tick > self.return_tick
-            ):
-                self.return_tick = return_tick
-            elif return_tick is None:
-                self.return_tick = None
         if trigger is not None:
             self.cue_event = trigger["event_sequence"]
         return trigger
 
+    def active_prayer(self, tick, now):
+        """The deflect to show now, or None for Soul Split. The latest-starting window wins."""
+        if tick is None:
+            if self.return_ns is not None and now < self.return_ns:
+                return self.hold_prayer
+            return None
+        self.windows = [window for window in self.windows if window[1] > tick]
+        active = [window for window in self.windows if window[0] <= tick]
+        return max(active, key=lambda window: window[0])[2] if active else None
+
     def holding(self, tick, now):
-        """Whether the deflect window opened by the latest cue is still running."""
-        if self.return_ns is None:
-            return False
-        if self.return_tick is not None and tick is not None:
-            due = tick >= self.return_tick
-        else:
-            due = now >= self.return_ns
-        if due:
-            self.return_tick = self.return_ns = None
-        return not due
+        """Whether any deflect window is open."""
+        return self.active_prayer(tick, now) is not None
 
     def next_prayer(self, prayer, tick, now):
         """Return the next prayer if a switch is needed and no acknowledgement is pending."""
-        target = self.hold_prayer if self.holding(tick, now) else Prayer.SOUL_SPLIT
+        target = self.active_prayer(tick, now)
+        if target is None:
+            target = Prayer.SOUL_SPLIT
         if self.requested is not None:
             requested, deadline = self.requested
             if prayer != requested and now < deadline:
@@ -1663,15 +1686,31 @@ def run(reader, args, board, attempt=None):
         tick = reader.encounter.game_tick
         return tick.counter if tick.valid else None
 
+    def telos_distance():
+        """Player's grid distance to Telos's footprint, or None without both tiles."""
+        player = reader.spatial.player
+        if not player.valid_mask & SpatialFlags.TILE or active_instance is None:
+            return None
+        for pose in reader.npc_spatial[: reader.spatial.npc_count]:
+            if pose.instance_id == active_instance and pose.valid_mask & SpatialFlags.TILE:
+                return footprint_distance(
+                    (player.tile.x, player.tile.y),
+                    (pose.tile.x, pose.tile.y),
+                    pose.footprint_size or 1,
+                )
+        return None
+
     def flick_step(actions, prayer, now, sample_ns):
         """Advance the melee flicker and send at most one prayer chord."""
         tick = received_tick_counter()
-        cue = flicker.observe(actions, tick, now)
+        distance = telos_distance() if actions else None
+        cue = flicker.observe(actions, tick, now, distance)
         if cue is not None:
             emit(
                 "prayer_flick_cue",
                 animation=cue["action_sequence"],
                 received_tick=tick,
+                distance=distance,
                 cue_native_sequence=cue["event_sequence"],
             )
         target = flicker.next_prayer(prayer, tick, now)

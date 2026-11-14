@@ -569,13 +569,32 @@ class PrayerFlickerTests(unittest.TestCase):
         self.assertIsNone(flicker.observe([event(2, HOLD_STILL)], 11, 0))
         self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 10, 0), Prayer.MELEE)
 
-    def test_magic_projectile_keeps_deflect_magic_through_plus_three(self):
-        # 175845: a 28959 at 8080 hit for 3,765 at 8083 after Soul Split returned at 8081.
+    def test_long_range_magic_flick_is_delayed(self):
+        magic = controller["MAGIC_ATTACK"]
+        # 175845: at 9 tiles a 28959 at 8080 hit for 3,765 at 8083; protect +1 and +2 only.
         flicker = PrayerFlicker()
-        flicker.observe([event(1, controller["MAGIC_ATTACK"])], 8080, 0)
-        for tick in (8080, 8081, 8082, 8083):
-            self.assertTrue(flicker.holding(tick, 0))
-        self.assertFalse(flicker.holding(8084, 0))
+        flicker.observe([event(1, magic)], 8080, 0, distance=9)
+        self.assertEqual(
+            [flicker.active_prayer(tick, 0) for tick in range(8080, 8084)],
+            [None, Prayer.MAGIC, Prayer.MAGIC, None],
+        )
+        # In melee range the flick stays on the animation tick only.
+        flicker = PrayerFlicker()
+        flicker.observe([event(1, magic)], 100, 0, distance=1)
+        self.assertEqual(flicker.active_prayer(100, 0), Prayer.MAGIC)
+        self.assertIsNone(flicker.active_prayer(101, 0))
+        # A melee auto during a pending long-range window deflects melee on its own tick.
+        flicker = PrayerFlicker()
+        flicker.observe([event(1, magic)], 200, 0, distance=8)
+        flicker.observe([event(2, AUTO)], 200, 0, distance=8)
+        self.assertEqual(flicker.active_prayer(200, 0), Prayer.MELEE)
+        self.assertEqual(flicker.active_prayer(201, 0), Prayer.MAGIC)
+
+    def test_magic_flick_windows_by_distance(self):
+        windows = controller["magic_flick_ticks"]
+        self.assertEqual([windows(d) for d in (0, 4, 5, 6, 7, 9, 12)],
+                         [(0, 0), (0, 0), (0, 1), (0, 1), (1, 2), (1, 2), (1, 3)])
+        self.assertEqual(windows(None), (0, 2))
 
     def test_magic_attack_selects_deflect_magic(self):
         flicker = PrayerFlicker()
@@ -583,11 +602,12 @@ class PrayerFlickerTests(unittest.TestCase):
         flicker.observe([event(1, magic)], 30, 0)
         self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 30, 0), Prayer.MAGIC)
         flicker.sent(Prayer.MAGIC, 0)
-        self.assertIsNone(flicker.next_prayer(Prayer.MAGIC, 33, 1))
-        self.assertEqual(flicker.next_prayer(Prayer.MAGIC, 34, 1), Prayer.SOUL_SPLIT)
+        # No positions: Deflect Magic covers hits at +1 to +3.
+        self.assertIsNone(flicker.next_prayer(Prayer.MAGIC, 32, 1))
+        self.assertEqual(flicker.next_prayer(Prayer.MAGIC, 33, 1), Prayer.SOUL_SPLIT)
         flicker.sent(Prayer.SOUL_SPLIT, 1)
-        flicker.observe([event(2, AUTO)], 34, 2)
-        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 34, 3), Prayer.MELEE)
+        flicker.observe([event(2, AUTO)], 33, 2)
+        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 33, 3), Prayer.MELEE)
 
     def test_phase_three_default_is_deflect_magic(self):
         flicker = PrayerFlicker()
@@ -835,6 +855,7 @@ class PracticeRunTests(unittest.TestCase):
         keys.get_async_key_state.return_value = 0
         reader.combat.scene_epoch = 1
         reader.position.valid = False
+        reader.spatial.player.valid_mask = 0  # No player tile: magic flicks use the default.
         reader.abilities = []
         reader.drain_npc_action_events.return_value = ([], 0)
         reader.drain_player_hit_events.return_value = ([], 0)
