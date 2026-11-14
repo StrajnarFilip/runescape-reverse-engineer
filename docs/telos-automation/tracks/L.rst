@@ -226,3 +226,12 @@ Requests
 * D1/P1: guard promotion of classified cues to usable calibrated threats with
   fresh exact local-player target evidence. A nearby Telos cue alone must not
   acquire a protection deadline. Preserve historical uncalibrated label counts.
+
+* D1 target guard is integrated at c2975e7. Same-sample local-player lifetime,
+  player index and fresh same-plane poses are required before timing-calibrated
+  cues become usable. Other/unknown/stale targets leave unresolved labelled
+  observations; confirmed in-flight impacts survive later target clears.
+  All 15 CTest targets pass (337 Python tests, zero skips), including 20 D1
+  tests and unchanged real-capture golden replays. See
+  ``docs/validation/telos-ladder-attacker-target-2026-11-14.json``. No new
+  attack/timing validation or live input authorization was introduced.

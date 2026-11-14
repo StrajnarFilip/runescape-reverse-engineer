@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "track": "L",
+  "date": "2026-11-14",
+  "source_commit": "c2975e7",
+  "status": "offline_target_promotion_guard_passed",
+  "behavior": "A calibrated single-component cue becomes usable only with exact local-player target evidence in its own native sample. Unverified targets preserve the classified cue with null protection windows.",
+  "required_evidence": [
+    "Original exact-scope labelled attack and independently validated protection window.",
+    "Event sample_sequence equals the current atomic snapshot sequence.",
+    "Exactly one fresh matching NPC lifetime in the current registry.",
+    "Fresh player-kind target with local player index/runtime and lifetime matching the available same-frame player-hit channel.",
+    "Fresh NPC/player poses on the same plane."
+  ],
+  "checks": {
+    "ctest_targets_passed": 15,
+    "python_tests_passed": 337,
+    "python_tests_skipped": 0,
+    "encounter_tracker_tests": 20,
+    "new_target_cases": 5,
+    "historical_real_capture_counts_and_golden_replays": "unchanged",
+    "confirmed_in_flight_impact_after_later_target_clear_or_phase_change": "retained"
+  },
+  "incoming_attack_coverage_inferred": false,
+  "new_attack_or_timing_validation": false,
+  "entity_reference_alone_declares_attack": false,
+  "live_input_sent": false,
+  "ladder_rung_passed": false,
+  "pending": [
+    "Active-Telos native target confirmation on the pinned runtime.",
+    "P6 component/style/window and complete incoming-coverage calibration."
+  ]
+}
