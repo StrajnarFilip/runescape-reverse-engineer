@@ -74,6 +74,13 @@ Do not infer a buff from an ability's cooldown. No automated input is enabled.
 Requests
 --------
 
+* L session evidence, 2026-11-15: user-confirmed Resonance after a physical
+  shield swap produced raw effect expiry 35363 with cooldown start 35063 in
+  capture 4592d4ff7cc8ab87d5fcfc9115616497f2988fe0ae220f42f8b385e32e02626e.
+  This is an expiry lead; presence and early consumption were not labelled.
+  Do not promote it to a one-hit active/consumed state. Compact session facts
+  are in docs/validation/interface-validation.json; raw rows remain local.
+
 Integration: register the effect header/storage in ``src/context.h`` along with
 own shared wiring. This is the same minimal private-snapshot registration pattern
 used by P1/P2; no existing public struct was extended. No other track files changed.

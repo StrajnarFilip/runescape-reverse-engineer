@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "track": "L",
+  "date": "2026-11-15",
+  "status": "controlled_read_only_checks_partial_mapping_confirmed",
+  "source_commit": "7d7fdba",
+  "source_report": "docs/validation/interface-validation.json",
+  "profile_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+  "live_findings": {
+    "dummy_hover": "Native candidate reference matched current runtime 25127/config 16027 in 280 samples.",
+    "inventory_hover": "Augmented Zaros godsword item 37675 matched zero-based slot 10 in 365 samples.",
+    "menu_backend": "Mode 1 uses +0x17b0; legacy +0x68 stayed zero. Guarded research observed closed/open/closed with 167 open samples.",
+    "menu_fix": "C selects the active backend, validates boolean mode/state and rechecks both plus the manager/record/world identity. Three additional loaded-code guards pin the selector/open/close paths.",
+    "post_build_native_check": "Five fresh DLL samples confirmed modern backend and closed state; a post-build C open-state capture remains pending.",
+    "manual_curses": "Magic, Ranged, Soul Split and Melee observed with the configured Ctrl+F1/F2/F3/F4 keys.",
+    "manual_abilities": "Hurricane, Flurry and Resonance cooldown starts and later zero values observed after user-confirmed casts.",
+    "manual_equipment": "Two-handed Zaros godsword, dual-wield Leng pair, and main-hand with physical divine spirit shield observed.",
+    "timer_revision": "Hurricane's start/end moved back 150 client units immediately after its initial sample. Native current values must take precedence over a fixed wall-clock timer.",
+    "all_four_native_queue_losses": 0,
+    "unknown_native_loss_rows": 0
+  },
+  "checks": {
+    "windows_x64_release_build": "passed",
+    "ctest_targets_passed": 15,
+    "python_tests_passed": 337,
+    "python_tests_skipped": 0,
+    "native_interface_fixture_groups": 21,
+    "new_backend_fixture_groups": 3,
+    "existing_public_structure_bytes_unchanged": 304,
+    "owned_cpp_style": "Repository clang-format applied to C/header changes",
+    "python_registration_scope": "Only the new flag and corresponding JSON field changed; pre-existing module spacing was preserved."
+  },
+  "limitations": [
+    "Observed hover associations do not establish a general exact target hit-test or current consumed-pointer position.",
+    "The candidate's semantic value remains null/PARTIAL/UNVALIDATED_SOURCE; no click permission is granted.",
+    "Full castability, physical UI/minimap geometry, view and path validation remain incomplete.",
+    "Resonance expiry candidate 35363 was observed; effect presence/consumption remains unvalidated.",
+    "These dummy checks are not a Telos shadow pass, server prayer-deadline measurement or phase-5 capture."
+  ],
+  "all_recorders_stopped": true,
+  "automatic_input_enabled": false,
+  "game_inputs_sent": false,
+  "ladder_rung_passed": false,
+  "raw_captures_game_files_and_tools_published": false
+}

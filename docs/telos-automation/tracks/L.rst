@@ -235,3 +235,18 @@ Requests
   tests and unchanged real-capture golden replays. See
   ``docs/validation/telos-ladder-attacker-target-2026-11-14.json``. No new
   attack/timing validation or live input authorization was introduced.
+
+* Controlled session, 2026-11-15: named dummy/item hovers and user-held menu
+  states exposed the active modern menu backend. P5's fix at 7d7fdba selects
+  +0x17b0 in mode 1, with five total code guards and double mode/state reads;
+  legacy +0x68 stays supported. The 304-byte ABI is unchanged and semantic
+  candidate value remains null. All 15 CTest targets pass (337 Python tests,
+  zero skips), including 21 native interface groups. The user also confirmed
+  all four configured curses and Hurricane/Flurry/Resonance with three weapon
+  setups; native cooldown starts and later zero values were retained. Every
+  native queue-loss total was zero. No inputs were automated or rung passed.
+  ``docs/validation/telos-ladder-live-checks-2026-11-15.json`` records scope;
+  raw capture digests and counts are in the P5 report, not gameplay files.
+* P1/P5/A2: physical minimap/UI geometry, complete view and exact hit-test/path
+  providers remain the next movement dependencies. The modern open-state
+  research does not authorize point selection or bypass A1/D6 checks.
