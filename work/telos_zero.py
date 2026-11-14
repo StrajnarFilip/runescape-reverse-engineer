@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -79,11 +80,16 @@ FLICK_HOLD_TICKS = {TENDRILS_RELEASE: 3}
 # Uppercut's 2,634 hitmark appeared 7 received ticks after 28938 on 2026-11-14 at 100%.
 # Escape is sent two to three ticks before that hitmark; the server hit deadline is unmeasured.
 UPPERCUT_ESCAPE_TICKS = (4, 5)
-# Hold Still lands a smaller melee hit at +2 received ticks and a 4,000+ melee hit at +4
-# (250%: 1,094 then 4,384; 1,170 then 4,488). Resonance must miss the first and absorb the
-# second, so it is sent once the +2 hit is seen, or at +3 at the latest.
+# Hold Still lands a smaller melee hit at +1 or +2 received ticks and a 4,000+ melee hit at +4
+# (250%: 1,094 then 4,384; 500%: blocked 0 at +1 then 8,612). Resonance must miss the first
+# and absorb the second. Resonance shares the GCD with Revolution, which takes every free slot
+# (one every 3 ticks), and a press made after Revolution fires waits for the next slot: at 500%
+# presses with 1,780 ms of GCD left at +2 and +3 never cast before the +4 hit. The press is
+# therefore queued during the GCD so that Resonance takes the slot that falls in +2..+4.
 RESONANCE_FIRST_HIT_TICK = 2
 RESONANCE_LATEST_TICK = 3
+RESONANCE_SLOT_TICKS = (2, 4)
+TICK_MS = 600
 UPPERCUT_ESCAPE_FALLBACK_NS = (2_400_000_000, 3_000_000_000)
 MOVEMENT_ABILITIES = frozenset({"Surge", "Escape"})
 MOVEMENT_WINDOWS = {
@@ -174,7 +180,7 @@ class PhaseOne:
         requires Deflect Melee to be the current overhead.
         """
         # Resonance is tick-critical, so it precedes any acknowledgement still pending.
-        if self.resonance_due(cooldowns, received_tick):
+        if self.resonance_due(cooldowns, received_tick, gcd_remaining_ms):
             return Action("Resonance", "Hold Still second melee hit")
         if self.pending:
             self.cast_result = self.acknowledge(
@@ -267,8 +273,14 @@ class PhaseOne:
         ):
             self.first_hit_tick = received_tick
 
-    def resonance_due(self, cooldowns, received_tick):
-        """Send after the first Hold Still hit at +2, or at +3 when it was not observed."""
+    def resonance_due(self, cooldowns, received_tick, gcd_remaining_ms=None):
+        """Press when the next free GCD slot falls on Hold Still +2..+4.
+
+        A press during the GCD queues Resonance ahead of Revolution for that slot. With a free
+        GCD before +2 the press waits, because Revolution takes that early slot and the next
+        one is then three ticks later. Without a GCD reading, the earlier rule applies: after
+        the +2 hit is seen, or at +3.
+        """
         if (
             self.special != HOLD_STILL
             or "Resonance" in self.handled
@@ -279,9 +291,15 @@ class PhaseOne:
         ):
             return False
         tick_delta = received_tick - self.special_tick
-        if tick_delta == RESONANCE_FIRST_HIT_TICK:
-            return self.first_hit_tick is not None
-        return tick_delta == RESONANCE_LATEST_TICK
+        earliest_slot, latest_slot = RESONANCE_SLOT_TICKS
+        if not 0 <= tick_delta <= latest_slot:
+            return False
+        if not isinstance(gcd_remaining_ms, int):
+            if tick_delta == RESONANCE_FIRST_HIT_TICK:
+                return self.first_hit_tick is not None
+            return tick_delta == RESONANCE_LATEST_TICK
+        slot_delta = tick_delta + math.ceil(gcd_remaining_ms / TICK_MS)
+        return earliest_slot <= slot_delta <= latest_slot
 
     def sent(self, action, now):
         """Wait for the sampled cooldown before treating this command as a cast."""

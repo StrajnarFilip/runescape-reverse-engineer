@@ -127,36 +127,60 @@ class PhaseOneTests(unittest.TestCase):
         timers = controller["cooldowns"](reader, {"Resonance", "Surge"})
         self.assertEqual(timers, {"Resonance": None, "Escape": 0})
 
-    def test_resonance_waits_for_first_hold_still_hit(self):
+    def test_resonance_queues_into_the_gcd_slot_at_plus_three(self):
+        # The 500% case: Revolution started a GCD on the Hold Still tick, freeing +3.
+        phase = PhaseOne()
+        phase.observe([dict(event(1, HOLD_STILL), received_tick=5171)])
+        action = phase.next_action(
+            SECOND_NS, {"Resonance": None}, 1780, Prayer.SOUL_SPLIT, received_tick=5171
+        )
+        self.assertEqual(action.ability, "Resonance")
+
+    def test_resonance_skips_free_slot_before_plus_two(self):
+        phase = PhaseOne()
+        phase.observe([dict(event(1, HOLD_STILL), received_tick=50)])
+        timers = {"Resonance": 0}
+        # Free at +0/+1 (Revolution takes it); a GCD started at +2 would free +5, too late.
+        for tick, gcd in ((50, 0), (51, 0), (52, 1780)):
+            self.assertIsNone(
+                phase.next_action(SECOND_NS, timers, gcd, Prayer.SOUL_SPLIT, received_tick=tick)
+            )
+        action = phase.next_action(SECOND_NS, timers, 600, Prayer.SOUL_SPLIT, received_tick=53)
+        self.assertEqual(action.ability, "Resonance")
+        self.assertIsNone(phase.next_action(SECOND_NS, timers, 0, Prayer.MELEE, received_tick=55))
+
+    def test_resonance_without_gcd_reading_waits_for_first_hold_still_hit(self):
         phase = PhaseOne()
         phase.observe([dict(event(1, HOLD_STILL), received_tick=50)])
         timers = {"Resonance": 0}
         phase.observe_hits(1, 51)
         self.assertIsNone(
-            phase.next_action(SECOND_NS, timers, 1200, Prayer.SOUL_SPLIT, received_tick=51)
+            phase.next_action(SECOND_NS, timers, None, Prayer.SOUL_SPLIT, received_tick=51)
         )
         self.assertIsNone(
-            phase.next_action(SECOND_NS, timers, 1200, Prayer.SOUL_SPLIT, received_tick=52)
+            phase.next_action(SECOND_NS, timers, None, Prayer.SOUL_SPLIT, received_tick=52)
         )
         phase.observe_hits(1, 52)
-        action = phase.next_action(SECOND_NS, timers, 1200, Prayer.SOUL_SPLIT, received_tick=52)
+        action = phase.next_action(SECOND_NS, timers, None, Prayer.SOUL_SPLIT, received_tick=52)
         self.assertEqual(action, controller["Action"]("Resonance", "Hold Still second melee hit"))
         phase.sent(action, SECOND_NS)
         self.assertIsNone(
-            phase.next_action(SECOND_NS, timers, 1200, Prayer.SOUL_SPLIT, received_tick=53)
+            phase.next_action(SECOND_NS, timers, None, Prayer.SOUL_SPLIT, received_tick=53)
         )
 
-    def test_resonance_falls_back_to_third_tick_and_not_later(self):
+    def test_resonance_without_gcd_reading_falls_back_to_third_tick(self):
         phase = PhaseOne()
         phase.observe([dict(event(1, HOLD_STILL), received_tick=50)])
         timers = {"Resonance": 0}
-        self.assertIsNone(phase.next_action(SECOND_NS, timers, 0, Prayer.MELEE, received_tick=54))
+        self.assertIsNone(
+            phase.next_action(SECOND_NS, timers, None, Prayer.MELEE, received_tick=54)
+        )
         self.assertEqual(
-            phase.next_action(SECOND_NS, timers, 0, Prayer.MELEE, received_tick=53).ability,
+            phase.next_action(SECOND_NS, timers, None, Prayer.MELEE, received_tick=53).ability,
             "Resonance",
         )
         self.assertIsNone(
-            phase.next_action(SECOND_NS, {"Resonance": 3000}, 0, Prayer.MELEE, received_tick=53)
+            phase.next_action(SECOND_NS, {"Resonance": 3000}, None, Prayer.MELEE, received_tick=53)
         )
 
     def test_uppercut_escape_uses_received_ticks_once(self):
