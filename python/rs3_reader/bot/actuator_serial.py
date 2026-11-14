@@ -15,7 +15,15 @@ import re
 import time
 from threading import RLock
 
-from .actuator_sendinput import ALT, CTRL, SHIFT, DeviceFault, InputRejected, SerializedActuator
+from .actuator_sendinput import (
+    ALT,
+    CTRL,
+    SHIFT,
+    DeviceFault,
+    InputRejected,
+    KeyBinding,
+    SerializedActuator,
+)
 
 PROTOCOL_GREETING = b"RS3_KEYBOARD 1"
 MAX_REPLY_BYTES = 64
@@ -226,6 +234,8 @@ class SerialKeyboardDevice:
 
     @staticmethod
     def usage(binding):
+        if not isinstance(binding, KeyBinding):
+            raise InputRejected("serial_pointer_unsupported")
         if binding.hid_usage is not None:
             return binding.hid_usage
         if 0x70 <= binding.virtual_key <= 0x7B:
