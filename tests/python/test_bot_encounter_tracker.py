@@ -31,21 +31,37 @@ def row(sequence=1, time_ms=1000, *, events=None, phase=1, enrage=300, epoch=3):
         "monotonic_ms": time_ms,
         "native": {"sample_sequence": sequence, "snapshot_age_ms": 0},
         "combat": {"scene_epoch": epoch},
+        "player": {"tile": {"x": 3200, "y": 3200, "plane": 0}},
+        "player_hit_splats": {"status": "available", "player_index": 17, "instance_id": 9},
         "telos": {"phase": phase, "enrage": enrage},
         "npcs": {
             "status": "available",
-            "entities": [{"instance_id": 4, "config_id": 22891, "name": "Telos, the Warden"}],
+            "entities": [
+                {
+                    "instance_id": 4,
+                    "config_id": 22891,
+                    "name": "Telos, the Warden",
+                    "tile": {"x": 3201, "y": 3201, "plane": 0},
+                    "target": {
+                        "kind": "player",
+                        "runtime_id": 17,
+                        "player_index": 17,
+                        "instance_id": 9,
+                    },
+                }
+            ],
         },
         "npc_action_events": events or [],
         "npc_action_events_lost": 0,
     }
 
 
-def cue(sequence=1, action=28929, *, time_ms=1000, epoch=3, instance=4):
+def cue(sequence=1, action=28929, *, time_ms=1000, epoch=3, instance=4, sample_sequence=1):
     return {
         "sequence": sequence,
         "action_sequence": action,
         "observed_ns": time_ms * MS,
+        "sample_sequence": sample_sequence,
         "pid": 1,
         "process_creation_time": 2,
         "scene_epoch": epoch,
@@ -124,6 +140,84 @@ class EncounterTrackerTests(unittest.TestCase):
         )
         self.assertIsNone(state.coverage_until_ns)  # One measured hit is not complete coverage.
         self.assertEqual(tracker.step(world(2, 1501)).pending_threats, ())
+
+    def test_calibrated_cue_needs_exact_current_local_player_target(self):
+        for target in (
+            None,
+            {"kind": "none"},
+            {"kind": "npc", "instance_id": 9, "runtime_id": 17},
+            {"kind": "player", "instance_id": 10, "runtime_id": 17, "player_index": 17},
+            {"kind": "player", "instance_id": 9, "runtime_id": 18, "player_index": 17},
+            {"kind": "player", "instance_id": 9, "runtime_id": 17, "player_index": 18},
+        ):
+            record = row(events=[cue()])
+            record["npcs"]["entities"][0]["target"] = target
+            state = EncounterTracker(AttackTable(measured_table())).step(
+                WorldState.from_telemetry(record)
+            )
+            with self.subTest(target=target):
+                self.assertEqual(len(state.pending_threats), 1)
+                self.assertTrue(state.pending_threats[0].classification_validated)
+                self.assertIsNone(state.pending_threats[0].prayer_record())
+                self.assertEqual(state.pending_threats[0].reason, "attacker_target_unverified")
+                self.assertIn("attacker_target_unverified", state.reasons)
+                self.assertIsNone(state.coverage_until_ns)
+
+    def test_stale_unmapped_target_channel_and_wrong_plane_cannot_validate_timing(self):
+        record = row(events=[cue()])
+        for patch in (
+            {"status": "unavailable"},
+            {"instance_id": 0},
+            {"player_index": None},
+        ):
+            changed = dict(record, player_hit_splats=dict(record["player_hit_splats"], **patch))
+            state = EncounterTracker(AttackTable(measured_table())).step(
+                WorldState.from_telemetry(changed)
+            )
+            self.assertIsNone(state.pending_threats[0].prayer_record())
+        value = WorldState.from_telemetry(record)
+        actor = value.npcs.value[0]
+        for changed_actor in (
+            replace(actor, target=Observation(actor.target.value, 151, "fixture")),
+            replace(actor, target=Observation(actor.target.value, 0, "fixture", reason="unmapped")),
+            replace(actor, tile=Observation()),
+        ):
+            state = EncounterTracker(AttackTable(measured_table())).step(
+                replace(value, npcs=Observation((changed_actor,), 0, "fixture"))
+            )
+            self.assertIsNone(state.pending_threats[0].prayer_record())
+        record["npcs"]["entities"][0]["tile"]["plane"] = 1
+        state = EncounterTracker(AttackTable(measured_table())).step(
+            WorldState.from_telemetry(record)
+        )
+        self.assertIsNone(state.pending_threats[0].prayer_record())
+
+    def test_a_different_or_unknown_event_frame_cannot_borrow_current_target_evidence(self):
+        for sample_sequence in (None, 0, 2, 3):
+            state = EncounterTracker(AttackTable(measured_table())).step(
+                world(events=[cue(sample_sequence=sample_sequence)])
+            )
+            self.assertEqual(len(state.pending_threats), 1)
+            self.assertIsNone(state.pending_threats[0].prayer_record())
+            self.assertEqual(state.pending_threats[0].reason, "attacker_target_unverified")
+        state = EncounterTracker(AttackTable(measured_table())).step(
+            world(2, 1010, events=[cue(sample_sequence=1)])
+        )
+        self.assertIsNone(state.pending_threats[0].prayer_record())
+
+    def test_confirmed_in_flight_threat_survives_a_later_target_clear(self):
+        tracker = EncounterTracker(AttackTable(measured_table()))
+        first = tracker.step(world(events=[cue()])).pending_threats[0]
+        record = row(2, 1100, phase=2)
+        record["npcs"]["entities"][0]["target"] = {"kind": "none"}
+        state = tracker.step(WorldState.from_telemetry(record))
+        self.assertEqual(state.pending_threats, (first,))
+        self.assertIsNotNone(state.pending_threats[0].prayer_record())
+
+    def test_target_reference_alone_cannot_validate_an_unmeasured_attack(self):
+        threat = self.tracker().step(world(events=[cue()])).pending_threats[0]
+        self.assertEqual(threat.reason, "protection_check_unmeasured")
+        self.assertIsNone(threat.prayer_record())
 
     def test_guide_or_multihit_window_is_not_promoted(self):
         document = measured_table()
