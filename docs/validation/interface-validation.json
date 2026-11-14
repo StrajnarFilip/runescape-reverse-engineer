@@ -522,5 +522,186 @@
     "serializer_regression_groups": 4,
     "unavailable_frame_and_worker_copy_tested": true,
     "semantic_value_always_null": true
+  },
+  "controlled_pointer_labels_2026_11_15": {
+    "profile_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+    "process_identity_pinned": true,
+    "captures": [
+      {
+        "role": "hover_labels",
+        "sha256": "e7bfec99e05df6daabd7414723960f992d517384c4107e37d483281761e92545",
+        "samples": 5079,
+        "seconds": 111.6557198
+      },
+      {
+        "role": "legacy_menu_probe",
+        "sha256": "da5f7eaacd9d9f301daf0a4039938e2dafb301c90612e393683a855502905814",
+        "samples": 3394,
+        "seconds": 189.6908347
+      },
+      {
+        "role": "modern_menu_probe",
+        "sha256": "430763ee1303048c4de86b503a9f6f9f92ef7a37356449b4dd8aff09a95a38f6",
+        "samples": 1020,
+        "seconds": 56.9119621
+      }
+    ],
+    "associations": [
+      {
+        "label": "Training dummy",
+        "verb": "Attack",
+        "raw_type_rva": "0x17201e0",
+        "raw_reference": 25127,
+        "same_frame_npc_config_id": 16027,
+        "samples": 280
+      },
+      {
+        "label": "Augmented Zaros godsword",
+        "verb": "Wield",
+        "raw_type_rva": "0x1721c90",
+        "raw_item_id": 37675,
+        "raw_arg1": 10,
+        "same_frame_inventory_slot_zero_based": 10,
+        "samples": 365
+      }
+    ],
+    "ground_descriptor_lead": "0x1721920; Walk here; raw args varied with observed ground tiles",
+    "general_identity_or_hit_test_validated": false,
+    "widget_descriptor_is_inventory_only": false,
+    "widget_descriptor_note": "The same descriptor also appeared for Open/close and Remove; it must not be classified globally as an inventory action.",
+    "menu_backend": {
+      "mode_offset": "0x1428",
+      "observed_mode": 1,
+      "legacy_offset": "0x68",
+      "legacy_value_in_all_three_captures": 0,
+      "modern_offset": "0x17b0",
+      "modern_probe_samples": {
+        "closed": 853,
+        "open": 167
+      },
+      "modern_probe_transitions": [
+        0,
+        1,
+        0,
+        1,
+        0
+      ],
+      "main_user_held_open_seconds": 9.4199752,
+      "independent_decompilation": [
+        "0x391d20 open",
+        "0x392530 close"
+      ],
+      "instruction_guards": [
+        {
+          "rva": "0x391d3f",
+          "bytes": "80b92814000000"
+        },
+        {
+          "rva": "0x391d52",
+          "bytes": "c681b017000001"
+        },
+        {
+          "rva": "0x392689",
+          "bytes": "4488b3b0170000"
+        }
+      ],
+      "raw_field_now_selects_active_backend": true,
+      "unknown_or_torn_mode_state_rejected": true,
+      "post_build_native_closed_samples": 5,
+      "post_build_native_open_sample": "pending; direct guarded research open/close was observed"
+    },
+    "all_four_native_queue_losses": 0,
+    "unknown_loss_rows": 0,
+    "new_menu_backend_fixture_groups": 3,
+    "native_interface_fixture_groups": 21,
+    "public_structure_bytes_unchanged": 304,
+    "additive_flag": "RS3_POINTER_MODERN_MENU=16",
+    "json_added_field": "ui.pointer_candidate.candidate.raw_menu_backend",
+    "candidate_semantic_value": null,
+    "physical_coordinates_or_view_validated": false,
+    "game_inputs_sent": false,
+    "raw_captures_published": false
+  },
+  "dummy_native_checks_2026_11_15": {
+    "capture_sha256": "4592d4ff7cc8ab87d5fcfc9115616497f2988fe0ae220f42f8b385e32e02626e",
+    "samples": 4593,
+    "seconds": 140.2999361,
+    "average_capture_hz": 32.7298795,
+    "capture_scope": "Selected abilities only; other ability rows were omitted, not declared unavailable or ready.",
+    "user_confirmed_order": [
+      "four configured curses",
+      "Hurricane",
+      "Flurry",
+      "Resonance"
+    ],
+    "observed_positive_curse_samples": {
+      "magic": 140,
+      "ranged": 170,
+      "soul_split": 202,
+      "melee": 1001
+    },
+    "sampled_manual_curse_key_edges": 5,
+    "equipment": [
+      {
+        "configuration": "two_handed",
+        "main_hand": 37675,
+        "name": "Augmented Zaros godsword"
+      },
+      {
+        "configuration": "dual_wield",
+        "main_hand": 52061,
+        "off_hand": 52063
+      },
+      {
+        "configuration": "main_hand_and_shield",
+        "main_hand": 52061,
+        "off_hand": 36449
+      }
+    ],
+    "cooldowns": [
+      {
+        "name": "Hurricane",
+        "struct_id": 14685,
+        "initial_remaining_ms": 20400,
+        "initial_start_end": [
+          34463,
+          35483
+        ],
+        "revised_start_end": [
+          34313,
+          35333
+        ],
+        "later_zero_observed": true
+      },
+      {
+        "name": "Flurry",
+        "struct_id": 14684,
+        "initial_remaining_ms": 20360,
+        "start_end": [
+          34703,
+          35723
+        ],
+        "later_zero_observed": true
+      },
+      {
+        "name": "Resonance",
+        "struct_id": 14713,
+        "initial_remaining_ms": 30000,
+        "start_end": [
+          35063,
+          36563
+        ],
+        "later_zero_observed": true
+      }
+    ],
+    "timer_note": "Hurricane's start/end revised by 150 client units immediately after the first sample. Use current native timers; do not start a fixed wall-clock cooldown from the first observation.",
+    "resonance_effect_expiry_raw_lead": 35363,
+    "effect_presence_or_consumption_validated": false,
+    "full_castability_validated": false,
+    "server_prayer_deadline_validated": false,
+    "all_four_native_queue_losses": 0,
+    "unknown_loss_rows": 0,
+    "game_inputs_sent": false,
+    "raw_capture_published": false
   }
 }

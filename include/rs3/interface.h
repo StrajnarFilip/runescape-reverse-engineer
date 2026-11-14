@@ -35,7 +35,8 @@ enum rs3_pointer_candidate_flags
     RS3_POINTER_RAW_MENU = 1u,
     RS3_POINTER_RAW_RECORD = 2u,
     RS3_POINTER_RAW_TEXT = 4u,
-    RS3_POINTER_RAW_TYPE = 8u
+    RS3_POINTER_RAW_TYPE = 8u,
+    RS3_POINTER_MODERN_MENU = 16u /**< raw_menu_state came from the selected modern backend. */
 };
 
 /**
@@ -56,7 +57,7 @@ typedef struct rs3_pointer_candidate
     int32_t raw_item_id;
     int32_t raw_arg1;
     int32_t raw_arg2;
-    int32_t raw_menu_state;
+    int32_t raw_menu_state; /**< Selected backend byte, 0 or 1; requires RAW_MENU. */
     uint32_t reserved;
     char name[RS3_POINTER_TEXT_CAPACITY];
     char verb[RS3_POINTER_TEXT_CAPACITY];

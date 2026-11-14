@@ -1,7 +1,7 @@
 P5 - Interface state
 ====================
 
-:Status: in progress
+:Status: waiting for live session
 :Wave: 1
 :Branch: ``telos/P5``
 :Kind: C (native DLL)
@@ -127,3 +127,26 @@ sample identity and age remain mandatory for downstream use.
   Do not turn names, raw reference equality or pointer clearing into a trusted
   hit-test. Physical pixel/view geometry and consumed pointer-event age still
   need mapping before a click backend may use this channel.
+
+* Controlled session, 2026-11-15: the user hovered a Training dummy and an
+  Augmented Zaros godsword. The raw NPC reference matched runtime 25127/config
+  16027 in 280 samples. Item 37675 matched zero-based backpack slot 10 in 365
+  samples. These are observed associations, not a general hit-test validation.
+  All four native queue-loss totals were zero; captures remain local.
+* The user-held context menu exposed a backend distinction. Mode byte +0x1428
+  stayed 1 while legacy +0x68 stayed 0. Independent decompilation shows the
+  alternate open/close functions set/clear +0x17b0. A second bounded capture
+  observed 0 -> 1 -> 0, including 167 open samples, while +0x68 stayed zero.
+  The C reader now selects the active backend, double-checks mode and state,
+  rejects values outside 0/1 and pins the selector/open/clear instructions.
+* The 304-byte ABI remains unchanged. New flag MODERN_MENU=16 identifies which
+  backend supplied raw_menu_state; JSON also exposes raw_menu_backend. Candidate
+  value stays null/PARTIAL/UNVALIDATED_SOURCE. Twenty-one native interface
+  groups cover the selected state, changed mode/state and additional code
+  guards. Five fresh DLL samples confirmed the modern closed state on the
+  pinned live client. A post-build C open-state check remains a later step.
+* The same manual session confirmed Ctrl+F1/F2/F3/F4 curse transitions and
+  Hurricane/Flurry/Resonance cooldown starts through the native collector, with
+  two-handed, dual-wield and physical-shield equipment. Full castability,
+  consumed effects and physical pointer/view/path evidence remain unmapped.
+  No automated game input was sent.
