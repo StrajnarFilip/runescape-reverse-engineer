@@ -523,6 +523,34 @@ static void pointer_heap_text_is_bounded_and_double_read(void)
     fixture_destroy(test_fixture);
 }
 
+static void pointer_snapshot_wiring_copy_and_unavailable_reset(void)
+{
+    fixture *test_fixture = pointer_fixture();
+    assert(fixture_decode(test_fixture));
+    rs3_pointer_candidate candidate;
+    rs3_snapshot *snapshot = test_fixture->snapshot;
+    assert(rs3_snapshot_pointer_candidate(snapshot, &candidate, sizeof candidate) == RS3_OK);
+    assert(candidate.flags & RS3_POINTER_RAW_RECORD);
+    assert(candidate.reason == RS3_UI_UNVALIDATED_SOURCE);
+    candidate.raw_reference++;
+    assert(snapshot->pointer_candidate.raw_reference == FIXTURE_NPC_RUNTIME_ID);
+    assert(rs3_snapshot_pointer_candidate(snapshot, &candidate, sizeof candidate - 1) == RS3_E_ABI);
+    assert(rs3_snapshot_pointer_candidate(NULL, &candidate, sizeof candidate) == RS3_E_ARGUMENT);
+    rs3_snapshot *consumer = NULL;
+    assert(rs3_snapshot_create(&consumer) == RS3_OK);
+    assert(rs3_snapshot_copy(snapshot, test_fixture->context->latest_frame) == RS3_OK);
+    assert(rs3_copy_latest(test_fixture->context, consumer) == RS3_OK);
+    assert(consumer->pointer_candidate.raw_reference == FIXTURE_NPC_RUNTIME_ID);
+    assert(consumer->pointer_candidate.observed_ns == snapshot->pointer_candidate.observed_ns);
+    interface_clear(test_fixture->context->latest_frame);
+    assert(rs3_copy_latest(test_fixture->context, consumer) == RS3_OK);
+    assert(consumer->pointer_candidate.status == RS3_UNAVAILABLE);
+    assert(consumer->pointer_candidate.reason == RS3_UI_FRAME_UNAVAILABLE);
+    assert(consumer->pointer_candidate.flags == 0 && consumer->pointer_candidate.name[0] == '\0');
+    rs3_snapshot_destroy(consumer);
+    fixture_destroy(test_fixture);
+}
+
 int main(void)
 {
     RUN_TEST(four_curse_bindings);
@@ -542,5 +570,6 @@ int main(void)
     RUN_TEST(pointer_empty_owner_and_profile_states_remain_explicit);
     RUN_TEST(pointer_rejects_torn_record_root_and_changed_code);
     RUN_TEST(pointer_heap_text_is_bounded_and_double_read);
+    RUN_TEST(pointer_snapshot_wiring_copy_and_unavailable_reset);
     return 0;
 }
