@@ -17,6 +17,10 @@ The practice controller relies on Revolution for normal damage. It uses client s
 
 Confirm the actual ability tooltips before using the example keys. `--displayed-keys` resolves the client window's keyboard layout to physical Arduino keys. `configured_abilities` records the displayed labels and resolved keys.
 
+`--flick-melee` is an unvalidated user-requested trial for phases 1-2. Each new Telos animation except Uppercut (`28938`) sends Ctrl+F4 Deflect Melee, then Ctrl+F3 Soul Split on the next received tick (0.6 s when the counter is invalid). Soul Split is the overhead between cues. A toggle is only resent after the overhead matches or 1.2 s passes. `prayer_flick_cue` and `prayer_flick_sent` rows record each decision. Server protection deadlines remain unmeasured, so a hit can still land during a flick.
+
+`--practice-enrage N` runs above 0%. It locks the first observed Telos maximum HP and assumes the 0% quarter phase split. Special timings remain calibrated at 0% only.
+
 `--timed-freedom` trials the first clear GCD at received-tick offsets +4 through +7 after `28935`. The observed cast acknowledged one tick after dispatch at +4. This measures the cast path and leaves the landing response unverified.
 
 Each file starts with `attempt_started`. The first `state` row includes the initial `changes` object. Apply subsequent state changes as top-level field replacements. `sequence` orders rows, `timestamp_ms` is Unix time, and `elapsed_ns` and `observed_ns` are relative to the same attempt origin. `client_logic_tick` is the client clock. `game_tick` carries the client's received server-tick counter when valid. `received_tick` rows mark observed counter changes and loss of validity. Receipt time has no calibrated relation to the server's protection check.

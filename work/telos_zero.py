@@ -42,10 +42,9 @@ OPENING_AUTOS = 7
 LOOP_AUTOS = 3
 HOLD_STILL_PREP_AUTOS = 2
 HOLD_STILL_FORECAST_WINDOW_NS = 2_400_000_000
-PHASE_TWO_HP = 300_000
-PHASE_THREE_HP = 200_000
-PHASE_FOUR_HP = 100_000
-FONT_THRESHOLDS = (75_000, 50_000, 25_000)
+PHASE_COUNT = 4
+FONT_SIXTEENTHS = (3, 2, 1)
+SIXTEENTHS = 16
 MAX_SAMPLE_AGE_NS = 100_000_000
 SPECIAL_WINDOW_NS = 3_000_000_000
 HOLD_STILL_HEAVY_HIT_TICK = 4
@@ -56,10 +55,15 @@ POLL_SECONDS = 0.025
 MAX_PRACTICE_SECONDS = 300
 ZERO_ENRAGE_HP = 400_000
 F12 = 0x7B
-APPROACH_TIMEOUT_NS = 10_000_000_000
+APPROACH_TIMEOUT_NS = 30_000_000_000
 ENGAGE_TIMEOUT_NS = 2_000_000_000
 REACQUIRE_TIMEOUT_NS = 3_600_000_000
 REACQUIRE_CUE_TIMEOUT_NS = 10_000_000_000
+# Fallback when the received server tick counter is invalid. One game tick is 0.6 seconds.
+TICK_FALLBACK_NS = 600_000_000
+# Curse bindings preserved in profiles/prayer_flick.json.
+PRAYER_CHORDS = {Prayer.MELEE: "Ctrl+F4", Prayer.SOUL_SPLIT: "Ctrl+F3"}
+FLICK_EXCLUDED_ANIMATIONS = frozenset({UPPERCUT})
 MOVEMENT_WINDOWS = {
     UPPERCUT: (3_600_000_000, 4_000_000_000, "Uppercut movement trial"),
     HOLD_STILL: (2_900_000_000, 5_000_000_000, "Hold Still landing movement trial"),
@@ -128,9 +132,21 @@ class PhaseOne:
                 }[sequence]
 
     def next_action(
-        self, now, cooldowns, gcd_remaining_ms, prayer, *, received_tick=None, timed_freedom=False
+        self,
+        now,
+        cooldowns,
+        gcd_remaining_ms,
+        prayer,
+        *,
+        received_tick=None,
+        timed_freedom=False,
+        flicking=False,
     ):
-        """Use cooldown acknowledgement and bound the number of attempts for each mechanic."""
+        """Use cooldown acknowledgement and bound the number of attempts for each mechanic.
+
+        With ``flicking``, the melee flicker owns protection, so Anticipation no longer
+        requires Deflect Melee to be the current overhead.
+        """
         if self.pending:
             self.cast_result = self.acknowledge(
                 cooldowns,
@@ -176,7 +192,7 @@ class PhaseOne:
             and self.autos == HOLD_STILL_PREP_AUTOS
             and self.last_auto_ns is not None
             and 0 <= now - self.last_auto_ns < HOLD_STILL_FORECAST_WINDOW_NS
-            and prayer == Prayer.MELEE
+            and (prayer == Prayer.MELEE or flicking)
             and "Anticipation" in cooldowns
             and not cooldowns["Anticipation"]
             and not self.forecast_handled
@@ -217,6 +233,63 @@ class PhaseOne:
         return ability, observed
 
 
+class MeleeFlicker:
+    """Unvalidated practice trial: Deflect Melee on each Telos animation, Soul Split a tick later.
+
+    Prayer keybinds toggle, so a chord is only requested when the overhead differs from the
+    target and no earlier request is still awaiting its overhead acknowledgement.
+    """
+
+    def __init__(self, excluded=FLICK_EXCLUDED_ANIMATIONS):
+        self.excluded = frozenset(excluded)
+        self.last_event = 0
+        self.return_tick = None
+        self.return_ns = None
+        self.cue_event = None
+        self.requested = None
+
+    def observe(self, actions, tick, now):
+        """Hold melee until the tick after each new non-excluded animation. Return the cue."""
+        trigger = None
+        for action in actions:
+            if action["event_sequence"] <= self.last_event:
+                continue
+            self.last_event = action["event_sequence"]
+            if action["action_sequence"] not in self.excluded:
+                trigger = action
+        if trigger is not None:
+            self.return_tick = None if tick is None else tick + 1
+            self.return_ns = now + TICK_FALLBACK_NS
+            self.cue_event = trigger["event_sequence"]
+        return trigger
+
+    def holding_melee(self, tick, now):
+        """Whether the melee window opened by the latest cue is still running."""
+        if self.return_ns is None:
+            return False
+        if self.return_tick is not None and tick is not None:
+            due = tick >= self.return_tick
+        else:
+            due = now >= self.return_ns
+        if due:
+            self.return_tick = self.return_ns = None
+        return not due
+
+    def next_prayer(self, prayer, tick, now):
+        """Return the prayer to request now, or None while it is active or awaiting acknowledgement."""
+        target = Prayer.MELEE if self.holding_melee(tick, now) else Prayer.SOUL_SPLIT
+        if self.requested is not None:
+            requested, deadline = self.requested
+            if prayer != requested and now < deadline:
+                return None
+            self.requested = None
+        return None if prayer == target else target
+
+    def sent(self, target, now):
+        """Wait for the overhead to change before another toggle can be sent."""
+        self.requested = (target, now + ACK_TIMEOUT_NS)
+
+
 def log(event, **fields):
     """Write decision and outcome records to standard output."""
     print(json.dumps({"event": event, **fields}), flush=True)
@@ -249,21 +322,26 @@ def cooldowns(reader):
     return timers
 
 
-def encounter_checkpoint(phase, health):
-    """Check the 0% HP band against the phase field and flag possible font progress."""
+def phase_end_hp(maximum_hp, phase):
+    """Boss HP at which the given phase hands off. Phases split maximum HP into quarters.
+
+    The quarter split is observed at 0% enrage only; other enrages assume the same ratio.
+    """
+    return maximum_hp * (PHASE_COUNT - phase) // PHASE_COUNT
+
+
+def encounter_checkpoint(phase, health, expected_max_hp=ZERO_ENRAGE_HP):
+    """Check the HP band against the phase field and flag possible font progress."""
     current, maximum = health["current"], health["max"]
-    if maximum != ZERO_ENRAGE_HP or current is None or phase not in (1, 2, 3, 4):
+    if maximum != expected_max_hp or current is None or phase not in (1, 2, 3, 4):
         return None
     # A shared boundary belongs to either neighboring phase during the handoff.
-    lower, upper = {
-        1: (PHASE_TWO_HP, ZERO_ENRAGE_HP),
-        2: (PHASE_THREE_HP, PHASE_TWO_HP),
-        3: (PHASE_FOUR_HP, PHASE_THREE_HP),
-        4: (0, PHASE_FOUR_HP),
-    }[phase]
+    lower = phase_end_hp(maximum, phase)
+    upper = phase_end_hp(maximum, phase - 1)
     if not lower <= current <= upper:
         return None
-    fonts_reached = sum(current <= threshold for threshold in FONT_THRESHOLDS) if phase == 4 else 0
+    font_thresholds = [maximum * part // SIXTEENTHS for part in FONT_SIXTEENTHS]
+    fonts_reached = sum(current <= threshold for threshold in font_thresholds) if phase == 4 else 0
     return {"phase": phase, "font_thresholds_reached": fonts_reached, "zero_hp": current == 0}
 
 
@@ -396,7 +474,9 @@ def observe(reader, duration, attempt=None):
                 telos_raw=player.variable(Variable.TELOS_PACKED),
                 phase_candidate=phase,
                 checkpoint_candidate=(
-                    encounter_checkpoint(phase, health) if boss.config_id == ACTIVE_TELOS else None
+                    encounter_checkpoint(phase, health, health["max"])
+                    if boss.config_id == ACTIVE_TELOS
+                    else None
                 ),
                 hp=hp,
                 other_npcs=other_npcs,
@@ -516,6 +596,40 @@ def run(reader, args, board, attempt=None):
         for binding in bindings.values()
     ):
         raise ValueError("Combat bindings must exclude prayer chords and F12")
+    flicker = MeleeFlicker() if getattr(args, "flick_melee", False) else None
+    prayer_chords = {target: parse_chord(chord) for target, chord in PRAYER_CHORDS.items()}
+
+    def received_tick_counter():
+        tick = reader.encounter.game_tick
+        return tick.counter if tick.valid else None
+
+    def flick_step(actions, prayer, now, sample_ns):
+        """Advance the melee flicker and send at most one prayer chord."""
+        tick = received_tick_counter()
+        cue = flicker.observe(actions, tick, now)
+        if cue is not None:
+            emit(
+                "prayer_flick_cue",
+                animation=cue["action_sequence"],
+                received_tick=tick,
+                cue_native_sequence=cue["event_sequence"],
+            )
+        target = flicker.next_prayer(prayer, tick, now)
+        if target is None:
+            return
+        if reader.monotonic_ns() - sample_ns > MAX_SAMPLE_AGE_NS:
+            raise RuntimeError("Native sample aged out before the prayer switch")
+        board.tap(prayer_chords[target], KEY_HOLD_SECONDS, check_focus, time.sleep)
+        sent_ns = reader.monotonic_ns()
+        flicker.sent(target, sent_ns)
+        emit(
+            "prayer_flick_sent",
+            prayer=target.name.lower(),
+            previous=prayer.name.lower(),
+            received_tick=tick,
+            cue_native_sequence=flicker.cue_event,
+        )
+
     if attempt:
         attempt.write(
             "configured_abilities",
@@ -527,6 +641,8 @@ def run(reader, args, board, attempt=None):
     deadline = time.monotonic() + args.duration
     initiated = False
     active_instance = None
+    practice_enrage = getattr(args, "practice_enrage", 0)
+    expected_max_hp = ZERO_ENRAGE_HP if practice_enrage == 0 else None
     engaged_at = 0
     phase_one_started = False
     next_prayer_check = 0
@@ -607,8 +723,16 @@ def run(reader, args, board, attempt=None):
 
         actions = telos_actions(events, identity, info.sequence, {active_instance})
         hp_known = bool(boss.flags & NPCFlags.HEALTH) and boss.health_max > 1
-        if hp_known and boss.health_max != ZERO_ENRAGE_HP:
-            raise RuntimeError(f"Expected 400,000 maximum Telos HP, observed {boss.health_max}")
+        if hp_known and expected_max_hp is None:
+            # Non-zero enrage: lock the first observed maximum for the rest of the attempt.
+            expected_max_hp = boss.health_max
+            emit("boss_max_hp_locked", boss_max_hp=expected_max_hp, enrage=practice_enrage)
+        if hp_known and boss.health_max != expected_max_hp:
+            raise RuntimeError(
+                f"Expected {expected_max_hp:,} maximum Telos HP, observed {boss.health_max}"
+            )
+        if flicker is not None and phase in (1, 2):
+            flick_step(actions, prayer, now, info.monotonic_ns)
         if not phase_one_started:
             if phase == 1 and hp_known:
                 emit("engaged", boss_hp=boss.health_current, phase=phase, player_hp=hp)
@@ -626,7 +750,7 @@ def run(reader, args, board, attempt=None):
         if phase == 3:
             if (
                 not args.continue_phase_two
-                or encounter_checkpoint(phase, npc_health_record(boss)) is None
+                or encounter_checkpoint(phase, npc_health_record(boss), expected_max_hp) is None
             ):
                 raise RuntimeError("Unexpected phase 3 checkpoint")
             emit("phase_three_observed", boss_hp=boss.health_current, player_hp=hp)
@@ -646,7 +770,7 @@ def run(reader, args, board, attempt=None):
                     attempt.end_reason = reason
             return 2
         if phase == 2:
-            if encounter_checkpoint(phase, npc_health_record(boss)) is None:
+            if encounter_checkpoint(phase, npc_health_record(boss), expected_max_hp) is None:
                 raise RuntimeError("Phase 2 bits disagree with the observed boss HP")
             first_phase_two_sample = phase_two_at is None
             if first_phase_two_sample:
@@ -692,7 +816,7 @@ def run(reader, args, board, attempt=None):
                     else:
                         time.sleep(POLL_SECONDS)
                         continue
-                elif boss.health_current < PHASE_TWO_HP:
+                elif boss.health_current < phase_end_hp(expected_max_hp, 1):
                     emit("phase_two_reacquire_skipped", reason="Boss HP already decreased")
                 elif phase_two_melee_cue(actions, prayer.name.lower()):
                     if reader.monotonic_ns() - info.monotonic_ns > MAX_SAMPLE_AGE_NS:
@@ -719,7 +843,7 @@ def run(reader, args, board, attempt=None):
                     if attempt:
                         attempt.end_reason = reason
                 return 2
-        phase_boundary = PHASE_TWO_HP if phase == 1 else PHASE_THREE_HP
+        phase_boundary = phase_end_hp(expected_max_hp, phase)
         if boss.health_current <= phase_boundary:
             time.sleep(POLL_SECONDS)
             continue
@@ -772,6 +896,7 @@ def run(reader, args, board, attempt=None):
             prayer,
             received_tick=received_tick,
             timed_freedom=timed_freedom,
+            flicking=flicker is not None,
         )
         if phase_one.cast_result:
             ability, confirmed = phase_one.cast_result
@@ -839,9 +964,22 @@ def main():
     parser.add_argument("--melee", type=int, nargs=2, help="Deflect Melee action-bar pixel")
     parser.add_argument("--practice-0-confirmed", action="store_true")
     parser.add_argument(
+        "--practice-enrage",
+        type=int,
+        default=0,
+        help="Confirmed Practice Mode enrage. Non-zero values lock the first observed maximum HP "
+        "and assume the 0%% quarter phase split; special timings are only calibrated at 0%%",
+    )
+    parser.add_argument(
         "--observe-transition",
         action="store_true",
         help="Record later cues after phase 1 input stops",
+    )
+    parser.add_argument(
+        "--flick-melee",
+        action="store_true",
+        help="Unvalidated trial: Ctrl+F4 Deflect Melee on every Telos animation except Uppercut, "
+        "then Ctrl+F3 Soul Split on the next received tick (phases 1-2)",
     )
     parser.add_argument("--freedom", help="Current Freedom binding")
     parser.add_argument("--anticipation", help="Current Anticipation binding")
@@ -900,7 +1038,7 @@ def main():
                 attempt = AttemptLog(
                     stream,
                     mode="practice" if args.port else "observation",
-                    enrage=0 if args.practice_0_confirmed else None,
+                    enrage=args.practice_enrage if args.practice_0_confirmed else None,
                     monotonic_ns=reader.monotonic_ns,
                 )
                 print(f"Attempt log {path}", flush=True)

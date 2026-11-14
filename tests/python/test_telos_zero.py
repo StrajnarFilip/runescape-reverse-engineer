@@ -105,6 +105,46 @@ class PhaseOneTests(unittest.TestCase):
         self.assertEqual(phase.cast_result, ("Surge", True))
 
 
+MeleeFlicker = controller["MeleeFlicker"]
+
+
+class MeleeFlickerTests(unittest.TestCase):
+    def test_animation_holds_melee_until_next_received_tick(self):
+        flicker = MeleeFlicker()
+        self.assertEqual(flicker.next_prayer(Prayer.MELEE, 10, 0), Prayer.SOUL_SPLIT)
+        flicker.sent(Prayer.SOUL_SPLIT, 0)
+        self.assertIsNone(flicker.next_prayer(Prayer.SOUL_SPLIT, 10, 1))
+        self.assertEqual(flicker.observe([event(1, AUTO)], 10, 2)["event_sequence"], 1)
+        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 10, 3), Prayer.MELEE)
+        flicker.sent(Prayer.MELEE, 3)
+        self.assertIsNone(flicker.next_prayer(Prayer.SOUL_SPLIT, 10, 4))
+        self.assertIsNone(flicker.next_prayer(Prayer.MELEE, 10, 5))
+        self.assertEqual(flicker.next_prayer(Prayer.MELEE, 11, 6), Prayer.SOUL_SPLIT)
+
+    def test_uppercut_and_repeated_events_do_not_flick(self):
+        flicker = MeleeFlicker()
+        self.assertIsNone(flicker.observe([event(1, UPPERCUT)], 10, 0))
+        self.assertIsNone(flicker.next_prayer(Prayer.SOUL_SPLIT, 10, 0))
+        flicker.observe([event(2, HOLD_STILL)], 10, 0)
+        self.assertIsNone(flicker.observe([event(2, HOLD_STILL)], 11, 0))
+        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 10, 0), Prayer.MELEE)
+
+    def test_invalid_tick_falls_back_to_one_tick_duration(self):
+        flicker = MeleeFlicker()
+        fallback = controller["TICK_FALLBACK_NS"]
+        flicker.observe([event(1, TENDRILS)], None, 0)
+        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, None, fallback - 1), Prayer.MELEE)
+        self.assertEqual(flicker.next_prayer(Prayer.MELEE, None, fallback), Prayer.SOUL_SPLIT)
+
+    def test_unacknowledged_toggle_is_not_repeated_before_timeout(self):
+        flicker = MeleeFlicker()
+        timeout = controller["ACK_TIMEOUT_NS"]
+        flicker.observe([event(1, AUTO)], 10, 0)
+        flicker.sent(Prayer.MELEE, 0)
+        self.assertIsNone(flicker.next_prayer(Prayer.SOUL_SPLIT, 11, timeout - 1))
+        self.assertIsNone(flicker.next_prayer(Prayer.SOUL_SPLIT, 11, timeout))
+
+
 class PracticeRunTests(unittest.TestCase):
     def test_phase_and_font_candidates_require_matching_health(self):
         checkpoint = controller["encounter_checkpoint"]
@@ -292,6 +332,31 @@ class PracticeRunTests(unittest.TestCase):
                 self.assertEqual(run(reader, args, board), 2)
         self.assertEqual([call.args[0][-1].name for call in board.tap.call_args_list], ["U"])
         self.assertEqual(mock_globals["log"].call_args.args[0], "phase_three_observed")
+
+        board.reset_mock()
+        args.continue_phase_two = False
+        args.flick_melee = True
+        reader.encounter.game_tick = SimpleNamespace(valid=True, counter=50)
+        reader.monotonic_ns.return_value = clock
+        info.monotonic_ns = clock
+        reader.active_prayer.side_effect = (
+            [Prayer.NONE, Prayer.NONE] + [Prayer.MELEE] * 3 + [Prayer.SOUL_SPLIT] * 3
+        )
+        mock_globals["boss_sample"].side_effect = samples
+        mock_globals["telos_actions"].side_effect = [[event(1, AUTO)], []]
+        with patch.dict(sys.modules, {"game_console": console}), patch("time.sleep"):
+            with patch.dict(run.__globals__, mock_globals):
+                self.assertEqual(run(reader, args, board), 2)
+        self.assertEqual(
+            [[key.name for key in call.args[0]] for call in board.tap.call_args_list],
+            [["CTRL", "F4"]],
+        )
+        flick_events = [
+            call.args[0]
+            for call in mock_globals["log"].call_args_list
+            if call.args[0].startswith("prayer_flick")
+        ]
+        self.assertEqual(flick_events, ["prayer_flick_cue", "prayer_flick_sent"])
 
 
 if __name__ == "__main__":
