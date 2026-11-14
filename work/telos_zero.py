@@ -22,6 +22,7 @@ from rs3_reader.native import (
     AbilityFlags,
     Camera,
     EquipmentMatch,
+    HazardFlags,
     NPCFlags,
     Position,
     Reader,
@@ -305,6 +306,77 @@ class FontDuty:
         self.move_attempts += 1
         self.next_move_tick = received_tick + FONT_MOVE_RETRY_TICKS
         return True
+
+
+# Anima streams. The low 21 bits of VARP 6363 are Telos's anima meter. Replayed 2026-11-14 logs:
+# it rises 3 per received tick (5 at 100%) while a stream feeds Telos, and each P2 Onslaught
+# projectile spends 10 of it; the Onslaught ends at 0. In the 250% death of 174445 the black
+# stream fed Telos through the whole Onslaught, so the meter never fell and twelve projectiles
+# rose to 3,807 damage. The wiki says to block the stream; the account owner adds that the black
+# stream cleanses the virus and that the green one slows Telos and gives adrenaline.
+METER_MASK = (1 << PHASE_SHIFT) - 1
+# enum rs3_hazard_kind: scene-location strips read on Compatibility Mode (commit ca6f117).
+GREEN_BEAM_KIND = 1
+BLACK_BEAM_KIND = 2
+BEAM_KIND_BY_PHASE = {1: GREEN_BEAM_KIND, 2: BLACK_BEAM_KIND}
+# The meter counts as fed after this many rises within the last BEAM_FEED_WINDOW tick changes.
+BEAM_FEED_RISES = 2
+BEAM_FEED_WINDOW = 3
+BEAM_MOVE_RETRY_TICKS = 3
+# Escape (Uppercut +4/+5) and the stomp Dive (Hold Still +4..+7) own movement for this long.
+BEAM_SPECIAL_HOLD_TICKS = 10
+
+
+def footprint_distance(tile, boss_tile, size):
+    """Grid distance from a tile to the nearest tile of a size x size footprint."""
+    dx = max(boss_tile[0] - tile[0], 0, tile[0] - (boss_tile[0] + size - 1))
+    dy = max(boss_tile[1] - tile[1], 0, tile[1] - (boss_tile[1] + size - 1))
+    return max(dx, dy)
+
+
+def beam_target(beam_tiles, boss_tile, size, player_tile):
+    """The stream tile to block from: next to Telos (melee range) if any, nearest the player."""
+    if not beam_tiles:
+        return None
+    return min(
+        beam_tiles,
+        key=lambda tile: (
+            max(footprint_distance(tile, boss_tile, size), 1),
+            chebyshev(tile, player_tile),
+            tile,
+        ),
+    )
+
+
+class BeamBlocker:
+    """Detect a stream feeding Telos from the anima meter and keep the player in its path."""
+
+    def __init__(self):
+        self.last_meter = None
+        self.rises = []
+        self.next_move_tick = None
+        self.reengage_due = False
+
+    def observe(self, meter, received_tick):
+        """Record one meter reading; return whether a stream is feeding Telos."""
+        if meter is None:
+            return False
+        if self.last_meter is not None and meter != self.last_meter:
+            self.rises.append(meter > self.last_meter)
+            del self.rises[:-BEAM_FEED_WINDOW]
+        self.last_meter = meter
+        return sum(self.rises) >= BEAM_FEED_RISES
+
+    def move_due(self, received_tick):
+        """Rate-limit movement into the stream."""
+        if self.next_move_tick is not None and received_tick < self.next_move_tick:
+            return False
+        self.next_move_tick = received_tick + BEAM_MOVE_RETRY_TICKS
+        return True
+
+    def blocked(self):
+        """The player has reached the stream: forget the rises seen while it fed Telos."""
+        self.rises.clear()
 
 
 class TargetPicker:
@@ -1335,6 +1407,67 @@ def run(reader, args, board, attempt=None):
             font_duty.resonance_sent = True
             emit("font_resonance", sent=send_chord(bindings["Resonance"]))
 
+    beam_blocker = BeamBlocker()
+
+    def beam_step(phase, phase_one, boss, meter, received_tick):
+        """Walk into the stream feeding Telos, then click Telos to keep attacking."""
+        if not isinstance(received_tick, int):
+            return
+        feeding = beam_blocker.observe(meter, received_tick)
+        player = reader.spatial.player
+        if (
+            not input_allowed
+            or not player.valid_mask & SpatialFlags.TILE
+            or not player.valid_mask & SpatialFlags.FINE_POSITION
+        ):
+            return
+        player_tile = (player.tile.x, player.tile.y)
+        beam_tiles = [
+            (hazard.tile.x, hazard.tile.y)
+            for hazard in reader.hazards[: reader.hazard_info.count]
+            if hazard.kind == BEAM_KIND_BY_PHASE[phase] and hazard.flags & HazardFlags.TILE
+        ]
+        if beam_blocker.reengage_due and player_tile in beam_tiles:
+            beam_blocker.reengage_due = False
+            beam_blocker.blocked()
+            emit("beam_blocking", tile=player_tile, meter=meter, received_tick=received_tick)
+            reengage_telos(boss, player)
+            return
+        busy = (
+            phase_one.special in (UPPERCUT, HOLD_STILL)
+            and isinstance(phase_one.special_tick, int)
+            and received_tick - phase_one.special_tick <= BEAM_SPECIAL_HOLD_TICKS
+        )
+        if not feeding or busy or not beam_tiles or player_tile in beam_tiles:
+            return
+        pose = next(
+            (
+                p
+                for p in reader.npc_spatial[: reader.spatial.npc_count]
+                if p.instance_id == boss.instance_id and p.valid_mask & SpatialFlags.TILE
+            ),
+            None,
+        )
+        if pose is None or not beam_blocker.move_due(received_tick):
+            return
+        target = beam_target(
+            beam_tiles, (pose.tile.x, pose.tile.y), pose.footprint_size or 1, player_tile
+        )
+        point = project_tile(reader, target, player.tile.plane, player.fine_height)
+        sent = None if point is None else click_point(point, select_dive=False)
+        if sent:
+            beam_blocker.reengage_due = True
+        emit(
+            "beam_move",
+            sent=sent,
+            phase=phase,
+            target=target,
+            player_tile=player_tile,
+            meter=meter,
+            beam_tiles=len(beam_tiles),
+            received_tick=received_tick,
+        )
+
     def attack_step(minions, boss, player, received_tick):
         """Click the next golem by priority, or Telos once no golem is left."""
         choice = target_picker.choose(minions, font_duty.state, received_tick)
@@ -1952,6 +2085,10 @@ def run(reader, args, board, attempt=None):
         remember_floor(phase, boss)
         if phase is not None and phase >= 4:
             font_step(phase_one, boss, received_tick, timers)
+        elif phase in BEAM_KIND_BY_PHASE:
+            telos_raw = player.variable(Variable.TELOS_PACKED)
+            meter = None if telos_raw is None else telos_raw & METER_MASK
+            beam_step(phase, phase_one, boss, meter, received_tick)
         stomp_dodge(phase_one, boss, received_tick, timers)
         time.sleep(POLL_SECONDS)
     emit("timeout", active=active_instance is not None)
