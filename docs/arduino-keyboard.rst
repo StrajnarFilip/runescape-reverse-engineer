@@ -225,3 +225,9 @@ The 2026-11-14 owned-copy follow-up passes 33 A1 tests. It verifies that a
 newer independent worker cannot replace the consumer frame, and that a changed
 or missing consumer snapshot still rejects. The native copy preserves the
 original timestamps and never makes stale evidence fresh.
+
+Both serialized backends expose ``fault`` as None or a latched transport/cleanup
+reason. ``SendResult.accepted=False`` alone does not distinguish an ordinary
+precondition rejection from uncertain delivery. D6 checks the fault channel
+before dispatch and after each result, stops the remaining batch and closes
+the backend on uncertainty. The property remains latched through shutdown.

@@ -308,6 +308,12 @@ class SerializedActuator:
         self._closed, self._fault_reason = False, None
         self._history, self._tick, self._counts = {}, None, {}
 
+    @property
+    def fault(self):
+        """Expose latched transport/cleanup uncertainty to D6/D8, distinct from rejection."""
+        with self._io:
+            return self._fault_reason
+
     def _now(self):
         value = self.clock()
         if type(value) is not int or value < 0:

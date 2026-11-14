@@ -295,11 +295,14 @@ class BackendTests(unittest.TestCase):
     def test_fault_releases_and_close_is_idempotent(self):
         for kind in ("native", "serial"):
             backend, state, clock, device, channel = self.make_backend(kind)
+            self.assertIsNone(backend.fault)
             if channel:
                 channel.fail_tap = True
             else:
                 device.fail = True
             self.assertFalse(backend.send(self.intent(state, clock)).accepted)
+            self.assertIsInstance(backend.fault, str)
+            self.assertTrue(backend.fault)
             self.assertEqual(
                 backend.send(self.intent(state, clock, "retry")).reason, "closed_or_faulted"
             )
@@ -312,6 +315,12 @@ class BackendTests(unittest.TestCase):
             else:
                 self.assertGreaterEqual(device.releases, 1)
                 self.assertEqual(device.closes, 1)
+
+    def test_ordinary_rejection_does_not_report_transport_uncertainty(self):
+        for kind in ("native", "serial"):
+            backend, state, clock, _, _ = self.make_backend(kind, enabled=False)
+            self.assertEqual(backend.send(self.intent(state, clock)).reason, "disabled")
+            self.assertIsNone(backend.fault)
 
     def test_fifo_waiter_is_revalidated_after_waiting(self):
         for kind in ("native", "serial"):
