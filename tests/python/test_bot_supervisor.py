@@ -16,10 +16,12 @@ from unittest.mock import patch
 from rs3_reader.bot.actuator import RecordingActuator
 from rs3_reader.bot.replay import replay
 from rs3_reader.bot.supervisor import (
+    DEFAULT_KILL_KEY,
     Supervisor,
     create_shadow_supervisor,
     hotkey_codes,
     load_producers,
+    readiness_record,
 )
 from rs3_reader.bot.world_state import WorldState
 
@@ -241,6 +243,7 @@ class SupervisorTests(unittest.TestCase):
             Supervisor(actuator=object())
 
     def test_hotkey_is_configurable_without_registering_os_input(self):
+        self.assertEqual(DEFAULT_KILL_KEY, "Ctrl+Shift+F12")
         self.assertEqual(hotkey_codes("Ctrl+Alt+Pause"), (0x4003, 0x13))
         self.assertEqual(hotkey_codes("Ctrl+Shift+F12"), (0x4006, 0x7B))
         for label in ("F1", "Ctrl+Ctrl+Pause", "Ctrl+Anything"):
@@ -393,6 +396,164 @@ class SupervisorTests(unittest.TestCase):
             hashlib.sha256(output.getvalue().encode()).hexdigest(),
             "f2c9a0cfceb6535913e930fe99d9314ea5a734a5355845087eabfaceb046e54b",
         )
+
+
+class ReadinessTests(unittest.TestCase):
+    def test_received_counter_does_not_establish_timing_or_enable_input(self):
+        record = row()
+        record["game_tick"] = {
+            "value": {"index": 123, "phase_ms": None, "uncertainty_ms": None},
+            "age_ms": 0,
+            "source": "native_received_tick",
+        }
+        report = readiness_record(WorldState.from_telemetry(record))
+        self.assertTrue(report["checks"]["received_tick_ordinal"]["available"])
+        self.assertFalse(report["attack_timing_assessed"])
+        self.assertFalse(report["dispatch_enabled"] or report["input_sent"])
+        self.assertIn("sampled_ability_castability", report["unobserved_fields"])
+        self.assertEqual(report["counts"]["active_telos"], 0)
+
+    def test_invalid_root_frame_cannot_be_rescued_by_nested_values(self):
+        for mutate in (
+            lambda record: record.pop("executable_sha256"),
+            lambda record: record["native"].pop("snapshot_age_ms"),
+            lambda record: record["native"].update(snapshot_age_ms=151),
+            lambda record: record.update(status="unavailable"),
+        ):
+            record = row()
+            mutate(record)
+            report = readiness_record(WorldState.from_telemetry(record))
+            self.assertFalse(any(value["available"] for value in report["checks"].values()))
+
+    def test_missing_and_lost_queues_remain_explicit(self):
+        record = row()
+        record.pop("inventory_changes")
+        record["npc_action_events_lost"] = 1
+        report = readiness_record(WorldState.from_telemetry(record))
+        self.assertFalse(report["checks"]["queue_inventory_changes"]["available"])
+        self.assertFalse(report["checks"]["queue_npc_actions"]["available"])
+        self.assertTrue(report["checks"]["queue_player_hits"]["available"])
+
+    def test_sampled_castability_requires_known_booleans_not_equipment_match(self):
+        record = row()
+        record["abilities"] = {
+            "status": "available",
+            "entries": [
+                {"struct_id": 103, "castable": None, "equipment_match": "matched"},
+                {"struct_id": 104, "castable": False},
+            ],
+        }
+        report = readiness_record(WorldState.from_telemetry(record))
+        self.assertFalse(report["checks"]["sampled_ability_castability"]["available"])
+        self.assertEqual(report["counts"]["known_castability"], 1)
+        record["abilities"]["entries"][0]["castable"] = True
+        report = readiness_record(WorldState.from_telemetry(record))
+        self.assertTrue(report["checks"]["sampled_ability_castability"]["available"])
+        self.assertFalse(report["availability_is_live_validation"] or report["dispatch_enabled"])
+
+    def test_active_telos_reference_requires_exact_local_index_and_one_actor(self):
+        record = row()
+        record["player_hit_splats"]["player_index"] = 17
+        npc = {
+            "config_id": 22891,
+            "target": {
+                "value": {"kind": "player", "player_index": 17, "runtime_id": 17, "instance_id": 2},
+                "source": "native_spatial",
+                "age_ms": 0,
+            },
+        }
+        record["npcs"]["entities"] = [npc]
+        self.assertTrue(
+            readiness_record(WorldState.from_telemetry(record))["checks"][
+                "active_telos_local_player_reference"
+            ]["available"]
+        )
+        record["player_hit_splats"]["player_index"] = 18
+        self.assertFalse(
+            readiness_record(WorldState.from_telemetry(record))["checks"][
+                "active_telos_local_player_reference"
+            ]["available"]
+        )
+        record["player_hit_splats"]["player_index"] = 17
+        record["npcs"]["entities"] = [npc, npc]
+        self.assertFalse(
+            readiness_record(WorldState.from_telemetry(record))["checks"][
+                "active_telos_local_player_reference"
+            ]["available"]
+        )
+
+    def test_result_requires_provenance_and_ages_during_delayed_replay(self):
+        record = row()
+        record["encounter_result"] = {
+            "value": {"kind": "kill", "id": "synthetic-kill", "validated": True},
+            "source": "synthetic_result",
+            "age_ms": 100,
+        }
+        report = readiness_record(WorldState.from_telemetry(record))
+        self.assertTrue(report["checks"]["validated_encounter_result"]["available"])
+        delayed = WorldState.from_telemetry(record, now_ns=1100 * MS)
+        self.assertFalse(
+            readiness_record(delayed)["checks"]["validated_encounter_result"]["available"]
+        )
+        record["encounter_result"].pop("source")
+        self.assertFalse(
+            readiness_record(WorldState.from_telemetry(record))["checks"][
+                "validated_encounter_result"
+            ]["available"]
+        )
+
+    def test_readiness_cli_is_bounded_without_loading_controllers_or_devices(self):
+        with tempfile.TemporaryDirectory() as directory:
+            capture = Path(directory) / "synthetic.jsonl"
+            capture.write_text(
+                json.dumps(row()) + "\n" + json.dumps(row(2)) + "\ninvalid beyond limit\n"
+            )
+            script = (
+                "import sys; from rs3_reader.bot.supervisor import main; r=main(); "
+                "assert not any(name in sys.modules for name in "
+                "('rs3_reader.native','rs3_reader.bot.actuator_sendinput',"
+                "'rs3_reader.bot.actuator_serial','rs3_reader.bot.encounter_tracker',"
+                "'rs3_reader.bot.prayer_executor','rs3_reader.bot.arbiter')); raise SystemExit(r)"
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    script,
+                    "--capture",
+                    str(capture),
+                    "--readiness",
+                    "--readiness-samples",
+                    "2",
+                ],
+                env=dict(os.environ, PYTHONPATH=str(ROOT / "python")),
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            records = [json.loads(line) for line in result.stdout.splitlines()]
+            self.assertEqual(len(records), 2)
+            self.assertTrue(
+                all(record["inspection_source"] == "capture_replay" for record in records)
+            )
+            self.assertFalse(any(record["input_sent"] for record in records))
+
+    def test_readiness_cannot_bypass_live_mode_or_overwrite_its_capture(self):
+        from rs3_reader.bot.supervisor import main
+
+        with tempfile.TemporaryDirectory() as directory, patch("sys.stderr", io.StringIO()):
+            capture = Path(directory) / "synthetic.jsonl"
+            capture.write_text(json.dumps(row()) + "\n")
+            for extra in (
+                ["--mode", "full"],
+                ["--readiness-samples", "0"],
+                ["--max-seconds", "nan"],
+                ["--output", str(capture)],
+            ):
+                with self.assertRaises(SystemExit):
+                    main(["--capture", str(capture), "--readiness", *extra])
+            self.assertEqual(capture.read_text(), json.dumps(row()) + "\n")
 
 
 if __name__ == "__main__":
