@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import time
 import ctypes
+import math
 
 from .inventory_records import extend_record
 from .native import (
@@ -834,8 +835,10 @@ def extend_encounter_record(record, reader):
         "value": (
             {
                 "index": tick.counter,
-                "phase_ms": tick.phase_ms,
-                "uncertainty_ms": tick.uncertainty_ms,
+                "phase_ms": tick.phase_ms if math.isfinite(tick.phase_ms) else None,
+                "uncertainty_ms": (
+                    tick.uncertainty_ms if math.isfinite(tick.uncertainty_ms) else None
+                ),
             }
             if tick.valid
             else None
@@ -846,7 +849,16 @@ def extend_encounter_record(record, reader):
             if tick.observed_ns
             else None
         ),
-        "reason": None if tick.valid else "unmapped",
+        "reason": (
+            None
+            if tick.valid
+            else {
+                2: "read_failed",
+                102: "awaiting_tick_transition",
+                103: "tick_counter_stalled",
+                104: "tick_counter_reset",
+            }.get(tick.reason, "unmapped")
+        ),
     }
     record["encounter"] = {
         "sample_sequence": state.sample_sequence,
