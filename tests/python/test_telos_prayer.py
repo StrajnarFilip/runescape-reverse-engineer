@@ -4,7 +4,10 @@ import contextlib
 import copy
 import io
 import json
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from rs3_reader import telos_prayer
@@ -228,6 +231,133 @@ class ManualPrayerKeyTests(unittest.TestCase):
         held_keys.add(VK_CONTROL)
         # Adding Ctrl to an already held key is not a down edge.
         self.assertEqual(keys.sample((1, 2, 3), clock), [])
+
+
+class ReadOnlyRecorderTests(unittest.TestCase):
+    def fixture(self):
+        path = Path(__file__).parent / "fixtures/bot/synthetic_capture.jsonl"
+        return json.loads(path.read_text().splitlines()[0])
+
+    def telemetry(self, *, unavailable=False):
+        row = self.fixture()
+        row["telos"]["phase"] = {
+            "value": 4,
+            "source": "native_encounter",
+            "age_ms": 0,
+            "reason": None,
+        }
+        row["telos"]["enrage"] = {"value": 300, "source": "native_encounter", "age_ms": 0}
+        row["encounter"] = {"validated_fields": ["phase", "enrage"]}
+        row["action_bar"] = {"slots": [], "status": "available"}
+        row["hazards"] = {"fonts": {"value": None, "reason": "unmapped"}}
+        row["inventory_changes"] = {"newly_observed": [], "events_lost": 3}
+        row["npc_action_events_lost"] = 1
+        row["hit_splats"]["events_lost"] = 2
+        row["player_hit_splats"]["events_lost"] = 4
+        if unavailable:
+            row.update(status="unavailable", health=None, npcs=None)
+        info = SimpleNamespace(monotonic_ns=10_000_000_123, sequence=1, sample_duration_ns=4321)
+        reader = SimpleNamespace(info=info, monotonic_ns=lambda: info.monotonic_ns + 1_000_000)
+        return SimpleNamespace(reader=reader, sample=Mock(return_value=row)), row
+
+    def test_complete_native_frame_replays_with_exact_times_and_all_four_queue_counts(self):
+        from rs3_reader.bot.world_state import WorldState
+
+        telemetry, original = self.telemetry()
+        keys = Mock(sample=Mock(return_value=[{"prayer": "melee", "observed_ns": 10_001_000_123}]))
+        output = io.StringIO()
+        wall_time = [0.0]
+
+        def sleep(seconds):
+            wall_time[0] += max(seconds, 0.01)
+
+        count = telos_prayer.record_calibration(
+            telemetry,
+            0.005,
+            output,
+            500,
+            keys,
+            clock=lambda: wall_time[0],
+            sleep=sleep,
+        )
+        self.assertEqual(count, 1)
+        telemetry.sample.assert_called_once_with(False)
+        row = json.loads(output.getvalue())
+        self.assertEqual(row["observed_ns"], 10_000_000_123)
+        self.assertEqual(row["sample_duration_ns"], 4321)
+        self.assertEqual(row["enrage_label"], 500)  # Manual label cannot replace native 300.
+        self.assertEqual(row["telos"], original["telos"])
+        self.assertEqual(row["encounter"], original["encounter"])
+        for name in ("action_bar", "hazards", "equipment", "inventory", "abilities"):
+            self.assertEqual(row[name], original[name])
+        world = WorldState.from_telemetry(row)
+        self.assertEqual(world.telos.phase.value, 4)
+        self.assertEqual(world.telos.enrage.value, 300)
+        self.assertEqual(
+            [
+                world.events.npc_actions.lost.value,
+                world.events.npc_hits.lost.value,
+                world.events.player_hits.lost.value,
+                world.events.inventory_changes.lost.value,
+            ],
+            [1, 2, 4, 3],
+        )
+        self.assertIsNone(world.events.manual_actions.lost.value)
+        self.assertFalse(row["input_sent_by_calibration"])
+        self.assertEqual(row["manual_prayer_keys"][0]["observed_ns"], 10_001_000_123)
+        keys.sample.assert_called_once_with((111, 222, 3), telemetry.reader.monotonic_ns)
+
+    def test_unavailable_frame_retains_unknown_fields_instead_of_previous_values(self):
+        telemetry, _ = self.telemetry(unavailable=True)
+        output, wall_time = io.StringIO(), [0.0]
+        telos_prayer.record_calibration(
+            telemetry,
+            0.005,
+            output,
+            None,
+            clock=lambda: wall_time[0],
+            sleep=lambda seconds: wall_time.__setitem__(0, 1.0),
+        )
+        row = json.loads(output.getvalue())
+        self.assertEqual(row["status"], "unavailable")
+        self.assertIsNone(row["health"])
+        self.assertIsNone(row["npcs"])
+        self.assertEqual(row["manual_prayer_keys"], [])
+        self.assertEqual(row["npc_action_events_lost"], 1)
+
+    def test_stop_file_and_invalid_duration_never_sample(self):
+        telemetry, _ = self.telemetry()
+        for duration in (None, 0, -1, float("nan"), float("inf"), True):
+            with self.subTest(duration=duration), self.assertRaises(ValueError):
+                telos_prayer.record_calibration(telemetry, duration, io.StringIO(), None)
+        with tempfile.TemporaryDirectory() as temporary:
+            stop = Path(temporary) / "stop"
+            stop.touch()
+            self.assertEqual(
+                telos_prayer.record_calibration(telemetry, 1, io.StringIO(), None, stop_file=stop),
+                0,
+            )
+        telemetry.sample.assert_not_called()
+
+    def test_cli_uses_read_only_synchronous_sampler_and_closes_on_recording_error(self):
+        telemetry, _ = self.telemetry()
+        telemetry.close = Mock()
+        with (
+            patch("sys.argv", ["telos_prayer", "--pid", "123", "--duration", "1"]),
+            patch.object(telos_prayer, "NativeTelemetry", return_value=telemetry) as factory,
+            patch.object(telos_prayer, "Reader") as trial_reader,
+            patch.object(telos_prayer, "PrayerTrial") as trial,
+            patch.object(telos_prayer, "record_calibration", side_effect=OSError("full disk")),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            with self.assertRaises(SystemExit) as error:
+                telos_prayer.main()
+            self.assertEqual(error.exception.code, 1)
+        factory.assert_called_once_with(123, 0)
+        telemetry.close.assert_called_once()
+        trial_reader.assert_not_called()
+        trial.assert_not_called()
 
 
 class AttackCatalogueTests(unittest.TestCase):

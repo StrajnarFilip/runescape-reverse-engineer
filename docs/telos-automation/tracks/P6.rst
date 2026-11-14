@@ -83,10 +83,28 @@ D1 may use classification labels; D2 must require validated timing and full
 incoming-attack coverage. No row currently authorizes automatic flicking.
 
 The recorder accepts ``--pid``, ``--record-keys``, ``--duration``, ``--enrage``,
-``--output`` and ``--stop-file``. It retains raw NPC actions, player hitmarks,
-loss counters and all four manual prayer-key edges. It labels no attack style
-or phase merely from an animation ID. Poll intervals are measured at key
-edges, not assumed to match the requested sampling period.
+``--output`` and ``--stop-file``. The 2026-11-14 read-only path uses the shared
+NativeTelemetry serializer and synchronous C acquisition. It retains complete
+schema-1 frames, all four native event queues and their loss counters, guarded
+P2 phase/enrage observations, target/pose, effects, hazards, bars, inventory and
+abilities. No queue is drained a second time by the prayer recorder. Exact
+native nanoseconds and sequence are added without a display-time round trip.
+Manual enrage stays a separate label and never replaces a native observation.
+
+All four manual prayer-key edges are retained. Poll intervals are measured at
+key edges, not assumed to match the requested 10 ms period. Complete down/up
+transitions between polls may be missed; manual_actions_lost stays unknown.
+No attack style or phase is labelled merely from an animation ID. Missing
+phase-5 semantics stay unknown; use bounded manual annotations when needed.
+The legacy automatic trial is still gated off by the shipped profile and is
+separate from the read-only recording path. The new path constructs no trial,
+input device, planner or controller, and always closes its native reader.
+
+The same new local capture can be passed to the S0a replay and D8 shadow or
+readiness commands, without reconstructing omitted queues. This does not make
+the capture a clean shadow run: current coverage and watchdog failures remain.
+Raw files stay local and may be much larger than the older reduced recordings;
+use the finite duration (default 300 seconds) and a fresh ignored output file.
 
 ``work/analyze_telos_calibration.py`` supports either isolated
 ``--phase``/``--enrage`` labels or ``--annotations`` for mixed-phase captures,
@@ -98,6 +116,11 @@ Guide leads never become validated; cue-to-hit delays never become protection
 deadlines. Raw stages are not decoded by the general analyzer.
 Hit pairing is disabled by default; ``--isolated-melee`` enables descriptive
 cue-to-hit observations only with an explicitly labelled phase-1 capture.
+Summaries now expose all four native queue-loss totals, preserving unknown
+counters, and retain true/false/unknown historical input provenance. An old
+automatic capture is never reported as read-only merely because it is analyzed
+offline. Output aliases of a capture, annotations or another output are rejected
+before any write, including hard links.
 
 ``docs/validation/telos-prayer-calibration-2026-11-13.json`` records compact
 provenance, counts, guard scope and missing coverage. Offline P2 annotations
@@ -120,3 +143,11 @@ Requests
   scope remains unchanged; phase 5 and Compatibility Mode need evidence.
   Use these guarded observations or explicit bounded manual phase callouts
   in later recordings. Packed stage alone is not a replacement for the guard.
+
+* Recorder follow-up, 2026-11-14: 17 P6 recorder/catalogue/key tests and 18
+  analyzer tests pass, including complete-frame replay, exact nanoseconds,
+  all four native queue-loss counts, native/manual enrage separation,
+  unavailable-frame handling, bounded stop, read-only cleanup, historical
+  input provenance and output-alias preservation. No game input was sent.
+  Remaining attack names, components, phase-5 and server protection windows
+  still require labelled live evidence; no catalogue authorization changed.

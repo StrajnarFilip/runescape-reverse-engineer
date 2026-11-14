@@ -25,7 +25,7 @@ from types import MappingProxyType
 
 from .native import REPOSITORY_ROOT, NPCActionFlags, Reader, Variable, decode_text
 from .prayer import Prayer
-from .telemetry import combat_record
+from .telemetry import NativeTelemetry, combat_record
 
 # User-labelled melee auto only in the isolated 300% phase-1 melee capture.
 MELEE_AUTO_SEQUENCE = 28929
@@ -568,6 +568,55 @@ def observe(reader, duration, output, enrage, keys, trial_window=None, stop_file
     return trial.completed_cycles if trial else 0
 
 
+def record_calibration(
+    telemetry, duration, output, enrage, keys=None, stop_file=None, *, clock=None, sleep=None
+):
+    """Write complete native schema-1 frames and manual prayer edges, read-only.
+
+    One NativeTelemetry sample owns all queue drains. No queue is read again
+    here, and no input function, trial or controller is constructed. The CLI
+    uses synchronous C acquisition so a worker cannot advance between the
+    frame copy and queue drains. Native event times/loss counts stay untouched.
+    Requested 10 ms polling is not a measured latency guarantee.
+    """
+    if type(duration) not in (int, float) or not math.isfinite(duration) or duration <= 0:
+        raise ValueError("Calibration recording requires a finite positive duration")
+    clock, sleep = clock or time.monotonic, sleep or time.sleep
+    end_time = clock() + duration
+    count = 0
+    while clock() < end_time:
+        if stop_file is not None and stop_file.exists():
+            break
+        started = clock()
+        row = telemetry.sample(False)
+        reader = telemetry.reader
+        info = reader.info
+        session = (row.get("pid"), row.get("process_creation_time"), row["combat"]["scene_epoch"])
+        presses = keys.sample(session, reader.monotonic_ns) if keys else []
+        # Preserve nanoseconds exactly instead of round-tripping telemetry's
+        # display milliseconds. An unavailable frame retains unavailable fields.
+        row.update(
+            observed_ns=info.monotonic_ns,
+            sample_started_ns=info.monotonic_ns,
+            sample_sequence=info.sequence,
+            sample_duration_ns=info.sample_duration_ns,
+            enrage_label=enrage,
+            phase_label=None,
+            calibration_mode="read_only_native",
+            requested_poll_interval_ms=POLL_SECONDS * 1000,
+            input_sent_by_calibration=False,
+            manual_prayer_keys=presses,
+            # Polling can miss a complete down/up between polls. No queue or
+            # hook supplies an exact count of missed manual key transitions.
+            manual_actions_lost=None,
+        )
+        output.write(json.dumps(row, separators=(",", ":"), allow_nan=False) + "\n")
+        output.flush()
+        count += 1
+        sleep(max(0, started + POLL_SECONDS - clock()))
+    return count
+
+
 def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--pid", type=int, help="RuneScape process ID")
@@ -615,37 +664,47 @@ def main():
     parser, arguments = parse_arguments()
     try:
         keys = ManualPrayerKeys() if arguments.record_keys or arguments.trial else None
-        with Reader(pid=arguments.pid, worker_hz=0) as reader:
-            if arguments.output:
-                arguments.output.parent.mkdir(parents=True, exist_ok=True)
-                output_context = arguments.output.open("x", encoding="utf-8")
-            else:
-                output_context = nullcontext(sys.stdout)
-            with output_context as output:
-                if arguments.trial:
-                    message = "Trial armed. Waiting for a fresh 28929 cue in foreground RuneScape."
-                else:
-                    message = "Recording Telos prayer timing. Switch prayers manually."
-                print(message, file=sys.stderr, flush=True)
-                if arguments.trial or arguments.duration is not None:
-                    duration = arguments.duration
-                else:
-                    duration = DEFAULT_CAPTURE_SECONDS
-                completed_cycles = observe(
-                    reader,
-                    duration,
-                    output,
-                    arguments.enrage,
-                    keys if arguments.record_keys else None,
-                    keys.game_window if arguments.trial else None,
-                    arguments.stop_file,
-                )
-                if arguments.trial:
+        if arguments.output:
+            arguments.output.parent.mkdir(parents=True, exist_ok=True)
+            output_context = arguments.output.open("x", encoding="utf-8")
+        else:
+            output_context = nullcontext(sys.stdout)
+        with output_context as output:
+            if arguments.trial:
+                with Reader(pid=arguments.pid, worker_hz=0) as reader:
+                    print(
+                        "Trial armed. Waiting for a fresh 28929 cue in foreground RuneScape.",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    completed_cycles = observe(
+                        reader,
+                        arguments.duration,
+                        output,
+                        arguments.enrage,
+                        None,
+                        keys.game_window,
+                        arguments.stop_file,
+                    )
                     print(
                         f"Trial ended with {completed_cycles} completed switch cycle(s).",
                         file=sys.stderr,
                         flush=True,
                     )
+            else:
+                print("Recording full native frames. Switch prayers manually.", file=sys.stderr)
+                telemetry = NativeTelemetry(arguments.pid, 0)
+                try:
+                    record_calibration(
+                        telemetry,
+                        arguments.duration or DEFAULT_CAPTURE_SECONDS,
+                        output,
+                        arguments.enrage,
+                        keys,
+                        arguments.stop_file,
+                    )
+                finally:
+                    telemetry.close()
     except KeyboardInterrupt:
         return
     except (OSError, RuntimeError, ValueError) as error:
