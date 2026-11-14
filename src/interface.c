@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "clock.h"
 #include "decode_utils.h"
 #include "inventory.h"
 #include "memory.h"
@@ -13,6 +14,7 @@ _Static_assert(sizeof(rs3_interface_info) == 32, "ABI interface info layout");
 _Static_assert(sizeof(rs3_interface_observation) == 16, "ABI interface observation layout");
 _Static_assert(sizeof(rs3_action_bar_slot) == 232, "ABI action bar layout");
 _Static_assert(offsetof(rs3_action_bar_slot, raw_packed) == 72, "ABI action bar alignment");
+_Static_assert(sizeof(rs3_pointer_candidate) == 304, "ABI pointer candidate layout");
 
 #define STORED_BAR_COUNT            18u
 #define DISPLAY_PRESETS_VAR         10160u
@@ -55,6 +57,25 @@ _Static_assert(offsetof(rs3_action_bar_slot, raw_packed) == 72, "ABI action bar 
 #define UI_COMPONENT_ID_OFFSET      0x18u
 #define UI_HEADING_MAX_BYTES        64u
 #define UI_MAX_COMPONENTS           4096u
+
+/* Static 951-3 menu paths; the record's semantic meaning is not live calibrated. */
+#define POINTER_MANAGER_OFFSET    0x19938u
+#define POINTER_OWNER_OFFSET      8u
+#define POINTER_MENU_STATE_OFFSET 0x68u
+#define POINTER_RECORD_OFFSET     0x1400u
+#define POINTER_RECORD_BYTES      0x60u
+#define POINTER_VERB_OFFSET       0x18u
+#define POINTER_TYPE_OFFSET       0x38u
+#define POINTER_ITEM_OFFSET       0x44u
+#define POINTER_REFERENCE_OFFSET  0x48u
+#define POINTER_ARG1_OFFSET       0x4cu
+#define POINTER_ARG2_OFFSET       0x50u
+#define POINTER_TEXT_HEADER_BYTES 24u
+#define POINTER_TEXT_TAG_OFFSET   23u
+#define POINTER_TEXT_HEAP_FLAG    0x80u
+#define POINTER_TEXT_CAPACITY     RS3_POINTER_TEXT_CAPACITY
+#define POINTER_MANAGER_GUARD_RVA 0x320c2fu
+#define POINTER_RECORD_GUARD_RVA  0x391305u
 
 static const char enrage_heading[] = "Choose initial enrage.";
 
@@ -563,9 +584,146 @@ uint32_t rs3_interface_sizeof(uint32_t structure)
             return sizeof(rs3_interface_observation);
         case 3:
             return sizeof(rs3_action_bar_slot);
+        case 4:
+            return sizeof(rs3_pointer_candidate);
         default:
             return 0;
     }
+}
+
+void interface_pointer_clear(rs3_pointer_candidate *out)
+{
+    memset(out, 0, sizeof *out);
+    out->status = RS3_UNAVAILABLE;
+    out->reason = RS3_UI_FRAME_UNAVAILABLE;
+    out->raw_reference = -1;
+    out->raw_item_id = -1;
+    out->raw_arg1 = -1;
+    out->raw_arg2 = -1;
+    out->raw_menu_state = -1;
+}
+
+/** Pin the current menu manager load and candidate-slot load, independent of old comments. */
+static int pointer_code_matches(rs3_context *context)
+{
+    static const unsigned char manager_guard[] = {0x48, 0x8b, 0x81, 0x38, 0x99, 0x01, 0x00};
+    static const unsigned char record_guard[] = {0x48, 0x8b, 0x86, 0x00, 0x14, 0x00, 0x00};
+    unsigned char bytes[sizeof manager_guard];
+    return memory_read(context, context->target.module_base + POINTER_MANAGER_GUARD_RVA, bytes,
+                       sizeof bytes) &&
+           memcmp(bytes, manager_guard, sizeof bytes) == 0 &&
+           memory_read(context, context->target.module_base + POINTER_RECORD_GUARD_RVA, bytes,
+                       sizeof bytes) &&
+           memcmp(bytes, record_guard, sizeof bytes) == 0;
+}
+
+/** Copy a bounded client string. The caller double-checks the complete owning record. */
+static int pointer_read_text(rs3_context *context, const unsigned char *header,
+                             char text[POINTER_TEXT_CAPACITY])
+{
+    unsigned char tag = header[POINTER_TEXT_TAG_OFFSET];
+    size_t length;
+    if (tag & POINTER_TEXT_HEAP_FLAG)
+    {
+        uint64_t pointer = decode_u64(header);
+        uint64_t size = decode_u64(header + sizeof(uint64_t));
+        if (!is_valid_remote_pointer(pointer) || size >= POINTER_TEXT_CAPACITY)
+        {
+            return 0;
+        }
+        length = (size_t)size;
+        char after[POINTER_TEXT_CAPACITY];
+        if (length &&
+            (!memory_read(context, pointer, text, length) ||
+             !memory_read(context, pointer, after, length) || memcmp(text, after, length)))
+        {
+            return 0;
+        }
+    }
+    else
+    {
+        if (tag >= POINTER_TEXT_HEADER_BYTES)
+        {
+            return 0;
+        }
+        length = POINTER_TEXT_TAG_OFFSET - tag;
+        memcpy(text, header, length);
+    }
+    text[length] = '\0';
+    return 1;
+}
+
+void interface_pointer_stage(rs3_context *context, uint64_t world_state, rs3_pointer_candidate *out)
+{
+    interface_pointer_clear(out);
+    out->reason = RS3_UI_UNSUPPORTED_PROFILE;
+    if (context->target.profile != &profile_primary || !pointer_code_matches(context))
+    {
+        return;
+    }
+    out->reason = RS3_UI_READ_FAILED;
+    uint64_t manager, owner, record, manager_after, owner_after, record_after;
+    uint32_t state, state_after;
+    unsigned char menu_state, menu_state_after;
+    if (!world_state ||
+        !memory_read(context, world_state + LAYOUT_GAME_STATE_OFFSET, &state, sizeof state) ||
+        state != LAYOUT_IN_GAME_STATE ||
+        !memory_read_pointer(context, world_state + POINTER_MANAGER_OFFSET, &manager) || !manager ||
+        !memory_read_pointer(context, manager + POINTER_OWNER_OFFSET, &owner) ||
+        owner != world_state ||
+        !memory_read(context, manager + POINTER_MENU_STATE_OFFSET, &menu_state,
+                     sizeof menu_state) ||
+        !memory_read_pointer(context, manager + POINTER_RECORD_OFFSET, &record))
+    {
+        return;
+    }
+    rs3_pointer_candidate staged;
+    interface_pointer_clear(&staged);
+    staged.raw_menu_state = menu_state;
+    staged.flags = RS3_POINTER_RAW_MENU;
+    if (record)
+    {
+        unsigned char before[POINTER_RECORD_BYTES], after[POINTER_RECORD_BYTES];
+        if (!memory_read(context, record, before, sizeof before) ||
+            !pointer_read_text(context, before, staged.name) ||
+            !pointer_read_text(context, before + POINTER_VERB_OFFSET, staged.verb) ||
+            !memory_read(context, record, after, sizeof after) ||
+            memcmp(before, after, sizeof before))
+        {
+            return;
+        }
+        uint64_t descriptor = decode_u64(before + POINTER_TYPE_OFFSET);
+        if (descriptor < context->target.module_base ||
+            descriptor - context->target.module_base >= context->target.module_size)
+        {
+            return;
+        }
+        staged.raw_type_rva = (uint32_t)(descriptor - context->target.module_base);
+        staged.raw_reference = decode_i32(before + POINTER_REFERENCE_OFFSET);
+        staged.raw_item_id = decode_i32(before + POINTER_ITEM_OFFSET);
+        staged.raw_arg1 = decode_i32(before + POINTER_ARG1_OFFSET);
+        staged.raw_arg2 = decode_i32(before + POINTER_ARG2_OFFSET);
+        staged.flags |= RS3_POINTER_RAW_RECORD | RS3_POINTER_RAW_TEXT | RS3_POINTER_RAW_TYPE;
+    }
+    if (!memory_read_pointer(context, world_state + POINTER_MANAGER_OFFSET, &manager_after) ||
+        manager_after != manager ||
+        !memory_read_pointer(context, manager + POINTER_OWNER_OFFSET, &owner_after) ||
+        owner_after != owner ||
+        !memory_read_pointer(context, manager + POINTER_RECORD_OFFSET, &record_after) ||
+        record_after != record ||
+        !memory_read(context, manager + POINTER_MENU_STATE_OFFSET, &menu_state_after,
+                     sizeof menu_state_after) ||
+        menu_state_after != menu_state ||
+        !memory_read(context, world_state + LAYOUT_GAME_STATE_OFFSET, &state_after,
+                     sizeof state_after) ||
+        state_after != state)
+    {
+        return;
+    }
+    staged.observed_ns = clock_monotonic_ns();
+    staged.status = RS3_PARTIAL;
+    staged.reason = RS3_UI_UNVALIDATED_SOURCE;
+    *out = staged;
 }
 
 void interface_clear(rs3_snapshot *snapshot)

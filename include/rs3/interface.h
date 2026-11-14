@@ -14,6 +14,7 @@ extern "C"
 #define RS3_MAX_ACTION_BAR_SLOTS  (RS3_DISPLAYED_ACTION_BARS * RS3_ACTION_BAR_SLOTS)
 #define RS3_REQUIRED_INTERFACES   5u
 #define RS3_INTERFACE_NAME_BYTES  128u
+#define RS3_POINTER_TEXT_CAPACITY 128u
 
 enum rs3_interface_reason
 {
@@ -24,8 +25,42 @@ enum rs3_interface_reason
     RS3_UI_UNSUPPORTED_PROFILE = 4,
     RS3_UI_CONTENT_UNMAPPED = 5,
     RS3_UI_KEY_UNMAPPED = 6,
-    RS3_UI_FRAME_UNAVAILABLE = 7
+    RS3_UI_FRAME_UNAVAILABLE = 7,
+    RS3_UI_UNVALIDATED_SOURCE = 8
 };
+
+/** Raw menu-record read flags only; these never authorize a click or identify an NPC. */
+enum rs3_pointer_candidate_flags
+{
+    RS3_POINTER_RAW_MENU = 1u,
+    RS3_POINTER_RAW_RECORD = 2u,
+    RS3_POINTER_RAW_TEXT = 4u,
+    RS3_POINTER_RAW_TYPE = 8u
+};
+
+/**
+ * Uncalibrated engine menu candidate. Strings may contain client markup.
+ * raw_reference/raw_arg1/raw_arg2 are overloaded fields, not typed entity IDs
+ * or coordinates. raw_type_rva identifies module data, not a callable API.
+ * A cleared record pointer does not prove that no entity is under the cursor.
+ * Successful raw reads remain PARTIAL/UNVALIDATED_SOURCE until live calibration.
+ */
+typedef struct rs3_pointer_candidate
+{
+    uint64_t observed_ns;
+    uint32_t status;
+    uint32_t reason;
+    uint32_t flags;
+    uint32_t raw_type_rva;
+    int32_t raw_reference;
+    int32_t raw_item_id;
+    int32_t raw_arg1;
+    int32_t raw_arg2;
+    int32_t raw_menu_state;
+    uint32_t reserved;
+    char name[RS3_POINTER_TEXT_CAPACITY];
+    char verb[RS3_POINTER_TEXT_CAPACITY];
+} rs3_pointer_candidate;
 
 enum rs3_interface_kind
 {
@@ -114,7 +149,7 @@ typedef struct rs3_action_bar_slot
     char name[RS3_INTERFACE_NAME_BYTES]; /**< UTF-8, always terminated. */
 } rs3_action_bar_slot;
 
-/** 1=info, 2=interface observation, 3=slot; unknown IDs return 0. */
+/** 1=info, 2=interface observation, 3=slot, 4=raw pointer candidate; unknown IDs return 0. */
 RS3_API uint32_t rs3_interface_sizeof(uint32_t structure);
 RS3_API int32_t rs3_snapshot_interface_info(const rs3_snapshot *snapshot, rs3_interface_info *out,
                                             uint32_t out_size);
