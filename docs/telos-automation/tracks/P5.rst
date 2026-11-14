@@ -93,3 +93,22 @@ keeps its translated chord unknown. Preserve the confirmed four Ctrl+F chords.
 
 When several clients exist, pass the intended PID explicitly. The collector's
 sample identity and age remain mandatory for downstream use.
+
+* Pointer-candidate follow-up, 2026-11-14: independent local decompilation
+  establishes the menu manager at world+0x19938 and candidate object at +0x1400.
+  Older reference comments point to different fields; the +0x13f8 slot is a
+  shared-control member, not the object used for text. Two code guards pin the
+  loads. The new pure C decoder reads bounded/double-checked raw fields and
+  text, verifies owner/root/state and normalizes the type pointer to an RVA.
+  Every successful read remains PARTIAL/UNVALIDATED_SOURCE. This is not an NPC
+  hit-test, physical coordinate, complete castability or a no-hover mapping.
+* L registration request: add one private ``rs3_pointer_candidate`` storage
+  field in ``src/context.h``, copy it in ``context.c``, and register a public
+  snapshot accessor in ``snapshot.c``. The public type is 304 bytes and
+  ``rs3_interface_sizeof(4)`` exposes it; no existing public layout changes.
+  P5 will then add its own clear/stage/binding/telemetry lines. This requested
+  private storage is unowned shared wiring and contains no retained heap address.
+* Seventeen native interface fixture groups include four new raw-candidate
+  groups. The next user session should label an NPC hover, empty ground and
+  menu open/close while the read-only collector is active. No click automation
+  or semantic mapping is enabled by this preparation.

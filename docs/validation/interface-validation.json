@@ -452,5 +452,70 @@
     },
     "automatic_input": false,
     "recorders_stopped": true
+  },
+  "pointer_candidate_research": {
+    "date": "2026-11-14",
+    "profile_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+    "source_lead": "RuneTools c7d860eb2a9b783e680e2cd31583c7b49deceab5; followed independently in the local original executable.",
+    "static_fields": {
+      "manager": "world state+0x19938",
+      "owner": "manager+0x8",
+      "raw_menu_state": "manager+0x68",
+      "candidate_object": "manager+0x1400",
+      "name": "record+0x0",
+      "verb": "record+0x18",
+      "raw_type_descriptor": "record+0x38; normalized to module RVA",
+      "raw_item": "record+0x44",
+      "raw_reference": "record+0x48",
+      "raw_args": [
+        "record+0x4c",
+        "record+0x50"
+      ]
+    },
+    "instruction_guards": [
+      {
+        "rva": "0x320c2f",
+        "bytes": "488b8138990100"
+      },
+      {
+        "rva": "0x391305",
+        "bytes": "488b8600140000"
+      }
+    ],
+    "decompilation_leads": [
+      "0x320c00",
+      "0x390310",
+      "0x38fd50"
+    ],
+    "old_comment_offsets_not_used": [
+      "world+0x198e8",
+      "manager+0x13f8 as object pointer"
+    ],
+    "control_pair_inference": "The update code increments/releases a control block at +0x13f8 and stores the candidate object separately at +0x1400.",
+    "new_public_structure_bytes": 304,
+    "sizeof_structure_id": 4,
+    "existing_abi_sizes_changed": false,
+    "semantic_validation": false,
+    "npc_identity_mapping": false,
+    "physical_coordinates_mapped": false,
+    "absence_from_cleared_slot_inferred": false,
+    "full_castability_inferred_from_ui_opacity": false,
+    "default_reason": "unvalidated_source",
+    "default_status_after_raw_read": "partial",
+    "new_fixture_groups": 4,
+    "native_interface_fixture_groups": 17,
+    "tests": [
+      "Raw fields stay nonsemantic",
+      "Empty slot/owner/profile states",
+      "Torn record/root and code guards",
+      "Heap string bounds and double reads"
+    ],
+    "game_inputs_sent": false,
+    "game_running_during_research": false,
+    "pending": [
+      "L private snapshot/storage/accessor registration",
+      "P5 collector/bindings/telemetry wiring",
+      "Manual pointer/menu labels on the same executable; no automatic pointer input"
+    ]
   }
 }

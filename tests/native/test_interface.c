@@ -14,18 +14,36 @@
 #define MODIFIER_NODE         (KEY_NODE + FIXTURE_VARIABLE_NODE_BYTES)
 #define FIRST_ADDITIONAL_SLOT RS3_ACTION_BAR_SLOTS
 
-#define UI_MANAGER            0xb10000ull
-#define UI_CACHE              0xb20000ull
-#define UI_RECORDS            0xb30000ull
-#define UI_NODE               0xb40000ull
-#define UI_VALUE              0xb40100ull
-#define UI_BUCKETS            0xb50000ull
-#define UI_CACHE_RECORD_COUNT 1478u
-#define UI_BANK_KEY           ((1477u << 16) | 706u)
-#define UI_ENRAGE_KEY         ((1477u << 16) | 748u)
-#define UI_COMPONENTS         0xb60000ull
-#define UI_HEADING            0xb70000ull
-#define UI_TEXT_HEAP          0xb80000ull
+#define UI_MANAGER                0xb10000ull
+#define UI_CACHE                  0xb20000ull
+#define UI_RECORDS                0xb30000ull
+#define UI_NODE                   0xb40000ull
+#define UI_VALUE                  0xb40100ull
+#define UI_BUCKETS                0xb50000ull
+#define UI_CACHE_RECORD_COUNT     1478u
+#define UI_BANK_KEY               ((1477u << 16) | 706u)
+#define UI_ENRAGE_KEY             ((1477u << 16) | 748u)
+#define UI_COMPONENTS             0xb60000ull
+#define UI_HEADING                0xb70000ull
+#define UI_TEXT_HEAP              0xb80000ull
+#define POINTER_MANAGER           0xb90000ull
+#define POINTER_RECORD            0xba0000ull
+#define POINTER_TEXT_HEAP         0xbb0000ull
+#define POINTER_ROOT_OFFSET       0x19938u
+#define POINTER_SLOT_OFFSET       0x1400u
+#define POINTER_NAME_BYTES        24u
+#define POINTER_TAG_OFFSET        23u
+#define POINTER_VERB_OFFSET       0x18u
+#define POINTER_TYPE_OFFSET       0x38u
+#define POINTER_REF_OFFSET        0x48u
+#define POINTER_DESCRIPTOR        0x1721ce0u
+#define POINTER_OWNER_OFFSET      8u
+#define POINTER_RECORD_BYTES      0x60u
+#define POINTER_ITEM_OFFSET       0x44u
+#define POINTER_MANAGER_GUARD_RVA 0x320c2fu
+#define POINTER_RECORD_GUARD_RVA  0x391305u
+#define POINTER_HEAP_FLAG         0x80u
+#define POINTER_MODULE_SIZE       0x2000000u
 
 static fixture *prayer_bar_fixture(void);
 
@@ -385,6 +403,126 @@ static void caller_owned_copy_contract(void)
     fixture_destroy(test_fixture);
 }
 
+/** This fixture validates raw byte decoding, never an entity hit-test or input permission. */
+static fixture *pointer_fixture(void)
+{
+    fixture *test_fixture = fixture_create();
+    test_fixture->context->target.module_size = POINTER_MODULE_SIZE;
+    fixture_add_block(test_fixture, POINTER_MANAGER, POINTER_SLOT_OFFSET + sizeof(uint64_t));
+    fixture_add_block(test_fixture, POINTER_RECORD, POINTER_RECORD_BYTES);
+    fixture_put_u64(test_fixture, FIXTURE_WORLD + POINTER_ROOT_OFFSET, POINTER_MANAGER);
+    fixture_put_u64(test_fixture, POINTER_MANAGER + POINTER_OWNER_OFFSET, FIXTURE_WORLD);
+    fixture_put_u64(test_fixture, POINTER_MANAGER + POINTER_SLOT_OFFSET, POINTER_RECORD);
+    fixture_put_u64(test_fixture, POINTER_RECORD + POINTER_TYPE_OFFSET,
+                    FIXTURE_MODULE_BASE + POINTER_DESCRIPTOR);
+    fixture_put_u32(test_fixture, POINTER_RECORD + POINTER_ITEM_OFFSET, UINT32_MAX);
+    fixture_put_u32(test_fixture, POINTER_RECORD + POINTER_REF_OFFSET, FIXTURE_NPC_RUNTIME_ID);
+    const char *name = "Training dummy";
+    const char *verb = "Attack";
+    memcpy(fixture_bytes(test_fixture, POINTER_RECORD, strlen(name)), name, strlen(name));
+    memcpy(fixture_bytes(test_fixture, POINTER_RECORD + POINTER_VERB_OFFSET, strlen(verb)), verb,
+           strlen(verb));
+    fixture_bytes(test_fixture, POINTER_RECORD + POINTER_TAG_OFFSET, 1)[0] =
+        (unsigned char)(POINTER_TAG_OFFSET - strlen(name));
+    fixture_bytes(test_fixture, POINTER_RECORD + POINTER_VERB_OFFSET + POINTER_TAG_OFFSET, 1)[0] =
+        (unsigned char)(POINTER_TAG_OFFSET - strlen(verb));
+    const unsigned char manager_guard[] = {0x48, 0x8b, 0x81, 0x38, 0x99, 1, 0};
+    const unsigned char record_guard[] = {0x48, 0x8b, 0x86, 0, 0x14, 0, 0};
+    fixture_add_block(test_fixture, FIXTURE_MODULE_BASE + POINTER_MANAGER_GUARD_RVA,
+                      sizeof manager_guard);
+    fixture_add_block(test_fixture, FIXTURE_MODULE_BASE + POINTER_RECORD_GUARD_RVA,
+                      sizeof record_guard);
+    memcpy(fixture_bytes(test_fixture, FIXTURE_MODULE_BASE + POINTER_MANAGER_GUARD_RVA,
+                         sizeof manager_guard),
+           manager_guard, sizeof manager_guard);
+    memcpy(fixture_bytes(test_fixture, FIXTURE_MODULE_BASE + POINTER_RECORD_GUARD_RVA,
+                         sizeof record_guard),
+           record_guard, sizeof record_guard);
+    return test_fixture;
+}
+
+static void pointer_raw_fields_never_become_semantic_hit_tests(void)
+{
+    fixture *test_fixture = pointer_fixture();
+    rs3_pointer_candidate candidate;
+    interface_pointer_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.status == RS3_PARTIAL && candidate.reason == RS3_UI_UNVALIDATED_SOURCE);
+    assert(candidate.flags == (RS3_POINTER_RAW_MENU | RS3_POINTER_RAW_RECORD |
+                               RS3_POINTER_RAW_TEXT | RS3_POINTER_RAW_TYPE));
+    assert(candidate.raw_reference == FIXTURE_NPC_RUNTIME_ID);
+    assert(candidate.raw_type_rva == POINTER_DESCRIPTOR);
+    assert(strcmp(candidate.name, "Training dummy") == 0);
+    assert(strcmp(candidate.verb, "Attack") == 0);
+    assert(candidate.observed_ns && candidate.raw_item_id == -1);
+    assert(rs3_interface_sizeof(4) == sizeof candidate);
+    fixture_destroy(test_fixture);
+}
+
+static void pointer_empty_owner_and_profile_states_remain_explicit(void)
+{
+    fixture *test_fixture = pointer_fixture();
+    rs3_pointer_candidate candidate;
+    fixture_put_u64(test_fixture, POINTER_MANAGER + POINTER_SLOT_OFFSET, 0);
+    interface_pointer_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.status == RS3_PARTIAL && candidate.flags == RS3_POINTER_RAW_MENU);
+    assert(candidate.reason == RS3_UI_UNVALIDATED_SOURCE && candidate.raw_reference == -1);
+    fixture_put_u64(test_fixture, POINTER_MANAGER + POINTER_OWNER_OFFSET, FIXTURE_WORLD + 8);
+    interface_pointer_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.status == RS3_UNAVAILABLE && candidate.flags == 0);
+    test_fixture->context->target.profile = &profile_compatibility;
+    interface_pointer_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.reason == RS3_UI_UNSUPPORTED_PROFILE && candidate.flags == 0);
+    interface_pointer_clear(&candidate);
+    assert(candidate.reason == RS3_UI_FRAME_UNAVAILABLE && candidate.observed_ns == 0);
+    fixture_destroy(test_fixture);
+}
+
+static void pointer_rejects_torn_record_root_and_changed_code(void)
+{
+    fixture *test_fixture = pointer_fixture();
+    rs3_pointer_candidate candidate;
+    fixture_mutate_on_read(test_fixture, POINTER_RECORD, 2, POINTER_RECORD + POINTER_REF_OFFSET,
+                           FIXTURE_NPC_RUNTIME_ID + 1);
+    interface_pointer_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.status == RS3_UNAVAILABLE && candidate.flags == 0);
+    fixture_clear_mutation(test_fixture);
+    fixture_mutate_on_read(test_fixture, FIXTURE_WORLD + POINTER_ROOT_OFFSET, 2,
+                           FIXTURE_WORLD + POINTER_ROOT_OFFSET,
+                           (uint32_t)POINTER_MANAGER + POINTER_OWNER_OFFSET);
+    interface_pointer_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.status == RS3_UNAVAILABLE && candidate.flags == 0);
+    fixture_clear_mutation(test_fixture);
+    fixture_put_u64(test_fixture, FIXTURE_WORLD + POINTER_ROOT_OFFSET, POINTER_MANAGER);
+    fixture_bytes(test_fixture, FIXTURE_MODULE_BASE + POINTER_RECORD_GUARD_RVA, 1)[0] = 0;
+    interface_pointer_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.reason == RS3_UI_UNSUPPORTED_PROFILE && candidate.flags == 0);
+    fixture_destroy(test_fixture);
+}
+
+static void pointer_heap_text_is_bounded_and_double_read(void)
+{
+    fixture *test_fixture = pointer_fixture();
+    const char *name = "<col=ff0000>Training dummy";
+    size_t length = strlen(name);
+    fixture_add_block(test_fixture, POINTER_TEXT_HEAP, RS3_POINTER_TEXT_CAPACITY);
+    memcpy(fixture_bytes(test_fixture, POINTER_TEXT_HEAP, length), name, length);
+    memset(fixture_bytes(test_fixture, POINTER_RECORD, POINTER_NAME_BYTES), 0, POINTER_NAME_BYTES);
+    fixture_put_u64(test_fixture, POINTER_RECORD, POINTER_TEXT_HEAP);
+    fixture_put_u64(test_fixture, POINTER_RECORD + sizeof(uint64_t), length);
+    fixture_bytes(test_fixture, POINTER_RECORD + POINTER_TAG_OFFSET, 1)[0] = POINTER_HEAP_FLAG;
+    rs3_pointer_candidate candidate;
+    interface_pointer_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.status == RS3_PARTIAL && strcmp(candidate.name, name) == 0);
+    fixture_mutate_on_read(test_fixture, POINTER_TEXT_HEAP, 2, POINTER_TEXT_HEAP, 0x41414141);
+    interface_pointer_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.status == RS3_UNAVAILABLE && candidate.flags == 0);
+    fixture_clear_mutation(test_fixture);
+    fixture_put_u64(test_fixture, POINTER_RECORD + sizeof(uint64_t), RS3_POINTER_TEXT_CAPACITY);
+    interface_pointer_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.status == RS3_UNAVAILABLE && candidate.flags == 0);
+    fixture_destroy(test_fixture);
+}
+
 int main(void)
 {
     RUN_TEST(four_curse_bindings);
@@ -400,5 +538,9 @@ int main(void)
     RUN_TEST(enrage_requires_heading_not_just_generic_dialog_id);
     RUN_TEST(enrage_rejects_torn_and_oversized_heading);
     RUN_TEST(ui_rejects_duplicate_keys_and_changing_vtable);
+    RUN_TEST(pointer_raw_fields_never_become_semantic_hit_tests);
+    RUN_TEST(pointer_empty_owner_and_profile_states_remain_explicit);
+    RUN_TEST(pointer_rejects_torn_record_root_and_changed_code);
+    RUN_TEST(pointer_heap_text_is_bounded_and_double_read);
     return 0;
 }
