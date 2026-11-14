@@ -481,6 +481,15 @@ RS3_API int32_t rs3_snapshot_create(rs3_snapshot **out);
 RS3_API void rs3_snapshot_destroy(rs3_snapshot *snapshot);
 
 /**
+ * Copies one caller-owned snapshot to another, without sampling or consulting
+ * the worker. Both must have been allocated by this DLL instance. The caller
+ * must keep source unchanged and destination exclusively owned until return.
+ * All observations and their original identities/timestamps are preserved;
+ * copying does not refresh stale data. source == out is allowed.
+ */
+RS3_API int32_t rs3_snapshot_copy(const rs3_snapshot *source, rs3_snapshot *out);
+
+/**
  * Samples synchronously into out. Returns RS3_E_STATE while the worker runs.
  * RS3_OK means an observation was produced; inspect info.status for availability.
  */
