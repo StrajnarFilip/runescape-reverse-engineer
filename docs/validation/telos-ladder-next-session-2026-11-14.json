@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "track": "L",
+  "date": "2026-11-14",
+  "status": "offline_checkpoint_active_client_and_controlled_evidence_needed",
+  "scope": "Preparation checkpoint; the full kill and every ladder rung remain unvalidated.",
+  "latest_software_checks": {
+    "ctest_targets_passed": 15,
+    "python_tests_passed": 337,
+    "python_tests_skipped": 0,
+    "actuator_cases": 43,
+    "survival_cases": 36,
+    "rotation_cases": 18,
+    "encounter_tracker_cases": 20,
+    "calibration_recorder_catalogue_and_key_cases": 17,
+    "calibration_analysis_cases": 18
+  },
+  "completed_followups": {
+    "native_pointer_backend": "a4e0066; optional guarded existing-ABI route, no built-in geometry/path/hit-test provider",
+    "complete_native_recording": "a4e8430; all four native queues and guarded encounter fields, exact native time",
+    "offensive_target_revalidation": "c601487; complete identity and unchanged target/action before dispatch",
+    "survival_purpose_revalidation": "e8770f0; current thresholds, protection, effects, components and item preconditions",
+    "calibrated_attacker_target_guard": "c2975e7; exact same-frame local-player target before usable timing"
+  },
+  "session_prerequisites": [
+    "The intended account is logged into one explicitly selected client; do not reuse historical PID, process creation time or scene epoch.",
+    "The pinned executable/profile must match. A changed executable needs a separately reviewed profile.",
+    "Confirm recording is active before manual changes. Raw JSONL remains under ignored work paths.",
+    "No automatic input is enabled. The user remains present for future ladder rungs."
+  ],
+  "ordered_work": [
+    {
+      "stage": "Native mapping outside combat",
+      "owners": ["P1", "P3", "P5", "A2"],
+      "manual_actions": "Stable named NPC/inventory/menu labels and account setup while read-only research runs.",
+      "remaining_implementation": [
+        "Map and validate physical minimap/UI bounds and the complete current view signature.",
+        "Map exact NPC default-action hit tests and route/walkability evidence; raw menu candidates remain unvalidated.",
+        "Complete account/ability castability and relevant effect presence/consumption mappings. Timers or opacity alone do not establish full castability."
+      ]
+    },
+    {
+      "stage": "Safe-area movement acceptance after native dependencies are available",
+      "owners": ["A1", "A2", "L"],
+      "required_evidence": "At least six labelled minimap clicks with native arrivals and held-out fit samples, twenty walks and twenty exact target selections/clears.",
+      "limitation": "These trials have not passed. A prepared dispatcher cannot supply its missing perception providers."
+    },
+    {
+      "stage": "Manual 300 percent Telos capture and shadow comparison",
+      "owners": ["P1", "P2", "P4", "P6", "D1", "D2", "L"],
+      "manual_actions": "Use the configured Ctrl+F curses manually, label phases/specials, and capture missing phase-5 data when reachable.",
+      "required_evidence": [
+        "Confirm active Telos targets the exact native local-player lifetime.",
+        "Label remaining styles and individual hit components; retain unknown sequences.",
+        "Measure controlled protection outcomes separately from client overhead and hitmark timestamps.",
+        "Cover phase-5 beams, golems and relevant incoming sources before enabling dependent decisions."
+      ],
+      "limitation": "The previously deferred earlier-phase beam/rock strategy remains separate. A four-tick cadence does not validate a protection deadline."
+    }
+  ],
+  "read_only_commands": {
+    "working_directory": "repository root",
+    "environment": {"PYTHONPATH": "python"},
+    "substitute": "VERIFIED_CURRENT_PID and NEW_SESSION with freshly confirmed values; output files must be new.",
+    "readiness": ["python", "-m", "rs3_reader.bot", "--readiness", "--pid", "VERIFIED_CURRENT_PID", "--readiness-samples", "40", "--output", "work/telos_research/readiness-NEW_SESSION.jsonl"],
+    "manual_combat_capture": ["python", "-m", "rs3_reader.telos_prayer", "--pid", "VERIFIED_CURRENT_PID", "--duration", "300", "--enrage", "300", "--record-keys", "--output", "work/telos_research/capture-NEW_SESSION.jsonl"],
+    "offline_shadow": ["python", "-m", "rs3_reader.bot", "--capture", "work/telos_research/capture-NEW_SESSION.jsonl", "--arbitrate", "--output", "work/telos_research/shadow-NEW_SESSION.jsonl"],
+    "shadow_note": "Current missing coverage or unknown cues can stop shadow. Such a stop is diagnostic, not a clean rung pass."
+  },
+  "prayer_bindings": {"magic": "Ctrl+F1", "ranged": "Ctrl+F2", "soul_split": "Ctrl+F3", "melee": "Ctrl+F4"},
+  "supervisor_stop_key": "Ctrl+Shift+F12",
+  "supervisor_stop_key_scope": "Track L observer; raw recording is bounded by duration, Ctrl+C or its explicit stop file.",
+  "automatic_input_enabled": false,
+  "full_kill_demonstrated": false,
+  "only_live_validation_remains": false,
+  "game_process_running_at_checkpoint": false,
+  "raw_captures_or_game_files_published": false
+}
