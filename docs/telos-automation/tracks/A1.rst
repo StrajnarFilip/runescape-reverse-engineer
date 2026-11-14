@@ -69,11 +69,12 @@ are in ``docs/arduino-keyboard.rst``.
 Requests
 --------
 
-* Native input owner: add an additive, guarded, balanced key-tap API accepting
-  modifiers and a fresh snapshot, with existing partial-input cleanup. The
-  current DLL exposes modified prayer and unmodified ability input only.
-  Generic item and modified ability intents explicitly reject in the native
-  backend until this API lands. No C files were changed by A1.
+* Native input request resolved by A2/L on 2026-11-14: the DLL exports
+  ``rs3_activate_ability_chord`` and ``rs3_activate_item_chord``, with balanced
+  modifiers, 150 ms freshness, active-scene and exact inventory guards plus
+  existing partial-input cleanup. Additive public declarations are registered.
+  A1 must now connect these symbols; older DLLs must continue to reject the
+  unsupported operations. No C files were changed by A1.
 * P2/L update, 2026-11-14: the original profile now supplies a guarded received
   server-tick ordinal in WorldState. A1 still rejects an unknown/stale index.
   Tick phase and input-arrival timing remain unknown; this mapping alone does

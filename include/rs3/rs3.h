@@ -590,6 +590,29 @@ RS3_API int32_t rs3_activate_ability(const rs3_snapshot *snapshot, uint32_t stru
                                      uint32_t virtual_key);
 
 /**
+ * Presses a balanced chord for exactly one sampled ability struct ID.
+ * modifiers uses rs3_key_modifiers (Ctrl=1, Shift=2, Alt=4); virtual_key has
+ * the same range as rs3_activate_ability. Requires an active game scene,
+ * a verified snapshot at most 150 ms old and client clock stall <=150 ms.
+ * Checks do not establish full castability. The caller supplies a calibrated
+ * current binding and retains cooldown, unlock, range and resource policy.
+ */
+RS3_API int32_t rs3_activate_ability_chord(const rs3_snapshot *snapshot, uint32_t struct_id,
+                                           uint32_t virtual_key, uint32_t modifiers);
+
+/**
+ * Presses a calibrated item's balanced action-bar chord. Requires the same
+ * scene/freshness guards as rs3_activate_ability_chord, a consistently read
+ * backpack, and the exact zero-based slot, item ID, nonzero tracking token
+ * and positive quantity. Ambiguous identities reject. A move or dose change
+ * invalidates old arguments. The caller maps the chord to the intended item
+ * operation; success means OS input acceptance, not confirmed consumption.
+ */
+RS3_API int32_t rs3_activate_item_chord(const rs3_snapshot *snapshot, uint32_t slot,
+                                        int32_t expected_item_id, uint64_t expected_token,
+                                        uint32_t virtual_key, uint32_t modifiers);
+
+/**
  * Clicks a visible entity or menu row at a physical screen pixel.
  *
  * A nonzero instance_id must appear in the snapshot's NPC list; use zero for

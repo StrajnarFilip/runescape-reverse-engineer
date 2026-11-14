@@ -146,3 +146,7 @@ Requests
 * A1: use the new chord symbols when present; keep explicit rejection for an
   older DLL. Consumable intents need a nonzero exact tracking token. Observe
   consumption/cooldowns later; OS acceptance never establishes game success.
+
+* L update: both additive chord declarations are registered in the public
+  header on integration. Six native input groups and all 15 CTest targets
+  pass (271 Python tests). Existing structure sizes/signatures are unchanged.

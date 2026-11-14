@@ -128,3 +128,8 @@ Requests
   that narrow ABI registration with the implementation merge. A1 then connects
   its existing serialized backend. This is software preparation only; no rung
   or automatic input is enabled while the user is away.
+
+* A2 native-input request resolved: two additive public chord declarations
+  are registered without changing any ABI structure or old function signature.
+  The native tests call pure preparation helpers on positive paths, never OS
+  dispatch. A1 connection and physical-delivery validation remain pending.

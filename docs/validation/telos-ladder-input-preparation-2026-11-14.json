@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-14",
+  "track": "L",
+  "status": "in_progress",
+  "native_input_commit": "36d2fce",
+  "new_exports": [
+    "rs3_activate_ability_chord",
+    "rs3_activate_item_chord"
+  ],
+  "public_header_registration": "include/rs3/rs3.h; two additive declarations only",
+  "native_input_fixture_groups": 6,
+  "ctest_targets_passed": 15,
+  "python_tests_passed": 271,
+  "public_abi_layouts_changed": false,
+  "input_sent": false,
+  "positive_path_tests": "Pure chord preparation; no foreground dispatch",
+  "remaining": [
+    "A1 connection with old-DLL rejection and exact item token checks.",
+    "Fresh binding propagation and pre-dispatch revalidation.",
+    "Supervised physical delivery and observed game outcomes.",
+    "Complete perception/attack timing before dependent controller enablement."
+  ],
+  "automatic_input_enabled": false,
+  "ladder_rung_passed": false
+}
