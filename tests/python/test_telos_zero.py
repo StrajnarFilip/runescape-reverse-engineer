@@ -87,6 +87,34 @@ class PhaseOneTests(unittest.TestCase):
         phase.observe([event(2, RELEASE)])
         self.assertIsNone(phase.next_action(2 * SECOND_NS, timers, 0, Prayer.MELEE))
 
+    def test_uppercut_escape_uses_received_ticks_once(self):
+        phase = PhaseOne()
+        phase.observe([dict(event(1, UPPERCUT), received_tick=100)])
+        timers = {"Escape": 0}
+        for tick in (102, 103, 106):
+            self.assertIsNone(
+                phase.next_action(SECOND_NS, timers, 0, Prayer.SOUL_SPLIT, received_tick=tick)
+            )
+        self.assertIsNone(
+            phase.next_action(SECOND_NS, {"Escape": 5000}, 0, Prayer.SOUL_SPLIT, received_tick=104)
+        )
+        action = phase.next_action(SECOND_NS, timers, 1000, Prayer.SOUL_SPLIT, received_tick=104)
+        self.assertEqual(action, controller["Action"]("Escape", "Uppercut escape"))
+        phase.sent(action, SECOND_NS)
+        phase.next_action(SECOND_NS + 1, {"Escape": 9000}, 0, Prayer.SOUL_SPLIT, received_tick=105)
+        self.assertEqual(phase.cast_result, ("Escape", True))
+        self.assertIsNone(
+            phase.next_action(SECOND_NS + 2, timers, 0, Prayer.SOUL_SPLIT, received_tick=105)
+        )
+
+    def test_uppercut_escape_falls_back_to_elapsed_time(self):
+        phase = PhaseOne()
+        phase.observe([event(1, UPPERCUT)])
+        timers = {"Escape": 0}
+        self.assertIsNone(phase.next_action(3 * SECOND_NS, timers, 0, Prayer.MELEE))
+        action = phase.next_action(3_500_000_000, timers, 0, Prayer.MELEE)
+        self.assertEqual(action.ability, "Escape")
+
     def test_stale_auto_count_cannot_trigger_anticipation(self):
         phase = PhaseOne()
         phase.observe([event(1, UPPERCUT), event(2, AUTO), event(3, AUTO)])

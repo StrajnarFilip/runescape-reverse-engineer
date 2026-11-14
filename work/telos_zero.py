@@ -66,6 +66,11 @@ TICK_FALLBACK_NS = 600_000_000
 DEFAULT_FLICK_MELEE_KEY = "F3"
 DEFAULT_FLICK_SOUL_SPLIT_KEY = "F4"
 FLICK_EXCLUDED_ANIMATIONS = frozenset({UPPERCUT})
+# Uppercut's 2,634 hitmark appeared 7 received ticks after 28938 on 2026-11-14 at 100%.
+# Escape is sent two to three ticks before that hitmark; the server hit deadline is unmeasured.
+UPPERCUT_ESCAPE_TICKS = (4, 5)
+UPPERCUT_ESCAPE_FALLBACK_NS = (2_400_000_000, 3_000_000_000)
+MOVEMENT_ABILITIES = frozenset({"Surge", "Escape"})
 MOVEMENT_WINDOWS = {
     UPPERCUT: (3_600_000_000, 4_000_000_000, "Uppercut movement trial"),
     HOLD_STILL: (2_900_000_000, 5_000_000_000, "Hold Still landing movement trial"),
@@ -181,6 +186,15 @@ class PhaseOne:
         ):
             reason = "Hold Still post-hit GCD trial" if timed_freedom else "Hold Still animation"
             return Action("Freedom", reason)
+        if (
+            self.special == UPPERCUT
+            and self.autos == 0
+            and "Escape" not in self.handled
+            and "Escape" in cooldowns
+            and not cooldowns["Escape"]
+            and self.uppercut_escape_due(elapsed_ns, received_tick)
+        ):
+            return Action("Escape", "Uppercut escape")
         movement = MOVEMENT_WINDOWS.get(self.special)
         if movement and self.autos == 0 and "Surge" not in self.handled:
             earliest_ns, latest_ns, reason = movement
@@ -209,6 +223,14 @@ class PhaseOne:
         ):
             return Action("Hurricane", "Tendrils damage check")
         return None
+
+    def uppercut_escape_due(self, elapsed_ns, received_tick):
+        """Use received ticks after Uppercut when both are valid, else the elapsed-time fallback."""
+        if isinstance(received_tick, int) and isinstance(self.special_tick, int):
+            earliest, latest = UPPERCUT_ESCAPE_TICKS
+            return earliest <= received_tick - self.special_tick <= latest
+        earliest_ns, latest_ns = UPPERCUT_ESCAPE_FALLBACK_NS
+        return earliest_ns <= elapsed_ns <= latest_ns
 
     def sent(self, action, now):
         """Wait for the sampled cooldown before treating this command as a cast."""
@@ -580,6 +602,8 @@ def run(reader, args, board, attempt=None):
         labels["Hurricane"] = args.hurricane
     if args.surge:
         labels["Surge"] = args.surge
+    if getattr(args, "escape", None):
+        labels["Escape"] = args.escape
     if args.reacquire:
         labels["Target Cycle"], labels["Opening Attack"] = args.reacquire
     layout = None
@@ -864,7 +888,7 @@ def run(reader, args, board, attempt=None):
         autos_before = phase_one.autos
         timed_freedom = getattr(args, "timed_freedom", False)
         received_tick = None
-        if timed_freedom:
+        if timed_freedom or "Escape" in bindings:
             tick = reader.encounter.game_tick
             if tick.valid:
                 received_tick = tick.counter
@@ -924,7 +948,7 @@ def run(reader, args, board, attempt=None):
             pending_cue = None
             phase_one.cast_result = None
         if action:
-            if action.ability == "Surge" and tile is None:
+            if action.ability in MOVEMENT_ABILITIES and tile is None:
                 time.sleep(POLL_SECONDS)
                 continue
             if reader.monotonic_ns() - info.monotonic_ns > MAX_SAMPLE_AGE_NS:
@@ -952,7 +976,7 @@ def run(reader, args, board, attempt=None):
                     sent_ns=attempt.relative_ns(sent_ns),
                     cue_native_sequence=pending_cue,
                 )
-            if action.ability == "Surge":
+            if action.ability in MOVEMENT_ABILITIES:
                 surge_origin = tile
                 surge_sent_ns = sent_ns
                 surge_cue = pending_cue
@@ -1010,6 +1034,9 @@ def main():
         help="Try Freedom at GCD zero, 4–7 received ticks after Hold Still",
     )
     parser.add_argument("--surge", help="Optional Surge binding for experimental movement")
+    parser.add_argument(
+        "--escape", help="Optional Escape binding, sent 4-5 received ticks after Uppercut"
+    )
     parser.add_argument(
         "--continue-phase-two",
         action="store_true",
