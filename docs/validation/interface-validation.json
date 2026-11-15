@@ -899,7 +899,15 @@
       ],
       "fresh_dll_raw_zoom": 1.0,
       "fresh_dll_raw_sprite_scale": 0.5,
-      "serializer_unavailable_and_flag_checks_passed": true
+      "serializer_unavailable_and_flag_checks_passed": true,
+      "integration_checks": {
+        "release_build_passed": true,
+        "ctest_targets_passed": 15,
+        "python_tests_passed": 337,
+        "python_tests_skipped": 0,
+        "native_interface_fixture_groups_passed": 25,
+        "existing_shared_python_blank_line_formatting_left_unchanged": true
+      }
     }
   }
 }

@@ -199,3 +199,9 @@ sample identity and age remain mandatory for downstream use.
   There were no zoom/scale transitions. The user did not label camera rotation
   as completed. Inventory queue losses were not exported by this research
   subset, so it cannot serve as a complete shadow or ladder capture.
+* Final integration validation: release build and all 15 CTest targets pass,
+  including 337 Python tests with no skips and 25 native interface groups.
+  The first isolated-worktree Python run found an older DLL explicitly loaded
+  from the primary build by a planner test; rebuilding integration resolved
+  that dependency. Existing blank-line-only formatting differences in other
+  tracks' shared Python sections were left unchanged.
