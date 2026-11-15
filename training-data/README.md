@@ -63,11 +63,15 @@ stays for the heavy hit. Devotion is pressed when it is bound, ready and afforda
 adrenaline), and the GCD slot is one Resonance cannot use. GCD abilities are pressed only in the last 200 ms of the GCD because
 ability queueing is off. `ability_sent.gcd_at_press_ms` records the time left, and
 `ability_press_skipped` marks a GCD window that passed while deciding.
-In P1 and P3 the controller keeps the player on the green or red strip. It uses only strip
-tiles in melee reach of Telos and never lands under him. Auto-attack undid every landing out of
-reach. It uses Dive when Dive is ready and the tile is within Dive range, except while Hold
-Still is the forecast special, and otherwise walks. Dive's cooldown is read from Bladed Dive's
-shared timer. Each attempt is a `beam_keep_move` row with the verified
+In P1 the controller keeps the player on the green strip, using only tiles in melee reach of
+Telos; auto-attack undid every landing out of reach. In P3 it blocks the red strip at all
+times. It walks onto the nearest strip tile even out of reach, since a walk drops the attack
+target and the player stays. From there it moves to a strip tile in reach when one appears.
+After walking onto a tile in reach it clicks Telos again. It never lands under Telos. Dive is
+used only for tiles in reach and within Dive range, while it is ready and Hold Still is not the
+forecast special. Its cooldown is read from Bladed Dive's shared timer. `beam_feeding` rows
+show whether the meter still rises in P3. The stomp dodge treats 5 tiles from Telos's centre
+as unsafe. Each attempt is a `beam_keep_move` row with the verified
 hover. `beam_keep_arrival` and `beam_keep_departure` mark changes in standing on the strip.
 Moves wait for a tick with no protection press and yield to Escape, the stomp dodge and the P3
 virus walk. In P4 the anima bomb `28942` gets Resonance, or Reflect if bound with `--reflect`

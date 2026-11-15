@@ -156,7 +156,9 @@ class PhaseOneTests(unittest.TestCase):
         # 500% capture: Telos SW (14555,1486), player (14561,1484), 4 tiles from centre: hit.
         self.assertFalse(under((14555, 1486), 5, (14561, 1484)))
         self.assertTrue(stomp((14555, 1486), 5, (14561, 1484)))
-        self.assertFalse(stomp((14555, 1486), 5, (14562, 1484)))
+        # 07:25 at 250%: a landing 5 tiles from the centre still took 5,647; 6 is clear.
+        self.assertTrue(stomp((15892, 714), 5, (15899, 716)))
+        self.assertFalse(stomp((14555, 1486), 5, (14563, 1484)))
         # Player on the east side (centre 102,202): continue east first, 6 tiles out.
         tiles = escapes(boss, 5, (104, 202))
         self.assertEqual(tiles[0], (108, 202))
@@ -169,9 +171,9 @@ class PhaseOneTests(unittest.TestCase):
     def test_dive_targets_only_known_floor_outside_the_stomp(self):
         targets = controller["known_floor_targets"]
         boss, player = (100, 200), (106, 202)  # Centre (102,202); player 4 tiles east.
-        floor = {(106, 202), (107, 202), (108, 202), (97, 202), (102, 213), (100, 200)}
-        # (106,202) is inside the stomp area, (102,213) is beyond Dive reach; nearest first.
-        self.assertEqual(targets(boss, 5, player, floor), [(107, 202), (108, 202), (97, 202)])
+        floor = {(106, 202), (107, 202), (108, 202), (96, 202), (102, 213), (100, 200)}
+        # (106,202) and (107,202) are inside the stomp area, (102,213) is beyond Dive reach.
+        self.assertEqual(targets(boss, 5, player, floor), [(108, 202), (96, 202)])
         self.assertEqual(targets(boss, 5, player, {(100, 200), (104, 204)}), [])
 
     def test_phase_three_opening_after_tendrils_forecasts_hold_still(self):
@@ -728,7 +730,8 @@ class BeamTests(unittest.TestCase):
                 (107, 103, 1, 1, 103546),
                 (117, 103, 0, 1, 103546),  # Eleven tiles away
                 (116, 103, 0, 1, 103545),  # Ten tiles away
-                (107, 103, 0, 3, 103549),
+                (107, 103, 0, 3, 103549),  # Five tiles from the centre: inside the stomp
+                (108, 103, 0, 3, 103549),
             )
         ]
         reader = SimpleNamespace(
@@ -740,7 +743,7 @@ class BeamTests(unittest.TestCase):
             green = choose(reader, kind_by_phase[1], player, pose, stomp=True)
             red = choose(reader, kind_by_phase[3], player, pose, stomp=True)
             self.assertEqual(green, (((116, 103), 0, 103545), (116, 103)))
-            self.assertEqual(red, (((107, 103), 0, 103549), (107, 103)))
+            self.assertEqual(red, (((108, 103), 0, 103549), (108, 103)))
             self.assertIsNone(
                 choose(
                     reader, kind_by_phase[1], player, pose, rejected_tiles={(116, 103)}, stomp=True

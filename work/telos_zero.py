@@ -29,6 +29,7 @@ from rs3_reader.native import (
     Reason,
     ScreenPoint,
     SpatialFlags,
+    SpatialTargetKind,
     Status,
     Variable,
 )
@@ -146,9 +147,9 @@ DIVE_SELECT_SECONDS = 0.15
 DIVE_RANGE_TILES = 10
 STOMP_DIVE_CONFIRM_TICKS = 2
 # The stomp reaches beyond the 5x5 body: players 4 tiles (Chebyshev) from Telos's centre took
-# 9,322 at 500% and 5,401 at 500% P3 (2026-11-14). Treat 4 tiles from the centre as unsafe and
-# Dive to 6 tiles out.
-STOMP_RADIUS_TILES = 4
+# 9,322 at 500% and 5,401 at 500% P3 (2026-11-14), and a Dive landing 5 tiles out took 5,647 at
+# 250% (13944, 07:25 run). Treat 5 tiles from the centre as unsafe and Dive to 6 tiles out.
+STOMP_RADIUS_TILES = 5
 STOMP_ESCAPE_DISTANCE = 6
 # A rejected stomp hover also rules out the tiles this close to it.
 STOMP_REJECT_RADIUS_TILES = 1
@@ -377,6 +378,9 @@ STOMP_BEAM_BY_PHASE = {1: GREEN_BEAM_KIND, 3: RED_BEAM_KIND}
 # of reach was undone at once as the player walked back to attack (10538-10541, 10717-10745).
 # Dive is kept for the stomp while Hold Still is the forecast special (Dive cooldown 20.4 s).
 BEAM_KEEP_BY_PHASE = STOMP_BEAM_BY_PHASE
+# P3 (account owner): the red strip must be blocked at all times or Telos charges, so the player
+# stands on it even out of melee reach. In the 07:25 run it was mostly 9-12 tiles from Telos.
+BEAM_BLOCK_ALWAYS_PHASES = frozenset({3})
 BEAM_KEEP_RETRY_TICKS = 3
 MELEE_REACH_TILES = 1
 # Leave each Telos attack cue's protection tick alone: a move holds the loop for ~0.35 s.
@@ -2128,13 +2132,11 @@ def run(reader, args, board, attempt=None):
                 received_tick=received_tick,
             )
         if (
-            standing
-            or not input_allowed
+            not input_allowed
             or movement_busy
             or phase_one.stomp_pending is not None
             or virus.started is not None
             or (flicker is not None and not flicker.quiet(received_tick, now))
-            or not beam_keeper.move_due(received_tick)
         ):
             return
         pose_flags = SpatialFlags.SAME_WORLD | SpatialFlags.TILE
@@ -2149,26 +2151,48 @@ def run(reader, args, board, attempt=None):
         )
         if pose is None or pose.tile.plane != plane:
             return
-        use_dive = (
-            "Dive" in bindings
-            and not timers.get("Dive")
-            and phase_one.expected != HOLD_STILL
-        )
+        boss_tile = (pose.tile.x, pose.tile.y)
+        size = pose.footprint_size or 1
+        always_block = phase in BEAM_BLOCK_ALWAYS_PHASES
+        in_reach_now = footprint_distance(player_tile, boss_tile, size) <= MELEE_REACH_TILES
+        if standing and in_reach_now:
+            untargeted = (
+                player.valid_mask & SpatialFlags.TARGET
+                and player.target_kind == SpatialTargetKind.NONE
+            )
+            if untargeted and beam_keeper.move_due(received_tick):
+                # A walk onto the strip dropped the attack; resume it from this tile.
+                reengage_telos(boss, player)
+            return
+        if standing and not always_block:
+            return
+        if not beam_keeper.move_due(received_tick):
+            return
+        # P1 uses strip tiles in melee reach only. P3 blocks the red strip anywhere, and from an
+        # out-of-reach strip tile still moves to one in reach when there is one.
         route = stream_destination(
             reader,
             kind,
             player,
             pose,
             rejected_tiles=beam_keeper.rejected,
-            max_reach=MELEE_REACH_TILES,
+            prefer_reach=True,
+            max_reach=MELEE_REACH_TILES if standing or not always_block else None,
         )
         if route is None:
-            # No strip tile in melee reach: standing elsewhere on it would be undone.
             beam_keeper.rejected.clear()
             return
         (target, _, config), point = route
-        if chebyshev(target, player_tile) > DIVE_RANGE_TILES:
-            use_dive = False
+        reach = footprint_distance(target, boss_tile, size)
+        # Dive keeps the attack target, so after an out-of-reach Dive the player walks back to
+        # Telos (06:51 run); a walk drops it and the player stays on the strip (P2 block, 07:15).
+        use_dive = (
+            "Dive" in bindings
+            and not timers.get("Dive")
+            and phase_one.expected != HOLD_STILL
+            and reach <= MELEE_REACH_TILES
+            and chebyshev(target, player_tile) <= DIVE_RANGE_TILES
+        )
         boss_id = boss.instance_id
         previous_cycle = reader.pointer_walk.menu_cycle
         hover = {}
@@ -2217,8 +2241,6 @@ def run(reader, args, board, attempt=None):
             beam_keeper.rejected.add(target)
         elif sent:
             beam_keeper.rejected.clear()
-        boss_tile = (pose.tile.x, pose.tile.y)
-        reach = footprint_distance(target, boss_tile, pose.footprint_size or 1)
         emit(
             "beam_keep_move",
             sent=sent,
@@ -2466,7 +2488,8 @@ def run(reader, args, board, attempt=None):
             )
             if outcome != "phase_changed":
                 moved = virus.finish()
-                if moved:
+                # In P3 the player stays on the red strip; the strip keeper resumes the attack.
+                if moved and phase not in BEAM_BLOCK_ALWAYS_PHASES:
                     virus_reengage = (phase, boss.instance_id)
         if onset:
             emit(
@@ -2569,10 +2592,8 @@ def run(reader, args, board, attempt=None):
             screen_point=screen_point,
         )
 
-    def beam_step(phase, phase_one, boss, meter, received_tick, *, movement_busy):
-        """Measure beam feeding and walk into the black stream while it feeds P2 Onslaught."""
-        if not isinstance(received_tick, int):
-            return
+    def observe_feeding(phase, meter, received_tick):
+        """Log when Telos's anima meter starts or stops rising; return whether it is fed."""
         feeding = beam_blocker.observe(meter, received_tick)
         if feeding != beam_blocker.feeding:
             beam_blocker.feeding = feeding
@@ -2582,6 +2603,13 @@ def run(reader, args, board, attempt=None):
                 meter=meter,
                 received_tick=received_tick,
             )
+        return feeding
+
+    def beam_step(phase, phase_one, boss, meter, received_tick, *, movement_busy):
+        """Measure beam feeding and walk into the black stream while it feeds P2 Onslaught."""
+        if not isinstance(received_tick, int):
+            return
+        feeding = observe_feeding(phase, meter, received_tick)
         if not input_allowed or movement_busy:
             return
         player = reader.spatial.player
@@ -3429,6 +3457,12 @@ def run(reader, args, board, attempt=None):
             telos_raw = player.variable(Variable.TELOS_PACKED)
             meter = None if telos_raw is None else telos_raw & METER_MASK
             beam_step(phase, phase_one, boss, meter, received_tick, movement_busy=movement_busy)
+        elif phase in BEAM_BLOCK_ALWAYS_PHASES and isinstance(received_tick, int):
+            # Shows whether the red strip block keeps Telos's meter from charging.
+            telos_raw = player.variable(Variable.TELOS_PACKED)
+            observe_feeding(
+                phase, None if telos_raw is None else telos_raw & METER_MASK, received_tick
+            )
         stomp_dodge(
             phase_one,
             boss,
