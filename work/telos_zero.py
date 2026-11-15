@@ -810,12 +810,78 @@ def gcd_remaining_now(player, sample_ns, now_ns):
         return 0
     remaining -= (now_ns - sample_ns) // 1_000_000
     return remaining if remaining > 0 else None
+
+
 UPPERCUT_ESCAPE_FALLBACK_NS = (2_400_000_000, 3_000_000_000)
 MOVEMENT_ABILITIES = frozenset({"Surge", "Escape"})
-MOVEMENT_WINDOWS = {
-    UPPERCUT: (3_600_000_000, 4_000_000_000, "Uppercut movement trial"),
-    HOLD_STILL: (2_900_000_000, 5_000_000_000, "Hold Still landing movement trial"),
-}
+# Uppercut misses a player at least 3 tiles from Telos (wiki). Escape jumps 7 tiles back from the
+# facing direction, but in the 07:35 P3 Uppercut the player stood near the arena edge: Escape
+# moved two tiles and the hit dealt 7,750 at +7. Surge jumps 10 tiles forward (account owner).
+# Only one is used: the controller projects both landings on the known floor and picks the one
+# that clears Uppercut (uppercut_dodge_choice).
+UPPERCUT_CLEAR_TILES = 3
+ESCAPE_DISTANCE_TILES = 7
+SURGE_DISTANCE_TILES = 10
+
+
+def eight_way(vector):
+    """Snap a tile vector to the nearest of the eight grid directions, or None for zero."""
+    if not vector[0] and not vector[1]:
+        return None
+    octant = round(math.atan2(vector[1], vector[0]) / (math.pi / 4)) % 8
+    return EIGHT_DIRECTIONS[octant]
+
+
+def ray_landing(origin, direction, distance, bounds):
+    """Last tile within ``bounds`` along ``distance`` grid steps from ``origin``.
+
+    The step is ``direction`` snapped to eight directions: the 07:35 Escape went (-2,-2), a
+    straight diagonal, and stopped at the floor edge. ``bounds`` is (min_x, min_y, max_x, max_y)
+    of the known floor. Returns None for a zero direction.
+    """
+    step = eight_way(direction)
+    if step is None:
+        return None
+    min_x, min_y, max_x, max_y = bounds
+    landing = origin
+    for count in range(1, distance + 1):
+        tile = (origin[0] + step[0] * count, origin[1] + step[1] * count)
+        if not (min_x <= tile[0] <= max_x and min_y <= tile[1] <= max_y):
+            break
+        landing = tile
+    return landing
+
+
+def uppercut_dodge_choice(player_tile, boss_tile, size, facing, bounds):
+    """Choose Escape or Surge for Uppercut from their projected landings.
+
+    ``facing`` is the player's heading as a tile vector. Escape lands up to 7 tiles behind and
+    Surge up to 10 ahead (possibly past Telos). Uppercut is avoided by moving at least
+    UPPERCUT_CLEAR_TILES: Telos charged two tiles after the player in the 07:35 run, so distance
+    from his old body does not count. A landing under the footprint never counts. Escape is
+    preferred when both clear; otherwise the longer jump. Returns (ability, escape_landing,
+    surge_landing), or None without a heading or floor.
+    """
+    if facing is None or bounds is None:
+        return None
+    backward = (-facing[0], -facing[1])
+    escape = ray_landing(player_tile, backward, ESCAPE_DISTANCE_TILES, bounds)
+    surge = ray_landing(player_tile, facing, SURGE_DISTANCE_TILES, bounds)
+    if escape is None or surge is None:
+        return None
+
+    def travel(landing):
+        if not footprint_distance(landing, boss_tile, size):
+            return 0
+        return chebyshev(landing, player_tile)
+
+    if travel(escape) >= UPPERCUT_CLEAR_TILES:
+        ability = "Escape"
+    elif travel(surge) >= UPPERCUT_CLEAR_TILES:
+        ability = "Surge"
+    else:
+        ability = "Surge" if travel(surge) > travel(escape) else "Escape"
+    return ability, escape, surge
 
 
 # Super restore (account owner, 2026-11-15): one dose on the L keybind whenever prayer points
@@ -1022,6 +1088,7 @@ class PhaseOne:
         flicking=False,
         stun_expiry=None,
         adrenaline_tenths=None,
+        uppercut_choice=None,
     ):
         """Use cooldown acknowledgement and bound the number of attempts for each mechanic.
 
@@ -1077,17 +1144,15 @@ class PhaseOne:
             and not self.hold_position
             and self.autos == 0
             and "Escape" not in self.handled
-            and "Escape" in cooldowns
-            and not cooldowns["Escape"]
+            and "Surge" not in self.handled
             and self.uppercut_escape_due(elapsed_ns, received_tick)
         ):
-            return Action("Escape", "Uppercut escape")
-        movement = MOVEMENT_WINDOWS.get(self.special)
-        if movement and not self.hold_position and self.autos == 0 and "Surge" not in self.handled:
-            earliest_ns, latest_ns, reason = movement
-            if earliest_ns <= elapsed_ns <= latest_ns and "Surge" in cooldowns:
-                if not cooldowns["Surge"]:
-                    return Action("Surge", reason)
+            # One jump only: the one with room to clear Uppercut, else the other if it is ready.
+            order = ("Surge", "Escape") if uppercut_choice == "Surge" else ("Escape", "Surge")
+            for ability in order:
+                if ability in cooldowns and not cooldowns[ability]:
+                    reason = "Uppercut escape" if ability == "Escape" else "Uppercut Surge"
+                    return Action(ability, reason)
         if not gcd_ready:
             return None
         if (
@@ -1797,8 +1862,11 @@ def run(reader, args, board, attempt=None):
     floor_phase = [None]
 
     def remember_floor(phase, boss):
-        """Collect walkable tiles for the stomp dodge (only needed when Dive is bound)."""
-        if "Dive" not in bindings:
+        """Collect walkable tiles for the stomp dodge and the Uppercut jump choice.
+
+        Player tiles, Telos's body and the strips (which sweep the platform) all count.
+        """
+        if not {"Dive", "Escape", "Surge"} & bindings.keys():
             return
         if phase != floor_phase[0]:
             floor_tiles.clear()  # Each phase is a different platform.
@@ -1806,6 +1874,12 @@ def run(reader, args, board, attempt=None):
         player = reader.spatial.player
         if player.valid_mask & SpatialFlags.TILE:
             floor_tiles.add((player.tile.x, player.tile.y))
+            for hazard in reader.hazards[: reader.hazard_info.count]:
+                if (
+                    hazard.flags & HazardFlags.SCENE_LOCATION
+                    and hazard.tile.plane == player.tile.plane
+                ):
+                    floor_tiles.add((hazard.tile.x, hazard.tile.y))
         for pose in reader.npc_spatial[: reader.spatial.npc_count]:
             if pose.instance_id == boss.instance_id and pose.valid_mask & SpatialFlags.TILE:
                 size = pose.footprint_size or 1
@@ -2920,6 +2994,76 @@ def run(reader, args, board, attempt=None):
         elapsed_ms -= (tick - tick_clock["tick"]) * TICK_MS
         return elapsed_ms if 0 <= elapsed_ms <= TICK_MS else None
 
+    # Facing is unmapped on Compatibility Mode: the last walking step stands in for it.
+    heading = {"tile": None, "vector": None}
+
+    def update_heading():
+        """Remember the direction of the player's last walking step."""
+        player = reader.spatial.player
+        if not player.valid_mask & SpatialFlags.TILE:
+            return
+        tile = (player.tile.x, player.tile.y)
+        previous = heading["tile"]
+        if previous is not None and tile != previous and chebyshev(tile, previous) <= 2:
+            heading["vector"] = (tile[0] - previous[0], tile[1] - previous[1])
+        heading["tile"] = tile
+
+    def uppercut_choice():
+        """Escape or Surge for the current Uppercut, with the facing and landings it used.
+
+        A player attacking Telos faces his centre; otherwise the last walking step is used.
+        Returns None when a tile, Telos's pose, a heading or the known floor is missing.
+        """
+        player = reader.spatial.player
+        if not player.valid_mask & SpatialFlags.TILE or active_instance is None or not floor_tiles:
+            return None
+        pose = next(
+            (
+                candidate
+                for candidate in reader.npc_spatial[: reader.spatial.npc_count]
+                if candidate.instance_id == active_instance
+                and candidate.valid_mask & SpatialFlags.TILE
+            ),
+            None,
+        )
+        if pose is None:
+            return None
+        size = pose.footprint_size or 1
+        boss_tile = (pose.tile.x, pose.tile.y)
+        player_tile = (player.tile.x, player.tile.y)
+        attacking = bool(
+            player.valid_mask & SpatialFlags.TARGET
+            and player.target_kind == SpatialTargetKind.NPC
+        )
+        if attacking:
+            offset = (size - 1) / 2
+            facing = (
+                boss_tile[0] + offset - player_tile[0],
+                boss_tile[1] + offset - player_tile[1],
+            )
+        else:
+            facing = heading["vector"]
+        bounds = (
+            min(tile[0] for tile in floor_tiles),
+            min(tile[1] for tile in floor_tiles),
+            max(tile[0] for tile in floor_tiles),
+            max(tile[1] for tile in floor_tiles),
+        )
+        choice = uppercut_dodge_choice(player_tile, boss_tile, size, facing, bounds)
+        if choice is None:
+            return None
+        ability, escape, surge = choice
+        return {
+            "ability": ability,
+            "escape_landing": escape,
+            "surge_landing": surge,
+            "facing": facing,
+            "facing_source": "target" if attacking else "last_step",
+            "player_tile": player_tile,
+            "boss_tile": boss_tile,
+            "floor_bounds": bounds,
+        }
+
     def telos_distance():
         """Player's grid distance to Telos's footprint, or None without both tiles."""
         player = reader.spatial.player
@@ -3369,6 +3513,11 @@ def run(reader, args, board, attempt=None):
         }
         gcd_remaining_ms = gcd_remaining_now(player, info.monotonic_ns, reader.monotonic_ns())
         phase_one.hold_position = font_duty.active  # A new phase object starts without it.
+        dodge_choice = None
+        if {"Escape", "Surge"} & bindings.keys():
+            update_heading()
+            if phase_one.special == UPPERCUT:
+                dodge_choice = uppercut_choice()
         action = phase_one.next_action(
             now,
             timers,
@@ -3379,6 +3528,7 @@ def run(reader, args, board, attempt=None):
             flicking=flicker is not None,
             stun_expiry=active_stun_expiry(reader, getattr(info, "logic_tick", None)),
             adrenaline_tenths=player.variable(Variable.ADRENALINE),
+            uppercut_choice=dodge_choice["ability"] if dodge_choice else None,
         )
         if phase_one.cast_result:
             ability, confirmed = phase_one.cast_result
@@ -3448,6 +3598,15 @@ def run(reader, args, board, attempt=None):
                 surge_origin = tile
                 surge_sent_ns = sent_ns
                 surge_cue = pending_cue
+                if action.reason.startswith("Uppercut"):
+                    # Compare the projected landings with surge_displacement and the hitmark.
+                    emit(
+                        "uppercut_dodge_choice",
+                        sent=action.ability,
+                        received_tick=received_tick,
+                        cue_native_sequence=pending_cue,
+                        **(dodge_choice or {"ability": None}),
+                    )
             log("ability_sent", ability=action.ability, reason=action.reason, sent_ns=sent_ns)
         remember_floor(phase, boss)
         movement_busy = phase_one.owns_movement(reader.monotonic_ns(), received_tick)
@@ -3493,14 +3652,19 @@ ACTION_BAR_KEY_ARGUMENTS = {
     "dive": "Dive",
     "reflect": "Reflect",
     "devotion": "Devotion",
+    "surge": "Surge",
     "flick_melee_key": "Deflect Melee",
     "flick_magic_key": "Deflect Magic",
     "flick_soul_split_key": "Soul Split",
 }
-FLICK_KEY_FALLBACKS = {
+# Keys used when a bar scan does not find the ability. Devotion on F7 and Surge on K were set up
+# by the account owner on 2026-11-15; the 07:01 scan did not find Devotion on a displayed bar.
+KEY_FALLBACKS = {
     "flick_melee_key": DEFAULT_FLICK_MELEE_KEY,
     "flick_magic_key": DEFAULT_FLICK_MAGIC_KEY,
     "flick_soul_split_key": DEFAULT_FLICK_SOUL_SPLIT_KEY,
+    "devotion": "F7",
+    "surge": "K",
 }
 
 
@@ -3532,8 +3696,8 @@ def resolve_action_bar_keys(reader, args, attempt=None):
             setattr(args, argument, bindings[name].key_label)
             sources[argument] = f"action_bar {bindings[name].display_bar}:{bindings[name].slot}"
             args.displayed_keys = True
-        elif argument in FLICK_KEY_FALLBACKS:
-            setattr(args, argument, FLICK_KEY_FALLBACKS[argument])
+        elif argument in KEY_FALLBACKS:
+            setattr(args, argument, KEY_FALLBACKS[argument])
             sources[argument] = "default"
     missing = [
         ACTION_BAR_KEY_ARGUMENTS[argument]
@@ -3598,7 +3762,10 @@ def main():
     )
     parser.add_argument("--hurricane", help="Current Hurricane binding, if equipped on the bar")
     parser.add_argument("--timed-freedom", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--surge", help="Optional Surge binding for experimental movement")
+    parser.add_argument(
+        "--surge", help="Surge key (default: from action bar, else K), used for Uppercut instead "
+        "of Escape when Escape lacks room"
+    )
     parser.add_argument(
         "--escape", help="Optional Escape binding, sent 4-5 received ticks after Uppercut"
     )

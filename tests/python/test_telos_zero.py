@@ -100,15 +100,62 @@ class PhaseOneTests(unittest.TestCase):
         self.assertIsNone(phase.next_action(5 * SECOND_NS, {"Freedom": 16000}, 0, Prayer.NONE))
         self.assertEqual(phase.cast_result, ("Freedom", True))
 
-    def test_movement_requires_cue_and_configured_cooldown_within_window(self):
+    def test_uppercut_dodge_choice_projects_escape_and_surge_on_the_known_floor(self):
+        choose = controller["uppercut_dodge_choice"]
+        # 07:35 P3: player (10129,844) attacking Telos at (10131,844); the floor seen began at
+        # y 842. Escape went south-west and stopped at (10127,842), two tiles: hit for 7,750.
+        bounds = (10122, 842, 10160, 880)
+        facing = (10133 - 10129, 846 - 844)
+        ability, escape, surge = choose((10129, 844), (10131, 844), 5, facing, bounds)
+        self.assertEqual(escape, (10127, 842))
+        self.assertEqual(ability, "Surge")
+        self.assertEqual(surge, (10139, 854))
+        # With room behind, Escape is kept.
+        open_floor = (10100, 820, 10160, 880)
+        self.assertEqual(choose((10129, 844), (10131, 844), 5, facing, open_floor)[0], "Escape")
+        # A Surge that would stop under Telos does not count as clearing.
+        cramped = (10127, 842, 10133, 846)
+        self.assertEqual(choose((10129, 844), (10131, 844), 5, facing, cramped)[0], "Escape")
+        # Unknown heading or floor: no choice.
+        self.assertIsNone(choose((10129, 844), (10131, 844), 5, None, bounds))
+        self.assertIsNone(choose((10129, 844), (10131, 844), 5, facing, None))
+        landing = controller["ray_landing"]
+        self.assertEqual(landing((5, 5), (1, 0), 7, (0, 0, 8, 10)), (8, 5))
+        self.assertEqual(landing((5, 5), (3, -1), 3, (0, 0, 20, 20)), (8, 5))
+        self.assertIsNone(landing((5, 5), (0, 0), 7, (0, 0, 8, 10)))
+
+    def test_uppercut_uses_one_jump_chosen_by_space(self):
+        timers = {"Escape": 0, "Surge": 0}
+        for choice, expected in (("Surge", "Surge"), ("Escape", "Escape"), (None, "Escape")):
+            phase = PhaseOne(phase=3)
+            phase.observe([dict(event(1, UPPERCUT), received_tick=15150)])
+            self.assertIsNone(
+                phase.next_action(SECOND_NS, timers, 0, Prayer.MELEE, received_tick=15153,
+                                  uppercut_choice=choice)
+            )
+            action = phase.next_action(
+                SECOND_NS, timers, 0, Prayer.MELEE, received_tick=15154, uppercut_choice=choice
+            )
+            self.assertEqual(action.ability, expected)
+            phase.sent(action, SECOND_NS)
+            # Never the other jump as well.
+            cooling = {expected: 20_000, ({"Escape", "Surge"} - {expected}).pop(): 0}
+            self.assertIsNone(
+                phase.next_action(SECOND_NS + 1, cooling, 0, Prayer.MELEE, received_tick=15155,
+                                  uppercut_choice="Surge" if expected == "Escape" else "Escape")
+            )
+        # The chosen jump cooling: the other one goes instead.
         phase = PhaseOne()
-        timers = {"Surge": None}
-        phase.observe([event(1, UPPERCUT)])
-        self.assertIsNone(phase.next_action(4 * SECOND_NS, timers, 0, Prayer.MELEE))
-        self.assertIsNone(phase.next_action(5 * SECOND_NS, {}, 0, Prayer.MELEE))
-        action = phase.next_action(5 * SECOND_NS, timers, 0, Prayer.MELEE)
-        self.assertEqual(action.ability, "Surge")
-        self.assertIsNone(phase.next_action(6 * SECOND_NS, timers, 0, Prayer.MELEE))
+        phase.observe([dict(event(2, UPPERCUT), received_tick=200)])
+        action = phase.next_action(
+            SECOND_NS, {"Escape": 9_000, "Surge": 0}, 0, Prayer.MELEE, received_tick=204,
+            uppercut_choice="Escape",
+        )
+        self.assertEqual(action, controller["Action"]("Surge", "Uppercut Surge"))
+        # Hold Still no longer triggers the old Surge trial.
+        still = PhaseOne()
+        still.observe([event(3, HOLD_STILL)])
+        self.assertIsNone(still.next_action(4 * SECOND_NS, {"Surge": 0}, 0, Prayer.MELEE))
 
     def test_freedom_only_while_stunned_and_once_per_stun(self):
         phase = PhaseOne()
@@ -624,16 +671,20 @@ class PhaseOneTests(unittest.TestCase):
         phase.observe([event(1, UPPERCUT), event(2, AUTO), event(3, AUTO)])
         self.assertIsNone(phase.next_action(6 * SECOND_NS, {"Anticipation": None}, 0, Prayer.MELEE))
 
-    def test_hold_still_surge_keeps_its_acknowledgement_window(self):
+    def test_uppercut_surge_keeps_its_acknowledgement_window(self):
         phase = PhaseOne()
-        phase.observe([event(1, HOLD_STILL)])
+        phase.observe([dict(event(1, UPPERCUT), received_tick=10)])
         now = 4 * SECOND_NS
-        action = phase.next_action(now, {"Surge": 0}, 0, Prayer.MELEE)
+        timers = {"Escape": 0, "Surge": 0}
+        action = phase.next_action(now, timers, 0, Prayer.MELEE, received_tick=14,
+                                   uppercut_choice="Surge")
         self.assertEqual(action.ability, "Surge")
         phase.sent(action, now)
-        self.assertIsNone(phase.next_action(now + 1, {"Surge": 0}, 0, Prayer.MELEE))
+        self.assertIsNone(phase.next_action(now + 1, timers, 0, Prayer.MELEE, received_tick=14,
+                                            uppercut_choice="Surge"))
         self.assertIsNone(phase.cast_result)
-        phase.next_action(now + 2, {"Surge": 10000}, 0, Prayer.MELEE)
+        phase.next_action(now + 2, {"Escape": 0, "Surge": 10000}, 0, Prayer.MELEE,
+                          received_tick=15, uppercut_choice="Surge")
         self.assertEqual(phase.cast_result, ("Surge", True))
 
 

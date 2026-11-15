@@ -125,8 +125,8 @@ auto-retaliate on. Start the script, click into RuneScape and wake Telos yoursel
 The enrage comes from memory (VARP 6359). Ability and prayer keys come from the
 displayed action bars: Freedom and Anticipation are required. Escape, Resonance,
 Dive, Deflect Magic, Deflect Melee and Soul Split are used when present, and
-Reflect and Devotion are optional. Super restore is drunk with ``L`` at 50 prayer
-points or fewer. The script runs until the player dies or F12 is pressed. Losing
+Reflect is optional. Devotion falls back to ``F7`` and Surge to ``K`` when no bar
+shows them. Super restore is drunk with ``L`` at 50 prayer points or fewer. The script runs until the player dies or F12 is pressed. Losing
 foreground focus pauses input. Each attempt is logged to ``training-data/telos-*.jsonl``.
 
 Optional arguments:
@@ -134,7 +134,7 @@ Optional arguments:
 * ``--practice-enrage N`` overrides the enrage read from memory.
 * ``--duration SECONDS`` bounds the session.
 * ``--pid ID`` selects the client process.
-* ``--freedom``, ``--anticipation``, ``--escape``, ``--resonance``, ``--dive``,
+* ``--freedom``, ``--anticipation``, ``--escape``, ``--surge``, ``--resonance``, ``--dive``,
   ``--reflect``, ``--devotion`` and ``--flick-melee-key`` / ``--flick-magic-key`` /
   ``--flick-soul-split-key`` override a key read from the bars. Displayed letters are
   translated through the game window's keyboard layout.

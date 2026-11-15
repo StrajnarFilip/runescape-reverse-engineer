@@ -9,8 +9,15 @@ handling. See the coverage table for the evidence and open timing questions. [Se
 
 Stand on the staging platform with Telos dormant and Revolution on bar 18. Put Freedom,
 Anticipation, Escape, Resonance, Dive and the Deflect Magic, Deflect Melee and Soul Split prayers on
-any displayed action bar. Reflect and Devotion are optional, and super restores go on the `L`
-keybind (`--super-restore` changes it). The controller reads their keys from game memory
+any displayed action bar. Reflect is optional. Devotion falls back to `F7` and Surge to `K`
+when no bar shows them, and super restores go on the `L` keybind (`--super-restore` changes
+it).
+For Uppercut the controller sends one jump: Escape (7 tiles back) or Surge (10 tiles forward).
+It projects both along the facing direction, snapped to eight directions, within the bounds of
+the floor seen this phase. Facing is Telos's centre while attacking, otherwise the last walking
+step. Escape is used if it moves the player at least 3 tiles and does not land under Telos,
+otherwise Surge if Surge does. The `uppercut_dodge_choice` row records both landings next to
+`surge_displacement`. The controller reads their keys from game memory
 (`rs3_reader.action_bar_keys`) and logs them as `keys_resolved`; a key passed on the command line
 takes precedence. Start the script, click into RuneScape, and wake Telos yourself. After engagement,
 leaving the encounter closes its attempt log. Losing focus pauses input until RuneScape is focused
