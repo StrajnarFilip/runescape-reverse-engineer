@@ -5,6 +5,10 @@
   "source": "https://pvme.io/pvme-guides/rs3-full-boss-guides/telos/melee/#phase-1",
   "live_validated": false,
   "movement_owner": "user",
+  "require_dormant_start": true,
+  "dormant_config_id": 22892,
+  "active_config_id": 22891,
+  "wake_cue_status": "active-form transition candidate; exact targetability tick not validated",
   "maximum_age_ms": 150,
   "acknowledgement_timeout_ms": 2500,
   "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
@@ -14,28 +18,33 @@
   "preparation_reference": ["At least two Bloodlust stacks", "Natural Instinct", "Dragon battleaxe special"],
   "steps": [
     {
-      "id": "phase_entry_vulnerability",
-      "same_tick": false,
-      "actions": [{"id": "vulnerability", "kind": "item", "role": "vulnerability_bomb", "key": "S", "item_id": 48951}]
-    },
-    {
       "id": "devotion_and_manual_surge",
       "same_tick": false,
+      "requires_target": false,
+      "opening_only": true,
       "manual_action": {"name": "Surge", "ability_id": 14726, "lane": "off_gcd", "key": "V"},
       "actions": [{"id": "devotion", "kind": "ability", "ability_id": 25028, "name": "Devotion", "key": "Alt+G"}]
     },
     {
       "id": "berserk_then_renewal",
       "same_tick": true,
+      "requires_target": false,
+      "opening_only": true,
       "actions": [
         {"id": "berserk", "kind": "ability", "ability_id": 14707, "name": "Berserk", "key": "F"},
         {"id": "renewal", "kind": "item", "role": "adrenaline_renewal", "key": "PgDn", "item_id": null}
       ]
     },
     {
-      "id": "greater_barge",
-      "same_tick": false,
-      "actions": [{"id": "greater_barge", "kind": "ability", "ability_id": 14678, "name": "Greater Barge", "base_name": "Barge", "required_upgrade": "Greater Barge", "key": "G"}]
+      "id": "wake_target_cycle_vulnerability_barge",
+      "same_tick": true,
+      "requires_target": false,
+      "requires_wake_edge": true,
+      "actions": [
+        {"id": "target_cycle", "kind": "target_cycle", "key": "A"},
+        {"id": "vulnerability", "kind": "item", "role": "vulnerability_bomb", "key": "S", "item_id": 48951},
+        {"id": "greater_barge", "kind": "ability", "ability_id": 14678, "name": "Greater Barge", "base_name": "Barge", "required_upgrade": "Greater Barge", "key": "G"}
+      ]
     },
     {
       "id": "meteor_strike",
@@ -80,6 +89,7 @@
     "Greater Barge upgrade and channel conversion are separate requirements from a base Barge timer.",
     "Equipment changes and each action need individual native confirmation; input acceptance never advances a step.",
     "Movement and Surge remain with the user for the first P1 attempts.",
+    "Berserk/renewal precede target selection; A-S-G is submitted together at the wake cue and checked afterward.",
     "Vulnerability is requested once on entry to each phase; this plan stops at the end of P1.",
     "Prayer control reuses D2 and the C planner; unvalidated timing does not authorize Soul Split flicks."
   ]

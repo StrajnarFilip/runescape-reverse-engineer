@@ -131,6 +131,19 @@ Requests
   +0x98. Groups 1430 and 1670..1673 correspond to the five displayed bars. The
   prepared executor needs a guarded C source and binding-change invalidation;
   do not copy the independent research decoder into runtime acquisition.
+* Opening correction from the user: Berserk/renewal happen while Telos is
+  dormant and no selected target is required. The next group is A target cycle,
+  S vulnerability and G Greater Barge in one ordered submission. The coordinator
+  now observes a unique dormant 22892 actor, retains its native lifetime across
+  the candidate active 22891 form transition, and binds A-S-G to that edge.
+  A late attachment, changed lifetime or missed wake window blocks input.
+  NPC identities in the C reader persist across a config morph while the actor
+  pointer remains the same; a replaced actor gets a new lifetime.
+* The active-form edge is a candidate wake cue, not a validated targetability
+  deadline. Target-cycle acknowledgement independently requires the exact
+  selected active Telos. A-S-G is confirmed after submission, with no wait
+  between its individual inputs. Ten ordered-sequence scenarios now pass
+  (28 D4 tests total, one local raw-capture skip in the isolated worktree).
 
 * Later account session: fill intended weapon/unlock constraints and calibrated
   keys once. Unknown setup is not silently populated from a guide or account

@@ -642,7 +642,14 @@ class OrderedP1Rotation:
                     or not action["id"]
                     or action["id"] in identifiers
                     or action.get("kind")
-                    not in ("ability", "item", "equip", "weapon_special", "eof_special")
+                    not in (
+                        "ability",
+                        "item",
+                        "equip",
+                        "weapon_special",
+                        "eof_special",
+                        "target_cycle",
+                    )
                     or not isinstance(action.get("key"), str)
                     or not action["key"]
                 ):
@@ -658,6 +665,10 @@ class OrderedP1Rotation:
         self._confirmed = set()
         self._last_sample = None
         self._last_time = None
+        self._encounter_identity = None
+        self._dormant_seen = False
+        self._wake_observed_ns = None
+        self._wake_tick = None
 
     @property
     def complete(self):
@@ -710,6 +721,26 @@ class OrderedP1Rotation:
             return None
         return target.value
 
+    def _encounter_npc(self, world):
+        """Read one exact dormant/active Telos; a form change preserves its lifetime."""
+        if not self._fresh(world.npcs):
+            return None
+        actors = [
+            npc
+            for npc in world.npcs.value
+            if all(self._fresh(value) for value in (npc.instance_id, npc.runtime_id, npc.config_id))
+            and _integer(npc.instance_id.value, 1)
+            and _integer(npc.runtime_id.value)
+            and npc.config_id.value
+            in (self.document["dormant_config_id"], self.document["active_config_id"])
+        ]
+        if len(actors) != 1:
+            return None
+        actor = actors[0]
+        return EntityRef(
+            "npc", actor.instance_id.value, actor.runtime_id.value, actor.config_id.value
+        )
+
     def step(self, world, readiness=None):
         """Offer the current whole batch only after every action is explicitly ready.
 
@@ -748,13 +779,27 @@ class OrderedP1Rotation:
             self.fault = "clock_or_sample_regressed"
             return None
         self._last_sample, self._last_time = world.sample_sequence, world.now_ns
-        if not self._fresh(world.telos.phase) or world.telos.phase.value != 1:
-            self.reasons = ("phase_one_not_observed",)
-            return None
-        target = self._target(world)
+        target = self._encounter_npc(world)
         if target is None:
-            self.reasons = ("exact_live_telos_target_unavailable",)
+            self.reasons = ("unique_telos_form_unavailable",)
             return None
+        identity = target.instance_id, target.runtime_id
+        if self._encounter_identity is None:
+            self._encounter_identity = identity
+        elif self._encounter_identity != identity:
+            self.fault = "telos_lifetime_changed"
+            return None
+        dormant = target.config_id == self.document["dormant_config_id"]
+        if dormant:
+            self._dormant_seen = True
+        elif self.document.get("require_dormant_start") and not self._dormant_seen:
+            self.fault = "dormant_start_not_observed"
+            return None
+        elif self._wake_observed_ns is None:
+            self._wake_observed_ns = world.observed_ns
+            tick = world.game_tick
+            if self._fresh(tick) and isinstance(tick.value, Mapping):
+                self._wake_tick = tick.value.get("index")
         if self._pending:
             if (
                 world.now_ns - self._pending[1]
@@ -764,6 +809,33 @@ class OrderedP1Rotation:
             self.reasons = ("awaiting_individual_native_confirmations",)
             return None
         step = self.current_step
+        if step.get("opening_only"):
+            if not dormant:
+                self.fault = "opening_window_missed"
+                return None
+        elif not (step.get("requires_wake_edge") and dormant) and (
+            not self._fresh(world.telos.phase) or world.telos.phase.value != 1
+        ):
+            self.reasons = ("phase_one_not_observed",)
+            return None
+        if step.get("requires_wake_edge"):
+            if dormant or self._wake_observed_ns is None:
+                self.reasons = ("waiting_for_native_wake_candidate",)
+                return None
+            tick = world.game_tick
+            if world.now_ns - self._wake_observed_ns > self.document[
+                "maximum_age_ms"
+            ] * NS_PER_MS or (
+                self._wake_tick is not None
+                and self._fresh(tick)
+                and isinstance(tick.value, Mapping)
+                and tick.value.get("index") != self._wake_tick
+            ):
+                self.fault = "wake_window_missed"
+                return None
+        if step.get("requires_target", True) and self._target(world) != target:
+            self.reasons = ("exact_live_telos_target_unavailable",)
+            return None
         readiness = {} if readiness is None else readiness
         if not isinstance(readiness, Mapping):
             raise TypeError("P1 readiness must be a mapping of action IDs to Observations")
@@ -827,6 +899,12 @@ class OrderedP1Rotation:
             return False
         batch, sent_ns = self._pending
         identifiers = {action["id"] for action in batch.actions}
+        step = self.current_step
+        target = self._encounter_npc(world) if isinstance(world, WorldState) else None
+        same_actor = target is not None and (target.instance_id, target.runtime_id) == (
+            batch.target.instance_id,
+            batch.target.runtime_id,
+        )
         if (
             action_id not in identifiers
             or action_id in self._confirmed
@@ -845,9 +923,13 @@ class OrderedP1Rotation:
             <= world.now_ns - world.observed_ns
             <= self.document["maximum_age_ms"] * NS_PER_MS
             or world.now_ns - sent_ns > self.document["acknowledgement_timeout_ms"] * NS_PER_MS
-            or not self._fresh(world.telos.phase)
-            or world.telos.phase.value != 1
-            or self._target(world) != batch.target
+            or not same_actor
+            or (
+                not step.get("opening_only")
+                and (not self._fresh(world.telos.phase) or world.telos.phase.value != 1)
+            )
+            or (step.get("requires_target", True) and self._target(world) != target)
+            or (action_id == "target_cycle" and self._target(world) != target)
             or not self._fresh(observation)
             or observation.value is not True
         ):
