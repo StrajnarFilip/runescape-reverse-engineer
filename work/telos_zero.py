@@ -128,10 +128,16 @@ ENCOUNTER_RESET = 3
 # (account owner, 2026-11-14; up to 9,900 at 500%). If the player is still underneath during
 # these received ticks after 28935, Dive to a tile this far from Telos's centre.
 # Telos relocated at +3 in the 500% capture of 2026-11-14 and the stomp follows his new position
-# at +8/+9, so the check starts once he has moved (and after Resonance's +2..+4 slot: a click
-# right after queuing Resonance coincided with Resonance never casting).
-STOMP_CHECK_TICKS = (4, 7)
+# at +8/+9. A Dive sent at +6 casts at +8, which was a tick too late (account owner; 06:51 P3
+# death, 07:01 P1 Dive at +7 after two rejected hovers), so the check starts at +3 and allows a
+# second target in the same tick after a rejected hover. At +3 the dodge yields to a Resonance
+# press due before it could finish (STOMP_DODGE_BUDGET_MS) and runs right after that press.
+STOMP_CHECK_TICKS = (3, 6)
 STOMP_PREFLIGHT_TICK = STOMP_CHECK_TICKS[0] - 1
+STOMP_ATTEMPTS_PER_TICK = 2
+STOMP_DODGE_BUDGET_MS = 400
+# Until this tick an outside position is checked again: Telos can still move next to the player.
+STOMP_RELOCATION_TICK = 3
 # The Dive press and the click are separated so the client is in targeting mode first; a
 # Dive that leaves the tile unchanged after this many ticks falls back to walking there.
 DIVE_SELECT_SECONDS = 0.15
@@ -772,6 +778,8 @@ RESONANCE_LATEST_PRESS_TICK = HOLD_STILL_HEAVY_HIT_TICK - 1
 # One GCD is three ticks, so after a press window at +T the next one is at +T+3.
 GCD_TICKS = 3
 TICK_MS = TICK_FALLBACK_NS // 1_000_000
+# A GCD ending at the next tick boundary has at most the rest of this tick left, plus jitter.
+GCD_BOUNDARY_TOLERANCE_MS = 100
 # Devotion, when Resonance cannot take the heavy hit (account owner): with Deflect Melee up it
 # turns the heavy melee hit into 1. It needs 50% adrenaline (tenths in VARP adrenaline) and lasts
 # past +4 from any cast on +1..+4.
@@ -858,6 +866,7 @@ class PhaseOne:
         self.stomp_prepared = None
         self.stomp_rejected = set()
         self.stomp_attempt_tick = None
+        self.stomp_tick_attempts = 0
         # Set while a P4 font needs the player: Escape and Surge would leave the font.
         self.hold_position = False
         self.opening_tick = None
@@ -958,6 +967,7 @@ class PhaseOne:
                 self.stomp_prepared = None
                 self.stomp_rejected.clear()
                 self.stomp_attempt_tick = None
+                self.stomp_tick_attempts = 0
                 self.expected = self.next_special[sequence]
                 if sequence in IMMEDIATE_FORECAST_CUES:
                     # The forecast window counts from the cue itself.
@@ -1125,17 +1135,21 @@ class PhaseOne:
             cooldowns, received_tick
         )
 
-    def resonance_planned(self, cooldowns, received_tick, gcd_remaining_ms):
+    def resonance_planned(self, cooldowns, received_tick, gcd_remaining_ms, tick_elapsed_ms=None):
         """Whether Resonance will be pressed before this received tick ends.
 
         True from the start of the tick when the GCD ends at the next tick boundary, so Soul
         Split can be requested early in the tick rather than after the late Resonance press.
+        ``tick_elapsed_ms`` is the time since this received tick was first seen. In the 07:01
+        run, 780 ms left late in +3 ended two ticks later, and Soul Split took the heavy hit.
         """
-        return (
-            gcd_remaining_ms is not None
-            and gcd_remaining_ms <= TICK_MS + GCD_PRESS_LEAD_MS
-            and self.resonance_tick_ok(cooldowns, received_tick)
-        )
+        if gcd_remaining_ms is None:
+            return False
+        if tick_elapsed_ms is None:
+            limit = GCD_PRESS_LEAD_MS
+        else:
+            limit = max(0, TICK_MS - tick_elapsed_ms) + GCD_BOUNDARY_TOLERANCE_MS
+        return gcd_remaining_ms <= limit and self.resonance_tick_ok(cooldowns, received_tick)
 
     def resonance_committed(self):
         """Whether this Hold Still's Resonance press went out and has not been refuted."""
@@ -1145,10 +1159,12 @@ class PhaseOne:
             and not self.resonance_failed
         )
 
-    def soul_split_for_heavy_hit(self, cooldowns, received_tick, gcd_remaining_ms):
+    def soul_split_for_heavy_hit(
+        self, cooldowns, received_tick, gcd_remaining_ms, tick_elapsed_ms=None
+    ):
         """Whether Resonance takes Hold Still's heavy hit, so Soul Split can replace Deflect."""
         return self.resonance_committed() or self.resonance_planned(
-            cooldowns, received_tick, gcd_remaining_ms
+            cooldowns, received_tick, gcd_remaining_ms, tick_elapsed_ms
         )
 
     def devotion_press_possible(self, cooldowns, received_tick, adrenaline_tenths):
@@ -1758,7 +1774,7 @@ def run(reader, args, board, attempt=None):
                     for dy in range(size):
                         floor_tiles.add((pose.tile.x + dx, pose.tile.y + dy))
 
-    def stomp_dodge(phase_one, boss, received_tick, timers):
+    def stomp_dodge(phase_one, boss, received_tick, timers, gcd_remaining_ms):
         """Dive out from under Telos before the Hold Still stomp, once per Hold Still."""
         if (
             not input_allowed
@@ -1774,9 +1790,18 @@ def run(reader, args, board, attempt=None):
         if delta < STOMP_PREFLIGHT_TICK:
             return
         preflight = delta == STOMP_PREFLIGHT_TICK
-        if preflight and phase_one.resonance_press_possible(timers, received_tick):
-            # The +3 Resonance press comes at the end of the GCD; a pointer check now could
-            # hold the loop past it. The dodge itself is checked from +4.
+        resonance_pending = phase_one.resonance_press_possible(timers, received_tick)
+        if preflight and resonance_pending:
+            # The Resonance press comes at the end of the GCD; a pointer check now could hold
+            # the loop past it.
+            return
+        if (
+            resonance_pending
+            and gcd_remaining_ms is not None
+            and gcd_remaining_ms <= GCD_PRESS_LEAD_MS + STOMP_DODGE_BUDGET_MS
+            and phase_one.resonance_tick_ok(timers, received_tick)
+        ):
+            # Resonance is pressed before a dodge started now could finish: dodge right after.
             return
         pending = phase_one.stomp_pending
         movement_window_open = delta <= STOMP_CHECK_TICKS[1]
@@ -1902,7 +1927,10 @@ def run(reader, args, board, attempt=None):
                         break
                 else:
                     return None
+            if phase_one.stomp_attempt_tick != received_tick:
+                phase_one.stomp_tick_attempts = 0
             phase_one.stomp_attempt_tick = received_tick
+            phase_one.stomp_tick_attempts += 1
             hover = {}
             sent = safe_ground_click(point, dive=dive, on_beam=on_beam, hover=hover)
             if preflight and sent:
@@ -1975,8 +2003,8 @@ def run(reader, args, board, attempt=None):
             abs(player_tile[1] - (boss_tile[1] + (size - 1) / 2)),
         )
         if not in_stomp_area(boss_tile, size, player_tile):
-            if preflight:
-                return  # Telos can still reposition before the response window.
+            if delta <= STOMP_RELOCATION_TICK:
+                return  # Telos can still reposition: check again next tick.
             phase_one.stomp_checked = True
             emit(
                 "stomp_check",
@@ -1987,7 +2015,10 @@ def run(reader, args, board, attempt=None):
                 received_tick_delta=delta,
             )
             return
-        if phase_one.stomp_attempt_tick == received_tick:
+        if (
+            phase_one.stomp_attempt_tick == received_tick
+            and phase_one.stomp_tick_attempts >= STOMP_ATTEMPTS_PER_TICK
+        ):
             return
         use_dive = not timers.get("Dive")
         movement = attempt_ground_move(dive=use_dive)
@@ -2503,7 +2534,7 @@ def run(reader, args, board, attempt=None):
         )
 
     def beam_step(phase, phase_one, boss, meter, received_tick, *, movement_busy):
-        """Measure beam feeding and optionally trial a verified walk during P2 Onslaught."""
+        """Measure beam feeding and walk into the black stream while it feeds P2 Onslaught."""
         if not isinstance(received_tick, int):
             return
         feeding = beam_blocker.observe(meter, received_tick)
@@ -2515,7 +2546,7 @@ def run(reader, args, board, attempt=None):
                 meter=meter,
                 received_tick=received_tick,
             )
-        if not getattr(args, "block_black_stream", False) or not input_allowed or movement_busy:
+        if not input_allowed or movement_busy:
             return
         player = reader.spatial.player
         if not player.valid_mask & SpatialFlags.TILE:
@@ -2792,9 +2823,22 @@ def run(reader, args, board, attempt=None):
     ):
         raise ValueError("Flick prayer keys must be distinct from each other, abilities and F12")
 
+    # The received tick last seen and when it was first seen (monotonic ns).
+    tick_clock = {"tick": None, "since_ns": None}
+
     def received_tick_counter():
         tick = reader.encounter.game_tick
-        return tick.counter if tick.valid else None
+        counter = tick.counter if tick.valid else None
+        if counter is not None and counter != tick_clock["tick"]:
+            tick_clock["tick"] = counter
+            tick_clock["since_ns"] = reader.monotonic_ns()
+        return counter
+
+    def tick_elapsed_ms(tick):
+        """Milliseconds since received tick ``tick`` was first seen, or None if unknown."""
+        if tick is None or tick != tick_clock["tick"] or tick_clock["since_ns"] is None:
+            return None
+        return (reader.monotonic_ns() - tick_clock["since_ns"]) // 1_000_000
 
     def telos_distance():
         """Player's grid distance to Telos's footprint, or None without both tiles."""
@@ -2840,7 +2884,7 @@ def run(reader, args, board, attempt=None):
             tick is not None
             and phase_one.special == HOLD_STILL
             and phase_one.soul_split_for_heavy_hit(
-                cooldowns(reader, bindings), tick, gcd_remaining_ms
+                cooldowns(reader, bindings), tick, gcd_remaining_ms, tick_elapsed_ms(tick)
             )
             and flicker.release(phase_one.special_event, tick)
         ):
@@ -3325,7 +3369,13 @@ def run(reader, args, board, attempt=None):
             telos_raw = player.variable(Variable.TELOS_PACKED)
             meter = None if telos_raw is None else telos_raw & METER_MASK
             beam_step(phase, phase_one, boss, meter, received_tick, movement_busy=movement_busy)
-        stomp_dodge(phase_one, boss, received_tick, timers)
+        stomp_dodge(
+            phase_one,
+            boss,
+            received_tick,
+            timers,
+            gcd_remaining_now(player, info.monotonic_ns, reader.monotonic_ns()),
+        )
         virus_step(phase, boss, received_tick, movement_busy=movement_busy)
         beam_keep_step(
             phase,
@@ -3426,10 +3476,9 @@ def main():
     )
     parser.add_argument("--melee", type=int, nargs=2, help="Deflect Melee action-bar pixel")
     parser.add_argument("--practice-0-confirmed", action="store_true")
-    parser.add_argument(
-        "--block-black-stream", action="store_true",
-        help="Practice trial: walk into the black stream while it feeds P2 Onslaught",
-    )
+    # Blocking the black stream during P2 Onslaught is always on (account owner: otherwise the
+    # Onslaught never ends); the old opt-in switch is still accepted.
+    parser.add_argument("--block-black-stream", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--practice-enrage",
         type=int,

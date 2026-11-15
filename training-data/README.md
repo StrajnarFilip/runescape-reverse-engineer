@@ -15,8 +15,9 @@ takes precedence. Start the script, click into RuneScape, and wake Telos yoursel
 leaving the encounter closes its attempt log. Losing focus pauses input until RuneScape is focused
 again, stale samples are skipped, and F12 stops the script.
 The controller turns on Deflect Melee and takes over when the fight starts. It checks for
-the Hold Still stomp at +4 to +7 received ticks, after checking the cursor's landing tile
-at +3. If the player needs to dodge, Dive
+the Hold Still stomp at +3 to +6 received ticks, after checking the cursor's landing tile
+at +2. Up to two targets are tried per tick when a hover is rejected. At +3 the dodge waits
+for a Resonance press due before it could finish. If the player needs to dodge, Dive
 prefers the green strip in P1 or red strip in P3 within ten tiles and clear of Telos.
 The binding `rs3_snapshot_pointer_walk` confirms the current ground tile under the pointer
 before the click. `rs3_snapshot_npc_spatial`, `rs3_snapshot_hazards`,
@@ -97,7 +98,8 @@ the same phase. The outcome `cleanse_confirmed` requires the countdown reset and
 the message. The nearest logged beam row can be one tile away when a cleanse occurs.
 Movement rows include the projected target, the observed default action and tile in `hover`,
 and the verified `walk_target` and `dispatch_tick` when a click is sent.
-`--block-black-stream` enables the P2 Onslaught movement trial. Read `beam_feeding` and
+During P2 Onslaught the controller always walks into the black stream while it feeds Telos;
+the old `--block-black-stream` switch is accepted as a no-op. Read `beam_feeding` and
 `beam_move` alongside player tiles, VARP `6363` and successive `28959` cues to verify the
 player blocked the stream and the meter drained.
 A log with no `attempt_ended` was interrupted before the writer could record its outcome.
@@ -109,7 +111,7 @@ The switch carries the cue of the protection window that selected it, including 
 overlap. `overhead_at_sample` gives the prayer from the hitmark's native frame when it was
 available, including intermediate cursor checks sampled by the controller.
 For Hold Still, compare `stomp_preflight`, `stomp_dodge` and `stomp_walk_fallback` with
-`stomp_dodge_result`. The preflight only records a cursor check at +3.
+`stomp_dodge_result`. The preflight only records a cursor check at +2.
 Join the response to `npc_animation` by `cue_native_sequence`. `hover` records the sampled
 Walk tile, MiniMenu cycle, and source frame and client logic tick. In P1 and P3, a verified
 beam destination also carries `hover.beam_config`. `clear_of_stomp` records displacement

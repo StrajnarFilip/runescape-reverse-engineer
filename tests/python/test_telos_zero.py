@@ -340,11 +340,16 @@ class PhaseOneTests(unittest.TestCase):
         phase.observe([dict(event(1, HOLD_STILL), received_tick=10543)])
         timers = {"Resonance": 0}
         phase.observe_hits([self.hit(133)], 10545)
-        # Early in +2 the GCD still has 560 ms left: it ends at +3, so Resonance goes this tick.
+        # 40 ms into +2 the GCD has 560 ms left: it ends at +3, so Resonance goes this tick.
         self.assertFalse(phase.resonance_due(timers, 10545, 560))
-        self.assertTrue(phase.soul_split_for_heavy_hit(timers, 10545, 560))
+        self.assertTrue(phase.soul_split_for_heavy_hit(timers, 10545, 560, 40))
         # With the GCD ending a tick later Resonance is not due here and Deflect stays.
-        self.assertFalse(phase.soul_split_for_heavy_hit(timers, 10545, 1160))
+        self.assertFalse(phase.soul_split_for_heavy_hit(timers, 10545, 1160, 40))
+        # 07:01 P4: 780 ms left 400 ms into the tick ended two ticks later; no early release.
+        self.assertFalse(phase.soul_split_for_heavy_hit(timers, 10545, 780, 400))
+        # Without the tick phase only a press that is due now releases.
+        self.assertFalse(phase.soul_split_for_heavy_hit(timers, 10545, 560))
+        self.assertTrue(phase.soul_split_for_heavy_hit(timers, 10545, 150))
         action = phase.next_action(SECOND_NS, timers, 190, Prayer.MELEE, received_tick=10545)
         phase.sent(action, SECOND_NS)
         self.assertTrue(phase.soul_split_for_heavy_hit({"Resonance": 30_000}, 10546, 1700))
