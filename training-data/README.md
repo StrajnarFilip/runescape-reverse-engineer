@@ -56,7 +56,7 @@ bands for `28959` and holds melee through the unanimated follow-up from Tendrils
 For Hold Still, the controller deflects the small hit from +0 through +2 after `28935`, using
 Deflect Magic in P3 and Deflect Melee otherwise. It holds Deflect Melee at +3 for the heavy +4
 hit. Once Resonance's cooldown confirms its cast, a `prayer_window_released` row marks the
-return to Soul Split. GCD abilities are pressed only in the last 100 ms of the GCD because
+return to Soul Split. GCD abilities are pressed only in the last 200 ms of the GCD because
 ability queueing is off. `ability_sent.gcd_at_press_ms` records the time left, and
 `ability_press_skipped` marks a GCD window that passed while deciding.
 Uppercut and the phase cues `28963` and `28930` do not schedule protection. A

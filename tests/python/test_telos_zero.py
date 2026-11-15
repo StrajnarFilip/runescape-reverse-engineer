@@ -192,7 +192,8 @@ class PhaseOneTests(unittest.TestCase):
         phase = PhaseOne()
         phase.observe([event(1, TENDRILS)])
         timers = {"Hurricane": None}
-        self.assertIsNone(phase.next_action(SECOND_NS, timers, 120, Prayer.MELEE))
+        early = controller["GCD_PRESS_LEAD_MS"] + 20
+        self.assertIsNone(phase.next_action(SECOND_NS, timers, early, Prayer.MELEE))
         self.assertEqual(phase.next_action(SECOND_NS, timers, 0, Prayer.MELEE).ability, "Hurricane")
         phase.observe([event(2, RELEASE)])
         self.assertIsNone(phase.next_action(2 * SECOND_NS, timers, 0, Prayer.MELEE))
@@ -204,11 +205,12 @@ class PhaseOneTests(unittest.TestCase):
         now = 3 * SECOND_NS
         timeout = controller["ACK_TIMEOUT_NS"]
         # 2026-11-15: presses with 1,760-1,780 ms left never cast, 360-600 ms always did.
-        for gcd in (1780, 600, 101, None):
+        lead = controller["GCD_PRESS_LEAD_MS"]
+        for gcd in (1780, 600, lead + 1, None):
             self.assertIsNone(
                 phase.next_action(now, timers, gcd, Prayer.SOUL_SPLIT, flicking=True)
             )
-        action = phase.next_action(now, timers, 100, Prayer.SOUL_SPLIT, flicking=True)
+        action = phase.next_action(now, timers, lead, Prayer.SOUL_SPLIT, flicking=True)
         self.assertEqual(action.ability, "Anticipation")
         phase.sent(action, now)
         retry = phase.next_action(now + timeout, timers, 40, Prayer.SOUL_SPLIT, flicking=True)
@@ -312,6 +314,27 @@ class PhaseOneTests(unittest.TestCase):
             late.next_action(SECOND_NS, {"Resonance": 0}, 0, Prayer.MELEE, received_tick=54)
         )
 
+    def test_resonance_takes_the_gcd_slot_before_freedom(self):
+        # 06:30 P3 Hold Still at 8728: Freedom and Resonance both pressed at +3; Resonance failed.
+        phase = PhaseOne(phase=3)
+        phase.observe([dict(event(1, HOLD_STILL), received_tick=8728)])
+        timers = {"Resonance": 0, "Freedom": 0}
+        action = phase.next_action(
+            SECOND_NS, timers, 90, Prayer.MELEE, received_tick=8731, stun_expiry=264200
+        )
+        self.assertEqual(action.ability, "Resonance")
+        phase.sent(action, SECOND_NS)
+        # Once Resonance has been pressed, the stun gets Freedom on the next GCD slot.
+        action = phase.next_action(
+            2 * SECOND_NS,
+            {"Resonance": 30_000, "Freedom": 0},
+            90,
+            Prayer.MELEE,
+            received_tick=8734,
+            stun_expiry=264200,
+        )
+        self.assertEqual(action.ability, "Freedom")
+
     def test_gcd_remaining_now_counts_down_to_the_press(self):
         remaining = controller["gcd_remaining_now"]
         player = SimpleNamespace(gcd_reason=Reason.NONE, gcd_remaining_ms=160)
@@ -322,8 +345,9 @@ class PhaseOneTests(unittest.TestCase):
         player.gcd_reason = Reason.NOT_SET
         self.assertIsNone(remaining(player, 0, 0))
         ready = controller["gcd_press_ready"]
+        lead = controller["GCD_PRESS_LEAD_MS"]
         self.assertEqual(
-            [ready(value) for value in (None, 0, 100, 101)], [False, True, True, False]
+            [ready(value) for value in (None, 0, lead, lead + 1)], [False, True, True, False]
         )
 
     def test_uppercut_escape_uses_received_ticks_once(self):

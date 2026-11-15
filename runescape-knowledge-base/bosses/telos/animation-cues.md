@@ -80,8 +80,9 @@ at 144620 is consistent with a duplicate press remaining in the ability queue.
 pressed while the GCD runs is dropped. Anticipation and Resonance presses with 1,140–1,800 ms
 left never cast; presses with 360–620 ms left or an idle GCD cast one received tick later.
 Escape cast at any GCD. The controller sends Resonance, Anticipation, Freedom and Hurricane
-only in the last 100 ms of the GCD (`GCD_PRESS_LEAD_MS`) or while it is idle. It re-checks
-the remaining time just before the key goes down and logs it as `gcd_at_press_ms`.
+only in the last 200 ms of the GCD (`GCD_PRESS_LEAD_MS`) or while it is idle. It re-checks
+the remaining time just before the key goes down and logs it as `gcd_at_press_ms`. A 100 ms
+lead was too late: Anticipation pressed with 76 ms left did not cast in the 06:30 run.
 [Queueing-off death](../../../training-data/telos-20261115T060159.222253Z.jsonl)
 
 Across 89 Hold Stills from P1 to P3, one small hit lands at +1 (a type `482` zero under

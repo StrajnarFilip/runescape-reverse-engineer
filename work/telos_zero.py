@@ -690,7 +690,8 @@ UPPERCUT_ESCAPE_TICKS = (4, 5)
 # with 360-620 ms left or an idle GCD they cast on the next tick. A press is therefore sent only
 # in the last GCD_PRESS_LEAD_MS before the GCD ends (or while it is idle) and reaches the server
 # on the tick the GCD ends, ahead of Revolution. Escape, Surge and Dive are off the GCD.
-GCD_PRESS_LEAD_MS = 100
+# A 100 ms lead was too late: Anticipation pressed with 76 ms left did not cast (06:30 run).
+GCD_PRESS_LEAD_MS = 200
 GCD_ABILITIES = frozenset({"Resonance", "Anticipation", "Freedom", "Hurricane"})
 # Hold Still: one small hit lands at +1 (a 0 under Deflect, type 482) or +2 (type 133 in P1/P2,
 # 139 in P3), rarely +3, and the heavy type 133 hit at +4 (45 P1, 24 P2 and 20 P3 cues). A press
@@ -896,13 +897,16 @@ class PhaseOne:
         longer changes behavior.
         """
         gcd_ready = gcd_press_ready(gcd_remaining_ms)
-        # Freedom is reactive: only an observed stun justifies it, and it precedes the rest.
+        # Freedom is reactive: only an observed stun justifies it. Resonance keeps the GCD slot
+        # while its press is still possible: at the 06:30 P3 Hold Still both were pressed at +3
+        # and Resonance did not cast. Freedom takes the next slot.
         if (
             stun_expiry is not None
             and stun_expiry != self.last_freedom_stun
             and gcd_ready
             and "Freedom" in cooldowns
             and not cooldowns["Freedom"]
+            and not self.resonance_press_possible(cooldowns, received_tick)
         ):
             self.last_freedom_stun = stun_expiry
             return Action("Freedom", "Player stunned")
@@ -1549,7 +1553,7 @@ def run(reader, args, board, attempt=None):
             return
         preflight = delta == STOMP_PREFLIGHT_TICK
         if preflight and phase_one.resonance_press_possible(timers, received_tick):
-            # The +3 Resonance press comes in the GCD's last 100 ms; a pointer check now could
+            # The +3 Resonance press comes at the end of the GCD; a pointer check now could
             # hold the loop past it. The dodge itself is checked from +4.
             return
         pending = phase_one.stomp_pending
