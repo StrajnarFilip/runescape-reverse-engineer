@@ -15,7 +15,8 @@ takes precedence. Start the script, click into RuneScape, and wake Telos yoursel
 leaving the encounter closes its attempt log. Losing focus pauses input until RuneScape is focused
 again, stale samples are skipped, and F12 stops the script.
 The controller turns on Deflect Melee and takes over when the fight starts. It checks for
-the Hold Still stomp at +4 to +7 received ticks. If the player needs to dodge, Dive
+the Hold Still stomp at +4 to +7 received ticks, after checking the cursor's landing tile
+at +3. If the player needs to dodge, Dive
 prefers the green strip in P1 or red strip in P3 within ten tiles and clear of Telos.
 The binding `rs3_snapshot_pointer_walk` confirms the current ground tile under the pointer
 before the click. `rs3_snapshot_npc_spatial`, `rs3_snapshot_hazards`,
@@ -52,6 +53,8 @@ Confirm the actual ability tooltips before using the example keys. `--displayed-
 
 The practice controller flicks by Telos animation and phase. It uses the measured distance
 bands for `28959` and holds melee through the unanimated follow-up from Tendrils release.
+For Hold Still, Deflect Melee covers +0 through +2 from `28935`. The controller requests
+Soul Split at +3 ahead of the heavy +4 hit with Resonance when protection is clear.
 Uppercut and the phase cues `28963` and `28930` do not schedule protection. A
 `prayer_transition_lockout` row marks when prayer inputs pause at a phase handoff or resume
 on the first recognized attack. A toggle is only resent after its overhead appears or 1.2 s
@@ -88,8 +91,10 @@ Join `prayer_flick_outcome.request_sequence` to the original `prayer_flick_sent`
 `acknowledged` outcome confirms the overhead observed in the client and records the sampling
 tick. Compare it with the recipient's hitmark and its client clock to assess the window.
 The switch carries the cue of the protection window that selected it, including during an
-overlap. A player hitmark carries `overhead_at_sample` when it was read in the same native frame.
-For Hold Still, compare `stomp_dodge` and `stomp_walk_fallback` with `stomp_dodge_result`.
+overlap. `overhead_at_sample` gives the prayer from the hitmark's native frame when it was
+available, including intermediate cursor checks sampled by the controller.
+For Hold Still, compare `stomp_preflight`, `stomp_dodge` and `stomp_walk_fallback` with
+`stomp_dodge_result`. The preflight only records a cursor check at +3.
 Join the response to `npc_animation` by `cue_native_sequence`. `hover` records the sampled
 Walk tile, MiniMenu cycle, and source frame and client logic tick. In P1 and P3, a verified
 beam destination also carries `hover.beam_config`. `clear_of_stomp` records displacement

@@ -52,3 +52,20 @@ The saved 0% trace recorded no active overhead at the P2 transition or at either
 In that same trace, Deflect Melee was still active for the two Hold Still hitmarks at about 1.14 and 2.31 seconds. The overhead first read `none` at 4.71 seconds, followed by the 4,187 hitmark at 5.31 seconds. The sampled Ctrl+F3/F4 press log was empty through that interval. The trace does not establish why the overhead disappeared. The optional Surge trial logs the first tile change within 1.2 seconds of input. Compare it with the cooldown acknowledgement and subsequent hitmarks to evaluate the dodge.
 
 **Observed on 2026-11-14, 0% P2.** With `--timed-freedom` and the translated Freedom binding, the controller sent Freedom four received ticks after `28935`, after the heavy type `133` hit and with the GCD clear. The cooldown acknowledged at cue +5. The overhead still changed to `none` at cue +8, and a 3,985 type `144` hitmark followed at cue +9. The trial waits for GCD zero at offsets +4 through +7. One successful cast confirms the input path. The landing dodge and protection deadline still need calibration. [Attempt log](../../../training-data/telos-20261114T081931.814573Z.jsonl)
+
+**Hold Still melee and Resonance.** The first hit at +2 dealt 1,049 and 1,068 on Soul Split
+in two 250% P1 attempts. The old one-tick window requested Soul Split at +1. Request
+Deflect Melee on `28935` and hold it through +2 for the hidden melee hit. Request Soul Split
+at +3 when no other protection window is active. Queue Resonance for the heavy melee hit at
++4 using the sampled GCD and verify the cooldown, the observed overhead and the hitmark.
+At 3522 the logged hit of 1 and healing of 1,136 coincided with Soul Split and followed the
+Resonance press. [1,049 hit](../../../training-data/telos-20261115T052849.237600Z.jsonl) · [1,068 hit and Resonance](../../../training-data/telos-20261115T054049.902492Z.jsonl)
+
+The revised rule was exercised at 250%. In P1 the cue arrived at 4697, the 482-damage
+small hit at +2 had Deflect Melee, and the Soul Split request and Resonance acknowledgement
+were recorded at +3. Around +4, the 1-damage heavy hit and 2,084 healing were sampled in
+native frame 1448. The controller next observed Soul Split in frame 1449, so the exact
+overhead of the heavy-hit frame was missing from that trace. In P2 the 347-damage small hit
+at +2 also had Deflect Melee. Soul Split was requested at +3, but Resonance was on cooldown
+through the heavy hit, which dealt 5,124. The cooldown restarted at logic tick 144620
+without a corresponding controller ability request. [250% retest](../../../training-data/telos-20261115T055239.542334Z.jsonl)

@@ -864,11 +864,19 @@ class PrayerFlickerTests(unittest.TestCase):
         flicker.observe([event(1, AUTO)], 40, 0)
         self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 40, 0), Prayer.MAGIC)
 
-    def test_hold_still_uses_melee_even_when_phase_default_is_magic(self):
+    def test_hold_still_protects_the_first_hit_and_restores_soul_split_for_resonance(self):
         flicker = PrayerFlicker()
         flicker.default_prayer = Prayer.MAGIC
-        flicker.observe([event(1, HOLD_STILL)], 40, 0)
-        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 40, 0), Prayer.MELEE)
+        # Recorded P1 cue at 3518 and melee hit of 1,068 at 3520.
+        flicker.observe([event(1, HOLD_STILL)], 3518, 0)
+        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 3518, 0), Prayer.MELEE)
+        flicker.sent(Prayer.MELEE, 0)
+        self.assertIsNone(flicker.next_prayer(Prayer.MELEE, 3519, 600_000_000))
+        self.assertIsNone(flicker.next_prayer(Prayer.MELEE, 3520, 1_200_000_000))
+        self.assertIsNone(flicker.next_prayer(Prayer.MELEE, None, 1_799_999_999))
+        self.assertEqual(flicker.next_prayer(Prayer.MELEE, 3521, 1_800_000_000), Prayer.SOUL_SPLIT)
+        flicker.sent(Prayer.SOUL_SPLIT, 1_800_000_000)
+        self.assertIsNone(flicker.next_prayer(Prayer.SOUL_SPLIT, 3522, 2_400_000_000))
 
     def test_phase_three_counts_magic_autos_before_hold_still(self):
         phase = PhaseOne(phase=3)

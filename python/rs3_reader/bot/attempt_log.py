@@ -117,7 +117,9 @@ class AttemptLog:
             observed_ns=self.relative_ns(observed_ns),
         )
 
-    def frame(self, reader, info, *, phase, actions, action_loss, hits, hit_loss):
+    def frame(
+        self, reader, info, *, phase, actions, action_loss, hits, hit_loss, intervening_prayers=None
+    ):
         """Record only encounter-relevant decoded fields and preserve queue event ordering."""
         player = reader.player
         npc_hits, npc_hit_loss = reader.drain_events()
@@ -307,17 +309,19 @@ class AttemptLog:
             )
         for event in hits:
             source = (event.pid, event.process_creation_time, event.scene_epoch)
+            overhead = None
+            if source == session:
+                if event.sample_sequence == info.sequence:
+                    overhead = state["active_prayer"]
+                elif intervening_prayers is not None:
+                    overhead = intervening_prayers.get(event.sample_sequence)
             self.write(
                 "player_hitmark",
                 native_sequence=event.sequence,
                 observed_ns=self.relative_ns(event.observed_ns),
                 source_frame_sequence=event.sample_sequence,
                 same_session=source == session,
-                overhead_at_sample=(
-                    state["active_prayer"]
-                    if source == session and event.sample_sequence == info.sequence
-                    else None
-                ),
+                overhead_at_sample=overhead,
                 hit=hit_record(event.hit),
             )
         for event in npc_hits:

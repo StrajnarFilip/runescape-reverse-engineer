@@ -124,6 +124,7 @@ ENCOUNTER_RESET = 3
 # at +8/+9, so the check starts once he has moved (and after Resonance's +2..+4 slot: a click
 # right after queuing Resonance coincided with Resonance never casting).
 STOMP_CHECK_TICKS = (4, 7)
+STOMP_PREFLIGHT_TICK = STOMP_CHECK_TICKS[0] - 1
 # The Dive press and the click are separated so the client is in targeting mode first; a
 # Dive that leaves the tile unchanged after this many ticks falls back to walking there.
 DIVE_SELECT_SECONDS = 0.15
@@ -636,9 +637,9 @@ TRANSITION_ATTACK_CUES = frozenset({
     MELEE_AUTO_SEQUENCE, MAGIC_ATTACK, TENDRILS, HOLD_STILL, UPPERCUT,
 })
 DEFAULT_FLICK_HOLD_TICKS = 1
-# After the Tendrils release an unanimated melee auto followed at +2 received ticks in both
-# 100% captures (1,470 and 1,076). Melee stays active through that tick.
-FLICK_HOLD_TICKS = {TENDRILS_RELEASE: 3}
+# The unanimated Tendrils follow-up and the first Hold Still melee hit can land at +2.
+# Hold Still then requests Soul Split at +3 for the heavy +4 hit and queued Resonance.
+FLICK_HOLD_TICKS = {TENDRILS_RELEASE: 3, HOLD_STILL: 3}
 
 
 def magic_flick_ticks(distance):
@@ -744,6 +745,7 @@ class PhaseOne:
         self.last_freedom_stun = None
         self.stomp_checked = False
         self.stomp_pending = None
+        self.stomp_prepared = None
         self.stomp_rejected = set()
         self.stomp_attempt_tick = None
         # Set while a P4 font needs the player: Escape and Surge would leave the font.
@@ -832,6 +834,7 @@ class PhaseOne:
                 self.resonance_attempts = 0
                 self.stomp_checked = False
                 self.stomp_pending = None
+                self.stomp_prepared = None
                 self.stomp_rejected.clear()
                 self.stomp_attempt_tick = None
                 self.expected = self.next_special[sequence]
@@ -1470,8 +1473,9 @@ def run(reader, args, board, attempt=None):
         ):
             return
         delta = received_tick - phase_one.special_tick
-        if delta < STOMP_CHECK_TICKS[0]:
+        if delta < STOMP_PREFLIGHT_TICK:
             return
+        preflight = delta == STOMP_PREFLIGHT_TICK
         pending = phase_one.stomp_pending
         movement_window_open = delta <= STOMP_CHECK_TICKS[1]
         if not movement_window_open and pending is None:
@@ -1506,6 +1510,15 @@ def run(reader, args, board, attempt=None):
             def validate():
                 fresh, current_boss, current_phase, hp = refresh_for_walk()
                 fill_walk_hover(hover)
+                hover_tick = received_tick_counter()
+                last_tick = STOMP_CHECK_TICKS[1]
+                if not preflight and (
+                    hover_tick - phase_one.special_tick > last_tick
+                    if hover_tick is not None
+                    else reader.monotonic_ns() - phase_one.special_ns
+                    >= (last_tick + 1) * TICK_FALLBACK_NS
+                ):
+                    return False
                 if (
                     not fresh
                     or current_phase != phase_one.phase
@@ -1553,7 +1566,13 @@ def run(reader, args, board, attempt=None):
                 hover["beam_config"] = route[0][2]
                 return True
 
-            return click_point(point, select_dive=dive, validate=validate)
+            return click_point(
+                point,
+                select_dive=dive,
+                validate=validate,
+                hover_only=preflight,
+                failure_event="stomp_preflight_skipped" if preflight else "stomp_dodge_skipped",
+            )
 
         def attempt_ground_move(*, dive):
             rejected = phase_one.stomp_rejected
@@ -1564,9 +1583,15 @@ def run(reader, args, board, attempt=None):
                 beam = stream_destination(
                     reader, beam_kind, player, pose, rejected_tiles=rejected, stomp=True
                 )
-            if beam is not None:
+            prepared = phase_one.stomp_prepared
+            phase_one.stomp_prepared = None
+            if prepared is not None and (prepared[2] or beam is None):
+                target, point, on_beam = prepared
+            elif beam is not None:
                 (target, _, _), point = beam
+                on_beam = True
             else:
+                on_beam = False
                 for target in known_floor_targets(boss_tile, size, player_tile, floor_tiles):
                     if target in rejected:
                         continue
@@ -1577,7 +1602,9 @@ def run(reader, args, board, attempt=None):
                     return None
             phase_one.stomp_attempt_tick = received_tick
             hover = {}
-            sent = safe_ground_click(point, dive=dive, on_beam=beam is not None, hover=hover)
+            sent = safe_ground_click(point, dive=dive, on_beam=on_beam, hover=hover)
+            if preflight and sent:
+                phase_one.stomp_prepared = (target, point, on_beam)
             if sent is None and hover:
                 rejected.add(target)
             return target, point, sent, hover
@@ -1617,7 +1644,10 @@ def run(reader, args, board, attempt=None):
                 phase_one.stomp_checked = True
                 return
             if (
-                delta - pending["received_tick_delta"] >= STOMP_DIVE_CONFIRM_TICKS
+                (
+                    delta - pending["received_tick_delta"] >= STOMP_DIVE_CONFIRM_TICKS
+                    or delta == STOMP_CHECK_TICKS[1]
+                )
                 and not pending["walked"]
                 and phase_one.stomp_attempt_tick != received_tick
             ):
@@ -1638,6 +1668,8 @@ def run(reader, args, board, attempt=None):
             abs(player_tile[1] - (boss_tile[1] + (size - 1) / 2)),
         )
         if not in_stomp_area(boss_tile, size, player_tile):
+            if preflight:
+                return  # Telos can still reposition before the response window.
             phase_one.stomp_checked = True
             emit(
                 "stomp_check",
@@ -1648,12 +1680,22 @@ def run(reader, args, board, attempt=None):
                 received_tick_delta=delta,
             )
             return
-        if timers.get("Dive") or phase_one.stomp_attempt_tick == received_tick:
-            return  # Dive still cooling down; check again next sample.
-        movement = attempt_ground_move(dive=True)
+        if phase_one.stomp_attempt_tick == received_tick:
+            return
+        use_dive = not timers.get("Dive")
+        movement = attempt_ground_move(dive=use_dive)
         if movement is None:
             return
         target, point, sent, hover = movement
+        if preflight:
+            emit(
+                "stomp_preflight",
+                confirmed=bool(sent),
+                target=target,
+                hover=hover,
+                cue_native_sequence=phase_one.special_event,
+            )
+            return
         if sent is None:
             emit(
                 "stomp_target_rejected",
@@ -1672,8 +1714,9 @@ def run(reader, args, board, attempt=None):
             "hover": hover,
             "screen_point": point,
             "received_tick_delta": delta,
+            "movement": "dive" if use_dive else "walk",
             "cue_native_sequence": phase_one.special_event,
-            "walked": False,
+            "walked": not use_dive,
             "moved": False,
         }
         emit("stomp_dodge", sent=sent, **record)
@@ -1835,7 +1878,11 @@ def run(reader, args, board, attempt=None):
             and 0 <= reader.monotonic_ns() - latest.monotonic_ns <= MAX_SAMPLE_AGE_NS
         )
         if fresh:
-            walk_samples[latest.sequence] = (current_phase, received_tick_counter())
+            walk_samples[latest.sequence] = (
+                current_phase,
+                received_tick_counter(),
+                Prayer(reader.active_prayer()).name.lower(),
+            )
         return fresh, current_boss, current_phase, hp
 
     def fill_walk_hover(hover):
@@ -2162,11 +2209,13 @@ def run(reader, args, board, attempt=None):
         emit("telos_reengage", sent=sent, tile=centre)
         return bool(sent)
 
-    def click_point(point, *, select_dive, validate=None, failure_event="stomp_dodge_skipped"):
-        """Move the pointer to a physical pixel and left-click, after Dive if requested.
+    def click_point(
+        point, *, select_dive, validate=None, hover_only=False, failure_event="stomp_dodge_skipped"
+    ):
+        """Move the pointer and validate the destination before any Dive and click.
 
-        Returns True when sent, False when focus was lost, None when the pointer could not be
-        placed (window moved, pixel covered). Only F12 propagates.
+        With hover_only, True means the hover was verified. Otherwise True means the click was
+        sent. False means focus was lost and None means placement or validation failed.
         """
         nonlocal pointer_window
         try:
@@ -2179,6 +2228,8 @@ def run(reader, args, board, attempt=None):
                 return None
             if pointer_window.bounds() != bounds:
                 return None
+            if hover_only:
+                return True
             if select_dive:
                 # P only selects Dive; the left click on the pointed tile performs it.
                 if not send_chord(bindings["Dive"]):
@@ -2401,10 +2452,9 @@ def run(reader, args, board, attempt=None):
         hits, hits_lost = reader.drain_player_hit_events()
         intervening_samples = {
             sequence: tick
-            for sequence, (walk_phase, tick) in walk_samples.items()
+            for sequence, (walk_phase, tick, _) in walk_samples.items()
             if walk_phase == phase
         }
-        walk_samples.clear()
         if attempt:
             attempt.frame(
                 reader,
@@ -2414,7 +2464,11 @@ def run(reader, args, board, attempt=None):
                 action_loss=lost,
                 hits=hits,
                 hit_loss=hits_lost,
+                intervening_prayers={
+                    sequence: prayer for sequence, (_, _, prayer) in walk_samples.items()
+                },
             )
+        walk_samples.clear()
         if (info.pid, info.process_creation_time) != identity[:2]:
             # A restarted client has nothing left to control.
             raise RuntimeError("Client process changed")

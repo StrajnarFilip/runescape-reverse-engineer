@@ -24,7 +24,13 @@
 ## Hold Still Dive
 
 - For a required Hold Still dodge in P1 and P3, prefer the nearest reachable tile on the green or red strip respectively (account owner, 2026-11-15). A landing under Telos can make him move back into the beam. Require a same-plane stream location with a terrain height, within ten tiles, outside his current footprint and outside the provisional four-tile stomp radius. Recheck the pointer's actual Walk tile against the current strip and actor pose before sending Dive. Use observed safe floor when no beam tile qualifies.
-- The input window is +4 to +7 received ticks from `28935`. If Dive does not move the player, reproject and check a Walk destination before clicking. Verify position after the action and check any type 144 hitmarks at the expected landing time. A beam location matched on the cursor and a subsequent player position on the beam are logged separately.
+- The input window is +4 to +7 received ticks from `28935`. At +3 the controller can position
+  the cursor and check a landing candidate. The hover alone sends no movement input. It
+  rechecks the landing tile before Dive or Walk during the input window. If Dive is cooling
+  down or does not move the player, the controller checks a Walk destination before clicking.
+  Verify position after the action and check any type 144 hitmarks at the expected landing
+  time. A beam location matched on the cursor and a subsequent player position on the beam
+  are logged separately.
 
 The captured phase 1 line was roughly at world X 15698 and spanned approximately Z 2826–2850. These are estimates from the rendered beam and the arena camera. They describe one instance and one beam placement. The ends of the visible effect and the tiles that clear a virus still need independent confirmation.
 
