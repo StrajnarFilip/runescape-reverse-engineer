@@ -593,7 +593,8 @@ RS3_API int32_t rs3_move_to_tile(const rs3_snapshot *snapshot, int32_t x, int32_
 
 /**
  * Presses the caller's action-bar key for a sampled ability struct ID.
- * virtual_key is an unmodified Windows A-Z, 0-9 or F1-F12 virtual key.
+ * virtual_key is an unmodified Windows A-Z, 0-9, F1-F12, Page Up, Page Down
+ * or OEM plus/equal virtual key. Dedicated navigation keys are extended keys.
  */
 RS3_API int32_t rs3_activate_ability(const rs3_snapshot *snapshot, uint32_t struct_id,
                                      uint32_t virtual_key);
@@ -620,6 +621,21 @@ RS3_API int32_t rs3_activate_ability_chord(const rs3_snapshot *snapshot, uint32_
 RS3_API int32_t rs3_activate_item_chord(const rs3_snapshot *snapshot, uint32_t slot,
                                         int32_t expected_item_id, uint64_t expected_token,
                                         uint32_t virtual_key, uint32_t modifiers);
+
+/**
+ * Validates both actions before submitting an ability chord followed by an
+ * exact item's chord in one foreground SendInput batch. Key ranges and
+ * modifiers match rs3_activate_ability_chord. All scene, process identity,
+ * freshness, item identity and user-held-key guards apply to the whole call.
+ * Success means ordered OS input acceptance, not successful casts, item use,
+ * full castability or same-tick processing by the game server. A partial OS
+ * insertion is an error, with cleanup of only keys inserted by this call.
+ */
+RS3_API int32_t rs3_activate_ability_then_item(const rs3_snapshot *snapshot, uint32_t struct_id,
+                                               uint32_t ability_key, uint32_t ability_modifiers,
+                                               uint32_t slot, int32_t expected_item_id,
+                                               uint64_t expected_token, uint32_t item_key,
+                                               uint32_t item_modifiers);
 
 /**
  * Clicks a visible entity or menu row at a physical screen pixel.

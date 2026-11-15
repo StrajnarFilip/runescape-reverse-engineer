@@ -120,6 +120,9 @@ Requests
   narrowly supported key additions. A1 must connect the ordered batch and
   native key support before D8 can use the P1 coordinator. These changes do
   not validate minimap geometry, movement, camera or prayer deadlines.
+* L public ABI registration is complete: the additive batch declaration and
+  supported key-range documentation are in the installed public header. No
+  existing public structure or calling convention changed.
 
 * P1/P5: publish native minimap center/safe radius in physical pixels, plus a
   fresh signature covering minimap/camera rotation, zoom, DPI, window and UI
