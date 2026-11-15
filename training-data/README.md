@@ -164,6 +164,13 @@ At release, `in_range` and `player_hp` report the observed position and HP when 
 charged actor disappears. `font_lost` records an earlier disappearance. Use the
 surrounding hitmarks to check the damage outcome.
 
+`font_charge_pulse` pairs the charging actor's health decrease with a nearby type 144
+`player_hitmark` from the existing native hit queue. Match `player_hit_sequence` to the
+hitmark's `native_sequence`. `font_resonance` records the cue and predicted hit ticks,
+the press tick and the GCD at press. Match it to `font_resonance_outcome` by font instance
+and expected hit tick. The outcome records the observed cooldown and the paired pulse
+damage. A missing damage field means the charge decrease and hitmark could not be paired.
+
 `anima_bomb_observed` records a phase 4 cue and the response window in milliseconds from
 its observation. The opener sequence `28930`, three `28929` melee attacks, then `28959`
 has a later impact than `28942`. Match the cue, defensive press, cooldown or spell

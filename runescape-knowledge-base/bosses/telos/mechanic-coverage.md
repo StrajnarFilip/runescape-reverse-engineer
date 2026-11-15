@@ -47,6 +47,12 @@ Another 300% practice run opened with Uppercut after the three melee attacks. No
 bomb defence was triggered in that run. The timing of the new response still needs a live
 bomb capture. [Zero-damage opener](../../../training-data/telos-20261115T054049.902492Z.jsonl) · [Uppercut opener](../../../training-data/telos-20261115T091100.770410Z.jsonl)
 
+At 100%, the opening cue was recognized at logic tick 803317. Resonance was pressed
+2.374 s after recognition, with the GCD reporting idle. No cooldown acknowledged the
+cast. The type 144 hit landed at logic tick 803465 for 3,150 and was followed by 350
+damage pulses. The live run confirms the cue and impact window. The defence remains
+unverified. [100% opening bomb](../../../training-data/telos-20261115T093004.670325Z.jsonl)
+
 **P4 font defence.** In the 300% Uppercut opener, the first font started at game tick
 24893. The verified walk reached the charging ring at 24902. Resonance cast on arrival
 and a melee hit consumed it at 24904. Type 144 pulses of 1,600, 1,600, 1,566 and 1,477
@@ -55,6 +61,23 @@ The separate native-effects probe showed the raw Resonance expiry stamp still pr
 after the melee hit. Use the font charge decrements and hit timestamps to validate a
 pulse-specific defence.
 [300% font arrival](../../../training-data/telos-20261115T091100.770410Z.jsonl)
+
+The controller pairs a charge decrement from `rs3_snapshot_npcs` with a single type 144
+hitmark from `rs3_player_hit_events_since` within four client logic ticks. It expects the
+next pulse 90 logic ticks later. It presses Resonance 16–24 logic ticks before that
+prediction if the `rs3_snapshot_spatial` player tile is in the charging ring, the cooldown
+is clear and the GCD has at most 200 ms left with queueing off. Replay saw 26 charging
+fonts and paired 80 decrements in 19 of them. Of the 61 consecutive paired intervals,
+60 were within four ticks of 90. A cooldown acknowledgement confirms the cast. The paired
+hit amount shows how much damage the pulse dealt.
+
+**P4 golem attack timing.** In archived P4 phases, all three golem configs (`22905`,
+`22906`, `22907`) used animation `28998`. With no other `28998` within four logic ticks
+and no Telos action near the cue and hit, a lone type 133 mark appeared 25–35 logic
+ticks later for 128 cues. Six had a single type 144 mark, one a type 139 mark and five
+a type 482 mark. The other 92 cues had overlapping marks or no matching mark. This
+provides a candidate melee window for a controlled prayer capture. Hitmarks lack a
+source actor field. [250% golem sample](../../../training-data/telos-20261114T171804.691233Z.jsonl) · [100% golem sample](../../../training-data/telos-20261114T173454.045394Z.jsonl)
 
 Guide-derived from the [RuneScape Wiki strategy page](https://runescape.wiki/w/Telos,_the_Warden/Strategies#Phase_2), which warns it may predate the March 2026 combat modernisation. Rows marked *live* match the 2026-11-14 Compatibility Mode captures.
 

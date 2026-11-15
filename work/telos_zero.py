@@ -18,6 +18,7 @@ from pathlib import Path
 from rs3_reader.action_bar_keys import displayed_bindings
 from rs3_reader.bot.attempt_log import CLEANSE_MAX_AGE_CLIENT_TICKS, AttemptLog
 from rs3_reader.native import (
+    LOGIC_TICK_MS,
     PRAYER_POINTS_MASK,
     AbilityFlags,
     Camera,
@@ -249,6 +250,12 @@ FONT_HOLD_TICKS = 30
 FONT_EARLIEST_RELEASE_TICK = 12
 # Move again when the player is still not inside after this many received ticks.
 FONT_MOVE_RETRY_TICKS = 3
+# Font health falls within four client logic ticks of a type 144 pulse. In normal charging
+# the native hitmark starts are 90 logic ticks apart (three game ticks).
+FONT_PULSE_HIT_TYPE = 144
+FONT_PULSE_LOGIC_TICKS = 90
+FONT_PULSE_SAMPLE_DELAY = 4
+FONT_RESONANCE_LEAD = (16, 24)
 # 100% kill of 2026-11-14 (telos-20261114T173454): Pure Anima Font (green) 22893/22896/22899,
 # Volcanic (red) 22894/22897/22900 and Corrupt (black) 22895/22898/22901, charged in that order.
 # Each charged font despawned 12-14 received ticks after charging.
@@ -305,7 +312,10 @@ class FontDuty:
         self.arrived_tick = None
         self.next_move_tick = None
         self.move_attempts = 0
-        self.resonance_sent = False
+        self.charge_health = None
+        self.last_pulse = None
+        self.pending_resonance = None
+        self.recent_pulse_hits = ()
         self.finished = set()
         self.rejected_points = set()
 
@@ -335,7 +345,10 @@ class FontDuty:
                     self.next_move_tick = received_tick
                     self.move_attempts = 0
                     self.rejected_points.clear()
-                    self.resonance_sent = False
+                    self.charge_health = health
+                    self.last_pulse = None
+                    self.pending_resonance = None
+                    self.recent_pulse_hits = ()
                     return tile, "font_charge_started"
             return None, None
         current = by_instance.get(self.font)
@@ -363,6 +376,52 @@ class FontDuty:
         self.tile = None
         self.state = None
         return None, event
+
+    def observe_pulse(self, fonts, logic_tick, hits, *, hits_lost):
+        """Pair a native font charge decrement with a single nearby typeless hitmark."""
+        if not self.active or logic_tick is None:
+            return None
+        health = next((font[2] for font in fonts if font[0] == self.font), None)
+        if hits_lost:
+            self.recent_pulse_hits = ()
+            self.last_pulse = None
+            self.charge_health = health
+            return None
+        recent = self.recent_pulse_hits + tuple(
+            (event.hit.start_tick, event.sequence, event.hit.amount)
+            for event in hits
+            if event.hit.type_id == FONT_PULSE_HIT_TYPE
+        )
+        self.recent_pulse_hits = tuple(
+            hit for hit in recent if 0 <= logic_tick - hit[0] <= FONT_PULSE_SAMPLE_DELAY
+        )
+        if health is None or health == self.charge_health:
+            return None
+        before = self.charge_health
+        self.charge_health = health
+        if before is None or health >= before or len(self.recent_pulse_hits) != 1:
+            self.last_pulse = None
+            return None
+        self.last_pulse = self.recent_pulse_hits[0][0]
+        return (before, health, *self.recent_pulse_hits[0])
+
+    def resonance_due(self, logic_tick, timers, gcd_remaining_ms):
+        """Return the next predicted font pulse when the Resonance press window is open."""
+        if (
+            self.state != "charging"
+            or self.last_pulse is None
+            or self.pending_resonance is not None
+            or logic_tick is None
+            or "Resonance" not in timers
+            or timers["Resonance"]
+            or not gcd_press_ready(gcd_remaining_ms)
+        ):
+            return None
+        expected_tick = self.last_pulse + FONT_PULSE_LOGIC_TICKS
+        earliest, latest = FONT_RESONANCE_LEAD
+        if earliest <= expected_tick - logic_tick <= latest:
+            return expected_tick
+        return None
 
     def move_due(self, player_tile, target, received_tick):
         """Whether to (re)issue movement to the font this tick.
@@ -2711,12 +2770,15 @@ def run(reader, args, board, attempt=None):
                 minions.append(record)
         return fonts, minions
 
-    def font_step(phase_one, boss, received_tick, timers):
+    def font_step(phase_one, boss, received_tick, timers, hits, hits_lost, *, action_pending):
         """Go to the chargeable P4 font, stay through the instakill, then pick targets."""
         if not isinstance(received_tick, int):
             return
         fonts, minions = p4_actors()
         prior_font, prior_tile = font_duty.font, font_duty.tile
+        sample_ns = reader.info.monotonic_ns
+        logic_tick = reader.info.logic_tick
+        pulse = font_duty.observe_pulse(fonts, logic_tick, hits, hits_lost=hits_lost)
         target, event = font_duty.update(fonts, received_tick)
         phase_one.hold_position = font_duty.active
         player = reader.spatial.player
@@ -2726,6 +2788,34 @@ def run(reader, args, board, attempt=None):
         player_tile = (
             (player.tile.x, player.tile.y) if player.valid_mask & SpatialFlags.TILE else None
         )
+        if pulse is not None:
+            before, after, hit_tick, hit_sequence, damage = pulse
+            emit(
+                "font_charge_pulse",
+                font_instance_id=prior_font,
+                charge_before=before,
+                charge_after=after,
+                player_hit_sequence=hit_sequence,
+                hit_client_tick=hit_tick,
+                damage=damage,
+            )
+        expected_tick = font_duty.pending_resonance
+        if expected_tick is not None and logic_tick is not None:
+            matched = pulse is not None and abs(hit_tick - expected_tick) <= FONT_PULSE_SAMPLE_DELAY
+            if (
+                matched
+                or logic_tick > expected_tick + FONT_PULSE_SAMPLE_DELAY
+                or not font_duty.active
+            ):
+                emit(
+                    "font_resonance_outcome",
+                    font_instance_id=prior_font,
+                    expected_hit_client_tick=expected_tick,
+                    cooldown_observed=bool(timers["Resonance"]) if "Resonance" in timers else None,
+                    player_hit_sequence=hit_sequence if matched else None,
+                    damage=damage if matched else None,
+                )
+                font_duty.pending_resonance = None
         if event:
             font_tile = target if target is not None else prior_tile
             emit(
@@ -2829,16 +2919,27 @@ def run(reader, args, board, attempt=None):
                 distance=distance,
                 attempt=font_duty.move_attempts,
             )
-        elif (
-            font_duty.state == "charging"
-            and in_font(player_tile, target)
-            and not font_duty.resonance_sent
-            and "Resonance" in bindings
-            and not timers.get("Resonance")
-        ):
-            # Resonance nullifies one charge step (account owner).
-            font_duty.resonance_sent = True
-            emit("font_resonance", sent=send_chord(bindings["Resonance"]))
+        elif not action_pending and in_font(player_tile, target):
+            dispatch_ns = reader.monotonic_ns()
+            sample_age_ns = dispatch_ns - sample_ns
+            if logic_tick is None or not 0 <= sample_age_ns <= MAX_SAMPLE_AGE_NS:
+                return
+            dispatch_tick = logic_tick + sample_age_ns // (LOGIC_TICK_MS * 1_000_000)
+            gcd_ms = gcd_remaining_now(reader.player, sample_ns, dispatch_ns)
+            expected_tick = font_duty.resonance_due(dispatch_tick, timers, gcd_ms)
+            if expected_tick is not None:
+                sent = send_chord(bindings["Resonance"])
+                if sent:
+                    font_duty.pending_resonance = expected_tick
+                emit(
+                    "font_resonance",
+                    sent=sent,
+                    font_instance_id=font_duty.font,
+                    cue_hit_client_tick=font_duty.last_pulse,
+                    press_client_tick=dispatch_tick,
+                    expected_hit_client_tick=expected_tick,
+                    gcd_at_press_ms=gcd_ms,
+                )
 
     beam_blocker = BeamBlocker()
     virus = VirusResponse()
@@ -4045,7 +4146,9 @@ def run(reader, args, board, attempt=None):
         remember_floor(phase, boss)
         movement_busy = phase_one.owns_movement(reader.monotonic_ns(), received_tick)
         if phase is not None and phase >= 4:
-            font_step(phase_one, boss, received_tick, timers)
+            font_step(
+                phase_one, boss, received_tick, timers, hits, hits_lost, action_pending=bool(action)
+            )
         elif phase in BEAM_KIND_BY_PHASE:
             telos_raw = player.variable(Variable.TELOS_PACKED)
             meter = None if telos_raw is None else telos_raw & METER_MASK

@@ -16,6 +16,7 @@ from rs3_reader.native import (
     HazardFlags,
     NPCActionEvent,
     NPCFlags,
+    PlayerHitEvent,
     Reason,
     SpatialFlags,
     Status,
@@ -864,6 +865,45 @@ class FontDutyTests(unittest.TestCase):
         self.assertEqual(duty.update(fonts(22899, 1), 21511), (target, "font_charged"))
         self.assertEqual(duty.update([], 21525), (None, "font_released"))
         self.assertFalse(duty.active)
+
+    def test_font_resonance_waits_for_the_next_observed_pulse_window(self):
+        duty = FontDuty()
+        ready = {"Resonance": 0}
+        duty.update(fonts(22896, 8000), 24893)
+        self.assertIsNone(duty.resonance_due(749244, ready, 0))
+        hit = PlayerHitEvent(sequence=119)
+        hit.hit.type_id = 144
+        hit.hit.start_tick = 749245
+        hit.hit.amount = 1600
+        self.assertIsNone(duty.observe_pulse(fonts(22896, 8000), 749246, [hit], hits_lost=0))
+        self.assertEqual(
+            duty.observe_pulse(fonts(22896, 6400), 749249, [], hits_lost=0),
+            (8000, 6400, 749245, 119, 1600),
+        )
+        # The arrival cast at 749277 was used by a melee hit at 749305.
+        self.assertIsNone(duty.resonance_due(749277, ready, 0))
+        self.assertIsNone(duty.resonance_due(749310, ready, 0))
+        self.assertIsNone(duty.resonance_due(749311, ready, 201))
+        self.assertEqual(duty.resonance_due(749311, ready, 200), 749335)
+        self.assertIsNone(duty.resonance_due(749320, ready, 0))
+        duty.pending_resonance = 749335
+        self.assertIsNone(duty.resonance_due(749318, ready, 0))
+        duty.pending_resonance = None
+        duty.observe_pulse(fonts(22896, 6400), 749318, [], hits_lost=1)
+        self.assertIsNone(duty.resonance_due(749318, ready, 0))
+
+    def test_font_without_a_unique_hitmark_does_not_predict_a_pulse(self):
+        duty = FontDuty()
+        duty.update(fonts(22896, 8000), 24893)
+        two_hits = [PlayerHitEvent(sequence=sequence) for sequence in (119, 120)]
+        for hit, amount in zip(two_hits, (1600, 380)):
+            hit.hit.type_id = 144
+            hit.hit.start_tick = 749245
+            hit.hit.amount = amount
+        self.assertIsNone(
+            duty.observe_pulse(fonts(22896, 6400), 749249, two_hits, hits_lost=0)
+        )
+        self.assertIsNone(duty.resonance_due(749311, {"Resonance": 0}, 0))
 
 
 BeamBlocker = controller["BeamBlocker"]
