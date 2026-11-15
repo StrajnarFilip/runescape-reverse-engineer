@@ -859,10 +859,25 @@ GCD_ABILITIES = frozenset(
 # soft typeless hit that a Resonance cast on its tick blocks and Reflect halves. Its typeless hit
 # came 3 received ticks after 28942 at 250% (5,228 at 9370) and 4 after it at 100% (5,904),
 # where a type 133 melee hit of 853 landed at +2. Deflect Melee covers +1 and +2, and the
-# defensive is pressed at +1 or +2 so that it casts on +2 or +3.
+# defensive is pressed at +1 or +2 so that it casts on +2 or +3. Resonance and Disruption Shield
+# block only one hit, so they must cast on the typeless hit's tick itself (account owner): both
+# are pressed at +2. Reflect lasts several ticks and may go at +1 or +2.
 ANIMA_BOMB_PRESS_TICKS = (1, 2)
+ANIMA_BOMB_SINGLE_HIT_PRESS_TICK = 2
 ANIMA_BOMB_DEFENCES = ("Resonance", "Reflect")
 ANIMA_BOMB_REASON = "Anima bomb"
+# Disruption Shield (account owner: on O, nullifies one attack; wiki: Lunar, off the GCD, 60 s
+# cooldown, blocks one hitsplat including soft typeless, and takes priority over Resonance).
+# The client exposes no timer for it, so the controller times the cooldown from each press.
+# For the bomb it must be up exactly on the typeless hit (+3 at 250%), so it is pressed at +2;
+# golem hits may still consume it first (account owner).
+DISRUPTION_SHIELD = "Disruption Shield"
+DEFAULT_DISRUPTION_SHIELD_KEY = "O"
+# Disruption Shield is cast through Spellbook Swap (account owner: I, then O about 50 ms later;
+# both ignore the GCD). The swap chord's own key hold supplies that gap.
+SPELLBOOK_SWAP = "Spellbook Swap"
+DEFAULT_SPELLBOOK_SWAP_KEY = "I"
+DISRUPTION_SHIELD_COOLDOWN_NS = 60_000_000_000
 # Hold Still: one small hit lands at +1 (a 0 under Deflect, type 482) or +2 (type 133 in P1/P2,
 # 139 in P3), rarely +3, and the heavy type 133 hit at +4 (45 P1, 24 P2 and 20 P3 cues). A press
 # sent during received tick T casts on T+1, so Resonance must be pressed in the tick after the
@@ -885,6 +900,20 @@ DEVOTION_ADRENALINE_TENTHS = 500
 def gcd_press_ready(gcd_remaining_ms):
     """Whether a GCD ability pressed now casts on the tick the global cooldown ends."""
     return gcd_remaining_ms is not None and gcd_remaining_ms <= GCD_PRESS_LEAD_MS
+
+
+def gcd_window_this_tick(gcd_remaining_ms, tick_elapsed_ms):
+    """Whether the GCD ends at the next tick boundary, so a GCD press comes in this tick.
+
+    ``tick_elapsed_ms`` is the time since this received tick was first seen. In the 07:01 run,
+    780 ms left late in a tick ended two ticks later. Without it, only a press due now counts.
+    """
+    if gcd_remaining_ms is None:
+        return False
+    if tick_elapsed_ms is None:
+        return gcd_remaining_ms <= GCD_PRESS_LEAD_MS
+    limit = max(0, TICK_MS - tick_elapsed_ms) + GCD_BOUNDARY_TOLERANCE_MS
+    return gcd_remaining_ms <= limit
 
 
 def gcd_remaining_now(player, sample_ns, now_ns):
@@ -1184,6 +1213,7 @@ class PhaseOne:
         stun_expiry=None,
         adrenaline_tenths=None,
         uppercut_choice=None,
+        tick_elapsed_ms=None,
     ):
         """Use cooldown acknowledgement and bound the number of attempts for each mechanic.
 
@@ -1214,6 +1244,10 @@ class PhaseOne:
             if self.pending:
                 self.cast_result = self.acknowledge(cooldowns, now, ending=True)
             return Action("Resonance", "Hold Still second melee hit")
+        if self.hold_still_shield_due(cooldowns, received_tick, gcd_remaining_ms, tick_elapsed_ms):
+            if self.pending:
+                self.cast_result = self.acknowledge(cooldowns, now, ending=True)
+            return Action(DISRUPTION_SHIELD, "Hold Still heavy hit without Resonance")
         if self.devotion_due(cooldowns, received_tick, gcd_remaining_ms, adrenaline_tenths):
             if self.pending:
                 self.cast_result = self.acknowledge(cooldowns, now, ending=True)
@@ -1223,6 +1257,10 @@ class PhaseOne:
             if self.pending:
                 self.cast_result = self.acknowledge(cooldowns, now, ending=True)
             return Action(bomb_defence, ANIMA_BOMB_REASON)
+        if self.bomb_shield_due(cooldowns, received_tick, gcd_remaining_ms, tick_elapsed_ms):
+            if self.pending:
+                self.cast_result = self.acknowledge(cooldowns, now, ending=True)
+            return Action(DISRUPTION_SHIELD, ANIMA_BOMB_REASON)
         if self.pending:
             self.cast_result = self.acknowledge(
                 cooldowns,
@@ -1340,13 +1378,9 @@ class PhaseOne:
         ``tick_elapsed_ms`` is the time since this received tick was first seen. In the 07:01
         run, 780 ms left late in +3 ended two ticks later, and Soul Split took the heavy hit.
         """
-        if gcd_remaining_ms is None:
-            return False
-        if tick_elapsed_ms is None:
-            limit = GCD_PRESS_LEAD_MS
-        else:
-            limit = max(0, TICK_MS - tick_elapsed_ms) + GCD_BOUNDARY_TOLERANCE_MS
-        return gcd_remaining_ms <= limit and self.resonance_tick_ok(cooldowns, received_tick)
+        return gcd_window_this_tick(gcd_remaining_ms, tick_elapsed_ms) and self.resonance_tick_ok(
+            cooldowns, received_tick
+        )
 
     def resonance_committed(self):
         """Whether this Hold Still's Resonance press went out and has not been refuted."""
@@ -1374,6 +1408,8 @@ class PhaseOne:
             and isinstance(adrenaline_tenths, int)
             and adrenaline_tenths >= DEVOTION_ADRENALINE_TENTHS
             and not self.resonance_committed()
+            # A ready Disruption Shield covers the heavy hit without adrenaline.
+            and not self.shield_ready(cooldowns)
             and isinstance(received_tick, int)
             and isinstance(self.special_tick, int)
             and 0 <= received_tick - self.special_tick <= RESONANCE_LATEST_PRESS_TICK
@@ -1413,16 +1449,74 @@ class PhaseOne:
         ):
             return None
         earliest, latest = ANIMA_BOMB_PRESS_TICKS
-        if not earliest <= received_tick - self.bomb_tick <= latest:
+        tick_delta = received_tick - self.bomb_tick
+        if not earliest <= tick_delta <= latest:
             return None
         return next(
             (
                 ability
                 for ability in ANIMA_BOMB_DEFENCES
-                if ability in cooldowns and not cooldowns[ability]
+                if ability in cooldowns
+                and not cooldowns[ability]
+                and (ability != "Resonance" or tick_delta == ANIMA_BOMB_SINGLE_HIT_PRESS_TICK)
             ),
             None,
         )
+
+    def shield_ready(self, cooldowns):
+        """Whether Disruption Shield is bound, off its timer and unused for this special."""
+        return (
+            DISRUPTION_SHIELD in cooldowns
+            and not cooldowns[DISRUPTION_SHIELD]
+            and DISRUPTION_SHIELD not in self.handled
+        )
+
+    def hold_still_shield_due(self, cooldowns, received_tick, gcd_remaining_ms, tick_elapsed_ms):
+        """Cast Disruption Shield for Hold Still's heavy hit when Resonance will not take it.
+
+        It blocks one hit and ignores the GCD, so it goes after the small hit: at once when
+        Resonance is cooling or unbound, otherwise at +3 unless Resonance is pressed or due in
+        that tick (they must never both be up: the shield takes the hit first).
+        """
+        if (
+            self.special != HOLD_STILL
+            or not self.shield_ready(cooldowns)
+            or self.resonance_committed()
+            or not isinstance(received_tick, int)
+            or not isinstance(self.special_tick, int)
+        ):
+            return False
+        tick_delta = received_tick - self.special_tick
+        if not 0 < tick_delta <= RESONANCE_LATEST_PRESS_TICK:
+            return False
+        if self.resonance_planned(cooldowns, received_tick, gcd_remaining_ms, tick_elapsed_ms):
+            return False
+        if tick_delta == RESONANCE_LATEST_PRESS_TICK:
+            return True
+        resonance_usable = (
+            "Resonance" in cooldowns
+            and not cooldowns["Resonance"]
+            and "Resonance" not in self.handled
+        )
+        return self.small_hit_tick is not None and not resonance_usable
+
+    def bomb_shield_due(self, cooldowns, received_tick, gcd_remaining_ms, tick_elapsed_ms):
+        """Cast Disruption Shield at +2 so it is up on the bomb's typeless hit at +3.
+
+        Resonance keeps that tick when its GCD slot falls in it. Golem hits may still use the
+        shield up first (account owner).
+        """
+        if (
+            self.bomb_handled
+            or not isinstance(self.bomb_tick, int)
+            or not isinstance(received_tick, int)
+            or received_tick - self.bomb_tick != ANIMA_BOMB_SINGLE_HIT_PRESS_TICK
+            or DISRUPTION_SHIELD not in cooldowns
+            or cooldowns[DISRUPTION_SHIELD]
+        ):
+            return False
+        resonance_usable = "Resonance" in cooldowns and not cooldowns["Resonance"]
+        return not (resonance_usable and gcd_window_this_tick(gcd_remaining_ms, tick_elapsed_ms))
 
     def resonance_press_possible(self, cooldowns, received_tick):
         """Whether this Hold Still's Resonance press can still come in this or a later tick."""
@@ -3158,6 +3252,9 @@ def run(reader, args, board, attempt=None):
     if getattr(args, "devotion", None):
         labels["Devotion"] = args.devotion
     labels["Super Restore"] = getattr(args, "super_restore", None) or DEFAULT_SUPER_RESTORE_KEY
+    if getattr(args, "disruption_shield", None) and getattr(args, "spellbook_swap", None):
+        labels[DISRUPTION_SHIELD] = args.disruption_shield
+        labels[SPELLBOOK_SWAP] = args.spellbook_swap
     if args.reacquire:
         labels["Target Cycle"], labels["Opening Attack"] = args.reacquire
     layout = None
@@ -3402,6 +3499,8 @@ def run(reader, args, board, attempt=None):
     phase_four_at = {}
     reacquire_at = None
     reacquire_hp = None
+    # Monotonic time from which Disruption Shield can be cast again (self-timed).
+    shield_ready_ns = 0
     warned = set()
 
     def warn_once(reason):
@@ -3745,6 +3844,9 @@ def run(reader, args, board, attempt=None):
         timers = {
             name: value for name, value in cooldowns(reader, bindings).items() if name in bindings
         }
+        if DISRUPTION_SHIELD in bindings:
+            # No client timer: counted from the last press.
+            timers[DISRUPTION_SHIELD] = max(0, shield_ready_ns - now) // 1_000_000
         gcd_remaining_ms = gcd_remaining_now(player, info.monotonic_ns, reader.monotonic_ns())
         phase_one.hold_position = font_duty.active  # A new phase object starts without it.
         dodge_choice = None
@@ -3763,6 +3865,7 @@ def run(reader, args, board, attempt=None):
             stun_expiry=active_stun_expiry(reader, getattr(info, "logic_tick", None)),
             adrenaline_tenths=player.variable(Variable.ADRENALINE),
             uppercut_choice=dodge_choice["ability"] if dodge_choice else None,
+            tick_elapsed_ms=tick_elapsed_ms(received_tick),
         )
         if phase_one.cast_result:
             ability, confirmed = phase_one.cast_result
@@ -3810,13 +3913,22 @@ def run(reader, args, board, attempt=None):
                     phase_one.last_freedom_stun = None
                 time.sleep(POLL_SECONDS)
                 continue
-            if not send_chord(bindings[action.ability]):
+            if action.ability == DISRUPTION_SHIELD:
+                # Spellbook Swap first; its key hold leaves the ~50 ms gap before the spell.
+                delivered = send_chord(bindings[SPELLBOOK_SWAP]) and send_chord(
+                    bindings[DISRUPTION_SHIELD]
+                )
+            else:
+                delivered = send_chord(bindings[action.ability])
+            if not delivered:
                 # Interrupted by focus loss; the decision is made again after focus returns.
                 if action.ability == "Freedom":
                     phase_one.last_freedom_stun = None
                 time.sleep(POLL_SECONDS)
                 continue
             sent_ns = reader.monotonic_ns()
+            if action.ability == DISRUPTION_SHIELD:
+                shield_ready_ns = sent_ns + DISRUPTION_SHIELD_COOLDOWN_NS
             phase_one.sent(action, sent_ns)
             if attempt:
                 attempt.write(
@@ -3887,6 +3999,8 @@ ACTION_BAR_KEY_ARGUMENTS = {
     "reflect": "Reflect",
     "devotion": "Devotion",
     "surge": "Surge",
+    "disruption_shield": DISRUPTION_SHIELD,
+    "spellbook_swap": SPELLBOOK_SWAP,
     "flick_melee_key": "Deflect Melee",
     "flick_magic_key": "Deflect Magic",
     "flick_soul_split_key": "Soul Split",
@@ -3899,6 +4013,8 @@ KEY_FALLBACKS = {
     "flick_soul_split_key": DEFAULT_FLICK_SOUL_SPLIT_KEY,
     "devotion": "F7",
     "surge": "K",
+    "disruption_shield": DEFAULT_DISRUPTION_SHIELD_KEY,
+    "spellbook_swap": DEFAULT_SPELLBOOK_SWAP_KEY,
 }
 
 
@@ -4017,6 +4133,16 @@ def main():
     parser.add_argument(
         "--devotion",
         help="Optional Devotion binding, used for Hold Still's heavy hit when Resonance cannot",
+    )
+    parser.add_argument(
+        "--disruption-shield",
+        help=f"Disruption Shield key (default: from action bar, else "
+        f"{DEFAULT_DISRUPTION_SHIELD_KEY}), for Hold Still and the P4 anima bomb",
+    )
+    parser.add_argument(
+        "--spellbook-swap",
+        help=f"Spellbook Swap key pressed just before Disruption Shield (default: from action "
+        f"bar, else {DEFAULT_SPELLBOOK_SWAP_KEY})",
     )
     parser.add_argument(
         "--super-restore",

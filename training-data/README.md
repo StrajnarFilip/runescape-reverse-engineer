@@ -66,8 +66,15 @@ For Hold Still, the controller deflects the small hit from +0 through +2 after `
 Deflect Magic in P3 and Deflect Melee otherwise. If Resonance will take the heavy +4 hit,
 Soul Split returns from the start of the tick in which Resonance is due or was pressed, so that
 Resonance heals the full hit. `prayer_window_released` records this. Otherwise Deflect Melee
-stays for the heavy hit. Devotion is pressed when it is bound, ready and affordable (50%
-adrenaline), and the GCD slot is one Resonance cannot use. GCD abilities are pressed only in the last 200 ms of the GCD because
+stays for the heavy hit. If Resonance cannot take it, Disruption Shield is cast: Spellbook Swap
+(`I`) and then the spell (`O`), both off the GCD. It goes right after the small hit when
+Resonance is cooling, otherwise at +3 unless Resonance is pressed or due in that tick, since
+the two must never be up together. Its 60 s cooldown is timed by the controller. Devotion
+remains the fallback while the shield is not ready. It is pressed when it is bound, ready and
+affordable (50% adrenaline), and the GCD slot is one Resonance cannot use.
+For the P4 anima bomb, Resonance and Disruption Shield block one hit only, so both are pressed
+at +2 to be up on the +3 typeless hit. Resonance is used when its GCD slot falls in that tick,
+otherwise the shield. Reflect may go at +1 or +2. Golem hits can still use the shield up first. GCD abilities are pressed only in the last 200 ms of the GCD because
 ability queueing is off. `ability_sent.gcd_at_press_ms` records the time left, and
 `ability_press_skipped` marks a GCD window that passed while deciding.
 In P1 the controller keeps the player on the green strip, using only tiles in melee reach of

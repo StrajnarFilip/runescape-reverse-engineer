@@ -125,8 +125,9 @@ auto-retaliate on. Start the script, click into RuneScape and wake Telos yoursel
 The enrage comes from memory (VARP 6359). Ability and prayer keys come from the
 displayed action bars: Freedom and Anticipation are required. Escape, Resonance,
 Dive, Deflect Magic, Deflect Melee and Soul Split are used when present, and
-Reflect is optional. Devotion falls back to ``F7`` and Surge to ``K`` when no bar
-shows them. Super restore is drunk with ``L`` at 50 prayer points or fewer. At the
+Reflect is optional. Devotion falls back to ``F7``, Surge to ``K``, Spellbook Swap
+to ``I`` and Disruption Shield to ``O`` when no bar shows them. Disruption Shield is
+cast as Spellbook Swap followed by the spell. Super restore is drunk with ``L`` at 50 prayer points or fewer. At the
 first Telos attack of each phase the up arrow is held for 3 seconds to raise the camera. The script runs until the player dies or F12 is pressed. Losing
 foreground focus pauses input. Each attempt is logged to ``training-data/telos-*.jsonl``.
 
@@ -136,7 +137,8 @@ Optional arguments:
 * ``--duration SECONDS`` bounds the session.
 * ``--pid ID`` selects the client process.
 * ``--freedom``, ``--anticipation``, ``--escape``, ``--surge``, ``--resonance``, ``--dive``,
-  ``--reflect``, ``--devotion`` and ``--flick-melee-key`` / ``--flick-magic-key`` /
+  ``--reflect``, ``--devotion``, ``--spellbook-swap``, ``--disruption-shield`` and
+  ``--flick-melee-key`` / ``--flick-magic-key`` /
   ``--flick-soul-split-key`` override a key read from the bars. Displayed letters are
   translated through the game window's keyboard layout.
 * ``--super-restore KEY`` changes the super restore key (default ``L``).

@@ -471,14 +471,18 @@ class PhaseOneTests(unittest.TestCase):
         phase = PhaseOne(phase=4)
         phase.observe([dict(event(1, bomb), received_tick=9367)])
         self.assertIsNone(phase.special)
-        timers = {"Resonance": 0, "Reflect": 0}
+        timers = {"Resonance": 0}
         self.assertIsNone(
             phase.next_action(SECOND_NS, timers, 0, Prayer.MELEE, received_tick=9367)
         )
+        # Resonance blocks one hit, so it only casts on the +3 typeless hit: pressed at +2.
         self.assertIsNone(
-            phase.next_action(SECOND_NS, timers, 400, Prayer.MELEE, received_tick=9368)
+            phase.next_action(SECOND_NS, timers, 150, Prayer.MELEE, received_tick=9368)
         )
-        action = phase.next_action(SECOND_NS, timers, 150, Prayer.MELEE, received_tick=9368)
+        self.assertIsNone(
+            phase.next_action(SECOND_NS, timers, 400, Prayer.MELEE, received_tick=9369)
+        )
+        action = phase.next_action(SECOND_NS, timers, 150, Prayer.MELEE, received_tick=9369)
         self.assertEqual(action, controller["Action"]("Resonance", "Anima bomb"))
         phase.sent(action, SECOND_NS)
         self.assertNotIn("Resonance", phase.handled)
@@ -500,6 +504,81 @@ class PhaseOneTests(unittest.TestCase):
         first = PhaseOne()
         first.observe([dict(event(3, bomb), received_tick=50)])
         self.assertIsNone(first.next_action(SECOND_NS, timers, 0, Prayer.MELEE, received_tick=51))
+
+    def test_disruption_shield_is_tick_perfect_for_the_anima_bomb(self):
+        shield = controller["DISRUPTION_SHIELD"]
+        bomb = controller["ANIMA_BOMB"]
+        phase = PhaseOne(phase=4)
+        phase.observe([dict(event(1, bomb), received_tick=9367)])
+        timers = {"Resonance": 12_000, shield: 0}
+        # Off the GCD: no GCD window is needed, but only +2 casts on the +3 typeless hit.
+        self.assertIsNone(
+            phase.next_action(SECOND_NS, timers, 1500, Prayer.MELEE, received_tick=9368)
+        )
+        action = phase.next_action(SECOND_NS, timers, 1500, Prayer.MELEE, received_tick=9369)
+        self.assertEqual(action, controller["Action"](shield, "Anima bomb"))
+        phase.sent(action, SECOND_NS)
+        self.assertTrue(phase.bomb_handled)
+        # Resonance keeps +2 when its GCD slot falls in that tick.
+        second = PhaseOne(phase=4)
+        second.observe([dict(event(2, bomb), received_tick=100)])
+        ready = {"Resonance": 0, shield: 0}
+        self.assertIsNone(
+            second.next_action(SECOND_NS, ready, 500, Prayer.MELEE, received_tick=102,
+                               tick_elapsed_ms=50)
+        )
+        third = PhaseOne(phase=4)
+        third.observe([dict(event(3, bomb), received_tick=100)])
+        self.assertEqual(
+            third.next_action(SECOND_NS, ready, 1100, Prayer.MELEE, received_tick=102,
+                              tick_elapsed_ms=50).ability,
+            shield,
+        )
+
+    def test_disruption_shield_takes_the_hold_still_heavy_hit_without_resonance(self):
+        shield = controller["DISRUPTION_SHIELD"]
+        # Resonance cooling: the shield goes right after the small hit.
+        phase = PhaseOne()
+        phase.observe([dict(event(1, HOLD_STILL), received_tick=100)])
+        cooling = {"Resonance": 12_000, shield: 0, "Devotion": 0}
+        self.assertIsNone(
+            phase.next_action(SECOND_NS, cooling, 1500, Prayer.MELEE, received_tick=101,
+                              adrenaline_tenths=1000)
+        )
+        phase.observe_hits([self.hit(133)], 102)
+        action = phase.next_action(SECOND_NS, cooling, 1500, Prayer.MELEE, received_tick=102,
+                                   adrenaline_tenths=1000)
+        self.assertEqual(
+            action, controller["Action"](shield, "Hold Still heavy hit without Resonance")
+        )
+        phase.sent(action, SECOND_NS)
+        self.assertIsNone(
+            phase.next_action(SECOND_NS, {"Resonance": 12_000, shield: 60_000}, 1500,
+                              Prayer.MELEE, received_tick=103)
+        )
+        # Resonance ready but its GCD slot ends at +5: the shield waits for +3.
+        late = PhaseOne()
+        late.observe([dict(event(2, HOLD_STILL), received_tick=200)])
+        late.observe_hits([self.hit(133)], 202)
+        ready = {"Resonance": 0, shield: 0}
+        self.assertIsNone(
+            late.next_action(SECOND_NS, ready, 1700, Prayer.MELEE, received_tick=202,
+                             tick_elapsed_ms=50)
+        )
+        self.assertEqual(
+            late.next_action(SECOND_NS, ready, 1100, Prayer.MELEE, received_tick=203,
+                             tick_elapsed_ms=50).ability,
+            shield,
+        )
+        # Resonance due at +3: never both.
+        both = PhaseOne()
+        both.observe([dict(event(3, HOLD_STILL), received_tick=300)])
+        self.assertEqual(
+            both.next_action(SECOND_NS, ready, 150, Prayer.MELEE, received_tick=303,
+                             tick_elapsed_ms=450).ability,
+            "Resonance",
+        )
+        self.assertFalse(both.hold_still_shield_due(ready, 303, 500, 50))
 
     def test_super_restore_at_fifty_prayer_points_waits_for_each_dose(self):
         restorer = controller["PrayerRestorer"]()
