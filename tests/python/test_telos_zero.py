@@ -335,6 +335,42 @@ class PhaseOneTests(unittest.TestCase):
         )
         self.assertEqual(action.ability, "Freedom")
 
+    def test_anima_bomb_defence_casts_ahead_of_the_typeless_hit(self):
+        # 06:34 at 250%: 28942 at 9367 and a 5,228 typeless hit at 9370.
+        bomb = controller["ANIMA_BOMB"]
+        phase = PhaseOne(phase=4)
+        phase.observe([dict(event(1, bomb), received_tick=9367)])
+        self.assertIsNone(phase.special)
+        timers = {"Resonance": 0, "Reflect": 0}
+        self.assertIsNone(
+            phase.next_action(SECOND_NS, timers, 0, Prayer.MELEE, received_tick=9367)
+        )
+        self.assertIsNone(
+            phase.next_action(SECOND_NS, timers, 400, Prayer.MELEE, received_tick=9368)
+        )
+        action = phase.next_action(SECOND_NS, timers, 150, Prayer.MELEE, received_tick=9368)
+        self.assertEqual(action, controller["Action"]("Resonance", "Anima bomb"))
+        phase.sent(action, SECOND_NS)
+        self.assertNotIn("Resonance", phase.handled)
+        self.assertIsNone(
+            phase.next_action(SECOND_NS, {"Reflect": 0}, 0, Prayer.MELEE, received_tick=9369)
+        )
+        # With Resonance cooling (the font instakill restarts every cooldown), Reflect at +2.
+        later = PhaseOne(phase=4)
+        later.observe([dict(event(2, bomb), received_tick=200)])
+        cooling = {"Resonance": 12_000, "Reflect": 0}
+        self.assertEqual(
+            later.next_action(SECOND_NS, cooling, 0, Prayer.MELEE, received_tick=202).ability,
+            "Reflect",
+        )
+        self.assertIsNone(
+            later.next_action(SECOND_NS, cooling, 0, Prayer.MELEE, received_tick=203)
+        )
+        # Outside P4 28942 is not treated as the bomb.
+        first = PhaseOne()
+        first.observe([dict(event(3, bomb), received_tick=50)])
+        self.assertIsNone(first.next_action(SECOND_NS, timers, 0, Prayer.MELEE, received_tick=51))
+
     def test_gcd_remaining_now_counts_down_to_the_press(self):
         remaining = controller["gcd_remaining_now"]
         player = SimpleNamespace(gcd_reason=Reason.NONE, gcd_remaining_ms=160)
@@ -615,6 +651,42 @@ class BeamTests(unittest.TestCase):
                 self.assertIsNone(
                     choose(reader, kind_by_phase[1], player, pose, use_tile=hover, stomp=True)
                 )
+
+    def test_beam_keeping_prefers_strip_tiles_in_melee_reach_and_never_under_telos(self):
+        choose = controller["stream_destination"]
+        player = SimpleNamespace(tile=SimpleNamespace(x=110, y=110, plane=0))
+        pose = SimpleNamespace(tile=SimpleNamespace(x=100, y=100, plane=0), footprint_size=5)
+        flags = HazardFlags.SCENE_LOCATION | HazardFlags.TILE | HazardFlags.TERRAIN_HEIGHT
+        hazards = [
+            SimpleNamespace(
+                tile=SimpleNamespace(x=x, y=y, plane=0), flags=flags, kind=1, config_id=103545
+            )
+            for x, y in ((104, 104), (105, 102), (109, 109), (108, 104))
+        ]
+        reader = SimpleNamespace(
+            hazard_info=SimpleNamespace(count=len(hazards)),
+            hazards=hazards,
+            hazard_terrain_height=lambda hazard: 4544.0,
+        )
+        with patch.dict(choose.__globals__, project_tile=lambda r, tile, plane, height: tile):
+            # Nearest first without the preference; the footprint tile (104,104) never.
+            self.assertEqual(choose(reader, 1, player, pose)[0][0], (109, 109))
+            self.assertEqual(choose(reader, 1, player, pose, prefer_reach=True)[0][0], (105, 102))
+            fallback = choose(
+                reader, 1, player, pose, prefer_reach=True, rejected_tiles={(105, 102)}
+            )
+            self.assertEqual(fallback[0][0], (109, 109))
+        strip = controller["on_strip"]
+        self.assertTrue(strip(reader, 1, (109, 109), 0))
+        self.assertFalse(strip(reader, 3, (109, 109), 0))
+        self.assertFalse(strip(reader, 1, (109, 109), 1))
+
+    def test_beam_keeper_waits_between_moves(self):
+        keeper = controller["BeamKeeper"]()
+        retry = controller["BEAM_KEEP_RETRY_TICKS"]
+        self.assertTrue(keeper.move_due(10))
+        self.assertFalse(keeper.move_due(10 + retry - 1))
+        self.assertTrue(keeper.move_due(10 + retry))
 
     def test_virus_destination_checks_colour_plane_projection_and_footprint(self):
         choose = controller["virus_beam_destination"]
@@ -911,6 +983,27 @@ class PrayerFlickerTests(unittest.TestCase):
         # P3 28929 hits were type 133 melee.
         flicker.observe([event(2, AUTO)], 44, 0)
         self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 44, 0), Prayer.MELEE)
+
+    def test_anima_bomb_deflects_melee_through_plus_two(self):
+        flicker = PrayerFlicker()
+        flicker.observe([event(1, controller["ANIMA_BOMB"])], 6007, 0)
+        self.assertEqual(
+            [flicker.active_prayer(tick, 0) for tick in range(6007, 6010)],
+            [Prayer.MELEE, Prayer.MELEE, None],
+        )
+
+    def test_beam_moves_wait_for_a_quiet_tick(self):
+        flicker = PrayerFlicker()
+        self.assertTrue(flicker.quiet(10, 0))
+        self.assertFalse(flicker.quiet(None, 0))
+        flicker.observe([event(1, AUTO)], 10, 0)
+        self.assertFalse(flicker.quiet(10, 0))
+        self.assertTrue(flicker.quiet(11, 0))
+        # A long-range magic window starting next tick also blocks the move.
+        flicker.observe([event(2, controller["MAGIC_ATTACK"])], 12, 0, distance=8)
+        self.assertFalse(flicker.quiet(12, 0))
+        self.assertFalse(flicker.quiet(13, 0))
+        self.assertTrue(flicker.quiet(15, 0))
 
     def test_hold_still_deflects_both_hits_without_resonance(self):
         flicker = PrayerFlicker()

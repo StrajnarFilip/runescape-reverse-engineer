@@ -48,6 +48,8 @@ TENDRILS = 28931
 TENDRILS_RELEASE = 28932
 HOLD_STILL = 28935
 UPPERCUT = 28938
+# P4 weak anima bomb throw (see ANIMA_BOMB_PRESS_TICKS).
+ANIMA_BOMB = 28942
 PHASE_SHIFT = 21
 PHASE_MASK = 7
 OPENING_AUTOS = 7
@@ -355,10 +357,18 @@ METER_MASK = (1 << PHASE_SHIFT) - 1
 GREEN_BEAM_KIND = 1
 BLACK_BEAM_KIND = 2
 RED_BEAM_KIND = 3
-# Only the black stream is blocked. In the 300% run of 175142 the green P1 strip stopped short
-# of Telos and moved, so following it dragged the player away from Telos for 50 ticks.
+# The black stream is blocked during P2 Onslaught.
 BEAM_KIND_BY_PHASE = {2: BLACK_BEAM_KIND}
 STOMP_BEAM_BY_PHASE = {1: GREEN_BEAM_KIND, 3: RED_BEAM_KIND}
+# The account owner asks for the player to stand in the green P1 and red P3 strip at all times,
+# moving there with Dive and never landing under Telos (that can move him). Strip tiles in melee
+# reach of the footprint are preferred: after a stomp Dive onto the strip (8950, 06:34 run)
+# auto-retaliate re-targeted Telos and the player stayed on the strip.
+BEAM_KEEP_BY_PHASE = STOMP_BEAM_BY_PHASE
+BEAM_KEEP_RETRY_TICKS = 3
+MELEE_REACH_TILES = 1
+# Leave each Telos attack cue's protection tick alone: a move holds the loop for ~0.35 s.
+BEAM_KEEP_QUIET_TICKS_AFTER_CUE = 1
 # The meter counts as fed after this many rises within the last BEAM_FEED_WINDOW received ticks.
 BEAM_FEED_RISES = 2
 BEAM_FEED_WINDOW = 3
@@ -502,9 +512,22 @@ def virus_beam_destination(reader, phase, player, boss, *, use_tile=None, reject
 
 
 def stream_destination(
-    reader, kind, player, pose, *, use_tile=None, rejected=(), rejected_tiles=(), stomp=False
+    reader,
+    kind,
+    player,
+    pose,
+    *,
+    use_tile=None,
+    rejected=(),
+    rejected_tiles=(),
+    stomp=False,
+    prefer_reach=False,
 ):
-    """Select a visible strip tile, optionally requiring a safe Dive landing."""
+    """Select a visible strip tile, optionally requiring a safe Dive landing.
+
+    Tiles under Telos's footprint are never chosen. ``prefer_reach`` ranks tiles within melee
+    reach of the footprint first, then by distance from the player.
+    """
     player_tile = (player.tile.x, player.tile.y)
     boss_tile = (pose.tile.x, pose.tile.y)
     size = pose.footprint_size or 1
@@ -528,11 +551,39 @@ def stream_destination(
         height = reader.hazard_terrain_height(hazard)
         point = project_tile(reader, tile, hazard.tile.plane, height)
         if point is not None and point not in rejected:
-            routes.append((distance, identity, point))
+            out_of_reach = footprint_distance(tile, boss_tile, size) > MELEE_REACH_TILES
+            rank = (out_of_reach, distance) if prefer_reach else (distance,)
+            routes.append((rank, identity, point))
     if not routes:
         return None
     _, identity, point = min(routes)
     return identity, point
+
+
+def on_strip(reader, kind, tile, plane):
+    """Whether the player's tile is one of the visible strip tiles of ``kind``."""
+    return any(
+        hazard.kind == kind
+        and hazard.flags & HazardFlags.SCENE_LOCATION
+        and (hazard.tile.x, hazard.tile.y, hazard.tile.plane) == (*tile, plane)
+        for hazard in reader.hazards[: reader.hazard_info.count]
+    )
+
+
+class BeamKeeper:
+    """Rate-limit P1/P3 strip moves and remember tiles whose hover was rejected."""
+
+    def __init__(self):
+        self.next_move_tick = None
+        self.rejected = set()
+        self.on_strip = None
+
+    def move_due(self, received_tick):
+        """Allow one move attempt, then wait BEAM_KEEP_RETRY_TICKS for it to land."""
+        if self.next_move_tick is not None and received_tick < self.next_move_tick:
+            return False
+        self.next_move_tick = received_tick + BEAM_KEEP_RETRY_TICKS
+        return True
 
 
 class TargetPicker:
@@ -642,8 +693,8 @@ TRANSITION_ATTACK_CUES = frozenset({
     MELEE_AUTO_SEQUENCE, MAGIC_ATTACK, TENDRILS, HOLD_STILL, UPPERCUT,
 })
 DEFAULT_FLICK_HOLD_TICKS = 1
-# The unanimated Tendrils follow-up can land at +2.
-FLICK_HOLD_TICKS = {TENDRILS_RELEASE: 3}
+# The unanimated Tendrils follow-up can land at +2, and so can the melee hit before the bomb.
+FLICK_HOLD_TICKS = {TENDRILS_RELEASE: 3, ANIMA_BOMB: 2}
 # Window ticks name the received tick of the press; the overhead is then up on the next tick.
 # Hold Still: Deflect for the small hit through +3, then Deflect Melee for the heavy +4 hit
 # unless Resonance's cooldown confirms that it will take that hit (PrayerFlicker.release).
@@ -692,7 +743,15 @@ UPPERCUT_ESCAPE_TICKS = (4, 5)
 # on the tick the GCD ends, ahead of Revolution. Escape, Surge and Dive are off the GCD.
 # A 100 ms lead was too late: Anticipation pressed with 76 ms left did not cast (06:30 run).
 GCD_PRESS_LEAD_MS = 200
-GCD_ABILITIES = frozenset({"Resonance", "Anticipation", "Freedom", "Hurricane"})
+GCD_ABILITIES = frozenset({"Resonance", "Anticipation", "Freedom", "Hurricane", "Reflect"})
+# P4 weak anima bomb (account owner): once Telos's bar is full the next special is the bomb, a
+# soft typeless hit that a Resonance cast on its tick blocks and Reflect halves. Its typeless hit
+# came 3 received ticks after 28942 at 250% (5,228 at 9370) and 4 after it at 100% (5,904),
+# where a type 133 melee hit of 853 landed at +2. Deflect Melee covers +1 and +2, and the
+# defensive is pressed at +1 or +2 so that it casts on +2 or +3.
+ANIMA_BOMB_PRESS_TICKS = (1, 2)
+ANIMA_BOMB_DEFENCES = ("Resonance", "Reflect")
+ANIMA_BOMB_REASON = "Anima bomb"
 # Hold Still: one small hit lands at +1 (a 0 under Deflect, type 482) or +2 (type 133 in P1/P2,
 # 139 in P3), rarely +3, and the heavy type 133 hit at +4 (45 P1, 24 P2 and 20 P3 cues). A press
 # sent during received tick T casts on T+1, so Resonance must be pressed in the tick after the
@@ -797,6 +856,10 @@ class PhaseOne:
         self.forecast_attempts = 0
         self.small_hit_tick = None
         self.cast_result = None
+        # P4 anima bomb: received tick and native event of 28942, and whether a defensive went.
+        self.bomb_tick = None
+        self.bomb_event = None
+        self.bomb_handled = False
 
     @property
     def expected_after(self):
@@ -847,6 +910,12 @@ class PhaseOne:
                 self.opening_tick = tick
             if self.is_p2_opening_magic_attack(sequence, tick):
                 sequence = MELEE_AUTO_SEQUENCE  # Counted as an ordinary attack.
+            if sequence == ANIMA_BOMB and self.phase == 4:
+                # Tracked beside the rotation: the forecast and special state stay unchanged.
+                self.bomb_tick = tick
+                self.bomb_event = action["event_sequence"]
+                self.bomb_handled = False
+                continue
             if sequence in self.auto_sequences:
                 self.autos += 1
                 self.last_auto_ns = action["observed_ns"]
@@ -915,6 +984,11 @@ class PhaseOne:
             if self.pending:
                 self.cast_result = self.acknowledge(cooldowns, now, ending=True)
             return Action("Resonance", "Hold Still second melee hit")
+        bomb_defence = self.bomb_defence(cooldowns, received_tick, gcd_remaining_ms)
+        if bomb_defence is not None:
+            if self.pending:
+                self.cast_result = self.acknowledge(cooldowns, now, ending=True)
+            return Action(bomb_defence, ANIMA_BOMB_REASON)
         if self.pending:
             self.cast_result = self.acknowledge(
                 cooldowns,
@@ -1019,6 +1093,31 @@ class PhaseOne:
             return True
         return 0 < tick_delta < RESONANCE_LATEST_PRESS_TICK and self.small_hit_tick is not None
 
+    def bomb_defence(self, cooldowns, received_tick, gcd_remaining_ms):
+        """The ready defensive to press for the P4 anima bomb now, or None.
+
+        Pressed at most once per bomb, in the GCD's last moments at +1 or +2 after 28942, so it
+        casts on +2 or +3 ahead of the typeless hit. Resonance is preferred over Reflect.
+        """
+        if (
+            self.bomb_handled
+            or not isinstance(self.bomb_tick, int)
+            or not isinstance(received_tick, int)
+            or not gcd_press_ready(gcd_remaining_ms)
+        ):
+            return None
+        earliest, latest = ANIMA_BOMB_PRESS_TICKS
+        if not earliest <= received_tick - self.bomb_tick <= latest:
+            return None
+        return next(
+            (
+                ability
+                for ability in ANIMA_BOMB_DEFENCES
+                if ability in cooldowns and not cooldowns[ability]
+            ),
+            None,
+        )
+
     def resonance_press_possible(self, cooldowns, received_tick):
         """Whether this Hold Still's Resonance press can still come in this or a later tick."""
         return (
@@ -1042,7 +1141,9 @@ class PhaseOne:
     def sent(self, action, now):
         """Wait for the sampled cooldown before treating this command as a cast."""
         self.pending = (action.ability, now + ACK_TIMEOUT_NS)
-        if action.ability == "Anticipation":
+        if action.reason == ANIMA_BOMB_REASON:
+            self.bomb_handled = True
+        elif action.ability == "Anticipation":
             # An unacknowledged press may be retried while the forecast window is still open.
             self.forecast_attempts += 1
             self.forecast_handled = self.forecast_attempts >= ANTICIPATION_MAX_ATTEMPTS
@@ -1089,6 +1190,8 @@ class PrayerFlicker:
         self.default_prayer = Prayer.MELEE
         # Selects the phase-specific Hold Still small-hit prayer.
         self.phase = 1
+        # Received tick of the latest protected attack cue.
+        self.last_cue_tick = None
         self.cue_event = None
         self.requested = None
         self.transition_phase = None
@@ -1149,6 +1252,7 @@ class PrayerFlicker:
             cue_tick = action.get("received_tick", tick)
             cue = action["event_sequence"]
             if cue_tick is not None:
+                self.last_cue_tick = cue_tick
                 for first, last, span_prayer in spans:
                     self.windows.append((cue_tick + first, cue_tick + last + 1, span_prayer, cue))
             # Without received ticks the first span's prayer holds until the last span ends.
@@ -1189,6 +1293,20 @@ class PrayerFlicker:
     def holding(self, tick, now):
         """Whether any deflect window is open."""
         return self.active_prayer(tick, now) is not None
+
+    def quiet(self, tick, now):
+        """Whether a pointer move now leaves every protection press undisturbed.
+
+        No deflect window may be open or start next tick, and the latest cue's tick has passed.
+        """
+        if tick is None or self.holding(tick, now):
+            return False
+        if any(window[0] <= tick + 1 for window in self.windows):
+            return False
+        return (
+            self.last_cue_tick is None
+            or tick - self.last_cue_tick >= BEAM_KEEP_QUIET_TICKS_AFTER_CUE
+        )
 
     def next_prayer(self, prayer, tick, now):
         """Return the next prayer if a switch is needed and no acknowledgement is pending."""
@@ -1806,6 +1924,134 @@ def run(reader, args, board, attempt=None):
         else:
             phase_one.stomp_checked = True
 
+    beam_keeper = BeamKeeper()
+
+    def beam_keep_step(phase, phase_one, boss, received_tick, timers, now, *, movement_busy):
+        """Keep the player on the P1 green or P3 red strip, by Dive when it is ready.
+
+        Escape, the stomp dodge and the P3 virus walk own movement while they run. The landing
+        tile is verified with the native Walk hover: a visible strip tile not under Telos and,
+        for Dive, within its range.
+        """
+        kind = BEAM_KEEP_BY_PHASE.get(phase)
+        if kind is None or not isinstance(received_tick, int):
+            return
+        player = reader.spatial.player
+        position_flags = SpatialFlags.TILE | SpatialFlags.FINE_POSITION
+        if player.valid_mask & position_flags != position_flags:
+            return
+        player_tile = (player.tile.x, player.tile.y)
+        plane = player.tile.plane
+        standing = on_strip(reader, kind, player_tile, plane)
+        if standing != beam_keeper.on_strip:
+            beam_keeper.on_strip = standing
+            emit(
+                "beam_keep_arrival" if standing else "beam_keep_departure",
+                phase=phase,
+                tile=(*player_tile, plane),
+                received_tick=received_tick,
+            )
+        if (
+            standing
+            or not input_allowed
+            or movement_busy
+            or phase_one.stomp_pending is not None
+            or virus.started is not None
+            or (flicker is not None and not flicker.quiet(received_tick, now))
+            or not beam_keeper.move_due(received_tick)
+        ):
+            return
+        pose_flags = SpatialFlags.SAME_WORLD | SpatialFlags.TILE
+        pose = next(
+            (
+                candidate
+                for candidate in reader.npc_spatial[: reader.spatial.npc_count]
+                if candidate.instance_id == boss.instance_id
+                and candidate.valid_mask & pose_flags == pose_flags
+            ),
+            None,
+        )
+        if pose is None or pose.tile.plane != plane:
+            return
+        use_dive = "Dive" in bindings and not timers.get("Dive")
+        route = stream_destination(
+            reader,
+            kind,
+            player,
+            pose,
+            rejected_tiles=beam_keeper.rejected,
+            prefer_reach=True,
+        )
+        if route is None:
+            beam_keeper.rejected.clear()
+            return
+        (target, _, config), point = route
+        if chebyshev(target, player_tile) > DIVE_RANGE_TILES:
+            use_dive = False
+        boss_id = boss.instance_id
+        previous_cycle = reader.pointer_walk.menu_cycle
+        hover = {}
+
+        def landing_current():
+            fresh, current_boss, current_phase, hp = refresh_for_walk()
+            fill_walk_hover(hover)
+            if (
+                not fresh
+                or current_boss is None
+                or current_boss.instance_id != boss_id
+                or current_phase != phase
+                or hp is None
+                or hp <= 0
+                or reader.pointer_walk.menu_cycle == previous_cycle
+                or hover.get("tile") is None
+            ):
+                return False
+            current = reader.spatial.player
+            landing = hover["tile"][:2]
+            if use_dive and not 0 < chebyshev(landing, (current.tile.x, current.tile.y)) <= (
+                DIVE_RANGE_TILES
+            ):
+                return False
+            current_pose = next(
+                (
+                    candidate
+                    for candidate in reader.npc_spatial[: reader.spatial.npc_count]
+                    if candidate.instance_id == boss_id
+                    and candidate.valid_mask & pose_flags == pose_flags
+                ),
+                None,
+            )
+            return current_pose is not None and (
+                stream_destination(reader, kind, current, current_pose, use_tile=hover["tile"])
+                is not None
+            )
+
+        sent = click_point(
+            point,
+            select_dive=use_dive,
+            validate=landing_current,
+            failure_event="beam_keep_skipped",
+        )
+        if sent is None and hover:
+            beam_keeper.rejected.add(target)
+        elif sent:
+            beam_keeper.rejected.clear()
+        boss_tile = (pose.tile.x, pose.tile.y)
+        reach = footprint_distance(target, boss_tile, pose.footprint_size or 1)
+        emit(
+            "beam_keep_move",
+            sent=sent,
+            phase=phase,
+            movement="dive" if use_dive else "walk",
+            target=(*target, plane),
+            beam_config=config,
+            in_reach=reach <= MELEE_REACH_TILES,
+            player_tile=(*player_tile, plane),
+            hover=hover,
+            dispatch_tick=received_tick_counter() if sent else None,
+            received_tick=received_tick,
+        )
+
     font_duty = FontDuty()
     target_picker = TargetPicker()
     seen_p4_actors = set()
@@ -2391,6 +2637,8 @@ def run(reader, args, board, attempt=None):
         labels["Resonance"] = args.resonance
     if getattr(args, "dive", None):
         labels["Dive"] = args.dive
+    if getattr(args, "reflect", None):
+        labels["Reflect"] = args.reflect
     if args.reacquire:
         labels["Target Cycle"], labels["Opening Attack"] = args.reacquire
     layout = None
@@ -2889,11 +3137,12 @@ def run(reader, args, board, attempt=None):
                 # Decided from an aged sample: decide again from the next fresh one.
                 time.sleep(POLL_SECONDS)
                 continue
-            pending_cue = (
-                phase_one.last_auto_event
-                if action.ability == "Anticipation"
-                else phase_one.special_event
-            )
+            if action.reason == ANIMA_BOMB_REASON:
+                pending_cue = phase_one.bomb_event
+            elif action.ability == "Anticipation":
+                pending_cue = phase_one.last_auto_event
+            else:
+                pending_cue = phase_one.special_event
             if attempt:
                 attempt.write(
                     "ability_requested",
@@ -2949,6 +3198,15 @@ def run(reader, args, board, attempt=None):
             beam_step(phase, phase_one, boss, meter, received_tick, movement_busy=movement_busy)
         stomp_dodge(phase_one, boss, received_tick, timers)
         virus_step(phase, boss, received_tick, movement_busy=movement_busy)
+        beam_keep_step(
+            phase,
+            phase_one,
+            boss,
+            received_tick,
+            timers,
+            reader.monotonic_ns(),
+            movement_busy=phase_one.owns_movement(reader.monotonic_ns(), received_tick),
+        )
         time.sleep(POLL_SECONDS)
     emit("timeout", active=active_instance is not None)
     return 1
@@ -2960,6 +3218,7 @@ ACTION_BAR_KEY_ARGUMENTS = {
     "escape": "Escape",
     "resonance": "Resonance",
     "dive": "Dive",
+    "reflect": "Reflect",
     "flick_melee_key": "Deflect Melee",
     "flick_magic_key": "Deflect Magic",
     "flick_soul_split_key": "Soul Split",
@@ -3076,6 +3335,10 @@ def main():
     parser.add_argument(
         "--resonance",
         help="Optional Resonance binding, sent after Hold Still's +2 hit to absorb the +4 hit",
+    )
+    parser.add_argument(
+        "--reflect",
+        help="Optional Reflect binding, used on the P4 anima bomb while Resonance is cooling",
     )
     # Phases 2 and 3 are always handled; the old opt-in flag is still accepted as a no-op.
     parser.add_argument("--continue-phase-two", action="store_true", help=argparse.SUPPRESS)

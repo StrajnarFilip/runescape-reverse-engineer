@@ -59,6 +59,13 @@ hit. Once Resonance's cooldown confirms its cast, a `prayer_window_released` row
 return to Soul Split. GCD abilities are pressed only in the last 200 ms of the GCD because
 ability queueing is off. `ability_sent.gcd_at_press_ms` records the time left, and
 `ability_press_skipped` marks a GCD window that passed while deciding.
+In P1 and P3 the controller keeps the player on the green or red strip. It prefers strip tiles
+in melee reach of Telos and never lands under him. It uses Dive when Dive is ready and the tile
+is within reach, and otherwise walks. Each attempt is a `beam_keep_move` row with the verified
+hover. `beam_keep_arrival` and `beam_keep_departure` mark changes in standing on the strip.
+Moves wait for a tick with no protection press and yield to Escape, the stomp dodge and the P3
+virus walk. In P4 the anima bomb `28942` gets Resonance, or Reflect if bound with `--reflect`
+or on a bar. Its `ability_sent` reason is `Anima bomb`.
 Uppercut and the phase cues `28963` and `28930` do not schedule protection. A
 `prayer_transition_lockout` row marks when prayer inputs pause at a phase handoff or resume
 on the first recognized attack. A toggle is only resent after its overhead appears or 1.2 s
