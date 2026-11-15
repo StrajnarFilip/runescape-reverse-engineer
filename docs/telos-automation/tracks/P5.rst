@@ -150,3 +150,20 @@ sample identity and age remain mandatory for downstream use.
   two-handed, dual-wield and physical-shield equipment. Full castability,
   consumed effects and physical pointer/view/path evidence remain unmapped.
   No automated game input was sent.
+* Minimap follow-up, 2026-11-15: the original-profile UI cache exposes group
+  1465/component 0. The actual component is entry+16, 32 bytes beyond the
+  entry+8 control object. Its vtable method +0x30 points to the independently
+  decompiled input handler 0x320c00. The current world owner, sprite scale 0.5,
+  rectangular shape 0 and 283 by 245 local bounds were read directly.
+* The attachment graph mounts that group at desktop 1477/component 97. A
+  bounded, double-checked parent walk yields candidate client origin (2273, 4).
+  Old minimap VarClient leads 8931..8934 are absent. The handler's zoom source
+  is instead the minimap manager at world+0x19898, field +0x3c (observed 1.0).
+  These are research findings, not a physical click region or production C
+  export. The native heading, DPI conversion, clipping/visibility and complete
+  view signature still need mapping. A bounded read-only manual zoom/camera
+  recorder is prepared; no automatic movement or other game input was sent.
+* A2/P1 integration follow-up: after P5 exports guarded minimap geometry,
+  connect a complete view signature and record manual clicks with confirmed
+  tile arrivals. Do not fit or authorize movement from the candidate panel
+  rectangle alone. See the compact minimap section of the interface report.

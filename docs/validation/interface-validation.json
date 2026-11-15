@@ -703,5 +703,144 @@
     "unknown_loss_rows": 0,
     "game_inputs_sent": false,
     "raw_capture_published": false
+  },
+  "minimap_research_2026_11_15": {
+    "status": "native_source_identified_manual_zoom_and_camera_check_pending",
+    "executable_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+    "profile": "original_951_3",
+    "process_creation_time": 134392394313785355,
+    "acquisition": "read_only_independent_research_decoder",
+    "production_c_geometry_exported": false,
+    "observed_component": {
+      "group": 1465,
+      "component": 0,
+      "component_vtable_rva": "0x1531208",
+      "input_handler_vtable_offset": "0x30",
+      "input_handler_rva": "0x320c00",
+      "entry_stride_bytes": 24,
+      "entry_component_pointer_offset": 16,
+      "entry_control_pointer_offset": 8,
+      "component_minus_control_bytes": 32,
+      "component_identity_offset": "0x18",
+      "component_rect_offset": "0x78",
+      "local_rect": [
+        0,
+        0,
+        283,
+        245
+      ],
+      "owner_offset": "0x220",
+      "owner_matches_current_world": true,
+      "sprite_pointer_offset": "0x228",
+      "sprite_vtable_rva": "0x15de040",
+      "sprite_scale_offset": "0x548",
+      "observed_sprite_scale": 0.5,
+      "sprite_shape_offset": "0x578",
+      "observed_sprite_shape": 0
+    },
+    "observed_attachment": {
+      "child_group": 1465,
+      "parent_group": 1477,
+      "parent_component": 97,
+      "parent_chain": [
+        {
+          "component": 97,
+          "parent": 96,
+          "rect": [
+            0,
+            0,
+            283,
+            245
+          ]
+        },
+        {
+          "component": 96,
+          "parent": 94,
+          "rect": [
+            4,
+            4,
+            283,
+            245
+          ]
+        },
+        {
+          "component": 94,
+          "parent": 61,
+          "rect": [
+            2269,
+            0,
+            291,
+            253
+          ]
+        },
+        {
+          "component": 61,
+          "parent": 28,
+          "rect": [
+            0,
+            0,
+            2560,
+            1369
+          ]
+        },
+        {
+          "component": 28,
+          "parent": -1,
+          "rect": [
+            0,
+            0,
+            2560,
+            1369
+          ]
+        }
+      ],
+      "candidate_client_rect": [
+        2273,
+        4,
+        283,
+        245
+      ],
+      "physical_screen_rect_validated": false,
+      "visibility_and_occlusion_validated": false
+    },
+    "zoom_source": {
+      "world_manager_offset": "0x19898",
+      "zoom_offset": "0x3c",
+      "observed_zoom": 1.0,
+      "handler_scroll_divisor": 5.0,
+      "handler_clamp": [
+        1.0,
+        7.0
+      ],
+      "relationship_to_sprite_scale_validated": false,
+      "old_varclient_leads_8931_to_8934_present": false
+    },
+    "camera_source_leads": {
+      "world_camera_manager_offset": "0x198a0",
+      "active_interface_offset": "0x2a0",
+      "fallback_interface_offset": "0x98",
+      "type_getter_rva": "0x6ede30",
+      "heading_getter_rva": "0xc9f04c",
+      "heading_mapping_validated": false,
+      "note": "Virtual function pointers were inspected only. No client function was called."
+    },
+    "consistency_checks": [
+      "Pinned executable hash and process creation time",
+      "Bounded attachment graph with bucket ownership, duplicate/cycle and count checks",
+      "Attachment headers, buckets, nodes and payloads reread after traversal",
+      "Bounded component parent chain with identity and cycle checks",
+      "Parent component entries and geometry reread after traversal"
+    ],
+    "remaining": [
+      "Label zoom changes and camera rotation from the bounded manual capture",
+      "Map native minimap heading and build a complete view-change signature",
+      "Implement guarded C acquisition and caller-owned snapshot export",
+      "Validate screen/DPI conversion, visibility, clipping and safe input region",
+      "Record manual minimap clicks and confirmed native tile arrivals before fitting A2",
+      "Validate destination/path evidence before any automatic movement"
+    ],
+    "automatic_input": false,
+    "raw_capture_published": false,
+    "movement_or_click_permission_established": false
   }
 }
