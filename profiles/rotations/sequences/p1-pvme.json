@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "phase": 1,
+  "name": "PVME P1 with user-controlled movement",
+  "source": "https://pvme.io/pvme-guides/rs3-full-boss-guides/telos/melee/#phase-1",
+  "live_validated": false,
+  "movement_owner": "user",
+  "maximum_age_ms": 150,
+  "acknowledgement_timeout_ms": 2500,
+  "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+  "starting_equipment": {"main_hand": 52061, "off_hand": 52063},
+  "binding_source": "Native UI labels read on 2026-11-15; user confirmed EZK PgUp, EoF 7, red EoF contents and starting weapons",
+  "stored_special_identity_source": "User declaration, not decoded from item ID or colour",
+  "preparation_reference": ["At least two Bloodlust stacks", "Natural Instinct", "Dragon battleaxe special"],
+  "steps": [
+    {
+      "id": "phase_entry_vulnerability",
+      "same_tick": false,
+      "actions": [{"id": "vulnerability", "kind": "item", "role": "vulnerability_bomb", "key": "S", "item_id": 48951}]
+    },
+    {
+      "id": "devotion_and_manual_surge",
+      "same_tick": false,
+      "manual_action": {"name": "Surge", "ability_id": 14726, "lane": "off_gcd", "key": "V"},
+      "actions": [{"id": "devotion", "kind": "ability", "ability_id": 25028, "name": "Devotion", "key": "Alt+G"}]
+    },
+    {
+      "id": "berserk_then_renewal",
+      "same_tick": true,
+      "actions": [
+        {"id": "berserk", "kind": "ability", "ability_id": 14707, "name": "Berserk", "key": "F"},
+        {"id": "renewal", "kind": "item", "role": "adrenaline_renewal", "key": "PgDn", "item_id": null}
+      ]
+    },
+    {
+      "id": "greater_barge",
+      "same_tick": false,
+      "actions": [{"id": "greater_barge", "kind": "ability", "ability_id": 14678, "name": "Greater Barge", "base_name": "Barge", "required_upgrade": "Greater Barge", "key": "G"}]
+    },
+    {
+      "id": "meteor_strike",
+      "same_tick": false,
+      "actions": [{"id": "meteor_strike", "kind": "ability", "ability_id": 14688, "name": "Meteor Strike", "key": "D"}]
+    },
+    {
+      "id": "assault",
+      "same_tick": false,
+      "actions": [{"id": "assault", "kind": "ability", "ability_id": 14704, "name": "Assault", "key": "R", "requires_barge_channel_conversion": true}]
+    },
+    {
+      "id": "overpower",
+      "same_tick": false,
+      "actions": [{"id": "overpower", "kind": "ability", "ability_id": 14686, "name": "Overpower", "key": "T"}]
+    },
+    {
+      "id": "equip_ezk",
+      "same_tick": false,
+      "actions": [{"id": "equip_ezk", "kind": "equip", "item_id": 52543, "equipment_slot": "main_hand", "key": "PgUp"}]
+    },
+    {
+      "id": "physical_ezk_special",
+      "same_tick": false,
+      "actions": [{"id": "ezk_special", "kind": "weapon_special", "ability_id": 28430, "name": "Weapon Special Attack", "required_weapon_id": 52543, "key": "="}]
+    },
+    {
+      "id": "equip_red_eof",
+      "same_tick": false,
+      "actions": [{"id": "equip_red_eof", "kind": "equip", "item_id": 51065, "equipment_slot": "neck", "key": "6"}]
+    },
+    {
+      "id": "eof_dragon_scimitar_special",
+      "same_tick": false,
+      "actions": [{"id": "dragon_scimitar_special", "kind": "eof_special", "ability_id": 11748, "name": "Essence of Finality", "required_amulet_id": 51065, "stored_weapon": "Dragon scimitar", "stored_weapon_source": "user", "key": "7"}]
+    }
+  ],
+  "limitations": [
+    "This is an ordered plan, not a validated kill or server-timing claim.",
+    "Native UI label bindings must be pinned and checked by the actuator before dispatch.",
+    "Same-tick means an ordered batch requirement; OS acceptance alone cannot prove the server processed both actions in the same tick.",
+    "Greater Barge upgrade and channel conversion are separate requirements from a base Barge timer.",
+    "Equipment changes and each action need individual native confirmation; input acceptance never advances a step.",
+    "Movement and Surge remain with the user for the first P1 attempts.",
+    "Vulnerability is requested once on entry to each phase; this plan stops at the end of P1.",
+    "Prayer control reuses D2 and the C planner; unvalidated timing does not authorize Soul Split flicks."
+  ]
+}

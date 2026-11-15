@@ -10,7 +10,7 @@ from pathlib import Path
 
 from rs3_reader.bot.intents import ActivateAbility, Priority
 from rs3_reader.bot.replay import replay
-from rs3_reader.bot.rotation import RotationEngine, RotationProfiles
+from rs3_reader.bot.rotation import OrderedP1Rotation, RotationEngine, RotationProfiles
 from rs3_reader.bot.world_state import Observation, WorldState
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -341,6 +341,137 @@ class RotationTests(unittest.TestCase):
             hashlib.sha256(output.getvalue().encode()).hexdigest(),
             "f2c9a0cfceb6535913e930fe99d9314ea5a734a5355845087eabfaceb046e54b",
         )
+
+
+class OrderedP1Tests(unittest.TestCase):
+    def ready(self, engine):
+        return {
+            action["id"]: Observation(True, 0, "synthetic_native_action_readiness")
+            for action in engine.current_step["actions"]
+        }
+
+    def send_step(self, engine, sample):
+        batch = engine.step(sample, self.ready(engine))
+        self.assertIsNotNone(batch)
+        engine.note_sent(batch, [action["id"] for action in batch.actions], sample.now_ns)
+        return batch
+
+    def confirm_step(self, engine, batch, sample):
+        for action in batch.actions:
+            self.assertTrue(
+                engine.confirm(
+                    action["id"], Observation(True, 0, "synthetic_native_specific_ack"), sample
+                )
+            )
+
+    def test_order_preserves_berserk_before_potion_and_distinct_specials(self):
+        engine = OrderedP1Rotation()
+        steps = engine.document["steps"]
+        pair = next(step for step in steps if step["id"] == "berserk_then_renewal")
+        self.assertTrue(pair["same_tick"])
+        self.assertEqual([action["id"] for action in pair["actions"]], ["berserk", "renewal"])
+        special = steps[-3]["actions"][0]
+        self.assertEqual(special["kind"], "weapon_special")
+        self.assertEqual(special["required_weapon_id"], 52543)
+        final = steps[-1]["actions"][0]
+        self.assertEqual(final["kind"], "eof_special")
+        self.assertEqual(final["required_amulet_id"], 51065)
+        self.assertEqual(final["stored_weapon_source"], "user")
+        surge = steps[1]["manual_action"]
+        self.assertEqual((surge["lane"], surge["name"]), ("off_gcd", "Surge"))
+        self.assertNotIn("surge", [a["id"] for s in steps for a in s["actions"]])
+
+    def test_unknown_readiness_blocks_instead_of_skipping_to_a_later_ability(self):
+        engine = OrderedP1Rotation()
+        self.assertIsNone(engine.step(world()))
+        self.assertEqual(engine.index, 0)
+        self.assertEqual(engine.reasons, ("action_not_ready:vulnerability",))
+        self.assertIsNone(engine.step(world(), {"vulnerability": Observation(True, 151, "stale")}))
+        self.assertEqual(engine.index, 0)
+
+    def test_input_acceptance_never_advances_and_same_frame_cannot_confirm(self):
+        engine = OrderedP1Rotation()
+        batch = self.send_step(engine, world())
+        self.assertEqual(engine.index, 0)
+        self.assertFalse(engine.confirm("vulnerability", Observation(True, 0, "native"), world()))
+        self.assertIsNone(engine.step(world(sequence=2, time_ms=10050), self.ready(engine)))
+        self.confirm_step(engine, batch, world(sequence=2, time_ms=10050))
+        self.assertEqual(engine.index, 1)
+
+    def test_every_group_waits_for_all_individual_acknowledgements(self):
+        engine = OrderedP1Rotation()
+        sample = 1
+        while engine.current_step["id"] != "berserk_then_renewal":
+            batch = self.send_step(engine, world(sequence=sample, time_ms=10000 + sample * 50))
+            sample += 1
+            self.confirm_step(engine, batch, world(sequence=sample, time_ms=10000 + sample * 50))
+        batch = self.send_step(engine, world(sequence=sample, time_ms=10000 + sample * 50))
+        sample += 1
+        current = world(sequence=sample, time_ms=10000 + sample * 50)
+        self.assertTrue(engine.confirm("berserk", Observation(True, 0, "native"), current))
+        self.assertEqual(engine.current_step["id"], "berserk_then_renewal")
+        self.assertFalse(engine.confirm("berserk", Observation(True, 0, "native"), current))
+        self.assertFalse(engine.confirm("renewal", Observation(None, 0, "native"), current))
+        self.assertTrue(engine.confirm("renewal", Observation(True, 0, "native"), current))
+        self.assertEqual(engine.current_step["id"], "greater_barge")
+
+    def test_partial_or_reordered_batch_latches_and_does_not_retry(self):
+        for accepted in ((), ("other",)):
+            engine = OrderedP1Rotation()
+            batch = engine.step(world(), self.ready(engine))
+            engine.note_sent(batch, accepted, batch.issued_ns)
+            self.assertEqual(engine.fault, "partial_or_reordered_batch")
+            self.assertIsNone(engine.step(world(sequence=2, time_ms=10050), self.ready(engine)))
+            self.assertEqual(engine.index, 0)
+
+    def test_stale_phase_target_hash_session_and_timeout_do_not_advance(self):
+        engine = OrderedP1Rotation()
+        batch = self.send_step(engine, world())
+        changed = row(sequence=2, time_ms=10050)
+        changed["player"]["target"]["instance_id"] = 999
+        self.assertFalse(
+            engine.confirm(
+                "vulnerability", Observation(True, 0, "native"), WorldState.from_telemetry(changed)
+            )
+        )
+        self.assertFalse(
+            engine.confirm(
+                "vulnerability",
+                Observation(True, 0, "native"),
+                world(phase=2, sequence=2, time_ms=10050),
+            )
+        )
+        self.assertFalse(
+            engine.confirm(
+                "vulnerability", Observation(True, 0, "native"), world(sequence=2, time_ms=13000)
+            )
+        )
+        self.assertIsNone(engine.step(world(sequence=2, time_ms=13000)))
+        self.assertEqual(engine.fault, "acknowledgement_timeout")
+        self.assertEqual(engine.index, 0)
+        other = OrderedP1Rotation()
+        other.step(world())
+        changed = row(sequence=2, time_ms=10050)
+        changed["process_creation_time"] = 3
+        self.assertIsNone(other.step(WorldState.from_telemetry(changed)))
+        self.assertEqual(other.fault, "session_changed")
+
+    def test_complete_order_requires_a_newer_native_ack_for_every_action(self):
+        engine = OrderedP1Rotation()
+        sequence = 1
+        offered = []
+        while not engine.complete:
+            batch = self.send_step(engine, world(sequence=sequence, time_ms=10000 + sequence * 50))
+            offered.extend(action["id"] for action in batch.actions)
+            sequence += 1
+            self.confirm_step(
+                engine, batch, world(sequence=sequence, time_ms=10000 + sequence * 50)
+            )
+        self.assertEqual(
+            offered[-4:], ["equip_ezk", "ezk_special", "equip_red_eof", "dragon_scimitar_special"]
+        )
+        self.assertIsNone(engine.current_step)
+        self.assertIsNone(engine.step(world(sequence=sequence, time_ms=10000 + sequence * 50)))
 
 
 if __name__ == "__main__":

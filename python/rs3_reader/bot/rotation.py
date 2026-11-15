@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Mapping, Optional, Tuple
 
 from .intents import ActionLane, ActivateAbility, Evidence, Intent, Priority
-from .world_state import Observation, WorldState, freeze
+from .world_state import EntityRef, Observation, SessionIdentity, WorldState, freeze
 
 ROOT = Path(__file__).resolve().parents[3]
 PROFILE_DIRECTORY = ROOT / "profiles" / "rotations"
@@ -564,3 +564,298 @@ class RotationEngine:
 def create_stack():
     """Construct a proposal-only S0a replay stack; no actuator is loaded."""
     return RotationEngine()
+
+
+P1_SEQUENCE_PATH = PROFILE_DIRECTORY / "sequences" / "p1-pvme.json"
+MAX_SEQUENCE_STEPS = 32
+MAX_SEQUENCE_ACTIONS = 4
+
+
+@dataclass(frozen=True)
+class SequenceBatch:
+    """An ordered request to an actuator adapter, not an accepted input or cast.
+
+    All actions in a same_tick batch must be prepared before the first input.
+    Their tuple order is significant. Server processing time remains unknown
+    until separately measured; a native input batch alone does not establish it.
+    """
+
+    batch_id: str
+    step_id: str
+    actions: tuple
+    same_tick: bool
+    session: SessionIdentity
+    target: EntityRef
+    sample_sequence: int
+    observed_ns: int
+    issued_ns: int
+    deadline_ns: int
+
+
+class OrderedP1Rotation:
+    """Pure acknowledgement-driven P1 coordinator for the supplied PVME order.
+
+    The adapter supplies current per-action readiness and confirmations as
+    Observations. This class acquires no memory and sends no input. It does
+    not infer castability, upgrade unlocks, EoF contents or successful specials.
+    An adapter must check those action-specific facts against native state.
+    Missing readiness blocks the current step instead of trying a later one.
+    """
+
+    def __init__(self, document=None):
+        document = (
+            json.loads(P1_SEQUENCE_PATH.read_text(encoding="utf-8"))
+            if document is None
+            else document
+        )
+        steps = document.get("steps")
+        if (
+            document.get("schema_version") != 1
+            or document.get("phase") != 1
+            or document.get("movement_owner") != "user"
+            or document.get("live_validated") is not False
+            or not isinstance(steps, list)
+            or not 1 <= len(steps) <= MAX_SEQUENCE_STEPS
+            or not _integer(document.get("maximum_age_ms"), 1)
+            or not _integer(document.get("acknowledgement_timeout_ms"), 1)
+            or not isinstance(document.get("client_sha256"), str)
+            or len(document["client_sha256"]) != 64
+            or any(character not in "0123456789abcdef" for character in document["client_sha256"])
+        ):
+            raise ValueError("Invalid supervised P1 sequence")
+        identifiers, step_ids = set(), set()
+        for step in steps:
+            actions = step.get("actions")
+            if (
+                not isinstance(step.get("id"), str)
+                or not step["id"]
+                or step["id"] in step_ids
+                or type(step.get("same_tick")) is not bool
+                or not isinstance(actions, list)
+                or not 1 <= len(actions) <= MAX_SEQUENCE_ACTIONS
+            ):
+                raise ValueError("Invalid or duplicate P1 step")
+            step_ids.add(step["id"])
+            for action in actions:
+                if (
+                    not isinstance(action.get("id"), str)
+                    or not action["id"]
+                    or action["id"] in identifiers
+                    or action.get("kind")
+                    not in ("ability", "item", "equip", "weapon_special", "eof_special")
+                    or not isinstance(action.get("key"), str)
+                    or not action["key"]
+                ):
+                    raise ValueError("Invalid or duplicate P1 action")
+                identifiers.add(action["id"])
+        self.document = freeze(document)
+        self.index = 0
+        self.session = None
+        self.fault = None
+        self.reasons = ()
+        self._offer = None
+        self._pending = None
+        self._confirmed = set()
+        self._last_sample = None
+        self._last_time = None
+
+    @property
+    def complete(self):
+        """Whether every configured action received its own later confirmation."""
+        return self.index == len(self.document["steps"])
+
+    @property
+    def current_step(self):
+        """Return the next step without skipping unavailable or failed actions."""
+        return None if self.complete else self.document["steps"][self.index]
+
+    def _fresh(self, observation):
+        return (
+            isinstance(observation, Observation)
+            and bool(observation.source)
+            and observation.reason is None
+            and observation.is_fresh(self.document["maximum_age_ms"])
+        )
+
+    def _target(self, world):
+        """Resolve the exact live Telos lifetime; a target clear is not a wildcard."""
+        target = world.player.target
+        if (
+            not self._fresh(target)
+            or target.value.kind != "npc"
+            or target.value.config_id != 22891
+            or not _integer(target.value.instance_id, 1)
+            or not _integer(target.value.runtime_id)
+            or not self._fresh(world.npcs)
+        ):
+            return None
+        matches = [
+            npc
+            for npc in world.npcs.value
+            if all(
+                self._fresh(observation) and observation.value == expected
+                for observation, expected in (
+                    (npc.instance_id, target.value.instance_id),
+                    (npc.runtime_id, target.value.runtime_id),
+                    (npc.config_id, target.value.config_id),
+                )
+            )
+        ]
+        if (
+            len(matches) != 1
+            or not self._fresh(matches[0].health.current)
+            or not _number(matches[0].health.current.value)
+            or matches[0].health.current.value <= 0
+        ):
+            return None
+        return target.value
+
+    def step(self, world, readiness=None):
+        """Offer the current whole batch only after every action is explicitly ready.
+
+        Readiness is an adapter-owned mapping of action ID to Observation(True).
+        It is permission to attempt that exact action, never a replacement for
+        WorldState's castability field. Confirmations are supplied separately.
+        """
+        if not isinstance(world, WorldState):
+            raise TypeError("OrderedP1Rotation requires WorldState")
+        self._offer = None
+        if self.fault or self.complete:
+            return None
+        if not world.session.complete:
+            self.reasons = ("session_unavailable",)
+            return None
+        if self.session is None:
+            self.session = world.session
+        if self.session != world.session:
+            self.fault = "session_changed"
+            return None
+        if (
+            world.status not in ("available", "partial")
+            or world.raw.get("executable_sha256") != self.document["client_sha256"]
+            or not _integer(world.now_ns)
+            or not _integer(world.observed_ns)
+            or not _integer(world.sample_sequence, 1)
+            or not 0
+            <= world.now_ns - world.observed_ns
+            <= self.document["maximum_age_ms"] * NS_PER_MS
+        ):
+            self.reasons = ("snapshot_unavailable_or_stale",)
+            return None
+        if self._last_sample is not None and (
+            world.sample_sequence < self._last_sample or world.now_ns < self._last_time
+        ):
+            self.fault = "clock_or_sample_regressed"
+            return None
+        self._last_sample, self._last_time = world.sample_sequence, world.now_ns
+        if not self._fresh(world.telos.phase) or world.telos.phase.value != 1:
+            self.reasons = ("phase_one_not_observed",)
+            return None
+        target = self._target(world)
+        if target is None:
+            self.reasons = ("exact_live_telos_target_unavailable",)
+            return None
+        if self._pending:
+            if (
+                world.now_ns - self._pending[1]
+                > self.document["acknowledgement_timeout_ms"] * NS_PER_MS
+            ):
+                self.fault = "acknowledgement_timeout"
+            self.reasons = ("awaiting_individual_native_confirmations",)
+            return None
+        step = self.current_step
+        readiness = {} if readiness is None else readiness
+        if not isinstance(readiness, Mapping):
+            raise TypeError("P1 readiness must be a mapping of action IDs to Observations")
+        missing = tuple(
+            "action_not_ready:" + action["id"]
+            for action in step["actions"]
+            if not self._fresh(readiness.get(action["id"]))
+            or readiness[action["id"]].value is not True
+        )
+        self.reasons = missing
+        if missing:
+            return None
+        self._offer = SequenceBatch(
+            "p1:{}:{}:{}:{}:{}".format(
+                world.session.pid,
+                world.session.process_creation_time,
+                world.session.scene_epoch,
+                world.sample_sequence,
+                step["id"],
+            ),
+            step["id"],
+            step["actions"],
+            step["same_tick"],
+            world.session,
+            target,
+            world.sample_sequence,
+            world.observed_ns,
+            world.now_ns,
+            world.observed_ns + self.document["maximum_age_ms"] * NS_PER_MS,
+        )
+        return self._offer
+
+    def note_sent(self, batch, accepted_action_ids, sent_ns):
+        """Record one complete ordered submission; partial submission latches a fault."""
+        if (
+            not isinstance(batch, SequenceBatch)
+            or batch != self._offer
+            or self._pending
+            or self.fault
+            or not _integer(sent_ns)
+            or not batch.issued_ns <= sent_ns <= batch.deadline_ns
+        ):
+            raise ValueError("Unknown, stale or pending P1 batch")
+        expected = tuple(action["id"] for action in batch.actions)
+        if tuple(accepted_action_ids) != expected:
+            self.fault = "partial_or_reordered_batch"
+            self._offer = None
+            return
+        self._pending = batch, sent_ns
+        self._offer = None
+        self._confirmed.clear()
+
+    def confirm(self, action_id, observation, world):
+        """Accept one exact-action confirmation from a strictly newer native frame.
+
+        Input acceptance, a generic GCD transition or an unlabelled adrenaline
+        change is not an action-specific confirmation. Adapters must retain
+        unknown results when their native acknowledgement channel is unmapped.
+        """
+        if self._pending is None or self.fault:
+            return False
+        batch, sent_ns = self._pending
+        identifiers = {action["id"] for action in batch.actions}
+        if (
+            action_id not in identifiers
+            or action_id in self._confirmed
+            or not isinstance(world, WorldState)
+            or world.session != batch.session
+            or world.status not in ("available", "partial")
+            or world.raw.get("executable_sha256") != self.document["client_sha256"]
+            or not _integer(world.sample_sequence, 1)
+            or world.sample_sequence <= batch.sample_sequence
+            or world.sample_sequence < self._last_sample
+            or not _integer(world.observed_ns)
+            or world.observed_ns <= sent_ns
+            or not _integer(world.now_ns)
+            or world.now_ns < self._last_time
+            or not 0
+            <= world.now_ns - world.observed_ns
+            <= self.document["maximum_age_ms"] * NS_PER_MS
+            or world.now_ns - sent_ns > self.document["acknowledgement_timeout_ms"] * NS_PER_MS
+            or not self._fresh(world.telos.phase)
+            or world.telos.phase.value != 1
+            or self._target(world) != batch.target
+            or not self._fresh(observation)
+            or observation.value is not True
+        ):
+            return False
+        self._confirmed.add(action_id)
+        if self._confirmed == identifiers:
+            self.index += 1
+            self._pending = None
+            self._confirmed.clear()
+            self.reasons = ()
+        return True

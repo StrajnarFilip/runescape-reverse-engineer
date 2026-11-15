@@ -100,6 +100,38 @@ passed (92 Python tests).
 Requests
 --------
 
+* Ordered P1 follow-up, 2026-11-15: the user supplied the PVME P1 order and
+  explicitly requested an automatic supervised P1 attempt while retaining
+  movement control. The new pure ``OrderedP1Rotation`` and
+  ``profiles/rotations/sequences/p1-pvme.json`` preserve the requested order,
+  manual off-GCD Surge, Berserk before renewal in one ordered batch, dual
+  Lengs, physical EZK and Dragon scimitar through the red EoF. The user declared
+  the red EoF contents; the reader has not decoded them from colour or item ID.
+* Current UI labels were read directly from native memory, without another
+  manual recording: Devotion Alt+G, Surge V, Berserk F, renewal PgDn, Greater
+  Barge G, Meteor Strike D, Assault R, Overpower T, EZK equip PgUp, weapon
+  special =, red EoF equip 6, EoF special 7 and vulnerability bomb S. Opaque
+  VarClient key fields do not translate to all those labels reliably; retain
+  that limitation instead of treating unknown modifier values as no modifier.
+* The coordinator waits for explicit per-action readiness, binds batches to
+  an exact living Telos lifetime and a fresh process/scene/sample, preserves
+  batch order and advances only after every action has a newer, action-specific
+  confirmation. Partial or reordered submission latches a fault. Seven new
+  scenarios exercise ordering, unknown readiness, partial groups, stale or
+  wrong-target confirmations, timeout and the full sequence. Twenty-five D4
+  tests pass (one intentionally absent raw-capture replay in this worktree).
+* A1/A2/L: connect the ordered coordinator to a supervised native executor.
+  This is a plan/coordinator, not a running controller. Current native input
+  rejects PgUp, PgDn and =; add a narrowly supported key set and a prepared
+  ability-then-item batch before attempting Berserk/renewal. Input acceptance
+  or a shared GCD alone must not acknowledge EZK/EoF specials. No same-server-tick
+  success, full castability, stored-special decoding or ladder pass is claimed.
+* P5: a bounded research read found actual label text on cached text components
+  at +0x190 (vtable RVA 0x1530678), and action names on graphic components via
+  +0x98. Groups 1430 and 1670..1673 correspond to the five displayed bars. The
+  prepared executor needs a guarded C source and binding-change invalidation;
+  do not copy the independent research decoder into runtime acquisition.
+
 * Later account session: fill intended weapon/unlock constraints and calibrated
   keys once. Unknown setup is not silently populated from a guide or account
   name. No input is needed while implementing the remaining offline tracks.
