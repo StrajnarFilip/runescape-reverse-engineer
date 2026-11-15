@@ -93,9 +93,14 @@ received tick T casts at T+1, which matches Deflect on the cue protecting a hit 
 is therefore pressed in the tick after the small hit is seen at +1 or +2, or at +3 regardless,
 so that it casts on +2..+4 and only the heavy hit consumes it. If no GCD slot falls in that
 window, Revolution takes the slot and Resonance waits for the next Hold Still. The flicker
-deflects the small hit from +0 through +2 (Deflect Magic in P3, Deflect Melee otherwise). It
-holds Deflect Melee at +3 for the heavy hit and returns to Soul Split as soon as Resonance's
-cooldown confirms the cast (`prayer_window_released`). Deflect halved melee autos (682 against
+deflects the small hit from +0 through +2 (Deflect Magic in P3, Deflect Melee otherwise). When
+Resonance will take the heavy hit, Soul Split returns from the start of the tick in which
+Resonance is due or was pressed (`prayer_window_released`), so Resonance heals the full,
+undeflected hit. Waiting for the cooldown acknowledgement had left Soul Split one tick late in
+the 06:51 run. If Resonance cannot take the hit (cooling, unbound, refuted by its
+acknowledgement, or no usable GCD slot), Deflect Melee stays for it. Devotion is then pressed
+when its cooldown and 50% adrenaline allow. With Deflect Melee it turns the heavy hit into 1
+(account owner). Deflect halved melee autos (682 against
 1,487 median at 250%), so Deflect Melee also halves an unabsorbed heavy hit. The 2,083 heavy
 hit at 5743 came under Deflect Melee, against 5,036 on Soul Split.
 The +3 cursor preflight is skipped while the Resonance press is still possible.

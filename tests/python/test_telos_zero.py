@@ -294,12 +294,11 @@ class PhaseOneTests(unittest.TestCase):
         self.assertEqual(action.ability, "Resonance")
         phase.sent(action, SECOND_NS)
         self.assertFalse(phase.resonance_press_possible(timers, 53))
-        self.assertFalse(phase.resonance_active(timers))
+        self.assertTrue(phase.resonance_committed())
         self.assertIsNone(
             phase.next_action(SECOND_NS + 20_000_000, timers, 0, Prayer.MELEE, received_tick=53)
         )
         cooling = {"Resonance": 30_000}
-        self.assertTrue(phase.resonance_active(cooling))
         self.assertIsNone(
             phase.next_action(
                 SECOND_NS + 600_000_000, cooling, 1780, Prayer.MELEE, received_tick=54
@@ -334,6 +333,83 @@ class PhaseOneTests(unittest.TestCase):
             stun_expiry=264200,
         )
         self.assertEqual(action.ability, "Freedom")
+
+    def test_soul_split_returns_for_the_heavy_hit_from_the_start_of_the_resonance_tick(self):
+        # 06:51 P1: Resonance pressed at +2 was confirmed at +3, so Soul Split came a tick late.
+        phase = PhaseOne()
+        phase.observe([dict(event(1, HOLD_STILL), received_tick=10543)])
+        timers = {"Resonance": 0}
+        phase.observe_hits([self.hit(133)], 10545)
+        # Early in +2 the GCD still has 560 ms left: it ends at +3, so Resonance goes this tick.
+        self.assertFalse(phase.resonance_due(timers, 10545, 560))
+        self.assertTrue(phase.soul_split_for_heavy_hit(timers, 10545, 560))
+        # With the GCD ending a tick later Resonance is not due here and Deflect stays.
+        self.assertFalse(phase.soul_split_for_heavy_hit(timers, 10545, 1160))
+        action = phase.next_action(SECOND_NS, timers, 190, Prayer.MELEE, received_tick=10545)
+        phase.sent(action, SECOND_NS)
+        self.assertTrue(phase.soul_split_for_heavy_hit({"Resonance": 30_000}, 10546, 1700))
+        # A press that produced no cooldown keeps Deflect Melee for the heavy hit.
+        phase.next_action(SECOND_NS + controller["ACK_TIMEOUT_NS"], timers, 1700, Prayer.MELEE,
+                          received_tick=10546)
+        self.assertEqual(phase.cast_result, ("Resonance", False))
+        self.assertFalse(phase.soul_split_for_heavy_hit(timers, 10546, 1700))
+
+    def test_devotion_covers_the_heavy_hit_when_resonance_cannot(self):
+        enough = controller["DEVOTION_ADRENALINE_TENTHS"]
+        # Resonance cooling: Devotion takes the first slot through +3, with enough adrenaline.
+        phase = PhaseOne()
+        phase.observe([dict(event(1, HOLD_STILL), received_tick=100)])
+        cooling = {"Resonance": 12_000, "Devotion": 0}
+        self.assertIsNone(
+            phase.next_action(SECOND_NS, cooling, 0, Prayer.MELEE, received_tick=100,
+                              adrenaline_tenths=enough - 10)
+        )
+        action = phase.next_action(SECOND_NS, cooling, 0, Prayer.MELEE, received_tick=100,
+                                   adrenaline_tenths=enough)
+        self.assertEqual(action.ability, "Devotion")
+        phase.sent(action, SECOND_NS)
+        self.assertFalse(phase.devotion_press_possible(cooling, 101, enough))
+        # Resonance ready: +0 is left for the +3 Resonance slot, but a +1 slot before the small
+        # hit is the last one in time, so Devotion takes it.
+        ready = {"Resonance": 0, "Devotion": 0}
+        second = PhaseOne()
+        second.observe([dict(event(2, HOLD_STILL), received_tick=200)])
+        self.assertIsNone(
+            second.next_action(SECOND_NS, ready, 0, Prayer.MELEE, received_tick=200,
+                               adrenaline_tenths=enough)
+        )
+        self.assertEqual(
+            second.next_action(SECOND_NS, ready, 0, Prayer.MELEE, received_tick=201,
+                               adrenaline_tenths=enough).ability,
+            "Devotion",
+        )
+        # Too late after +3, and never on top of a pressed Resonance.
+        late = PhaseOne()
+        late.observe([dict(event(3, HOLD_STILL), received_tick=300)])
+        self.assertFalse(late.devotion_press_possible(cooling, 304, enough))
+        late.sent(controller["Action"]("Resonance", "Hold Still second melee hit"), SECOND_NS)
+        self.assertFalse(late.devotion_press_possible(cooling, 301, enough))
+
+    def test_dive_cooldown_comes_from_the_shared_bladed_dive_timer(self):
+        from rs3_reader.native import AbilityFlags, EquipmentMatch
+
+        def ability(name, match, reason, flags=0, remaining=0):
+            return SimpleNamespace(
+                name=name.encode(), equipment_match=match, reason=reason, flags=flags,
+                remaining_ms=remaining,
+            )
+
+        valid = AbilityFlags.TIMER_VALID
+        reader = SimpleNamespace(
+            abilities=[
+                ability("Dive", EquipmentMatch.ALLOWED, Reason.NOT_SET),
+                ability("Bladed Dive", EquipmentMatch.BLOCKED, Reason.NONE, valid, 14_000),
+            ]
+        )
+        timers = controller["cooldowns"](reader, {"Dive"})
+        self.assertEqual(timers, {"Dive": 14_000})
+        reader.abilities[1].remaining_ms = 0
+        self.assertEqual(controller["cooldowns"](reader, {"Dive"}), {"Dive": 0})
 
     def test_anima_bomb_defence_casts_ahead_of_the_typeless_hit(self):
         # 06:34 at 250%: 28942 at 9367 and a 5,228 typeless hit at 9370.
@@ -1022,6 +1098,8 @@ class PrayerFlickerTests(unittest.TestCase):
         # Confirmed at +3 (pressed at +2): Soul Split is requested at +3 for the heavy hit.
         self.assertTrue(flicker.release(7, 103))
         self.assertFalse(flicker.release(7, 103))
+        # A later sample without a received tick must not bring the deflect back.
+        self.assertIsNone(flicker.active_prayer(None, 1))
         self.assertEqual(
             [flicker.active_prayer(tick, 0) for tick in range(100, 104)],
             [Prayer.MELEE, Prayer.MELEE, Prayer.MELEE, None],

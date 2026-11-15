@@ -54,14 +54,18 @@ Confirm the actual ability tooltips before using the example keys. `--displayed-
 The practice controller flicks by Telos animation and phase. It uses the measured distance
 bands for `28959` and holds melee through the unanimated follow-up from Tendrils release.
 For Hold Still, the controller deflects the small hit from +0 through +2 after `28935`, using
-Deflect Magic in P3 and Deflect Melee otherwise. It holds Deflect Melee at +3 for the heavy +4
-hit. Once Resonance's cooldown confirms its cast, a `prayer_window_released` row marks the
-return to Soul Split. GCD abilities are pressed only in the last 200 ms of the GCD because
+Deflect Magic in P3 and Deflect Melee otherwise. If Resonance will take the heavy +4 hit,
+Soul Split returns from the start of the tick in which Resonance is due or was pressed, so that
+Resonance heals the full hit. `prayer_window_released` records this. Otherwise Deflect Melee
+stays for the heavy hit. Devotion is pressed when it is bound, ready and affordable (50%
+adrenaline), and the GCD slot is one Resonance cannot use. GCD abilities are pressed only in the last 200 ms of the GCD because
 ability queueing is off. `ability_sent.gcd_at_press_ms` records the time left, and
 `ability_press_skipped` marks a GCD window that passed while deciding.
-In P1 and P3 the controller keeps the player on the green or red strip. It prefers strip tiles
-in melee reach of Telos and never lands under him. It uses Dive when Dive is ready and the tile
-is within reach, and otherwise walks. Each attempt is a `beam_keep_move` row with the verified
+In P1 and P3 the controller keeps the player on the green or red strip. It uses only strip
+tiles in melee reach of Telos and never lands under him. Auto-attack undid every landing out of
+reach. It uses Dive when Dive is ready and the tile is within Dive range, except while Hold
+Still is the forecast special, and otherwise walks. Dive's cooldown is read from Bladed Dive's
+shared timer. Each attempt is a `beam_keep_move` row with the verified
 hover. `beam_keep_arrival` and `beam_keep_departure` mark changes in standing on the strip.
 Moves wait for a tick with no protection press and yield to Escape, the stomp dodge and the P3
 virus walk. In P4 the anima bomb `28942` gets Resonance, or Reflect if bound with `--reflect`

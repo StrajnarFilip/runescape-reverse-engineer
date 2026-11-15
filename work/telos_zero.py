@@ -142,6 +142,8 @@ STOMP_DIVE_CONFIRM_TICKS = 2
 # Dive to 6 tiles out.
 STOMP_RADIUS_TILES = 4
 STOMP_ESCAPE_DISTANCE = 6
+# A rejected stomp hover also rules out the tiles this close to it.
+STOMP_REJECT_RADIUS_TILES = 1
 EIGHT_DIRECTIONS = ((1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1))
 
 
@@ -361,9 +363,11 @@ RED_BEAM_KIND = 3
 BEAM_KIND_BY_PHASE = {2: BLACK_BEAM_KIND}
 STOMP_BEAM_BY_PHASE = {1: GREEN_BEAM_KIND, 3: RED_BEAM_KIND}
 # The account owner asks for the player to stand in the green P1 and red P3 strip at all times,
-# moving there with Dive and never landing under Telos (that can move him). Strip tiles in melee
-# reach of the footprint are preferred: after a stomp Dive onto the strip (8950, 06:34 run)
-# auto-retaliate re-targeted Telos and the player stayed on the strip.
+# moving there with Dive and never landing under Telos (that can move him). Only strip tiles in
+# melee reach of the footprint are used: after a stomp Dive onto the strip (8950, 06:34 run)
+# auto-retaliate re-targeted Telos and the player stayed, but in the 06:51 run every landing out
+# of reach was undone at once as the player walked back to attack (10538-10541, 10717-10745).
+# Dive is kept for the stomp while Hold Still is the forecast special (Dive cooldown 20.4 s).
 BEAM_KEEP_BY_PHASE = STOMP_BEAM_BY_PHASE
 BEAM_KEEP_RETRY_TICKS = 3
 MELEE_REACH_TILES = 1
@@ -522,11 +526,13 @@ def stream_destination(
     rejected_tiles=(),
     stomp=False,
     prefer_reach=False,
+    max_reach=None,
 ):
     """Select a visible strip tile, optionally requiring a safe Dive landing.
 
     Tiles under Telos's footprint are never chosen. ``prefer_reach`` ranks tiles within melee
-    reach of the footprint first, then by distance from the player.
+    reach of the footprint first, then by distance from the player. ``max_reach`` drops tiles
+    farther than that from the footprint.
     """
     player_tile = (player.tile.x, player.tile.y)
     boss_tile = (pose.tile.x, pose.tile.y)
@@ -544,6 +550,7 @@ def stream_destination(
             or tile in rejected_tiles
             or not distance
             or not footprint_distance(tile, boss_tile, size)
+            or (max_reach is not None and footprint_distance(tile, boss_tile, size) > max_reach)
             or (stomp and (distance > DIVE_RANGE_TILES or in_stomp_area(boss_tile, size, tile)))
             or (use_tile is not None and (*tile, hazard.tile.plane) != use_tile)
         ):
@@ -743,7 +750,9 @@ UPPERCUT_ESCAPE_TICKS = (4, 5)
 # on the tick the GCD ends, ahead of Revolution. Escape, Surge and Dive are off the GCD.
 # A 100 ms lead was too late: Anticipation pressed with 76 ms left did not cast (06:30 run).
 GCD_PRESS_LEAD_MS = 200
-GCD_ABILITIES = frozenset({"Resonance", "Anticipation", "Freedom", "Hurricane", "Reflect"})
+GCD_ABILITIES = frozenset(
+    {"Resonance", "Anticipation", "Freedom", "Hurricane", "Reflect", "Devotion"}
+)
 # P4 weak anima bomb (account owner): once Telos's bar is full the next special is the bomb, a
 # soft typeless hit that a Resonance cast on its tick blocks and Reflect halves. Its typeless hit
 # came 3 received ticks after 28942 at 250% (5,228 at 9370) and 4 after it at 100% (5,904),
@@ -760,6 +769,13 @@ HOLD_STILL_SMALL_HIT_TYPES = frozenset({133, 139, 482})
 HOLD_STILL_SMALL_HIT_TICKS = (1, 3)
 HOLD_STILL_HEAVY_HIT_TICK = 4
 RESONANCE_LATEST_PRESS_TICK = HOLD_STILL_HEAVY_HIT_TICK - 1
+# One GCD is three ticks, so after a press window at +T the next one is at +T+3.
+GCD_TICKS = 3
+TICK_MS = TICK_FALLBACK_NS // 1_000_000
+# Devotion, when Resonance cannot take the heavy hit (account owner): with Deflect Melee up it
+# turns the heavy melee hit into 1. It needs 50% adrenaline (tenths in VARP adrenaline) and lasts
+# past +4 from any cast on +1..+4.
+DEVOTION_ADRENALINE_TENTHS = 500
 
 
 def gcd_press_ready(gcd_remaining_ms):
@@ -855,6 +871,8 @@ class PhaseOne:
         self.forecast_handled = False
         self.forecast_attempts = 0
         self.small_hit_tick = None
+        # Set when this Hold Still's Resonance press produced no cooldown.
+        self.resonance_failed = False
         self.cast_result = None
         # P4 anima bomb: received tick and native event of 28942, and whether a defensive went.
         self.bomb_tick = None
@@ -934,6 +952,7 @@ class PhaseOne:
                 self.forecast_handled = False
                 self.forecast_attempts = 0
                 self.small_hit_tick = None
+                self.resonance_failed = False
                 self.stomp_checked = False
                 self.stomp_pending = None
                 self.stomp_prepared = None
@@ -955,6 +974,7 @@ class PhaseOne:
         timed_freedom=False,
         flicking=False,
         stun_expiry=None,
+        adrenaline_tenths=None,
     ):
         """Use cooldown acknowledgement and bound the number of attempts for each mechanic.
 
@@ -976,6 +996,7 @@ class PhaseOne:
             and "Freedom" in cooldowns
             and not cooldowns["Freedom"]
             and not self.resonance_press_possible(cooldowns, received_tick)
+            and not self.devotion_press_possible(cooldowns, received_tick, adrenaline_tenths)
         ):
             self.last_freedom_stun = stun_expiry
             return Action("Freedom", "Player stunned")
@@ -984,6 +1005,10 @@ class PhaseOne:
             if self.pending:
                 self.cast_result = self.acknowledge(cooldowns, now, ending=True)
             return Action("Resonance", "Hold Still second melee hit")
+        if self.devotion_due(cooldowns, received_tick, gcd_remaining_ms, adrenaline_tenths):
+            if self.pending:
+                self.cast_result = self.acknowledge(cooldowns, now, ending=True)
+            return Action("Devotion", "Hold Still heavy hit without Resonance")
         bomb_defence = self.bomb_defence(cooldowns, received_tick, gcd_remaining_ms)
         if bomb_defence is not None:
             if self.pending:
@@ -1071,11 +1096,10 @@ class PhaseOne:
         ):
             self.small_hit_tick = received_tick
 
-    def resonance_due(self, cooldowns, received_tick, gcd_remaining_ms=None):
-        """Press once per Hold Still so that the cast lands after the small hit, by the heavy hit.
+    def resonance_tick_ok(self, cooldowns, received_tick):
+        """Whether a ready Resonance pressed in this received tick would take the heavy hit.
 
-        The press goes out in the GCD's last moments, so it casts on the next received tick.
-        Before +3 it requires the small hit to have been seen; at +3 it casts on the heavy hit's
+        Before +3 the small hit must have been seen; at +3 the cast lands on the heavy hit's
         tick whether or not the small hit was seen.
         """
         if (
@@ -1083,7 +1107,6 @@ class PhaseOne:
             or "Resonance" in self.handled
             or "Resonance" not in cooldowns
             or cooldowns["Resonance"]
-            or not gcd_press_ready(gcd_remaining_ms)
             or not isinstance(received_tick, int)
             or not isinstance(self.special_tick, int)
         ):
@@ -1092,6 +1115,76 @@ class PhaseOne:
         if tick_delta == RESONANCE_LATEST_PRESS_TICK:
             return True
         return 0 < tick_delta < RESONANCE_LATEST_PRESS_TICK and self.small_hit_tick is not None
+
+    def resonance_due(self, cooldowns, received_tick, gcd_remaining_ms=None):
+        """Press once per Hold Still so that the cast lands after the small hit, by the heavy hit.
+
+        The press goes out in the GCD's last moments, so it casts on the next received tick.
+        """
+        return gcd_press_ready(gcd_remaining_ms) and self.resonance_tick_ok(
+            cooldowns, received_tick
+        )
+
+    def resonance_planned(self, cooldowns, received_tick, gcd_remaining_ms):
+        """Whether Resonance will be pressed before this received tick ends.
+
+        True from the start of the tick when the GCD ends at the next tick boundary, so Soul
+        Split can be requested early in the tick rather than after the late Resonance press.
+        """
+        return (
+            gcd_remaining_ms is not None
+            and gcd_remaining_ms <= TICK_MS + GCD_PRESS_LEAD_MS
+            and self.resonance_tick_ok(cooldowns, received_tick)
+        )
+
+    def resonance_committed(self):
+        """Whether this Hold Still's Resonance press went out and has not been refuted."""
+        return (
+            self.special == HOLD_STILL
+            and "Resonance" in self.handled
+            and not self.resonance_failed
+        )
+
+    def soul_split_for_heavy_hit(self, cooldowns, received_tick, gcd_remaining_ms):
+        """Whether Resonance takes Hold Still's heavy hit, so Soul Split can replace Deflect."""
+        return self.resonance_committed() or self.resonance_planned(
+            cooldowns, received_tick, gcd_remaining_ms
+        )
+
+    def devotion_press_possible(self, cooldowns, received_tick, adrenaline_tenths):
+        """Whether Devotion is ready, affordable and still in time for this heavy hit."""
+        return (
+            self.special == HOLD_STILL
+            and "Devotion" not in self.handled
+            and "Devotion" in cooldowns
+            and not cooldowns["Devotion"]
+            and isinstance(adrenaline_tenths, int)
+            and adrenaline_tenths >= DEVOTION_ADRENALINE_TENTHS
+            and not self.resonance_committed()
+            and isinstance(received_tick, int)
+            and isinstance(self.special_tick, int)
+            and 0 <= received_tick - self.special_tick <= RESONANCE_LATEST_PRESS_TICK
+        )
+
+    def devotion_due(self, cooldowns, received_tick, gcd_remaining_ms, adrenaline_tenths):
+        """Press Devotion in a GCD slot that Resonance cannot use for the heavy hit.
+
+        That is any slot through +3 when Resonance is unbound, cooling or refuted, or a slot
+        after +0 that Resonance cannot take: the next slot, three ticks later, is too late.
+        """
+        if not gcd_press_ready(gcd_remaining_ms) or not self.devotion_press_possible(
+            cooldowns, received_tick, adrenaline_tenths
+        ):
+            return False
+        resonance_usable = (
+            "Resonance" in cooldowns
+            and not cooldowns["Resonance"]
+            and "Resonance" not in self.handled
+        )
+        if not resonance_usable:
+            return True
+        next_slot = received_tick - self.special_tick + GCD_TICKS
+        return next_slot > RESONANCE_LATEST_PRESS_TICK
 
     def bomb_defence(self, cooldowns, received_tick, gcd_remaining_ms):
         """The ready defensive to press for the P4 anima bomb now, or None.
@@ -1130,14 +1223,6 @@ class PhaseOne:
             and received_tick - self.special_tick <= RESONANCE_LATEST_PRESS_TICK
         )
 
-    def resonance_active(self, cooldowns):
-        """Whether this Hold Still's Resonance press has been confirmed by its cooldown."""
-        return (
-            self.special == HOLD_STILL
-            and "Resonance" in self.handled
-            and (cooldowns.get("Resonance") or 0) > 0
-        )
-
     def sent(self, action, now):
         """Wait for the sampled cooldown before treating this command as a cast."""
         self.pending = (action.ability, now + ACK_TIMEOUT_NS)
@@ -1164,6 +1249,8 @@ class PhaseOne:
         else:
             return None
         self.pending = None
+        if ability == "Resonance" and observed is False:
+            self.resonance_failed = True
         return ability, observed
 
 
@@ -1265,6 +1352,9 @@ class PrayerFlicker:
 
     def release(self, cue, tick):
         """End one cue's windows from received tick ``tick``; return whether any changed."""
+        if self.hold_cue == cue:
+            # Otherwise a sample without a received tick would bring the deflect back (06:51).
+            self.return_ns = None
         kept = []
         for first, end, prayer, window_cue in self.windows:
             if window_cue == cue and end > tick:
@@ -1362,6 +1452,13 @@ def active_stun_expiry(reader, logic_tick):
     return int(stun.raw_expiry) if 0 < remaining <= MAX_STUN_TICKS else None
 
 
+# Dive has no client timer pair (profiles/ability_bindings_951_3.json), but it shares its
+# cooldown with Bladed Dive, whose timer restarted for 20.4 s after each Dive on 2026-11-15
+# (06:51 run, struct 1488). Without this every Dive press counted as ready, and presses during
+# the cooldown only walked.
+SHARED_COOLDOWN_SOURCES = {"Dive": "Bladed Dive"}
+
+
 def cooldowns(reader, operator_bound=()):
     """Separate valid cooldowns from mapped timers absent in the sparse table.
 
@@ -1370,8 +1467,12 @@ def cooldowns(reader, operator_bound=()):
     weapon; the operator's binding and the later cooldown acknowledgement decide instead.
     """
     timers = {}
+    shared = {}
     for ability in reader.abilities:
         name = ability.name.decode("utf-8", errors="replace")
+        if name in SHARED_COOLDOWN_SOURCES.values() and ability.flags & AbilityFlags.TIMER_VALID:
+            # A shared timer is valid whatever the equipment allows for its own ability.
+            shared[name] = ability.remaining_ms
         if ability.equipment_match != EquipmentMatch.ALLOWED and not (
             ability.equipment_match == EquipmentMatch.UNKNOWN and name in operator_bound
         ):
@@ -1380,6 +1481,9 @@ def cooldowns(reader, operator_bound=()):
             timers[name] = ability.remaining_ms
         elif ability.reason == Reason.NOT_SET:
             timers[name] = None
+    for name, source in SHARED_COOLDOWN_SOURCES.items():
+        if timers.get(name) is None and source in shared:
+            timers[name] = shared[source]
     return timers
 
 
@@ -1804,7 +1908,12 @@ def run(reader, args, board, attempt=None):
             if preflight and sent:
                 phase_one.stomp_prepared = (target, point, on_beam)
             if sent is None and hover:
-                rejected.add(target)
+                # Telos's model covered the neighbouring tiles too: in the 06:51 P3 Hold Still
+                # (13207,459) and then (13207,460) both hovered an NPC action, which delayed the
+                # Dive to +6 and its cast to the +8 stomp.
+                for dx in range(-STOMP_REJECT_RADIUS_TILES, STOMP_REJECT_RADIUS_TILES + 1):
+                    for dy in range(-STOMP_REJECT_RADIUS_TILES, STOMP_REJECT_RADIUS_TILES + 1):
+                        rejected.add((target[0] + dx, target[1] + dy))
             return target, point, sent, hover
 
         if pending is not None:
@@ -1973,16 +2082,21 @@ def run(reader, args, board, attempt=None):
         )
         if pose is None or pose.tile.plane != plane:
             return
-        use_dive = "Dive" in bindings and not timers.get("Dive")
+        use_dive = (
+            "Dive" in bindings
+            and not timers.get("Dive")
+            and phase_one.expected != HOLD_STILL
+        )
         route = stream_destination(
             reader,
             kind,
             player,
             pose,
             rejected_tiles=beam_keeper.rejected,
-            prefer_reach=True,
+            max_reach=MELEE_REACH_TILES,
         )
         if route is None:
+            # No strip tile in melee reach: standing elsewhere on it would be undone.
             beam_keeper.rejected.clear()
             return
         (target, _, config), point = route
@@ -2639,6 +2753,8 @@ def run(reader, args, board, attempt=None):
         labels["Dive"] = args.dive
     if getattr(args, "reflect", None):
         labels["Reflect"] = args.reflect
+    if getattr(args, "devotion", None):
+        labels["Devotion"] = args.devotion
     if args.reacquire:
         labels["Target Cycle"], labels["Opening Attack"] = args.reacquire
     layout = None
@@ -2694,7 +2810,7 @@ def run(reader, args, board, attempt=None):
                 )
         return None
 
-    def flick_step(actions, phase, prayer, now, sample_ns):
+    def flick_step(actions, phase, prayer, now, sample_ns, gcd_remaining_ms):
         """Advance the flicker and send at most one prayer chord."""
         tick = received_tick_counter()
         flicker.phase = phase
@@ -2723,13 +2839,18 @@ def run(reader, args, board, attempt=None):
         if (
             tick is not None
             and phase_one.special == HOLD_STILL
-            and phase_one.resonance_active(cooldowns(reader, bindings))
+            and phase_one.soul_split_for_heavy_hit(
+                cooldowns(reader, bindings), tick, gcd_remaining_ms
+            )
             and flicker.release(phase_one.special_event, tick)
         ):
-            # Resonance takes the heavy hit, so Soul Split returns for it.
+            # Resonance takes the heavy hit, so Soul Split is requested early in this tick:
+            # waiting for the cooldown left Soul Split one tick late (06:51 run).
             emit(
                 "prayer_window_released",
-                reason="Resonance cast confirmed",
+                reason=(
+                    "Resonance pressed" if phase_one.resonance_committed() else "Resonance due"
+                ),
                 received_tick=tick,
                 cue_native_sequence=phase_one.special_event,
             )
@@ -2926,7 +3047,14 @@ def run(reader, args, board, attempt=None):
         continue_phase_three = args.continue_phase_two
         if flicker is not None and (phase in (1, 2) or (phase >= 3 and continue_phase_three)):
             flicker.default_prayer = DEFAULT_FLICK_PRAYER_BY_PHASE[phase]
-            flick_step(actions, phase, prayer, now, info.monotonic_ns)
+            flick_step(
+                actions,
+                phase,
+                prayer,
+                now,
+                info.monotonic_ns,
+                gcd_remaining_now(player, info.monotonic_ns, reader.monotonic_ns()),
+            )
         if not phase_one_started:
             if hp_known:
                 emit("engaged", boss_hp=boss.health_current, phase=phase, player_hp=hp)
@@ -3118,6 +3246,7 @@ def run(reader, args, board, attempt=None):
             timed_freedom=timed_freedom,
             flicking=flicker is not None,
             stun_expiry=active_stun_expiry(reader, getattr(info, "logic_tick", None)),
+            adrenaline_tenths=player.variable(Variable.ADRENALINE),
         )
         if phase_one.cast_result:
             ability, confirmed = phase_one.cast_result
@@ -3219,6 +3348,7 @@ ACTION_BAR_KEY_ARGUMENTS = {
     "resonance": "Resonance",
     "dive": "Dive",
     "reflect": "Reflect",
+    "devotion": "Devotion",
     "flick_melee_key": "Deflect Melee",
     "flick_magic_key": "Deflect Magic",
     "flick_soul_split_key": "Soul Split",
@@ -3339,6 +3469,10 @@ def main():
     parser.add_argument(
         "--reflect",
         help="Optional Reflect binding, used on the P4 anima bomb while Resonance is cooling",
+    )
+    parser.add_argument(
+        "--devotion",
+        help="Optional Devotion binding, used for Hold Still's heavy hit when Resonance cannot",
     )
     # Phases 2 and 3 are always handled; the old opt-in flag is still accepted as a no-op.
     parser.add_argument("--continue-phase-two", action="store_true", help=argparse.SUPPRESS)
