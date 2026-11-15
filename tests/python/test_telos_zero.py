@@ -834,6 +834,23 @@ class BeamTests(unittest.TestCase):
         self.assertFalse(strip(reader, 3, (109, 109), 0))
         self.assertFalse(strip(reader, 1, (109, 109), 1))
 
+    def test_p3_anchor_keeps_the_player_on_a_strip_tile_that_left_the_reader_window(self):
+        # 07:54 P3: on (6874,1045) at 17074, the tile left the listed strip at 17075, and the
+        # keeper walked one tile; the anchor keeps the player still instead.
+        keeper = controller["BeamKeeper"]()
+        window = controller["BEAM_FEED_WINDOW"]
+        tile = (6874, 1045)
+        self.assertTrue(keeper.holding(tile, True, False, 17074))
+        self.assertTrue(keeper.holding(tile, False, False, 17075))
+        # The meter still rising just after arrival does not count yet.
+        self.assertTrue(keeper.holding(tile, False, True, 17074 + window))
+        # A rising meter later means the strip no longer passes this tile.
+        self.assertFalse(keeper.holding(tile, False, True, 17075 + window))
+        # A mechanic that moved the player ends the anchor too.
+        keeper.holding(tile, True, False, 17100)
+        self.assertFalse(keeper.holding((6874, 1042), False, False, 17101))
+        self.assertFalse(keeper.holding(tile, False, False, 17102))
+
     def test_beam_keeper_waits_between_moves(self):
         keeper = controller["BeamKeeper"]()
         retry = controller["BEAM_KEEP_RETRY_TICKS"]

@@ -596,6 +596,32 @@ class BeamKeeper:
         self.next_move_tick = None
         self.rejected = set()
         self.on_strip = None
+        # Tile and received tick where the player last reached the strip (P3 anchor).
+        self.anchor_tile = None
+        self.anchor_tick = None
+
+    def holding(self, tile, on_strip_now, fed, received_tick):
+        """Whether the player still blocks the strip from ``tile``.
+
+        The reader lists a moving window of strip tiles, so the player's tile can drop out of
+        it while the player still blocks (07:54, 17074-17090). The anchor holds until the
+        player moves (a mechanic) or the meter rises again (``fed``) after the feed window
+        that follows the arrival has passed.
+        """
+        if on_strip_now:
+            if self.anchor_tile != tile:
+                self.anchor_tick = received_tick
+            self.anchor_tile = tile
+            return True
+        settled = (
+            self.anchor_tick is not None
+            and received_tick - self.anchor_tick > BEAM_FEED_WINDOW
+        )
+        if self.anchor_tile != tile or (fed and settled):
+            self.anchor_tile = None
+            self.anchor_tick = None
+            return False
+        return True
 
     def move_due(self, received_tick):
         """Allow one move attempt, then wait BEAM_KEEP_RETRY_TICKS for it to land."""
@@ -2197,6 +2223,10 @@ def run(reader, args, board, attempt=None):
         player_tile = (player.tile.x, player.tile.y)
         plane = player.tile.plane
         standing = on_strip(reader, kind, player_tile, plane)
+        if phase in BEAM_BLOCK_ALWAYS_PHASES:
+            standing = beam_keeper.holding(
+                player_tile, standing, beam_blocker.feeding, received_tick
+            )
         if standing != beam_keeper.on_strip:
             beam_keeper.on_strip = standing
             emit(
@@ -2238,12 +2268,12 @@ def run(reader, args, board, attempt=None):
                 # A walk onto the strip dropped the attack; resume it from this tile.
                 reengage_telos(boss, player)
             return
-        if standing and not always_block:
+        if standing:
+            # On the strip the player only moves for mechanics (account owner).
             return
         if not beam_keeper.move_due(received_tick):
             return
-        # P1 uses strip tiles in melee reach only. P3 blocks the red strip anywhere, and from an
-        # out-of-reach strip tile still moves to one in reach when there is one.
+        # P1 uses strip tiles in melee reach only; P3 blocks the red strip anywhere.
         route = stream_destination(
             reader,
             kind,
@@ -2251,7 +2281,7 @@ def run(reader, args, board, attempt=None):
             pose,
             rejected_tiles=beam_keeper.rejected,
             prefer_reach=True,
-            max_reach=MELEE_REACH_TILES if standing or not always_block else None,
+            max_reach=None if always_block else MELEE_REACH_TILES,
         )
         if route is None:
             beam_keeper.rejected.clear()

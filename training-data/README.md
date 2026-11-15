@@ -73,8 +73,10 @@ ability queueing is off. `ability_sent.gcd_at_press_ms` records the time left, a
 In P1 the controller keeps the player on the green strip, using only tiles in melee reach of
 Telos; auto-attack undid every landing out of reach. In P3 it blocks the red strip at all
 times. It walks onto the nearest strip tile even out of reach, since a walk drops the attack
-target and the player stays. From there it moves to a strip tile in reach when one appears.
-After walking onto a tile in reach it clicks Telos again. It never lands under Telos. Dive is
+target and the player stays. Once on the strip the player only moves for mechanics. The reader
+lists a moving window of strip tiles, so the arrival tile stays anchored after it leaves that
+list. The anchor ends when a mechanic moves the player or the meter rises again. After walking
+onto a tile in reach it clicks Telos again. It never lands under Telos. Dive is
 used only for tiles in reach and within Dive range, while it is ready and Hold Still is not the
 forecast special. Its cooldown is read from Bladed Dive's shared timer. `beam_feeding` rows
 show whether the meter still rises in P3. The stomp dodge treats 5 tiles from Telos's centre
