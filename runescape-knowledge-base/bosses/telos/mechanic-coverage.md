@@ -71,6 +71,13 @@ fonts and paired 80 decrements in 19 of them. Of the 61 consecutive paired inter
 60 were within four ticks of 90. A cooldown acknowledgement confirms the cast. The paired
 hit amount shows how much damage the pulse dealt.
 
+At 100%, the corrected controller paired 1,200-point charge drops with type 144 hits
+at logic ticks 819099 and 819189. The next pulse landed at 819279. The GCD had already
+started at each planned press window and ended after its pulse. The player died on the
+third pulse after entering the phase with 2,385 HP. The native cue and cadence are live
+verified. The defensive cast remains to be verified with a free GCD slot.
+[100% font pulse trace](../../../training-data/telos-20261115T093525.671562Z.jsonl)
+
 **P4 golem attack timing.** In archived P4 phases, all three golem configs (`22905`,
 `22906`, `22907`) used animation `28998`. With no other `28998` within four logic ticks
 and no Telos action near the cue and hit, a lone type 133 mark appeared 25–35 logic
