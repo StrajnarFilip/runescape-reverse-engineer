@@ -441,6 +441,33 @@ class PointerCandidate(ctypes.Structure):
     ]
 
 
+class MinimapCandidateFlags(IntFlag):
+    """Raw source reads; no attachment, visibility or click permission."""
+
+    RAW_COMPONENT = 1
+    RAW_SCALE = 2
+    RAW_ZOOM = 4
+
+
+class MinimapCandidate(ctypes.Structure):
+    """rs3_minimap_candidate; local bounds and uncalibrated scale sources."""
+
+    _fields_ = [
+        ("observed_ns", ctypes.c_uint64),
+        *(
+            (name, ctypes.c_uint32)
+            for name in ("status", "reason", "flags", "interface_id", "component_id")
+        ),
+        *(
+            (name, ctypes.c_int32)
+            for name in ("local_x", "local_y", "width", "height", "raw_shape", "raw_mode")
+        ),
+        ("raw_zoom", ctypes.c_float),
+        ("raw_sprite_scale", ctypes.c_float),
+        ("reserved", ctypes.c_uint32),
+    ]
+
+
 class InterfaceInfo(ctypes.Structure):
     _fields_ = [
         *(
@@ -941,6 +968,7 @@ def _function_prototypes():
         ),
         "interface_sizeof": (u32, [u32]),
         "snapshot_pointer_candidate": (i32, [handle, ctypes.POINTER(PointerCandidate), u32]),
+        "snapshot_minimap_candidate": (i32, [handle, ctypes.POINTER(MinimapCandidate), u32]),
         "snapshot_interface_info": (i32, [handle, ctypes.POINTER(InterfaceInfo), u32]),
         "snapshot_interfaces": (
             i32,
@@ -981,6 +1009,7 @@ def _verify_layouts(library):
         (2, InterfaceObservation),
         (3, ActionBarSlot),
         (4, PointerCandidate),
+        (5, MinimapCandidate),
     ):
         if library.rs3_interface_sizeof(structure_id) != ctypes.sizeof(structure):
             raise RuntimeError("C/Python interface layout mismatch for " + structure.__name__)
@@ -1063,6 +1092,7 @@ class Reader:
         self.hits = (Hit * MAX_HITS)()
         self.interface_info = InterfaceInfo()
         self.pointer_candidate = PointerCandidate()
+        self.minimap_candidate = MinimapCandidate()
         self.interfaces = (InterfaceObservation * 5)()
         self.action_bar = (ActionBarSlot * 70)()
         self.player_hit_info = PlayerHitInfo()
@@ -1145,6 +1175,7 @@ class Reader:
         copy_array(library.rs3_snapshot_hits, self.hits)
         copy_record(library.rs3_snapshot_interface_info, self.interface_info)
         copy_record(library.rs3_snapshot_pointer_candidate, self.pointer_candidate)
+        copy_record(library.rs3_snapshot_minimap_candidate, self.minimap_candidate)
         copy_array(library.rs3_snapshot_interfaces, self.interfaces)
         copy_array(library.rs3_snapshot_action_bar, self.action_bar)
         copy_record(library.rs3_snapshot_player_hit_info, self.player_hit_info)

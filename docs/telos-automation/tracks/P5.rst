@@ -187,3 +187,15 @@ sample identity and age remain mandatory for downstream use.
   size-checked caller-owned accessor are registered on integration. P5 can
   connect its stage/clear path and language bindings without changing other
   tracks' storage or public layouts.
+* Stage/clear, caller-owned copy, checked ctypes layout and
+  ``ui.minimap_candidate`` diagnostics are now connected. The semantic value
+  stays null. Four new native fixture groups (25 total) cover the source and
+  snapshot lifecycle. Five fresh synchronous DLL samples on the pinned client
+  matched 283 by 245 local bounds, raw zoom 1.0 and sprite scale 0.5. Python
+  serializer checks preserve nulls and false visibility/coordinate/transform
+  validation flags. None of this authorizes movement.
+* The manual research capture is stopped: 7,400 native frames over 398.210
+  seconds, with 7,399 stable research reads and one rejected changing UI read.
+  There were no zoom/scale transitions. The user did not label camera rotation
+  as completed. Inventory queue losses were not exported by this research
+  subset, so it cannot serve as a complete shadow or ladder capture.

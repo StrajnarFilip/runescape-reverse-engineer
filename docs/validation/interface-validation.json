@@ -705,7 +705,7 @@
     "raw_capture_published": false
   },
   "minimap_research_2026_11_15": {
-    "status": "native_source_identified_manual_zoom_and_camera_check_pending",
+    "status": "raw_sources_exported_by_c_zoom_control_and_physical_geometry_unvalidated",
     "executable_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
     "profile": "original_951_3",
     "process_creation_time": 134392394313785355,
@@ -832,15 +832,74 @@
       "Parent component entries and geometry reread after traversal"
     ],
     "remaining": [
-      "Label zoom changes and camera rotation from the bounded manual capture",
       "Map native minimap heading and build a complete view-change signature",
-      "Implement guarded C acquisition and caller-owned snapshot export",
+      "Implement guarded C attachment and parent-origin acquisition",
       "Validate screen/DPI conversion, visibility, clipping and safe input region",
       "Record manual minimap clicks and confirmed native tile arrivals before fitting A2",
-      "Validate destination/path evidence before any automatic movement"
+      "Validate destination/path evidence before any automatic movement",
+      "Identify and validate an actual zoom control only if needed for a supported configuration"
     ],
     "automatic_input": false,
     "raw_capture_published": false,
-    "movement_or_click_permission_established": false
+    "movement_or_click_permission_established": false,
+    "production_c_raw_candidate_exported": true,
+    "manual_scroll_trial": {
+      "user_label": "Hovering over the minimap and scrolling does nothing.",
+      "samples": 7400,
+      "duration_seconds": 398.209559,
+      "capture_sha256": "529f8b60e1f593ce3f92b801ca164584d3b5d15a3d37716cfb5c4bd438ae3c68",
+      "stable_research_samples": 7399,
+      "discarded_torn_research_samples": 1,
+      "distinct_zoom_values": [
+        1.0
+      ],
+      "distinct_sprite_scales": [
+        0.5
+      ],
+      "native_pointer_samples_inside_candidate_panel": 99,
+      "zoom_change_observed": false,
+      "zoom_control_validated": false,
+      "camera_rotation_label_received": false,
+      "capture_scope": "research_subset_not_full_shadow",
+      "inventory_queue_loss_exported": false,
+      "recording_stopped": true,
+      "automatic_input": false,
+      "note": "Constant fields during a reported no-op do not calibrate zoom. Do not repeat the scroll sequence as a known working control."
+    },
+    "native_candidate_export": {
+      "public_type": "rs3_minimap_candidate",
+      "size_bytes": 64,
+      "size_query_id": 5,
+      "accessor": "rs3_snapshot_minimap_candidate",
+      "telemetry_path": "ui.minimap_candidate",
+      "successful_status": "partial",
+      "reason": "unvalidated_source",
+      "semantic_value": null,
+      "local_bounds_only": true,
+      "visibility_validated": false,
+      "physical_coordinates_validated": false,
+      "tile_transform_validated": false,
+      "loaded_handler_instruction_guards": 8,
+      "vtable_handler_guard": true,
+      "roots_and_consumed_fields_double_checked": true,
+      "native_interface_fixture_groups": 25,
+      "fresh_dll_samples": 5,
+      "fresh_dll_sample_sequences": [
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "fresh_dll_local_rect": [
+        0,
+        0,
+        283,
+        245
+      ],
+      "fresh_dll_raw_zoom": 1.0,
+      "fresh_dll_raw_sprite_scale": 0.5,
+      "serializer_unavailable_and_flag_checks_passed": true
+    }
   }
 }

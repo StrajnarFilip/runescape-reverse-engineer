@@ -20,6 +20,7 @@ from .native import (
     NPCFlags,
     NPCActionFlags,
     PointerCandidateFlags,
+    MinimapCandidateFlags,
     Reader,
     Reason,
     Status,
@@ -186,6 +187,49 @@ def interface_records(reader):
                     "verb": decode_text(pointer.verb) if raw_text else None,
                     "semantic_identity_validated": False,
                     "physical_coordinates_validated": False,
+                }
+                if flags
+                else None
+            ),
+        }
+    minimap = getattr(reader, "minimap_candidate", None)
+    if minimap is not None:
+        flags = MinimapCandidateFlags(minimap.flags)
+        ui["minimap_candidate"] = {
+            "value": None,
+            "age_ms": (
+                max(0, reader.monotonic_ns() - minimap.observed_ns) / 1e6
+                if minimap.observed_ns
+                else None
+            ),
+            "source": "native_cached_minimap_component",
+            "reason": INTERFACE_REASONS[minimap.reason],
+            "candidate": (
+                {
+                    "interface_id": minimap.interface_id,
+                    "component_id": minimap.component_id,
+                    "local_rect": (
+                        [minimap.local_x, minimap.local_y, minimap.width, minimap.height]
+                        if flags & MinimapCandidateFlags.RAW_COMPONENT
+                        else None
+                    ),
+                    "raw_shape": (
+                        minimap.raw_shape if flags & MinimapCandidateFlags.RAW_SCALE else None
+                    ),
+                    "raw_mode": (
+                        minimap.raw_mode if flags & MinimapCandidateFlags.RAW_ZOOM else None
+                    ),
+                    "raw_zoom": (
+                        minimap.raw_zoom if flags & MinimapCandidateFlags.RAW_ZOOM else None
+                    ),
+                    "raw_sprite_scale": (
+                        minimap.raw_sprite_scale
+                        if flags & MinimapCandidateFlags.RAW_SCALE
+                        else None
+                    ),
+                    "visibility_validated": False,
+                    "physical_coordinates_validated": False,
+                    "tile_transform_validated": False,
                 }
                 if flags
                 else None

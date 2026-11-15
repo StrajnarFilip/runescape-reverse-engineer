@@ -752,6 +752,34 @@ static void minimap_rejects_bad_identity_bounds_values_and_guards(void)
     fixture_destroy(test_fixture);
 }
 
+static void minimap_snapshot_copy_and_unavailable_reset(void)
+{
+    fixture *test_fixture = minimap_fixture();
+    assert(fixture_decode(test_fixture));
+    rs3_minimap_candidate candidate;
+    rs3_snapshot *snapshot = test_fixture->snapshot;
+    assert(rs3_snapshot_minimap_candidate(snapshot, &candidate, sizeof candidate) == RS3_OK);
+    assert(candidate.flags == 7 && candidate.width == 283);
+    candidate.width++;
+    assert(snapshot->minimap_candidate.width == 283);
+    assert(rs3_snapshot_minimap_candidate(snapshot, &candidate, sizeof candidate - 1) == RS3_E_ABI);
+    assert(rs3_snapshot_minimap_candidate(NULL, &candidate, sizeof candidate) == RS3_E_ARGUMENT);
+    assert(rs3_snapshot_minimap_candidate(snapshot, NULL, sizeof candidate) == RS3_E_ARGUMENT);
+    rs3_snapshot *consumer = NULL;
+    assert(rs3_snapshot_create(&consumer) == RS3_OK);
+    assert(rs3_snapshot_copy(snapshot, test_fixture->context->latest_frame) == RS3_OK);
+    assert(rs3_copy_latest(test_fixture->context, consumer) == RS3_OK);
+    assert(consumer->minimap_candidate.width == 283);
+    assert(consumer->minimap_candidate.observed_ns == snapshot->minimap_candidate.observed_ns);
+    interface_clear(test_fixture->context->latest_frame);
+    assert(rs3_copy_latest(test_fixture->context, consumer) == RS3_OK);
+    assert(consumer->minimap_candidate.status == RS3_UNAVAILABLE);
+    assert(consumer->minimap_candidate.reason == RS3_UI_FRAME_UNAVAILABLE);
+    assert(consumer->minimap_candidate.flags == 0 && consumer->minimap_candidate.width == 0);
+    rs3_snapshot_destroy(consumer);
+    fixture_destroy(test_fixture);
+}
+
 int main(void)
 {
     RUN_TEST(four_curse_bindings);
@@ -778,5 +806,6 @@ int main(void)
     RUN_TEST(minimap_cached_sources_remain_unvalidated);
     RUN_TEST(minimap_rejects_torn_component_scale_and_roots);
     RUN_TEST(minimap_rejects_bad_identity_bounds_values_and_guards);
+    RUN_TEST(minimap_snapshot_copy_and_unavailable_reset);
     return 0;
 }

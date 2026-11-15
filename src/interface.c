@@ -946,6 +946,7 @@ void interface_pointer_stage(rs3_context *context, uint64_t world_state, rs3_poi
 void interface_clear(rs3_snapshot *snapshot)
 {
     interface_pointer_clear(&snapshot->pointer_candidate);
+    interface_minimap_clear(&snapshot->minimap_candidate);
     memset(&snapshot->interface_info, 0, sizeof snapshot->interface_info);
     memset(snapshot->interfaces, 0, sizeof snapshot->interfaces);
     memset(snapshot->action_bar, 0, sizeof snapshot->action_bar);
@@ -1180,6 +1181,7 @@ void interface_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t play
     if (memory_read_pointer(context, client_address + LAYOUT_STATE_POINTER_OFFSET, &pointer_world))
     {
         interface_pointer_stage(context, pointer_world, &snapshot->pointer_candidate);
+        interface_minimap_stage(context, pointer_world, &snapshot->minimap_candidate);
     }
     uint64_t headers[2] = {player_address + LAYOUT_PLAYER_VARIABLE_TABLE_OFFSET,
                            client_address + LAYOUT_CLIENT_VARIABLE_TABLE_OFFSET};
