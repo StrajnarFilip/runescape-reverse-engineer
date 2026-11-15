@@ -15,6 +15,8 @@
 
 /** Largest key chord built by input_build_key_chord(): three modifiers, key down and up. */
 #define MAX_CHORD_INPUTS 8u
+/** Two complete chords, submitted in one ordered foreground SendInput call. */
+#define MAX_CHORD_BATCH_INPUTS (2u * MAX_CHORD_INPUTS)
 
 /**
  * Projects a tile onto the calibrated minimap.
@@ -51,6 +53,22 @@ int32_t input_prepare_item_chord(const rs3_snapshot *snapshot, uint32_t slot,
                                  int32_t expected_item_id, uint64_t expected_token,
                                  uint32_t virtual_key, uint32_t modifiers,
                                  INPUT chord[MAX_CHORD_INPUTS], uint32_t *input_count);
+
+/** Prepare both exact actions before exposing any ability-then-item batch events. */
+int32_t input_prepare_ability_item_batch(const rs3_snapshot *snapshot, uint32_t struct_id,
+                                         uint32_t ability_key, uint32_t ability_modifiers,
+                                         uint32_t slot, int32_t expected_item_id,
+                                         uint64_t expected_token, uint32_t item_key,
+                                         uint32_t item_modifiers,
+                                         INPUT events[MAX_CHORD_BATCH_INPUTS],
+                                         uint32_t *input_count);
+
+/** Submit an ordered ability-then-item batch; acceptance is not a server-tick guarantee. */
+RS3_API int32_t rs3_activate_ability_then_item(const rs3_snapshot *snapshot, uint32_t struct_id,
+                                               uint32_t ability_key, uint32_t ability_modifiers,
+                                               uint32_t slot, int32_t expected_item_id,
+                                               uint64_t expected_token, uint32_t item_key,
+                                               uint32_t item_modifiers);
 
 /* Additive public declarations are routed through L's shared ABI registration. */
 /** Send a balanced sampled-ability chord; modifiers use rs3_key_modifiers. */

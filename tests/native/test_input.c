@@ -287,6 +287,74 @@ static void copied_policy_snapshot_survives_source_changes_and_destruction(void)
     rs3_snapshot_destroy(copy);
 }
 
+static void navigation_and_oem_bindings_preserve_extended_key_flags(void)
+{
+    INPUT events[MAX_CHORD_INPUTS], releases[MAX_CHORD_INPUTS];
+    uint32_t count = 0;
+    for (uint32_t key = VK_PRIOR; key <= VK_NEXT; key++)
+    {
+        assert(input_build_key_chord(key, RS3_KEY_CTRL, events, &count) == RS3_OK);
+        assert(count == 4);
+        assert(events[1].ki.wVk == key);
+        assert(events[1].ki.dwFlags == KEYEVENTF_EXTENDEDKEY);
+        assert(events[2].ki.dwFlags == (KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP));
+        assert(input_release_inserted(events, 2, releases) == 2);
+        assert(releases[0].ki.wVk == key);
+        assert(releases[0].ki.dwFlags == (KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP));
+    }
+    assert(input_build_key_chord(VK_OEM_PLUS, 0, events, &count) == RS3_OK);
+    assert(count == 2 && events[0].ki.dwFlags == 0);
+    assert(input_build_key_chord(VK_LEFT, 0, events, &count) == RS3_E_ARGUMENT);
+}
+
+static void ability_item_batch_prepares_both_and_preserves_order(void)
+{
+    fixture *test_fixture = key_chord_fixture();
+    INPUT events[MAX_CHORD_BATCH_INPUTS], releases[MAX_CHORD_INPUTS];
+    uint32_t count = 0;
+    assert(input_prepare_ability_item_batch(test_fixture->snapshot, FIXTURE_ABILITY_ID, 'F', 0, 0,
+                                            FIXTURE_ITEM_BREW_6, FIXTURE_ITEM_TOKEN, VK_NEXT, 0,
+                                            events, &count) == RS3_OK);
+    assert(count == 4);
+    assert(events[0].ki.wVk == 'F' && events[0].ki.dwFlags == 0);
+    assert(events[1].ki.wVk == 'F' && events[1].ki.dwFlags == KEYEVENTF_KEYUP);
+    assert(events[2].ki.wVk == VK_NEXT && events[2].ki.dwFlags == KEYEVENTF_EXTENDEDKEY);
+    assert(events[3].ki.wVk == VK_NEXT &&
+           events[3].ki.dwFlags == (KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP));
+    uint32_t modifiers = RS3_KEY_CTRL | RS3_KEY_SHIFT | RS3_KEY_ALT;
+    assert(input_prepare_ability_item_batch(test_fixture->snapshot, FIXTURE_ABILITY_ID, 'F',
+                                            modifiers, 0, FIXTURE_ITEM_BREW_6, FIXTURE_ITEM_TOKEN,
+                                            VK_NEXT, modifiers, events, &count) == RS3_OK);
+    assert(count == MAX_CHORD_BATCH_INPUTS);
+    /* Every possible partial insertion can release all keys owned by both chords. */
+    for (uint32_t inserted = 1; inserted < count; inserted++)
+    {
+        uint32_t releases_count = input_release_inserted(events, inserted, releases);
+        assert(releases_count > 0 && releases_count <= MAX_CHORD_INPUTS);
+        for (uint32_t index = 0; index < releases_count; index++)
+        {
+            assert(releases[index].ki.dwFlags & KEYEVENTF_KEYUP);
+        }
+    }
+    fixture_destroy(test_fixture);
+}
+
+static void invalid_second_action_never_exposes_a_partial_batch(void)
+{
+    fixture *test_fixture = key_chord_fixture();
+    INPUT events[MAX_CHORD_BATCH_INPUTS] = {0};
+    uint32_t count = 999;
+    assert(input_prepare_ability_item_batch(test_fixture->snapshot, FIXTURE_ABILITY_ID, 'F', 0, 0,
+                                            FIXTURE_ITEM_BREW_5, FIXTURE_ITEM_TOKEN, VK_NEXT, 0,
+                                            events, &count) == RS3_E_TARGET);
+    assert(count == 0 && events[0].type == 0);
+    assert(input_prepare_ability_item_batch(test_fixture->snapshot, FIXTURE_ABILITY_ID, 'F', 0, 0,
+                                            FIXTURE_ITEM_BREW_6, FIXTURE_ITEM_TOKEN, VK_LWIN, 0,
+                                            events, &count) == RS3_E_ARGUMENT);
+    assert(count == 0 && events[0].type == 0);
+    fixture_destroy(test_fixture);
+}
+
 int main(void)
 {
     RUN_TEST(projects_minimap_tiles_and_guards_actions);
@@ -296,6 +364,9 @@ int main(void)
     RUN_TEST(item_chord_requires_exact_slot_dose_token_and_quantity);
     RUN_TEST(key_chords_reject_stale_scene_clock_and_unknown_inventory);
     RUN_TEST(copied_policy_snapshot_survives_source_changes_and_destruction);
+    RUN_TEST(navigation_and_oem_bindings_preserve_extended_key_flags);
+    RUN_TEST(ability_item_batch_prepares_both_and_preserves_order);
+    RUN_TEST(invalid_second_action_never_exposes_a_partial_batch);
     puts("PASS: input tests");
     return 0;
 }

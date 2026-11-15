@@ -47,12 +47,19 @@ static int is_valid_tile(int32_t tile_x, int32_t tile_y, int32_t plane)
            tile_y < MAX_TILE_COORDINATE && plane >= 0 && plane <= MAX_PLANE;
 }
 
-/** Accepts an unmodified Windows A-Z, 0-9 or F1-F12 virtual key. */
+/** Accept regular action-bar keys plus the observed Page Up/Down and OEM plus key. */
 static int is_bindable_key(uint32_t virtual_key)
 {
     return (virtual_key >= 'A' && virtual_key <= 'Z') ||
            (virtual_key >= '0' && virtual_key <= '9') ||
-           (virtual_key >= VK_F1 && virtual_key <= VK_F12);
+           (virtual_key >= VK_F1 && virtual_key <= VK_F12) || virtual_key == VK_PRIOR ||
+           virtual_key == VK_NEXT || virtual_key == VK_OEM_PLUS;
+}
+
+/** Distinguish dedicated Page Up/Down keys from numeric keypad navigation keys. */
+static DWORD key_event_flags(uint32_t virtual_key)
+{
+    return virtual_key == VK_PRIOR || virtual_key == VK_NEXT ? KEYEVENTF_EXTENDEDKEY : 0;
 }
 
 int32_t input_project_minimap_tile(const rs3_position *player_tile, const rs3_minimap *minimap,
@@ -162,9 +169,10 @@ int32_t input_build_key_chord(uint32_t virtual_key, uint32_t modifiers,
     }
     chord[count].type = INPUT_KEYBOARD;
     chord[count].ki.wVk = (WORD)virtual_key;
+    chord[count].ki.dwFlags = key_event_flags(virtual_key);
     count++;
     chord[count] = chord[count - 1];
-    chord[count].ki.dwFlags = KEYEVENTF_KEYUP;
+    chord[count].ki.dwFlags |= KEYEVENTF_KEYUP;
     count++;
     for (uint32_t modifier = MODIFIER_COUNT; modifier > 0; modifier--)
     {
@@ -411,7 +419,8 @@ int32_t rs3_activate_ability(const rs3_snapshot *snapshot, uint32_t struct_id, u
     events[1].type = INPUT_KEYBOARD;
     events[0].ki.wVk = (WORD)virtual_key;
     events[1].ki.wVk = (WORD)virtual_key;
-    events[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    events[0].ki.dwFlags = key_event_flags(virtual_key);
+    events[1].ki.dwFlags = KEYEVENTF_KEYUP | key_event_flags(virtual_key);
     return send_to_game(snapshot, GetForegroundWindow(), events, 2, ACTION_MAX_AGE_NS);
 }
 
@@ -506,6 +515,62 @@ int32_t rs3_activate_item_chord(const rs3_snapshot *snapshot, uint32_t slot,
                                               virtual_key, modifiers, chord, &input_count);
     return result == RS3_OK ? send_prepared_key_chord(snapshot, virtual_key, chord, input_count)
                             : result;
+}
+
+int32_t input_prepare_ability_item_batch(const rs3_snapshot *snapshot, uint32_t struct_id,
+                                         uint32_t ability_key, uint32_t ability_modifiers,
+                                         uint32_t slot, int32_t expected_item_id,
+                                         uint64_t expected_token, uint32_t item_key,
+                                         uint32_t item_modifiers,
+                                         INPUT events[MAX_CHORD_BATCH_INPUTS],
+                                         uint32_t *input_count)
+{
+    if (events == NULL || input_count == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    *input_count = 0;
+    INPUT ability_events[MAX_CHORD_INPUTS], item_events[MAX_CHORD_INPUTS];
+    uint32_t ability_count = 0, item_count = 0;
+    int32_t result = input_prepare_ability_chord(snapshot, struct_id, ability_key,
+                                                 ability_modifiers, ability_events, &ability_count);
+    if (result != RS3_OK)
+    {
+        return result;
+    }
+    result = input_prepare_item_chord(snapshot, slot, expected_item_id, expected_token, item_key,
+                                      item_modifiers, item_events, &item_count);
+    if (result != RS3_OK)
+    {
+        return result;
+    }
+    memcpy(events, ability_events, ability_count * sizeof *events);
+    memcpy(events + ability_count, item_events, item_count * sizeof *events);
+    *input_count = ability_count + item_count;
+    return RS3_OK;
+}
+
+int32_t rs3_activate_ability_then_item(const rs3_snapshot *snapshot, uint32_t struct_id,
+                                       uint32_t ability_key, uint32_t ability_modifiers,
+                                       uint32_t slot, int32_t expected_item_id,
+                                       uint64_t expected_token, uint32_t item_key,
+                                       uint32_t item_modifiers)
+{
+    INPUT events[MAX_CHORD_BATCH_INPUTS];
+    uint32_t input_count = 0;
+    int32_t result = input_prepare_ability_item_batch(
+        snapshot, struct_id, ability_key, ability_modifiers, slot, expected_item_id, expected_token,
+        item_key, item_modifiers, events, &input_count);
+    if (result != RS3_OK)
+    {
+        return result;
+    }
+    if (user_holds_modifier() || GetAsyncKeyState((int)ability_key) < 0 ||
+        GetAsyncKeyState((int)item_key) < 0)
+    {
+        return RS3_E_STATE;
+    }
+    return send_to_game(snapshot, GetForegroundWindow(), events, input_count, KEY_CHORD_MAX_AGE_NS);
 }
 
 static int snapshot_has_npc(const rs3_snapshot *snapshot, uint64_t instance_id)

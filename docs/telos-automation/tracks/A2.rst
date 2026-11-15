@@ -104,6 +104,23 @@ produced zero pointer proposals. No new game input was sent during this work.
 Requests
 --------
 
+* P1 input follow-up, 2026-11-15: native action-bar chords now support the
+  observed PgUp, PgDn and OEM plus/equal virtual keys. Dedicated navigation
+  keys retain EXTENDEDKEY on down, up and partial-insertion cleanup. Other
+  navigation/system keys remain rejected. No game input was sent by tests.
+* ``input_prepare_ability_item_batch`` validates the sampled ability and exact
+  backpack slot/ID/token/quantity before exposing any batch events. The new
+  ``rs3_activate_ability_then_item`` submits the ability chord followed by the
+  item chord in one foreground-guarded SendInput call. Existing PID/creation,
+  scene, 150 ms freshness, user-held-key checks and partial-insertion cleanup
+  remain in force. OS acceptance is not a successful cast or a server-tick
+  guarantee. Three additional fixture groups pass (10 native input groups).
+* L registration request: add the public declaration for
+  ``rs3_activate_ability_then_item`` to ``include/rs3/rs3.h`` and document the
+  narrowly supported key additions. A1 must connect the ordered batch and
+  native key support before D8 can use the P1 coordinator. These changes do
+  not validate minimap geometry, movement, camera or prayer deadlines.
+
 * P1/P5: publish native minimap center/safe radius in physical pixels, plus a
   fresh signature covering minimap/camera rotation, zoom, DPI, window and UI
   layout. No current field supplies this complete record. Route/path validation
