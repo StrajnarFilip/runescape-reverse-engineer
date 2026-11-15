@@ -27,6 +27,8 @@
 /** Windows virtual keys pressed for each modifier bit, in bit order. */
 static const WORD modifier_virtual_keys[MODIFIER_COUNT] = {VK_CONTROL, VK_SHIFT, VK_MENU};
 
+_Static_assert(sizeof(rs3_key_action) == 48, "ABI key action layout");
+
 /** Returns nonzero for a verified frame that is at most one second old. */
 static int is_fresh_game_frame(const rs3_snapshot *snapshot)
 {
@@ -131,6 +133,23 @@ uint32_t input_release_inserted(const INPUT *events, uint32_t inserted_count,
         const INPUT *event = &events[index - 1];
         if (event->type == INPUT_KEYBOARD && !(event->ki.dwFlags & KEYEVENTF_KEYUP))
         {
+            int released = 0;
+            for (uint32_t later = index; later < inserted_count; later++)
+            {
+                const INPUT *following = &events[later];
+                if (following->type == INPUT_KEYBOARD && following->ki.wVk == event->ki.wVk &&
+                    (following->ki.dwFlags & KEYEVENTF_EXTENDEDKEY) ==
+                        (event->ki.dwFlags & KEYEVENTF_EXTENDEDKEY) &&
+                    (following->ki.dwFlags & KEYEVENTF_KEYUP))
+                {
+                    released = 1;
+                    break;
+                }
+            }
+            if (released)
+            {
+                continue;
+            }
             releases[release_count] = *event;
             releases[release_count].ki.dwFlags |= KEYEVENTF_KEYUP;
             release_count++;
@@ -569,6 +588,117 @@ int32_t rs3_activate_ability_then_item(const rs3_snapshot *snapshot, uint32_t st
         GetAsyncKeyState((int)item_key) < 0)
     {
         return RS3_E_STATE;
+    }
+    return send_to_game(snapshot, GetForegroundWindow(), events, input_count, KEY_CHORD_MAX_AGE_NS);
+}
+
+uint32_t rs3_key_action_sizeof(void)
+{
+    return sizeof(rs3_key_action);
+}
+
+int32_t input_prepare_key_batch(const rs3_snapshot *snapshot, const rs3_key_action *actions,
+                                uint32_t action_size, uint32_t action_count,
+                                INPUT events[MAX_TARGET_BATCH_INPUTS], uint32_t *input_count)
+{
+    if (input_count != NULL)
+    {
+        *input_count = 0;
+    }
+    if (snapshot == NULL || actions == NULL || events == NULL || input_count == NULL)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    if (action_size != sizeof *actions)
+    {
+        return RS3_E_ABI;
+    }
+    if (action_count == 0 || action_count > RS3_MAX_KEY_ACTIONS)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    if (!is_fresh_key_chord_frame(snapshot))
+    {
+        return RS3_E_STATE;
+    }
+    INPUT staged[MAX_TARGET_BATCH_INPUTS];
+    uint32_t staged_count = 0;
+    for (uint32_t index = 0; index < action_count; index++)
+    {
+        const rs3_key_action *action = &actions[index];
+        INPUT chord[MAX_CHORD_INPUTS];
+        uint32_t chord_count = 0;
+        int32_t result = RS3_E_ARGUMENT;
+        if (action->reserved != 0)
+        {
+            return RS3_E_ARGUMENT;
+        }
+        if (action->kind == RS3_KEY_ACTION_ABILITY)
+        {
+            result = input_prepare_ability_chord(snapshot, action->ability_id, action->virtual_key,
+                                                 action->modifiers, chord, &chord_count);
+        }
+        else if (action->kind == RS3_KEY_ACTION_ITEM)
+        {
+            result = input_prepare_item_chord(snapshot, action->slot, action->expected_item_id,
+                                              action->expected_token, action->virtual_key,
+                                              action->modifiers, chord, &chord_count);
+        }
+        else if (action->kind == RS3_KEY_ACTION_TARGET_CYCLE)
+        {
+            if (action->expected_instance_id == 0 || action->expected_config_id < 0 ||
+                snapshot->info.npc_count > RS3_MAX_NPCS)
+            {
+                return RS3_E_ARGUMENT;
+            }
+            unsigned matches = 0;
+            for (uint32_t npc_index = 0; npc_index < snapshot->info.npc_count; npc_index++)
+            {
+                const rs3_npc *npc = &snapshot->npcs[npc_index];
+                matches += npc->instance_id == action->expected_instance_id &&
+                           (npc->flags & RS3_NPC_CONFIG) != 0 &&
+                           npc->config_id == action->expected_config_id;
+            }
+            if (matches != 1)
+            {
+                return RS3_E_TARGET;
+            }
+            result =
+                input_build_key_chord(action->virtual_key, action->modifiers, chord, &chord_count);
+        }
+        if (result != RS3_OK)
+        {
+            return result;
+        }
+        memcpy(staged + staged_count, chord, chord_count * sizeof *staged);
+        staged_count += chord_count;
+    }
+    memcpy(events, staged, staged_count * sizeof *events);
+    *input_count = staged_count;
+    return RS3_OK;
+}
+
+int32_t rs3_activate_key_batch(const rs3_snapshot *snapshot, const rs3_key_action *actions,
+                               uint32_t action_size, uint32_t action_count)
+{
+    INPUT events[MAX_TARGET_BATCH_INPUTS];
+    uint32_t input_count = 0;
+    int32_t result =
+        input_prepare_key_batch(snapshot, actions, action_size, action_count, events, &input_count);
+    if (result != RS3_OK)
+    {
+        return result;
+    }
+    if (user_holds_modifier())
+    {
+        return RS3_E_STATE;
+    }
+    for (uint32_t index = 0; index < action_count; index++)
+    {
+        if (GetAsyncKeyState((int)actions[index].virtual_key) < 0)
+        {
+            return RS3_E_STATE;
+        }
     }
     return send_to_game(snapshot, GetForegroundWindow(), events, input_count, KEY_CHORD_MAX_AGE_NS);
 }

@@ -90,7 +90,7 @@ static void builds_chords_and_releases_partial_insertions(void)
     for (uint32_t inserted = 1; inserted < 4; inserted++)
     {
         uint32_t release_count = input_release_inserted(chord, inserted, releases);
-        assert(release_count == (inserted == 1 ? 1u : 2u));
+        assert(release_count == (inserted == 2 ? 2u : 1u));
         for (uint32_t index = 0; index < release_count; index++)
         {
             assert(releases[index].ki.dwFlags & KEYEVENTF_KEYUP);
@@ -330,7 +330,7 @@ static void ability_item_batch_prepares_both_and_preserves_order(void)
     for (uint32_t inserted = 1; inserted < count; inserted++)
     {
         uint32_t releases_count = input_release_inserted(events, inserted, releases);
-        assert(releases_count > 0 && releases_count <= MAX_CHORD_INPUTS);
+        assert(releases_count <= MAX_CHORD_INPUTS);
         for (uint32_t index = 0; index < releases_count; index++)
         {
             assert(releases[index].ki.dwFlags & KEYEVENTF_KEYUP);
@@ -355,6 +355,87 @@ static void invalid_second_action_never_exposes_a_partial_batch(void)
     fixture_destroy(test_fixture);
 }
 
+static void target_item_ability_batch_checks_identity_and_keeps_a_s_g_order(void)
+{
+    fixture *test_fixture = key_chord_fixture();
+    rs3_snapshot *snapshot = test_fixture->snapshot;
+    snapshot->info.npc_count = 1;
+    snapshot->npcs[0] = (rs3_npc){.instance_id = 123, .config_id = 22891, .flags = RS3_NPC_CONFIG};
+    rs3_key_action actions[3] = {
+        {.kind = RS3_KEY_ACTION_TARGET_CYCLE,
+         .virtual_key = 'A',
+         .expected_instance_id = 123,
+         .expected_config_id = 22891},
+        {.kind = RS3_KEY_ACTION_ITEM,
+         .virtual_key = 'S',
+         .slot = 0,
+         .expected_item_id = FIXTURE_ITEM_BREW_6,
+         .expected_token = FIXTURE_ITEM_TOKEN},
+        {.kind = RS3_KEY_ACTION_ABILITY, .virtual_key = 'G', .ability_id = FIXTURE_ABILITY_ID}};
+    INPUT events[MAX_TARGET_BATCH_INPUTS] = {0};
+    uint32_t count = 0;
+    assert(rs3_key_action_sizeof() == 48);
+    assert(input_prepare_key_batch(snapshot, actions, sizeof *actions, 3, events, &count) ==
+           RS3_OK);
+    assert(count == 6);
+    assert(events[0].ki.wVk == 'A' && events[2].ki.wVk == 'S' && events[4].ki.wVk == 'G');
+    for (uint32_t index = 0; index < count; index++)
+    {
+        assert(events[index].ki.dwFlags == (index % 2 ? KEYEVENTF_KEYUP : 0));
+    }
+    actions[2].ability_id++;
+    assert(input_prepare_key_batch(snapshot, actions, sizeof *actions, 3, events, &count) ==
+           RS3_E_TARGET);
+    assert(count == 0);
+    actions[2].ability_id--;
+    snapshot->npcs[0].instance_id++;
+    assert(input_prepare_key_batch(snapshot, actions, sizeof *actions, 3, events, &count) ==
+           RS3_E_TARGET);
+    assert(count == 0);
+    assert(input_prepare_key_batch(snapshot, actions, sizeof *actions - 1, 3, events, &count) ==
+           RS3_E_ABI);
+    assert(input_prepare_key_batch(snapshot, actions, sizeof *actions, 4, events, &count) ==
+           RS3_E_ARGUMENT);
+    fixture_destroy(test_fixture);
+}
+
+static void three_chord_partial_cleanup_leaves_no_owned_keys_down(void)
+{
+    fixture *test_fixture = key_chord_fixture();
+    rs3_key_action actions[3];
+    for (uint32_t index = 0; index < 3; index++)
+    {
+        actions[index] = (rs3_key_action){.kind = RS3_KEY_ACTION_ABILITY,
+                                          .ability_id = FIXTURE_ABILITY_ID,
+                                          .virtual_key = 'A' + index,
+                                          .modifiers = RS3_KEY_CTRL | RS3_KEY_SHIFT | RS3_KEY_ALT};
+    }
+    INPUT events[MAX_TARGET_BATCH_INPUTS], releases[MAX_CHORD_INPUTS];
+    uint32_t count = 0;
+    assert(input_prepare_key_batch(test_fixture->snapshot, actions, sizeof *actions, 3, events,
+                                   &count) == RS3_OK);
+    assert(count == MAX_TARGET_BATCH_INPUTS);
+    for (uint32_t prefix = 1; prefix < count; prefix++)
+    {
+        unsigned char held[256] = {0};
+        for (uint32_t index = 0; index < prefix; index++)
+        {
+            held[events[index].ki.wVk] = !(events[index].ki.dwFlags & KEYEVENTF_KEYUP);
+        }
+        uint32_t release_count = input_release_inserted(events, prefix, releases);
+        for (uint32_t index = 0; index < release_count; index++)
+        {
+            assert(held[releases[index].ki.wVk]);
+            held[releases[index].ki.wVk] = 0;
+        }
+        for (uint32_t key = 0; key < 256; key++)
+        {
+            assert(!held[key]);
+        }
+    }
+    fixture_destroy(test_fixture);
+}
+
 int main(void)
 {
     RUN_TEST(projects_minimap_tiles_and_guards_actions);
@@ -367,6 +448,8 @@ int main(void)
     RUN_TEST(navigation_and_oem_bindings_preserve_extended_key_flags);
     RUN_TEST(ability_item_batch_prepares_both_and_preserves_order);
     RUN_TEST(invalid_second_action_never_exposes_a_partial_batch);
+    RUN_TEST(target_item_ability_batch_checks_identity_and_keeps_a_s_g_order);
+    RUN_TEST(three_chord_partial_cleanup_leaves_no_owned_keys_down);
     puts("PASS: input tests");
     return 0;
 }

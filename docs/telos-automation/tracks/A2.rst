@@ -123,6 +123,19 @@ Requests
 * L public ABI registration is complete: the additive batch declaration and
   supported key-range documentation are in the installed public header. No
   existing public structure or calling convention changed.
+* A-S-G follow-up: the user clarified target cycle A, vulnerability S and
+  Greater Barge G as one ordered same-tick attempt. A new bounded 48-byte
+  ``rs3_key_action`` descriptor and ``rs3_activate_key_batch`` prepare 1..3
+  ability, exact-item or expected-NPC target-cycle chords before submitting
+  one OS batch. Native NPC lifetime/config and item/ability preconditions are
+  checked before any event escapes preparation. Post-input target selection
+  and successful casts still require native readback. Twelve native input
+  groups pass, including every partial prefix of three fully modified chords.
+* L: register the key action types, size query and batch declaration from
+  ``src/input.h`` in the public header. A1 must bind this API to the supervised
+  runner. Partial-insertion cleanup now releases only keyboard keys still down
+  in the inserted prefix, preserving dedicated navigation-key flags. This
+  change does not establish targetability or same-server-tick execution.
 
 * P1/P5: publish native minimap center/safe radius in physical pixels, plus a
   fresh signature covering minimap/camera rotation, zoom, DPI, window and UI
