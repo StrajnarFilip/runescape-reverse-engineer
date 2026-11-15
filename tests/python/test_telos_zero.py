@@ -465,73 +465,64 @@ class PhaseOneTests(unittest.TestCase):
         reader.abilities[1].remaining_ms = 0
         self.assertEqual(controller["cooldowns"](reader, {"Dive"}), {"Dive": 0})
 
-    def test_anima_bomb_defence_casts_ahead_of_the_typeless_hit(self):
-        # 06:34 at 250%: 28942 at 9367 and a 5,228 typeless hit at 9370.
+    def test_anima_bomb_resonance_and_reflect_follow_the_measured_hit_time(self):
+        # 06:34 at 250%: 28942 observed at logic 283125, typeless hit at 283240 (+2.30 s).
         bomb = controller["ANIMA_BOMB"]
+        cue_ns = SECOND_NS  # event(1, ...) is observed at one second
         phase = PhaseOne(phase=4)
-        phase.observe([dict(event(1, bomb), received_tick=9367)])
+        phase.observe([event(1, bomb)])
         self.assertIsNone(phase.special)
         timers = {"Resonance": 0}
-        self.assertIsNone(
-            phase.next_action(SECOND_NS, timers, 0, Prayer.MELEE, received_tick=9367)
-        )
-        # Resonance blocks one hit, so it only casts on the +3 typeless hit: pressed at +2.
-        self.assertIsNone(
-            phase.next_action(SECOND_NS, timers, 150, Prayer.MELEE, received_tick=9368)
-        )
-        self.assertIsNone(
-            phase.next_action(SECOND_NS, timers, 400, Prayer.MELEE, received_tick=9369)
-        )
-        action = phase.next_action(SECOND_NS, timers, 150, Prayer.MELEE, received_tick=9369)
+        # Resonance blocks one hit: not in the GCD slot before the window, only inside it.
+        for offset in (0, 600_000_000, 1_700_000_000):
+            self.assertIsNone(phase.next_action(cue_ns + offset, timers, 150, Prayer.MELEE))
+        self.assertIsNone(phase.next_action(cue_ns + 1_800_000_000, timers, 400, Prayer.MELEE))
+        action = phase.next_action(cue_ns + 1_800_000_000, timers, 150, Prayer.MELEE)
         self.assertEqual(action, controller["Action"]("Resonance", "Anima bomb"))
-        phase.sent(action, SECOND_NS)
+        phase.sent(action, cue_ns + 1_800_000_000)
         self.assertNotIn("Resonance", phase.handled)
         self.assertIsNone(
-            phase.next_action(SECOND_NS, {"Reflect": 0}, 0, Prayer.MELEE, received_tick=9369)
+            phase.next_action(cue_ns + 1_900_000_000, {"Reflect": 0}, 0, Prayer.MELEE)
         )
-        # With Resonance cooling (the font instakill restarts every cooldown), Reflect at +2.
+        # With Resonance cooling (the font instakill restarts every cooldown), Reflect earlier.
         later = PhaseOne(phase=4)
-        later.observe([dict(event(2, bomb), received_tick=200)])
+        later.observe([event(2, bomb)])
         cooling = {"Resonance": 12_000, "Reflect": 0}
-        self.assertEqual(
-            later.next_action(SECOND_NS, cooling, 0, Prayer.MELEE, received_tick=202).ability,
-            "Reflect",
-        )
-        self.assertIsNone(
-            later.next_action(SECOND_NS, cooling, 0, Prayer.MELEE, received_tick=203)
-        )
+        reflect = later.next_action(2 * SECOND_NS + 700_000_000, cooling, 0, Prayer.MELEE)
+        self.assertEqual(reflect.ability, "Reflect")
+        # Past the window nothing is pressed.
+        late = PhaseOne(phase=4)
+        late.observe([event(3, bomb)])
+        self.assertIsNone(late.next_action(3 * SECOND_NS + 2_100_000_000, timers, 0, Prayer.MELEE))
         # Outside P4 28942 is not treated as the bomb.
         first = PhaseOne()
-        first.observe([dict(event(3, bomb), received_tick=50)])
-        self.assertIsNone(first.next_action(SECOND_NS, timers, 0, Prayer.MELEE, received_tick=51))
+        first.observe([event(4, bomb)])
+        self.assertIsNone(first.next_action(4 * SECOND_NS + 1_800_000_000, timers, 0, Prayer.MELEE))
 
     def test_disruption_shield_is_tick_perfect_for_the_anima_bomb(self):
         shield = controller["DISRUPTION_SHIELD"]
         bomb = controller["ANIMA_BOMB"]
         phase = PhaseOne(phase=4)
-        phase.observe([dict(event(1, bomb), received_tick=9367)])
+        phase.observe([event(1, bomb)])
         timers = {"Resonance": 12_000, shield: 0}
-        # Off the GCD: no GCD window is needed, but only +2 casts on the +3 typeless hit.
-        self.assertIsNone(
-            phase.next_action(SECOND_NS, timers, 1500, Prayer.MELEE, received_tick=9368)
-        )
-        action = phase.next_action(SECOND_NS, timers, 1500, Prayer.MELEE, received_tick=9369)
+        # Off the GCD, but only inside the window before the hit at about +2.28 s.
+        self.assertIsNone(phase.next_action(SECOND_NS + 1_600_000_000, timers, 1500, Prayer.MELEE))
+        action = phase.next_action(SECOND_NS + 1_760_000_000, timers, 1500, Prayer.MELEE)
         self.assertEqual(action, controller["Action"](shield, "Anima bomb"))
-        phase.sent(action, SECOND_NS)
+        phase.sent(action, SECOND_NS + 1_760_000_000)
         self.assertTrue(phase.bomb_handled)
-        # Resonance keeps +2 when its GCD slot falls in that tick.
+        # Resonance in its GCD slot takes precedence; the shield is not added on top.
         second = PhaseOne(phase=4)
-        second.observe([dict(event(2, bomb), received_tick=100)])
+        second.observe([event(2, bomb)])
         ready = {"Resonance": 0, shield: 0}
-        self.assertIsNone(
-            second.next_action(SECOND_NS, ready, 500, Prayer.MELEE, received_tick=102,
-                               tick_elapsed_ms=50)
+        self.assertEqual(
+            second.next_action(2 * SECOND_NS + 1_800_000_000, ready, 150, Prayer.MELEE).ability,
+            "Resonance",
         )
         third = PhaseOne(phase=4)
-        third.observe([dict(event(3, bomb), received_tick=100)])
+        third.observe([event(3, bomb)])
         self.assertEqual(
-            third.next_action(SECOND_NS, ready, 1100, Prayer.MELEE, received_tick=102,
-                              tick_elapsed_ms=50).ability,
+            third.next_action(3 * SECOND_NS + 1_800_000_000, ready, 1100, Prayer.MELEE).ability,
             shield,
         )
 

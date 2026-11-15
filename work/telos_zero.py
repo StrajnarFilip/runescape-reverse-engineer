@@ -49,7 +49,7 @@ TENDRILS = 28931
 TENDRILS_RELEASE = 28932
 HOLD_STILL = 28935
 UPPERCUT = 28938
-# P4 weak anima bomb throw (see ANIMA_BOMB_PRESS_TICKS).
+# P4 weak anima bomb throw (see ANIMA_BOMB_SINGLE_HIT_WINDOW_NS).
 ANIMA_BOMB = 28942
 PHASE_SHIFT = 21
 PHASE_MASK = 7
@@ -860,10 +860,15 @@ GCD_ABILITIES = frozenset(
 # came 3 received ticks after 28942 at 250% (5,228 at 9370) and 4 after it at 100% (5,904),
 # where a type 133 melee hit of 853 landed at +2. Deflect Melee covers +1 and +2, and the
 # defensive is pressed at +1 or +2 so that it casts on +2 or +3. Resonance and Disruption Shield
-# block only one hit, so they must cast on the typeless hit's tick itself (account owner): both
-# are pressed at +2. Reflect lasts several ticks and may go at +1 or +2.
-ANIMA_BOMB_PRESS_TICKS = (1, 2)
-ANIMA_BOMB_SINGLE_HIT_PRESS_TICK = 2
+# block only one hit, so they must be up on the typeless hit's tick itself (account owner).
+# Measured on the client clock the hit started 113-116 logic ticks (2.26-2.32 s) after 28942 was
+# observed in all four P4 bombs logged (100% and 250%): the start of cue tick +4 (the +2/+3 tick
+# labels lagged the boundary). A press made during tick +3 is processed with that hit, so the
+# single-hit blocks are pressed 1.75-2.05 s after the cue: after tick +3 begins, and early
+# enough for the press to reach the server (a 76 ms lead was too late for GCD presses).
+# Reflect lasts several ticks and may go from 0.6 s.
+ANIMA_BOMB_SINGLE_HIT_WINDOW_NS = (1_750_000_000, 2_050_000_000)
+ANIMA_BOMB_REFLECT_EARLIEST_NS = 600_000_000
 ANIMA_BOMB_DEFENCES = ("Resonance", "Reflect")
 ANIMA_BOMB_REASON = "Anima bomb"
 # Disruption Shield (account owner: on O, nullifies one attack; wiki: Lunar, off the GCD, 60 s
@@ -1110,8 +1115,8 @@ class PhaseOne:
         # Set when this Hold Still's Resonance press produced no cooldown.
         self.resonance_failed = False
         self.cast_result = None
-        # P4 anima bomb: received tick and native event of 28942, and whether a defensive went.
-        self.bomb_tick = None
+        # P4 anima bomb: observation time and native event of 28942, and whether a defensive went.
+        self.bomb_ns = None
         self.bomb_event = None
         self.bomb_handled = False
 
@@ -1166,7 +1171,7 @@ class PhaseOne:
                 sequence = MELEE_AUTO_SEQUENCE  # Counted as an ordinary attack.
             if sequence == ANIMA_BOMB and self.phase == 4:
                 # Tracked beside the rotation: the forecast and special state stay unchanged.
-                self.bomb_tick = tick
+                self.bomb_ns = action["observed_ns"]
                 self.bomb_event = action["event_sequence"]
                 self.bomb_handled = False
                 continue
@@ -1252,12 +1257,12 @@ class PhaseOne:
             if self.pending:
                 self.cast_result = self.acknowledge(cooldowns, now, ending=True)
             return Action("Devotion", "Hold Still heavy hit without Resonance")
-        bomb_defence = self.bomb_defence(cooldowns, received_tick, gcd_remaining_ms)
+        bomb_defence = self.bomb_defence(cooldowns, now, gcd_remaining_ms)
         if bomb_defence is not None:
             if self.pending:
                 self.cast_result = self.acknowledge(cooldowns, now, ending=True)
             return Action(bomb_defence, ANIMA_BOMB_REASON)
-        if self.bomb_shield_due(cooldowns, received_tick, gcd_remaining_ms, tick_elapsed_ms):
+        if self.bomb_shield_due(cooldowns, now, gcd_remaining_ms):
             if self.pending:
                 self.cast_result = self.acknowledge(cooldowns, now, ending=True)
             return Action(DISRUPTION_SHIELD, ANIMA_BOMB_REASON)
@@ -1435,33 +1440,35 @@ class PhaseOne:
         next_slot = received_tick - self.special_tick + GCD_TICKS
         return next_slot > RESONANCE_LATEST_PRESS_TICK
 
-    def bomb_defence(self, cooldowns, received_tick, gcd_remaining_ms):
-        """The ready defensive to press for the P4 anima bomb now, or None.
+    def bomb_elapsed(self, now):
+        """Nanoseconds since this phase's anima bomb cue, or None without an open bomb."""
+        if self.bomb_handled or self.bomb_ns is None:
+            return None
+        return now - self.bomb_ns
 
-        Pressed at most once per bomb, in the GCD's last moments at +1 or +2 after 28942, so it
-        casts on +2 or +3 ahead of the typeless hit. Resonance is preferred over Reflect.
+    def bomb_defence(self, cooldowns, now, gcd_remaining_ms):
+        """The GCD defensive to press for the P4 anima bomb now, or None.
+
+        Resonance only inside ANIMA_BOMB_SINGLE_HIT_WINDOW_NS, so it is up on the typeless hit
+        and not spent on a golem hit first; Reflect from ANIMA_BOMB_REFLECT_EARLIEST_NS. Both
+        need the GCD's last moments, and only one defensive is pressed per bomb.
         """
+        elapsed = self.bomb_elapsed(now)
+        if elapsed is None or not gcd_press_ready(gcd_remaining_ms):
+            return None
+        earliest, latest = ANIMA_BOMB_SINGLE_HIT_WINDOW_NS
+        if elapsed > latest:
+            return None
+        if earliest <= elapsed and "Resonance" in cooldowns and not cooldowns["Resonance"]:
+            return "Resonance"
         if (
-            self.bomb_handled
-            or not isinstance(self.bomb_tick, int)
-            or not isinstance(received_tick, int)
-            or not gcd_press_ready(gcd_remaining_ms)
+            elapsed >= ANIMA_BOMB_REFLECT_EARLIEST_NS
+            and "Reflect" in cooldowns
+            and not cooldowns["Reflect"]
+            and not self.shield_ready(cooldowns)
         ):
-            return None
-        earliest, latest = ANIMA_BOMB_PRESS_TICKS
-        tick_delta = received_tick - self.bomb_tick
-        if not earliest <= tick_delta <= latest:
-            return None
-        return next(
-            (
-                ability
-                for ability in ANIMA_BOMB_DEFENCES
-                if ability in cooldowns
-                and not cooldowns[ability]
-                and (ability != "Resonance" or tick_delta == ANIMA_BOMB_SINGLE_HIT_PRESS_TICK)
-            ),
-            None,
-        )
+            return "Reflect"
+        return None
 
     def shield_ready(self, cooldowns):
         """Whether Disruption Shield is bound, off its timer and unused for this special."""
@@ -1500,23 +1507,28 @@ class PhaseOne:
         )
         return self.small_hit_tick is not None and not resonance_usable
 
-    def bomb_shield_due(self, cooldowns, received_tick, gcd_remaining_ms, tick_elapsed_ms):
-        """Cast Disruption Shield at +2 so it is up on the bomb's typeless hit at +3.
+    def bomb_shield_due(self, cooldowns, now, gcd_remaining_ms):
+        """Cast Disruption Shield in ANIMA_BOMB_SINGLE_HIT_WINDOW_NS so it takes the bomb hit.
 
-        Resonance keeps that tick when its GCD slot falls in it. Golem hits may still use the
-        shield up first (account owner).
+        It ignores the GCD, so it goes at the window's start unless Resonance is being pressed
+        at that moment (they must not both be up). Golem hits may still use the shield up first
+        (account owner).
         """
+        elapsed = self.bomb_elapsed(now)
+        earliest, latest = ANIMA_BOMB_SINGLE_HIT_WINDOW_NS
         if (
-            self.bomb_handled
-            or not isinstance(self.bomb_tick, int)
-            or not isinstance(received_tick, int)
-            or received_tick - self.bomb_tick != ANIMA_BOMB_SINGLE_HIT_PRESS_TICK
+            elapsed is None
+            or not earliest <= elapsed <= latest
             or DISRUPTION_SHIELD not in cooldowns
             or cooldowns[DISRUPTION_SHIELD]
         ):
             return False
-        resonance_usable = "Resonance" in cooldowns and not cooldowns["Resonance"]
-        return not (resonance_usable and gcd_window_this_tick(gcd_remaining_ms, tick_elapsed_ms))
+        resonance_now = (
+            "Resonance" in cooldowns
+            and not cooldowns["Resonance"]
+            and gcd_press_ready(gcd_remaining_ms)
+        )
+        return not resonance_now
 
     def resonance_press_possible(self, cooldowns, received_tick):
         """Whether this Hold Still's Resonance press can still come in this or a later tick."""
