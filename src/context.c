@@ -79,6 +79,7 @@ static void copy_frame(rs3_snapshot *destination, const rs3_snapshot *source)
     destination->player = source->player;
     destination->interface_info = source->interface_info;
     destination->pointer_candidate = source->pointer_candidate;
+    destination->minimap_candidate = source->minimap_candidate;
     memcpy(destination->interfaces, source->interfaces,
            source->interface_info.interface_count * sizeof(rs3_interface_observation));
     memcpy(destination->action_bar, source->action_bar,

@@ -183,3 +183,7 @@ sample identity and age remain mandatory for downstream use.
   field in ``src/context.h``, copy it with the other P5 data and add its
   caller-owned accessor. P5 will add the stage/clear and Python registration
   lines after that integration step. No existing public layout changes.
+* L registration resolved: the private snapshot field, frame copy and
+  size-checked caller-owned accessor are registered on integration. P5 can
+  connect its stage/clear path and language bindings without changing other
+  tracks' storage or public layouts.
