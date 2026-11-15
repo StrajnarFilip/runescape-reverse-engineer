@@ -1,7 +1,7 @@
 A2 - Movement primitives
 ========================
 
-:Status: waiting for live session
+:Status: in progress
 :Wave: 2
 :Branch: ``telos/A2``
 :Kind: Python and C input layer
