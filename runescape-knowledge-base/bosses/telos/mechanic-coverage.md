@@ -53,6 +53,14 @@ cast. The type 144 hit landed at logic tick 803465 for 3,150 and was followed by
 damage pulses. The live run confirms the cue and impact window. The defence remains
 unverified. [100% opening bomb](../../../training-data/telos-20261115T093004.670325Z.jsonl)
 
+In the 100% follow-up, the ordinary `28942` cue arrived at logic tick 1855080.
+The GCD ended at 1855166, about 1.72 s after the cue, and restarted by 1855168.
+The current 1.75–2.05 s window missed that slot even though Resonance was ready.
+Disruption Shield had been used about 34 s earlier. The bomb hit for 4,399 at
+1855199. Use this trace to calibrate the earlier GCD boundary and check for
+intervening hits before changing the press window.
+[100% follow-up](../../../training-data/telos-20261115T151940.657825Z.jsonl)
+
 **P4 font defence.** In the 300% Uppercut opener, the first font started at game tick
 24893. The verified walk reached the charging ring at 24902. Resonance cast on arrival
 and a melee hit consumed it at 24904. Type 144 pulses of 1,600, 1,600, 1,566 and 1,477
