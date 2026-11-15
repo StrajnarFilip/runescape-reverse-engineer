@@ -866,6 +866,13 @@ class FontDutyTests(unittest.TestCase):
         self.assertEqual(duty.update([], 21525), (None, "font_released"))
         self.assertFalse(duty.active)
 
+    def test_native_released_config_takes_precedence_over_the_received_tick_estimate(self):
+        duty = FontDuty()
+        duty.update(fonts(22897, 6000), 29876)
+        self.assertEqual(duty.update(fonts(22900, 1), 29900)[1], "font_charged")
+        self.assertEqual(duty.update(fonts(22903, 1), 29911), (None, "font_released"))
+        self.assertFalse(duty.active)
+
     def test_font_resonance_waits_for_the_next_observed_pulse_window(self):
         duty = FontDuty()
         ready = {"Resonance": 0}
@@ -1196,6 +1203,32 @@ PrayerFlicker = controller["PrayerFlicker"]
 
 
 class PrayerFlickerTests(unittest.TestCase):
+    def test_stamped_golem_swings_keep_melee_through_shared_impact(self):
+        flicker = PrayerFlicker()
+        pure = dict(
+            event(442, 28998), config_id=22905, application_stamp=868245, instance_id=47
+        )
+        volcanic = dict(pure, event_sequence=443, config_id=22907, instance_id=48)
+        self.assertEqual(
+            flicker.observe_golems((pure, volcanic), 868246),
+            [(pure, 868270, 868280), (volcanic, 868270, 868280)],
+        )
+        self.assertEqual(flicker.active_prayer(None, 0, 868275), Prayer.MELEE)
+        self.assertEqual(flicker.cue_event, 443)
+        self.assertEqual(flicker.active_prayer(None, 0, 868280), Prayer.MELEE)
+        self.assertEqual(flicker.next_prayer(Prayer.MELEE, None, 0, 868281), Prayer.SOUL_SPLIT)
+
+    def test_golem_window_requires_fresh_stamp_and_yields_to_telos_magic(self):
+        flicker = PrayerFlicker()
+        golem = dict(event(1, 28998), config_id=22906, application_stamp=1000, instance_id=46)
+        self.assertEqual(flicker.observe_golems((dict(golem, application_stamp=None),), 1001), [])
+        self.assertEqual(flicker.observe_golems((golem,), 1016), [])
+        self.assertEqual(flicker.observe_golems((dict(golem, config_id=22891),), 1001), [])
+        self.assertTrue(flicker.observe_golems((golem,), 1015))
+        flicker.observe([event(2, controller["MAGIC_ATTACK"])], 30, 0, distance=0)
+        self.assertEqual(flicker.active_prayer(30, 0, 1015), Prayer.MAGIC)
+        self.assertEqual(flicker.active_prayer(34, 0, 1025), Prayer.MELEE)
+
     def test_final_prayer_outcome_precedes_the_end_timestamp(self):
         stream = io.StringIO()
         clock = iter(range(100, 110))

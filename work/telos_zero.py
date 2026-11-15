@@ -238,7 +238,10 @@ FONT_IDLE_CONFIGS = frozenset({22893, 22894, 22895})
 FONT_STAGE_STEP = 3
 FONT_CHARGING_CONFIGS = frozenset(config + FONT_STAGE_STEP for config in FONT_IDLE_CONFIGS)
 FONT_CHARGED_CONFIGS = frozenset(config + FONT_STAGE_STEP for config in FONT_CHARGING_CONFIGS)
-FONT_CONFIGS = FONT_IDLE_CONFIGS | FONT_CHARGING_CONFIGS | FONT_CHARGED_CONFIGS
+FONT_RELEASED_CONFIGS = frozenset(config + FONT_STAGE_STEP for config in FONT_CHARGED_CONFIGS)
+FONT_CONFIGS = (
+    FONT_IDLE_CONFIGS | FONT_CHARGING_CONFIGS | FONT_CHARGED_CONFIGS | FONT_RELEASED_CONFIGS
+)
 # Idle and charged fonts report this health; a charging font reports its remaining charge.
 FONT_UNCHARGED_HEALTH = 1
 # Fonts are 2x2 (logged footprint). Charges ran with the player inside it (173454) or one tile
@@ -267,6 +270,10 @@ PURE_GOLEM = 22905
 CORRUPT_GOLEM = 22906
 VOLCANIC_GOLEM = 22907
 MINION_CONFIGS = frozenset({PURE_GOLEM, CORRUPT_GOLEM, VOLCANIC_GOLEM})
+GOLEM_MELEE_ANIMATION = 28998
+# In the P4 replay, associated melee hitmarks start 25 to 35 logic ticks after the stamp.
+GOLEM_MELEE_HIT_OFFSETS = (25, 35)
+GOLEM_MAX_CUE_AGE_TICKS = 15
 # Kill order: the stunning red golem, then the green one before its damage grows, then black.
 MINION_PRIORITY = (VOLCANIC_GOLEM, PURE_GOLEM, CORRUPT_GOLEM)
 
@@ -360,6 +367,8 @@ class FontDuty:
             )
             return self.finish("font_released" if release_due else "font_lost")
         _, config, _health, tile = current
+        if self.state == "holding" and config in FONT_RELEASED_CONFIGS:
+            return self.finish("font_released")
         if tile is not None:
             self.tile = tile
         if self.state == "charging" and config in FONT_CHARGED_CONFIGS:
@@ -1685,6 +1694,7 @@ class PrayerFlicker:
         self.last_event = 0
         # Received-tick windows (first tick, end tick exclusive, prayer, cue), one per cue.
         self.windows = []
+        self.golem_windows = {}
         # Without a received tick, the latest cue holds from now (nanosecond fallback).
         self.return_ns = None
         self.hold_prayer = Prayer.MELEE
@@ -1709,6 +1719,7 @@ class PrayerFlicker:
                 if self.transition_phase is None:
                     self.transition_phase = phase
                     self.windows.clear()
+                    self.golem_windows.clear()
                     self.return_ns = None
                     self.hold_cue = None
                     self.cue_event = None
@@ -1768,6 +1779,26 @@ class PrayerFlicker:
                 self.return_ns = return_ns
         return trigger
 
+    def observe_golems(self, actions, logic_tick):
+        """Hold melee through each fresh stamped P4 golem swing's possible impact."""
+        if logic_tick is None:
+            return []
+        opened = []
+        first_hit, last_hit = GOLEM_MELEE_HIT_OFFSETS
+        for action in actions:
+            if (
+                action["config_id"] not in MINION_CONFIGS
+                or action["action_sequence"] != GOLEM_MELEE_ANIMATION
+            ):
+                continue
+            stamp = action["application_stamp"]
+            if stamp is None or not 0 <= logic_tick - stamp <= GOLEM_MAX_CUE_AGE_TICKS:
+                continue
+            cue = action["event_sequence"]
+            self.golem_windows[cue] = stamp + last_hit + 1
+            opened.append((action, stamp + first_hit, stamp + last_hit))
+        return opened
+
     def release(self, cue, tick):
         """End one cue's windows from received tick ``tick``; return whether any changed."""
         if self.hold_cue == cue:
@@ -1784,19 +1815,26 @@ class PrayerFlicker:
         self.windows = kept
         return changed
 
-    def active_prayer(self, tick, now):
-        """The deflect to show now, or None for Soul Split. The latest-starting window wins."""
+    def active_prayer(self, tick, now, logic_tick=None):
+        """Select an active Telos protection window, a golem swing, or Soul Split."""
         if tick is None:
             if self.return_ns is not None and now < self.return_ns:
                 self.cue_event = self.hold_cue
                 return self.hold_prayer
-            return None
-        self.windows = [window for window in self.windows if window[1] > tick]
-        active = [window for window in self.windows if window[0] <= tick]
-        if not active:
-            return None
-        _, _, prayer, self.cue_event = max(active, key=lambda window: window[0])
-        return prayer
+        else:
+            self.windows = [window for window in self.windows if window[1] > tick]
+            active = [window for window in self.windows if window[0] <= tick]
+            if active:
+                _, _, prayer, self.cue_event = max(active, key=lambda window: window[0])
+                return prayer
+        if logic_tick is not None:
+            self.golem_windows = {
+                cue: end for cue, end in self.golem_windows.items() if logic_tick < end
+            }
+            if self.golem_windows:
+                self.cue_event = max(self.golem_windows)
+                return Prayer.MELEE
+        return None
 
     def holding(self, tick, now):
         """Whether any deflect window is open."""
@@ -1816,9 +1854,9 @@ class PrayerFlicker:
             or tick - self.last_cue_tick >= BEAM_KEEP_QUIET_TICKS_AFTER_CUE
         )
 
-    def next_prayer(self, prayer, tick, now):
+    def next_prayer(self, prayer, tick, now, logic_tick=None):
         """Return the next prayer if a switch is needed and no acknowledgement is pending."""
-        target = self.active_prayer(tick, now)
+        target = self.active_prayer(tick, now, logic_tick)
         if target is None:
             target = Prayer.SOUL_SPLIT
         if self.requested is not None:
@@ -3663,7 +3701,7 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                 )
         return None
 
-    def flick_step(actions, phase, prayer, now, sample_ns, gcd_remaining_ms):
+    def flick_step(actions, phase, prayer, now, sample_ns, gcd_remaining_ms, *, golems=()):
         """Advance the flicker and send at most one prayer chord."""
         tick = received_tick_counter()
         flicker.phase = phase
@@ -3679,6 +3717,16 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
             )
         if flicker.transition_phase is not None:
             return
+        logic_tick = reader.info.logic_tick if phase == 4 else None
+        for action, first_hit, last_hit in flicker.observe_golems(golems, logic_tick):
+            emit(
+                "golem_prayer_cue",
+                instance_id=action["instance_id"],
+                config_id=action["config_id"],
+                cue_native_sequence=action["event_sequence"],
+                first_hit_client_tick=first_hit,
+                last_hit_client_tick=last_hit,
+            )
         distance = telos_distance() if actions else None
         cue = flicker.observe(actions, tick, now, distance)
         if cue is not None:
@@ -3707,7 +3755,7 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                 received_tick=tick,
                 cue_native_sequence=phase_one.special_event,
             )
-        target = flicker.next_prayer(prayer, tick, now)
+        target = flicker.next_prayer(prayer, tick, now, logic_tick)
         if target is None:
             return
         if reader.monotonic_ns() - sample_ns > MAX_SAMPLE_AGE_NS:
@@ -3902,6 +3950,17 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
         continue_phase_three = args.continue_phase_two
         if flicker is not None and (phase in (1, 2) or (phase >= 3 and continue_phase_three)):
             flicker.default_prayer = DEFAULT_FLICK_PRAYER_BY_PHASE[phase]
+            golems = (
+                telos_actions(
+                    events,
+                    identity,
+                    info.sequence,
+                    {event.instance_id for event in events if event.config_id in MINION_CONFIGS},
+                    additional_samples=intervening_samples,
+                )
+                if phase == 4 and events
+                else ()
+            )
             flick_step(
                 actions,
                 phase,
@@ -3909,6 +3968,7 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                 now,
                 info.monotonic_ns,
                 gcd_remaining_now(player, info.monotonic_ns, reader.monotonic_ns()),
+                golems=golems,
             )
         prayer_tenths = None if prayer_raw is None else prayer_raw & PRAYER_POINTS_MASK
         if input_allowed and restorer.due(prayer_tenths, now):

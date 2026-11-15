@@ -160,9 +160,10 @@ stomp still landed at +9.
 
 For P4 fonts, follow `font_charge_started`, `font_arrival`, `font_charged` and
 `font_released` by `font_instance_id`. The charge must reach a charged actor config.
-At release, `in_range` and `player_hp` report the observed position and HP when the
-charged actor disappears. `font_lost` records an earlier disappearance. Use the
-surrounding hitmarks to check the damage outcome.
+At release, `in_range` and `player_hp` report the position and HP when the actor
+changes to a released config (`22902`–`22904`) or disappears after the measured hold.
+`font_lost` records an earlier disappearance. Use the surrounding hitmarks to
+check the damage outcome.
 
 `font_charge_pulse` pairs the charging actor's health decrease with a nearby type 144
 `player_hitmark` from the existing native hit queue. Match `player_hit_sequence` to the
@@ -179,6 +180,12 @@ Compare the requested `auto_retaliate_sent.enabled` value with
 `auto_retaliate_outcome.observed`. The controller restores an initially enabled
 setting after charging or when the attempt ends with the game in focus. A
 `auto_retaliate_restore_deferred` row means the final setting needs checking.
+
+For phase 4 golems, join `golem_prayer_cue.cue_native_sequence` to the stamped
+`npc_animation` and any associated `prayer_flick_sent`. Inspect `prayer_flick_outcome`
+and the overhead on nearby player hitmarks within `first_hit_client_tick` through
+`last_hit_client_tick`. Two golems can swing together. A player hitmark gives the
+recipient and timing, so use nearby cues to assess attribution.
 
 `anima_bomb_observed` records a phase 4 cue and the response window in milliseconds from
 its observation. The opener sequence `28930`, three `28929` melee attacks, then `28959`

@@ -15,10 +15,10 @@ The practice controller has 0% evidence through the phase 3 handoff on Compatibi
 | Black beam and Magic Onslaught, P2 | Detect beam occupancy and meter changes. Pull Telos clear while mobile. Use Magic protection for the barrage and add an eligible defensive as required. | Measure the last repositioning tick and protection checks for all pulses. Verify occupancy, overhead, pulses and end of barrage. |
 | Virus, P2 and P3 | Use raw VARP 6362 and walk to the nearest projected black or red stream tile outside Telos's footprint. If already on or beside the strip, allow two game ticks for the position to trigger the cleanse. | The first recurring P2 damage arrived about three game ticks after onset. Verify a countdown reset and the matching system message. P5 virus detection and the last safe tick before expiry remain uncalibrated. |
 | Red beam, golem pressure, drain and shockwaves, P3 | Read beam occupancy, golem count and meter. Remove pressure and handle drain or soft-typeless pulses with the appropriate defense. | Verify per-pulse HP, prayer and adrenaline changes. `28959` is observed in P2 and P3. **The account owner identified it as a magic attack (2026-11-14).** At 250% four `28959` applications in P2 were followed one tick later by type `139` hits of 1,139, 2,210, 3,284 and 3,828 while Deflect Melee was flicked. The flick now uses Deflect Magic for this cue. The meter value has a raw candidate in VARP 6363. |
-| Fonts and minions, P4 | At 3/4, 2/4 and 1/4 of P4 health (green, red, black font; account owner) go to the chargeable font, let it drain HP and stay inside for Telos's instakill. Reflect halves the soft-typeless charge and Resonance nullifies one step. Kill the red minion first (random stuns); the green one hits harder over time and the black one strips armour. | *live*, 250%: fonts are actors with base animation `28988` at fixed tiles from P4 start, 1 HP while idle. At 112,500 the green font went config 22893 → 22896 with a 7,500 charge. It drained 1,500 per step (about 1,400 typeless to the player) and became 22899 at 1 HP. Three anima-golems (13,000 HP at 250%, 10,000 at 100%) spawn beside each font. *live*, 100% kill: fonts charged in the order Pure (green, 22893→22896→22899), Volcanic (red, 22894→22897→22900), Corrupt (black, 22895→22898→22901) at 93,750, 62,500 and 31,250 of P4's 125,000 HP. Each charge was 6,000 at about 1,200 typeless per step. Each charged font despawned 12–14 ticks after charging. Golems: Pure 22905, Corrupt 22906, Volcanic 22907. The controller went to, charged and held all three fonts and the player survived each instakill. It now clicks golems in the order Volcanic, Pure, Corrupt once the font has charged, then clicks Telos again. Golem left-click behaviour is unvalidated. |
+| Fonts and minions, P4 | At 3/4, 2/4 and 1/4 of P4 health (green, red, black font; account owner) go to the chargeable font, let it drain HP and stay inside for Telos's instakill. Reflect halves the soft-typeless charge and Resonance nullifies one step. Kill the red minion first (random stuns); the green one hits harder over time and the black one strips armour. | *live*, 250%: fonts are actors with base animation `28988` at fixed tiles from P4 start, 1 HP while idle. At 112,500 the green font went config 22893 → 22896 with a 7,500 charge. It drained 1,500 per step (about 1,400 typeless to the player) and became 22899 at 1 HP. Three anima-golems (13,000 HP at 250%, 10,000 at 100%) spawn beside each font. *live*, 100% encounter: fonts charged in the order Pure (green, 22893→22896→22899), Volcanic (red, 22894→22897→22900), Corrupt (black, 22895→22898→22901) at 93,750, 62,500 and 31,250 of P4's 125,000 HP. Each charge was 6,000 at about 1,200 typeless per step. Each charged font despawned 12–14 ticks after charging. Golems: Pure 22905, Corrupt 22906, Volcanic 22907. The controller went to, charged and held all three fonts and the player survived each instakill. It now clicks golems in the order Volcanic, Pure, Corrupt once the font has charged, then clicks Telos again. Golem left-click behaviour is unvalidated. |
 | Weak anima bomb and So Much Power, P4 | Distinguish orb, ordinary hit and soft-typeless bomb. Use a timed defensive and cleanse the weak bomb's overload effect at a font. | Measure impact and defensive eligibility per component. Verify debuff onset and cleanse, HP and defensive consumption. |
 | Rocks, P4/P5 at high enrage | Identify each hazard footprint and expiry. Move clear or use an eligible defensive. | Verify outside-footprint position at impact or confirmed mitigation. Direct rock observations remain unmapped. |
-| P5 golems and final bomb | Confirm P5 actor, golem styles, beam layout, meter and font route. Prioritize protection when a golem or Telos hit overlaps a healing opportunity. Handle the charged bomb using the route appropriate to the enrage. | Measure per-source protection checks, charge and resolution. Verify golem outcomes, bomb interception and the result interface. P5 has no validated capture in this repository. |
+| P5 golems and final bomb | Confirm P5 actor, golem styles, beam layout, meter and font route. Prioritize protection when a golem or Telos hit overlaps a healing opportunity. Handle the charged bomb using the route appropriate to the enrage. | The archived 100% handoff described below identifies the new actor and golem configs. Per-source protection checks, bomb interception, and the result interface need verification. |
 | Phase transitions and victory | Corroborate stage changes with Telos HP and actor lifetime. Move and reacquire once the destination and target are confirmed. **The player can take no action during the P1→P2 switch: prayers, abilities and other inputs all fail (account owner, 2026-11-14).** Set the overhead and HP before the switch and treat inputs as lost until it ends. | In the 100% flick attempt, Telos repeated `28963` four times about 2.4 s apart before the phase field changed to 2. Four Deflect Melee keypresses during that time left the overhead unchanged. The end of the lockout and the first accepted input tick still need measurement. For a clear, capture an explicit result or reward signal. |
 | Soul Split | Correlate eligible outgoing damage, active Soul Split and attributable healing. Prioritize protection through an overlapping check window. | Measure activation acknowledgement, latest required protection and earliest safe return in game ticks. Raw HP changes alone do not identify Soul Split healing. |
 
@@ -106,6 +106,40 @@ ticks later for 128 cues. Six had a single type 144 mark, one a type 139 mark an
 a type 482 mark. The other 92 cues had overlapping marks or no matching mark. This
 provides a candidate melee window for a controlled prayer capture. Hitmarks lack a
 source actor field. [250% golem sample](../../../training-data/telos-20261114T171804.691233Z.jsonl) · [100% golem sample](../../../training-data/telos-20261114T173454.045394Z.jsonl)
+
+In the 100% auto-retaliate run, two `28998` applications at logic tick 868245 preceded
+the 478 and 730 melee hits at 868275. A third `28998` application at 868305 preceded the
+669 melee hit at 868335. The P4 trial uses `rs3_npc_action_events_since` and accepts
+same-session, stamped cues from the three golem configs up to 15 logic ticks after
+application. It requests Deflect Melee from first observation through +35 logic ticks.
+A Telos protection window takes priority when their styles conflict. Verify overhead
+and hit timing independently with `rs3_snapshot_combat` and
+`rs3_player_hit_events_since`. [Third-font trace](../../../training-data/telos-20261115T095005.120680Z.jsonl)
+
+The 100% golem-flick trial logged 38 windows across all three configs. Of the 25
+type 133 hitmarks in those windows, 23 sampled Deflect Melee. One sampled Deflect
+Magic while the Telos window was active. One sampled Soul Split after the next
+golem cue arrived five logic ticks after a return request. The latter Deflect
+Melee press went out after the hit. There were also two type 482 zero-damage
+marks under Deflect Melee. [100% golem flick trace](../../../training-data/telos-20261115T100113.908512Z.jsonl)
+
+The same run saw the red font's instance change from charged `22900` to released
+`22903` while the player was in its ring. The received counter showed only 11 ticks
+since charge completion, so the controller logged `font_lost`. The client clock
+showed 360 logic ticks. The controller now recognizes released configs `22902`–`22904`
+on the same charged actor. The third font started charging 32 tiles from the player.
+All sixteen projected Walk attempts were rejected. The font still had its full
+6,000-point charge when the player returned to staging. [100% font trace](../../../training-data/telos-20261115T100113.908512Z.jsonl)
+
+**P4 to P5 handoff at 100%.** Actor config `22891` reached zero HP at received tick
+6047 and disappeared by 6062. The input controller ended on that disappearance.
+The continued recording saw config `22908` with 100,000 HP on plane 1 at 6067,
+one tick before VARP `6363` changed to phase 5. Three 1-HP actors used configs
+`22912`, `22913` and `22914`. Six golems with config `22911` had 4,500 maximum HP.
+The boss used `28950` sixteen times and reached zero HP at 6133, then applied
+`28957`. The log later saw dormant config `22892` and ended without a result event.
+For the next handoff, corroborate the new config and health with the packed phase.
+[100% handoff trace](../../../training-data/telos-20261114T173454.045394Z.jsonl)
 
 Guide-derived from the [RuneScape Wiki strategy page](https://runescape.wiki/w/Telos,_the_Warden/Strategies#Phase_2), which warns it may predate the March 2026 combat modernisation. Rows marked *live* match the 2026-11-14 Compatibility Mode captures.
 
