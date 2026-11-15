@@ -126,7 +126,8 @@ The enrage comes from memory (VARP 6359). Ability and prayer keys come from the
 displayed action bars: Freedom and Anticipation are required. Escape, Resonance,
 Dive, Deflect Magic, Deflect Melee and Soul Split are used when present, and
 Reflect is optional. Devotion falls back to ``F7`` and Surge to ``K`` when no bar
-shows them. Super restore is drunk with ``L`` at 50 prayer points or fewer. The script runs until the player dies or F12 is pressed. Losing
+shows them. Super restore is drunk with ``L`` at 50 prayer points or fewer. At the
+first Telos attack of each phase the up arrow is held for 3 seconds to raise the camera. The script runs until the player dies or F12 is pressed. Losing
 foreground focus pauses input. Each attempt is logged to ``training-data/telos-*.jsonl``.
 
 Optional arguments:

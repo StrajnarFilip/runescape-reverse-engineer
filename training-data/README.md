@@ -115,6 +115,9 @@ and the verified `walk_target` and `dispatch_tick` when a click is sent.
 At 50 prayer points or fewer the controller drinks one super restore dose with `L`
 (`--super-restore` changes the key). It waits for the points to rise, or for 2.4 s, before
 the next dose. Each dose is a `super_restore_sent` row.
+At the first Telos attack of each phase, after any handoff lockout, the up arrow is held for
+3 s to raise the camera fully (`camera_lift_started`, `camera_lift_ended`). Each prayer or
+ability chord releases every key, so the arrow is pressed again until the 3 s have passed.
 During P2 Onslaught the controller always walks into the black stream while it feeds Telos;
 the old `--block-black-stream` switch is accepted as a no-op. Read `beam_feeding` and
 `beam_move` alongside player tiles, VARP `6363` and successive `28959` cues to verify the

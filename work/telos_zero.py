@@ -914,6 +914,11 @@ def uppercut_dodge_choice(player_tile, boss_tile, size, facing, bounds):
 # are 50 or fewer (500 in the tenths of PRAYER_POINTS_MASK). After a dose the next waits until
 # the points have risen or SUPER_RESTORE_RETRY_NS has passed.
 DEFAULT_SUPER_RESTORE_KEY = "L"
+# Camera (account owner, 2026-11-15): at the start of each phase, once Telos attacks, hold the up
+# arrow for 3 s so the camera pitch is fully raised and tiles are easier to click. Every chord
+# ends with RELEASE_ALL, which also lifts the arrow, so it is pressed again until the time is up.
+CAMERA_LIFT_KEY = "UP"
+CAMERA_LIFT_NS = 3_000_000_000
 SUPER_RESTORE_PRAYER_TENTHS = 500
 SUPER_RESTORE_RETRY_NS = 4 * TICK_FALLBACK_NS
 
@@ -2895,7 +2900,41 @@ def run(reader, args, board, attempt=None):
         except FocusLostError:
             emit("input_interrupted", reason="RuneScape lost foreground focus")
             return False
+        finally:
+            camera["pressed"] = False  # The tap's RELEASE_ALL also lifted the arrow key.
         return True
+
+    camera_key = parse_chord(CAMERA_LIFT_KEY)[0]
+    camera = {"until_ns": None, "pressed": False, "phase": None}
+
+    def camera_step(phase, actions):
+        """Hold the camera key from the first Telos attack of each phase for CAMERA_LIFT_NS."""
+        now_ns = reader.monotonic_ns()
+        if (
+            camera["phase"] != phase
+            and (flicker is None or flicker.transition_phase is None)
+            and any(action["action_sequence"] in TRANSITION_ATTACK_CUES for action in actions)
+        ):
+            camera["phase"] = phase
+            camera["until_ns"] = now_ns + CAMERA_LIFT_NS
+            emit("camera_lift_started", phase=phase, received_tick=received_tick_counter())
+        until_ns = camera["until_ns"]
+        if until_ns is None:
+            return
+        try:
+            if now_ns >= until_ns or not input_allowed:
+                if camera["pressed"]:
+                    camera["pressed"] = False
+                    board.event(camera_key, False, lambda: None)
+                if now_ns >= until_ns:
+                    camera["until_ns"] = None
+                    emit("camera_lift_ended", phase=phase)
+                return
+            if not camera["pressed"]:
+                board.event(camera_key, True, check_focus)
+                camera["pressed"] = True
+        except FocusLostError:
+            emit("input_interrupted", reason="RuneScape lost foreground focus")
 
     game = None
     if not manual_engage:
@@ -3362,6 +3401,7 @@ def run(reader, args, board, attempt=None):
                     prayer_points=prayer_tenths / 10,
                     received_tick=received_tick_counter(),
                 )
+        camera_step(phase, actions)
         if not phase_one_started:
             if hp_known:
                 emit("engaged", boss_hp=boss.health_current, phase=phase, player_hp=hp)
