@@ -63,8 +63,10 @@ class AttemptLog:
         if self.pending_prayer is not None:
             if event in ("attempt_ended", "encounter_reset"):
                 self.observe_prayer(now_ns, None, ending=event)
+                now_ns = self.clock()
             elif event == "prayer_flick_sent":
                 self.observe_prayer(now_ns, None, ending="superseded")
+                now_ns = self.clock()
         self.engaged |= event == "engaged"
         self.sequence += 1
         row = {
@@ -240,7 +242,12 @@ class AttemptLog:
                 for hazard in beams
             ),
             "beam_ground_heights": sorted(
-                (hazard.tile.x, hazard.tile.y, hazard.tile.plane, reader.hazard_terrain_height(hazard))
+                (
+                    hazard.tile.x,
+                    hazard.tile.y,
+                    hazard.tile.plane,
+                    reader.hazard_terrain_height(hazard),
+                )
                 for hazard in beams
                 if hazard.flags & HazardFlags.TERRAIN_HEIGHT
             ),
@@ -306,6 +313,11 @@ class AttemptLog:
                 observed_ns=self.relative_ns(event.observed_ns),
                 source_frame_sequence=event.sample_sequence,
                 same_session=source == session,
+                overhead_at_sample=(
+                    state["active_prayer"]
+                    if source == session and event.sample_sequence == info.sequence
+                    else None
+                ),
                 hit=hit_record(event.hit),
             )
         for event in npc_hits:

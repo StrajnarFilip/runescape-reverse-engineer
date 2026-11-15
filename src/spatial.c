@@ -51,7 +51,7 @@
 #define MENU_CYCLE_OFFSET          0x21d0u
 #define MENU_REFERENCE_BYTES       16u
 #define MENU_ENTRY_ACTION_OFFSET   0x38u
-#define MENU_ENTRY_TILE_OFFSET     0x48u
+#define MENU_ENTRY_WALK_DATA_OFFSET 0x48u
 #define MENU_ACTION_ID_OFFSET      0x40u
 #define MENU_WALK_ACTION_RVA       0x16be960u
 #define MENU_WALK_ACTION           23
@@ -392,14 +392,21 @@ static void read_camera(rs3_context *context, uint64_t world_state, uint64_t act
 }
 
 /** Read the top closed-menu action and only decode the ground fields of Walk. */
-static void stage_pointer_walk(rs3_context *context, uint64_t world_state, rs3_pointer_walk *out)
+static void stage_pointer_walk(rs3_context *context, uint64_t world_state,
+                               const rs3_actor_spatial *player, rs3_pointer_walk *out)
 {
     static const unsigned char cycle_increment[] = {0xff, 0x81, 0xd0, 0x21, 0, 0};
     unsigned char instruction[sizeof cycle_increment];
     uint64_t module = context->target.module_base, menu, vtable, cycle, cycle_after;
     uint64_t entries[2], entries_after[2], entry, entry_after, action;
     unsigned char open, open_after;
-    int32_t action_id, tile[3] = {0};
+    int32_t action_id;
+    struct
+    {
+        int32_t from_minimap;
+        int32_t x;
+        int32_t y;
+    } ground = {0};
     if (context->target.profile != &profile_compatibility ||
         !memory_read(context, module + MENU_GUARD_RVA, instruction, sizeof instruction) ||
         memcmp(instruction, cycle_increment, sizeof cycle_increment) ||
@@ -418,7 +425,8 @@ static void stage_pointer_walk(rs3_context *context, uint64_t world_state, rs3_p
         return;
     }
     int walk = action == module + MENU_WALK_ACTION_RVA && action_id == MENU_WALK_ACTION;
-    if ((walk && !memory_read(context, entry + MENU_ENTRY_TILE_OFFSET, tile, sizeof tile)) ||
+    if ((walk &&
+         !memory_read(context, entry + MENU_ENTRY_WALK_DATA_OFFSET, &ground, sizeof ground)) ||
         !memory_read_pointer(context, entries[1] - sizeof(uint64_t), &entry_after) ||
         entry_after != entry ||
         !memory_read(context, menu + MENU_VECTOR_OFFSET, entries_after, sizeof entries_after) ||
@@ -433,10 +441,12 @@ static void stage_pointer_walk(rs3_context *context, uint64_t world_state, rs3_p
     out->menu_cycle = cycle;
     out->action = action_id;
     out->valid = 1;
-    if (walk && tile[0] >= 0 && tile[0] <= MAX_SPATIAL_PLANE && tile[1] >= 0 &&
-        tile[1] < MAX_TILE_COORDINATE && tile[2] >= 0 && tile[2] < MAX_TILE_COORDINATE)
+    /* Scene Walk supplies only X/Y. Ground movement uses the local player's plane. */
+    if (walk && !ground.from_minimap && player->tile.valid &&
+        (player->valid_mask & RS3_SPATIAL_SAME_WORLD) && ground.x >= 0 &&
+        ground.x < MAX_TILE_COORDINATE && ground.y >= 0 && ground.y < MAX_TILE_COORDINATE)
     {
-        out->tile = (rs3_position){1, tile[1], tile[2], tile[0]};
+        out->tile = (rs3_position){1, ground.x, ground.y, player->tile.plane};
     }
 }
 
@@ -444,6 +454,7 @@ void spatial_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_
 {
     rs3_spatial_info *info = &snapshot->spatial;
     memset(info, 0, sizeof *info);
+    memset(&snapshot->pointer_walk, 0, sizeof snapshot->pointer_walk);
     info->status = RS3_UNAVAILABLE;
     info->reason = RS3_UNSUPPORTED_CLIENT;
     info->player.tile_reason = RS3_UNSUPPORTED_CLIENT;
@@ -456,7 +467,6 @@ void spatial_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_
     {
         return;
     }
-    stage_pointer_walk(context, world_state, &snapshot->pointer_walk);
     info->status = RS3_PARTIAL;
     info->reason = RS3_SPATIAL_UNMAPPED;
     info->player.tile_reason = RS3_READ_FAILED;
@@ -484,6 +494,7 @@ void spatial_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_
             }
         }
     }
+    stage_pointer_walk(context, world_state, &info->player, &snapshot->pointer_walk);
     info->npc_count = snapshot->info.npc_count;
     for (uint32_t npc = 0; npc < info->npc_count; npc++)
     {

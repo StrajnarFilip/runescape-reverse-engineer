@@ -128,7 +128,6 @@ STOMP_CHECK_TICKS = (4, 7)
 # Dive that leaves the tile unchanged after this many ticks falls back to walking there.
 DIVE_SELECT_SECONDS = 0.15
 DIVE_RANGE_TILES = 10
-STOMP_TARGET_ATTEMPTS = 4
 STOMP_DIVE_CONFIRM_TICKS = 2
 # The stomp reaches beyond the 5x5 body: players 4 tiles (Chebyshev) from Telos's centre took
 # 9,322 at 500% and 5,401 at 500% P3 (2026-11-14). Treat 4 tiles from the centre as unsafe and
@@ -353,6 +352,7 @@ RED_BEAM_KIND = 3
 # Only the black stream is blocked. In the 300% run of 175142 the green P1 strip stopped short
 # of Telos and moved, so following it dragged the player away from Telos for 50 ticks.
 BEAM_KIND_BY_PHASE = {2: BLACK_BEAM_KIND}
+STOMP_BEAM_BY_PHASE = {1: GREEN_BEAM_KIND, 3: RED_BEAM_KIND}
 # The meter counts as fed after this many rises within the last BEAM_FEED_WINDOW received ticks.
 BEAM_FEED_RISES = 2
 BEAM_FEED_WINDOW = 3
@@ -488,28 +488,41 @@ def virus_beam_destination(reader, phase, player, boss, *, use_tile=None, reject
         ),
         None,
     )
-    if pose is None:
+    if pose is None or pose.tile.plane != player.tile.plane:
         return None
+    return stream_destination(
+        reader, VIRUS_BEAM_BY_PHASE[phase], player, pose, use_tile=use_tile, rejected=rejected
+    )
+
+
+def stream_destination(
+    reader, kind, player, pose, *, use_tile=None, rejected=(), rejected_tiles=(), stomp=False
+):
+    """Select a visible strip tile, optionally requiring a safe Dive landing."""
     player_tile = (player.tile.x, player.tile.y)
     boss_tile = (pose.tile.x, pose.tile.y)
+    size = pose.footprint_size or 1
     required = HazardFlags.TILE | HazardFlags.SCENE_LOCATION | HazardFlags.TERRAIN_HEIGHT
     routes = []
     for hazard in reader.hazards[: reader.hazard_info.count]:
         tile = (hazard.tile.x, hazard.tile.y)
         identity = (tile, hazard.tile.plane, hazard.config_id)
+        distance = chebyshev(tile, player_tile)
         if (
             hazard.flags & required != required
-            or hazard.kind != VIRUS_BEAM_BY_PHASE[phase]
+            or hazard.kind != kind
             or hazard.tile.plane != player.tile.plane
-            or tile == player_tile
-            or not footprint_distance(tile, boss_tile, pose.footprint_size or 1)
+            or tile in rejected_tiles
+            or not distance
+            or not footprint_distance(tile, boss_tile, size)
+            or (stomp and (distance > DIVE_RANGE_TILES or in_stomp_area(boss_tile, size, tile)))
             or (use_tile is not None and (*tile, hazard.tile.plane) != use_tile)
         ):
             continue
         height = reader.hazard_terrain_height(hazard)
         point = project_tile(reader, tile, hazard.tile.plane, height)
         if point is not None and point not in rejected:
-            routes.append((chebyshev(tile, player_tile), identity, point))
+            routes.append((distance, identity, point))
     if not routes:
         return None
     _, identity, point = min(routes)
@@ -731,6 +744,8 @@ class PhaseOne:
         self.last_freedom_stun = None
         self.stomp_checked = False
         self.stomp_pending = None
+        self.stomp_rejected = set()
+        self.stomp_attempt_tick = None
         # Set while a P4 font needs the player: Escape and Surge would leave the font.
         self.hold_position = False
         self.opening_tick = None
@@ -817,6 +832,8 @@ class PhaseOne:
                 self.resonance_attempts = 0
                 self.stomp_checked = False
                 self.stomp_pending = None
+                self.stomp_rejected.clear()
+                self.stomp_attempt_tick = None
                 self.expected = self.next_special[sequence]
                 if sequence in IMMEDIATE_FORECAST_CUES:
                     # The forecast window counts from the cue itself.
@@ -1008,11 +1025,12 @@ class PrayerFlicker:
         self.hold_ticks = dict(FLICK_HOLD_TICKS if hold_ticks is None else hold_ticks)
         self.prayers = dict(FLICK_PRAYER_BY_ANIMATION if prayers is None else prayers)
         self.last_event = 0
-        # Received-tick windows (first tick, end tick exclusive, prayer), one per cue.
+        # Received-tick windows (first tick, end tick exclusive, prayer, cue), one per cue.
         self.windows = []
         # Without a received tick, the latest cue holds from now (nanosecond fallback).
         self.return_ns = None
         self.hold_prayer = Prayer.MELEE
+        self.hold_cue = None
         # Deflect for animations without an override; P3 switches this to Deflect Magic.
         self.default_prayer = Prayer.MELEE
         self.cue_event = None
@@ -1030,6 +1048,7 @@ class PrayerFlicker:
                     self.transition_phase = phase
                     self.windows.clear()
                     self.return_ns = None
+                    self.hold_cue = None
                     self.cue_event = None
                     changed_by = action["event_sequence"]
             elif (
@@ -1064,25 +1083,29 @@ class PrayerFlicker:
             else:
                 first, last = 0, self.hold_ticks.get(sequence, DEFAULT_FLICK_HOLD_TICKS) - 1
             cue_tick = action.get("received_tick", tick)
+            cue = action["event_sequence"]
             if cue_tick is not None:
-                self.windows.append((cue_tick + first, cue_tick + last + 1, prayer))
+                self.windows.append((cue_tick + first, cue_tick + last + 1, prayer, cue))
             self.hold_prayer = prayer
+            self.hold_cue = cue
             return_ns = now + (last + 1) * TICK_FALLBACK_NS
             if self.return_ns is None or return_ns > self.return_ns:
                 self.return_ns = return_ns
-        if trigger is not None:
-            self.cue_event = trigger["event_sequence"]
         return trigger
 
     def active_prayer(self, tick, now):
         """The deflect to show now, or None for Soul Split. The latest-starting window wins."""
         if tick is None:
             if self.return_ns is not None and now < self.return_ns:
+                self.cue_event = self.hold_cue
                 return self.hold_prayer
             return None
         self.windows = [window for window in self.windows if window[1] > tick]
         active = [window for window in self.windows if window[0] <= tick]
-        return max(active, key=lambda window: window[0])[2] if active else None
+        if not active:
+            return None
+        _, _, prayer, self.cue_event = max(active, key=lambda window: window[0])
+        return prayer
 
     def holding(self, tick, now):
         """Whether any deflect window is open."""
@@ -1436,7 +1459,6 @@ def run(reader, args, board, attempt=None):
 
     def stomp_dodge(phase_one, boss, received_tick, timers):
         """Dive out from under Telos before the Hold Still stomp, once per Hold Still."""
-        nonlocal pointer_window
         if (
             not input_allowed
             or font_duty.active
@@ -1450,49 +1472,167 @@ def run(reader, args, board, attempt=None):
         delta = received_tick - phase_one.special_tick
         if delta < STOMP_CHECK_TICKS[0]:
             return
-        if delta > STOMP_CHECK_TICKS[1]:
+        pending = phase_one.stomp_pending
+        movement_window_open = delta <= STOMP_CHECK_TICKS[1]
+        if not movement_window_open and pending is None:
             phase_one.stomp_checked = True
-            if phase_one.stomp_pending:
-                emit("stomp_dodge_result", moved=False, **phase_one.stomp_pending)
-                phase_one.stomp_pending = None
             return
         player = reader.spatial.player
-        pending = phase_one.stomp_pending
-        if pending is not None:
-            # Confirm the Dive moved the player; otherwise walk to the same tile once.
-            if not player.valid_mask & SpatialFlags.TILE:
-                return
-            current = (player.tile.x, player.tile.y)
-            if current != tuple(pending["player_tile"]):
-                emit("stomp_dodge_result", moved=True, tile=current, **pending)
-                phase_one.stomp_pending = None
-                phase_one.stomp_checked = True
-            elif (
-                delta - pending["received_tick_delta"] >= STOMP_DIVE_CONFIRM_TICKS
-                and not pending["walked"]
-            ):
-                pending["walked"] = True
-                walked = click_point(tuple(pending["screen_point"]), select_dive=False)
-                emit("stomp_walk_fallback", sent=walked, target=pending["target"])
+        position_flags = SpatialFlags.TILE | SpatialFlags.FINE_POSITION
+        if player.valid_mask & position_flags != position_flags:
             return
+        player_tile = (player.tile.x, player.tile.y)
+        plane = player.tile.plane
+        height = player.fine_height
+        boss_id = boss.instance_id
+        pose_flags = SpatialFlags.SAME_WORLD | SpatialFlags.TILE
         pose = next(
             (
-                p
-                for p in reader.npc_spatial[: reader.spatial.npc_count]
-                if p.instance_id == boss.instance_id
+                pose
+                for pose in reader.npc_spatial[: reader.spatial.npc_count]
+                if pose.instance_id == boss_id and pose.valid_mask & pose_flags == pose_flags
             ),
             None,
         )
-        if (
-            pose is None
-            or not pose.valid_mask & SpatialFlags.TILE
-            or not player.valid_mask & SpatialFlags.TILE
-            or not player.valid_mask & SpatialFlags.FINE_POSITION
-        ):
-            return  # Positions unavailable this sample; try again within the window.
+        if pose is None:
+            return
         boss_tile = (pose.tile.x, pose.tile.y)
-        player_tile = (player.tile.x, player.tile.y)
         size = pose.footprint_size or 1
+        beam_kind = STOMP_BEAM_BY_PHASE.get(phase_one.phase)
+
+        def safe_ground_click(point, *, dive, on_beam, hover):
+            previous_cycle = reader.pointer_walk.menu_cycle
+
+            def validate():
+                fresh, current_boss, current_phase, hp = refresh_for_walk()
+                fill_walk_hover(hover)
+                if (
+                    not fresh
+                    or current_phase != phase_one.phase
+                    or current_boss is None
+                    or current_boss.instance_id != boss_id
+                    or hp is None
+                    or hp <= 0
+                    or reader.pointer_walk.menu_cycle == previous_cycle
+                    or hover.get("tile") is None
+                ):
+                    return False
+                landing_x, landing_y, landing_plane = hover["tile"]
+                landing = (landing_x, landing_y)
+                current = reader.spatial.player
+                origin = (current.tile.x, current.tile.y)
+                hazard_pose = next(
+                    (
+                        pose
+                        for pose in reader.npc_spatial[: reader.spatial.npc_count]
+                        if pose.instance_id == boss_id
+                        and pose.valid_mask & pose_flags == pose_flags
+                    ),
+                    None,
+                )
+                if (
+                    hazard_pose is None
+                    or not current.valid_mask & SpatialFlags.TILE
+                    or not landing_plane == plane == current.tile.plane == hazard_pose.tile.plane
+                    or not 0 < chebyshev(landing, origin) <= DIVE_RANGE_TILES
+                ):
+                    return False
+                hazard_tile = (hazard_pose.tile.x, hazard_pose.tile.y)
+                hazard_size = hazard_pose.footprint_size or 1
+                if not footprint_distance(landing, hazard_tile, hazard_size) or in_stomp_area(
+                    hazard_tile, hazard_size, landing
+                ):
+                    return False
+                if not on_beam:
+                    return landing in floor_tiles
+                route = stream_destination(
+                    reader, beam_kind, current, hazard_pose, use_tile=hover["tile"], stomp=True
+                )
+                if route is None:
+                    return False
+                hover["beam_config"] = route[0][2]
+                return True
+
+            return click_point(point, select_dive=dive, validate=validate)
+
+        def attempt_ground_move(*, dive):
+            rejected = phase_one.stomp_rejected
+            # Leave a tick to choose a floor tile if all tested beam hovers were blocked.
+            try_beam = beam_kind is not None and (delta < STOMP_CHECK_TICKS[1] or not rejected)
+            beam = None
+            if try_beam and pose.tile.plane == plane:
+                beam = stream_destination(
+                    reader, beam_kind, player, pose, rejected_tiles=rejected, stomp=True
+                )
+            if beam is not None:
+                (target, _, _), point = beam
+            else:
+                for target in known_floor_targets(boss_tile, size, player_tile, floor_tiles):
+                    if target in rejected:
+                        continue
+                    point = project_tile(reader, target, plane, height)
+                    if point is not None:
+                        break
+                else:
+                    return None
+            phase_one.stomp_attempt_tick = received_tick
+            hover = {}
+            sent = safe_ground_click(point, dive=dive, on_beam=beam is not None, hover=hover)
+            if sent is None and hover:
+                rejected.add(target)
+            return target, point, sent, hover
+
+        if pending is not None:
+            pending["moved"] |= player_tile != tuple(pending["player_tile"])
+            if player_tile != tuple(pending["player_tile"]):
+                clear = not in_stomp_area(boss_tile, size, player_tile)
+                if clear:
+                    landed_on_beam = any(
+                        hazard.kind == beam_kind
+                        and hazard.flags & HazardFlags.SCENE_LOCATION
+                        and (hazard.tile.x, hazard.tile.y, hazard.tile.plane)
+                        == (*player_tile, plane)
+                        for hazard in reader.hazards[: reader.hazard_info.count]
+                    )
+                    emit(
+                        "stomp_dodge_result",
+                        clear_of_stomp=True,
+                        landed_on_beam=landed_on_beam,
+                        tile=player_tile,
+                        observed_tick_delta=delta,
+                        **pending,
+                    )
+                    phase_one.stomp_pending = None
+                    phase_one.stomp_checked = True
+                    return
+            if not movement_window_open:
+                emit(
+                    "stomp_dodge_result",
+                    clear_of_stomp=False,
+                    tile=player_tile,
+                    observed_tick_delta=delta,
+                    **pending,
+                )
+                phase_one.stomp_pending = None
+                phase_one.stomp_checked = True
+                return
+            if (
+                delta - pending["received_tick_delta"] >= STOMP_DIVE_CONFIRM_TICKS
+                and not pending["walked"]
+                and phase_one.stomp_attempt_tick != received_tick
+            ):
+                fallback = attempt_ground_move(dive=False)
+                if fallback is not None:
+                    target, _, walked, hover = fallback
+                    pending["walked"] = bool(walked)
+                    emit(
+                        "stomp_walk_fallback",
+                        sent=walked,
+                        target=target,
+                        hover=hover,
+                        cue_native_sequence=phase_one.special_event,
+                    )
+            return
         centre_distance = max(
             abs(player_tile[0] - (boss_tile[0] + (size - 1) / 2)),
             abs(player_tile[1] - (boss_tile[1] + (size - 1) / 2)),
@@ -1508,37 +1648,40 @@ def run(reader, args, board, attempt=None):
                 received_tick_delta=delta,
             )
             return
-        if timers.get("Dive"):
+        if timers.get("Dive") or phase_one.stomp_attempt_tick == received_tick:
             return  # Dive still cooling down; check again next sample.
-        targets = known_floor_targets(boss_tile, size, player_tile, floor_tiles)
-        if not targets:
-            emit("stomp_dodge_skipped", reason="No known floor tile outside the stomp area")
+        movement = attempt_ground_move(dive=True)
+        if movement is None:
+            return
+        target, point, sent, hover = movement
+        if sent is None:
+            emit(
+                "stomp_target_rejected",
+                target=target,
+                screen_point=point,
+                hover=hover,
+                cue_native_sequence=phase_one.special_event,
+            )
+            return
+        record = {
+            "player_tile": player_tile,
+            "boss_tile": boss_tile,
+            "footprint": size,
+            "centre_distance": centre_distance,
+            "target": hover["tile"][:2] if sent else target,
+            "hover": hover,
+            "screen_point": point,
+            "received_tick_delta": delta,
+            "cue_native_sequence": phase_one.special_event,
+            "walked": False,
+            "moved": False,
+        }
+        emit("stomp_dodge", sent=sent, **record)
+        if sent:
+            phase_one.stomp_pending = record
+            target_picker.moved()
+        else:
             phase_one.stomp_checked = True
-            return
-        for target in targets[:STOMP_TARGET_ATTEMPTS]:
-            point = project_tile(reader, target, player.tile.plane, player.fine_height)
-            if point is None:
-                continue
-            sent = click_point(point, select_dive=True)
-            if sent is None:
-                continue  # Pointer could not reach this target; try the next direction.
-            record = {
-                "player_tile": player_tile,
-                "boss_tile": boss_tile,
-                "footprint": size,
-                "centre_distance": centre_distance,
-                "target": target,
-                "screen_point": point,
-                "received_tick_delta": delta,
-                "walked": False,
-            }
-            emit("stomp_dodge", sent=sent, **record)
-            if sent:
-                phase_one.stomp_pending = record
-                target_picker.moved()
-            else:
-                phase_one.stomp_checked = True
-            return
 
     font_duty = FontDuty()
     target_picker = TargetPicker()
@@ -1699,6 +1842,9 @@ def run(reader, args, board, attempt=None):
         pointer = reader.pointer_walk
         if pointer.valid:
             hover["action"] = pointer.action
+            hover["menu_cycle"] = pointer.menu_cycle
+            hover["frame_sequence"] = reader.info.sequence
+            hover["client_logic_tick"] = reader.info.logic_tick
             if pointer.tile.valid:
                 hover["tile"] = (pointer.tile.x, pointer.tile.y, pointer.tile.plane)
 
@@ -1719,7 +1865,9 @@ def run(reader, args, board, attempt=None):
                 reengage_telos(boss, reader.spatial.player)
             return
         message = reader.telos_cleanse
-        onset, outcome = virus.observe(phase, remaining, received_tick, reader.info.logic_tick, message)
+        onset, outcome = virus.observe(
+            phase, remaining, received_tick, reader.info.logic_tick, message
+        )
         player = reader.spatial.player
         player_tile = (
             (player.tile.x, player.tile.y, player.tile.plane)

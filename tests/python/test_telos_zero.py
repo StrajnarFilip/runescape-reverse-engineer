@@ -529,6 +529,48 @@ BeamBlocker = controller["BeamBlocker"]
 
 
 class BeamTests(unittest.TestCase):
+    def test_stomp_beam_landing_requires_matching_colour_range_and_clearance(self):
+        choose = controller["stream_destination"]
+        kind_by_phase = controller["STOMP_BEAM_BY_PHASE"]
+        player = SimpleNamespace(tile=SimpleNamespace(x=106, y=103, plane=0))
+        pose = SimpleNamespace(tile=SimpleNamespace(x=100, y=100, plane=0), footprint_size=5)
+        flags = HazardFlags.SCENE_LOCATION | HazardFlags.TILE | HazardFlags.TERRAIN_HEIGHT
+        hazards = [
+            SimpleNamespace(
+                tile=SimpleNamespace(x=x, y=y, plane=plane),
+                flags=flags,
+                kind=kind,
+                config_id=config,
+            )
+            for x, y, plane, kind, config in (
+                (104, 103, 0, 1, 103545),  # Telos's footprint
+                (105, 103, 0, 1, 103546),  # Outside the footprint, inside the stomp
+                (107, 103, 1, 1, 103546),
+                (117, 103, 0, 1, 103546),  # Eleven tiles away
+                (116, 103, 0, 1, 103545),  # Ten tiles away
+                (107, 103, 0, 3, 103549),
+            )
+        ]
+        reader = SimpleNamespace(
+            hazard_info=SimpleNamespace(count=len(hazards)),
+            hazards=hazards,
+            hazard_terrain_height=lambda hazard: 4544.0,
+        )
+        with patch.dict(choose.__globals__, project_tile=lambda r, tile, plane, height: tile):
+            green = choose(reader, kind_by_phase[1], player, pose, stomp=True)
+            red = choose(reader, kind_by_phase[3], player, pose, stomp=True)
+            self.assertEqual(green, (((116, 103), 0, 103545), (116, 103)))
+            self.assertEqual(red, (((107, 103), 0, 103549), (107, 103)))
+            self.assertIsNone(
+                choose(
+                    reader, kind_by_phase[1], player, pose, rejected_tiles={(116, 103)}, stomp=True
+                )
+            )
+            for hover in ((104, 103, 0), (105, 103, 0), (107, 103, 0), (117, 103, 0)):
+                self.assertIsNone(
+                    choose(reader, kind_by_phase[1], player, pose, use_tile=hover, stomp=True)
+                )
+
     def test_virus_destination_checks_colour_plane_projection_and_footprint(self):
         choose = controller["virus_beam_destination"]
         player = SimpleNamespace(tile=SimpleNamespace(x=100, y=100, plane=0))
@@ -687,6 +729,17 @@ PrayerFlicker = controller["PrayerFlicker"]
 
 
 class PrayerFlickerTests(unittest.TestCase):
+    def test_final_prayer_outcome_precedes_the_end_timestamp(self):
+        stream = io.StringIO()
+        clock = iter(range(100, 110))
+        attempt = AttemptLog(stream, mode="practice", enrage=250, monotonic_ns=clock.__next__)
+        attempt.write("prayer_flick_sent", prayer="magic")
+        attempt.write("attempt_ended", result="incomplete", reason="interrupted")
+        rows = list(map(json.loads, stream.getvalue().splitlines()))
+        outcome, end = rows[-2:]
+        self.assertEqual(outcome["outcome"], "attempt_ended")
+        self.assertLessEqual(outcome["elapsed_ns"], end["elapsed_ns"])
+
     def test_attempt_log_matches_observed_overhead_to_the_issued_request(self):
         stream = io.StringIO()
         now = 100
@@ -782,7 +835,9 @@ class PrayerFlickerTests(unittest.TestCase):
         flicker.observe([event(1, magic)], 200, 0, distance=8)
         flicker.observe([event(2, AUTO)], 200, 0, distance=8)
         self.assertEqual(flicker.active_prayer(200, 0), Prayer.MELEE)
+        self.assertEqual(flicker.cue_event, 2)
         self.assertEqual(flicker.active_prayer(201, 0), Prayer.MAGIC)
+        self.assertEqual(flicker.cue_event, 1)
 
     def test_magic_flick_windows_by_distance(self):
         windows = controller["magic_flick_ticks"]

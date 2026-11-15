@@ -1,6 +1,9 @@
 # Telos attempt logs
 
-Use the 0% Practice Mode controller from the repository root. Stage the character across the gap with Telos dormant, the melee action bar selected and auto-retaliate active. Identify the Deflect Melee slot and a walkable approach tile from the fresh client image. The controller handles every phase it reaches through P3: Deflect Melee flicks in P1/P2, Deflect Magic in P3. P4 and P5 keep the flicks, Escape, Anticipation and Resonance (fonts, golems and bombs are not handled yet). `--observe-transition` continues recording after input ends. F12 stops input. [Setup and bindings](../runescape-knowledge-base/bosses/telos/animation-cues.md)
+Run the Practice Mode controller from the repository root. Stage the character across the gap
+with Telos dormant, the melee action bar selected and auto-retaliate active. The controller
+uses Telos's animations and phase for prayer flicks, special responses and P4 font and golem
+handling. See the coverage table for the evidence and open timing questions. [Setup and bindings](../runescape-knowledge-base/bosses/telos/animation-cues.md) · [Mechanic coverage](../runescape-knowledge-base/bosses/telos/mechanic-coverage.md)
 
 ### Running it yourself
 
@@ -11,7 +14,13 @@ any displayed action bar. The controller reads their keys from game memory
 takes precedence. Start the script, click into RuneScape, and wake Telos yourself. After engagement,
 leaving the encounter closes its attempt log. Losing focus pauses input until RuneScape is focused
 again, stale samples are skipped, and F12 stops the script.
-The controller turns on Deflect Melee with its key and takes over when the fight starts. If the player is still under Telos 1-4 ticks after Hold Still, it moves the pointer to a projected tile outside his footprint and presses Dive, avoiding the stomp. F12 stops it.
+The controller turns on Deflect Melee and takes over when the fight starts. It checks for
+the Hold Still stomp at +4 to +7 received ticks. If the player needs to dodge, Dive
+prefers the green strip in P1 or red strip in P3 within ten tiles and clear of Telos.
+The binding `rs3_snapshot_pointer_walk` confirms the current ground tile under the pointer
+before the click. `rs3_snapshot_npc_spatial`, `rs3_snapshot_hazards`,
+`rs3_hazard_terrain_height` and `rs3_project_tile` supply the footprint, beam location,
+terrain height and screen projection.
 
 ```powershell
 $env:PYTHONPATH = 'python'
@@ -48,11 +57,15 @@ Uppercut and the phase cues `28963` and `28930` do not schedule protection. A
 on the first recognized attack. A toggle is only resent after its overhead appears or 1.2 s
 passes. Server protection deadlines remain unmeasured.
 
-`--practice-enrage N` runs above 0%. It locks the first observed Telos maximum HP and assumes the 0% quarter phase split. Special timings remain calibrated at 0% only.
+`--practice-enrage N` runs above 0%. It locks the first observed Telos maximum HP and assumes the
+quarter phase split. See the coverage table and individual traces for timing evidence by enrage.
 
 `--timed-freedom` trials the first clear GCD at received-tick offsets +4 through +7 after `28935`. The observed cast acknowledged one tick after dispatch at +4. This measures the cast path and leaves the landing response unverified.
 
 Each file starts with `attempt_started`. The first `state` row includes the initial `changes` object. Apply subsequent state changes as top-level field replacements. `sequence` orders rows, `timestamp_ms` is Unix time, and `elapsed_ns` and `observed_ns` are relative to the same attempt origin. `client_logic_tick` is the client clock. `game_tick` carries the client's received server-tick counter when valid. `received_tick` rows mark observed counter changes and loss of validity. Receipt time has no calibrated relation to the server's protection check.
+In captures made before the prayer outcome timestamp fix, use `sequence` to order a prayer
+outcome and the immediately following request or attempt end. Their `elapsed_ns` values can
+appear a few microseconds out of order.
 
 `actors` maps attempt-local instance IDs to `[config_id, current_hp, max_hp, action_animation, movement_animation]`. `actor_tiles` maps the same IDs to `[x, y, plane, same_world_confirmed]` when the reader has a tile. `ability_cooldowns` maps ability struct IDs to `[reason, start_client_tick, end_client_tick, active]`. A missing timer stays unknown. NPC and player hitmark rows retain native timing and recipient evidence. Hitmarks lack an attacker field.
 
@@ -74,6 +87,16 @@ A log with no `attempt_ended` was interrupted before the writer could record its
 Join `prayer_flick_outcome.request_sequence` to the original `prayer_flick_sent` row. An
 `acknowledged` outcome confirms the overhead observed in the client and records the sampling
 tick. Compare it with the recipient's hitmark and its client clock to assess the window.
+The switch carries the cue of the protection window that selected it, including during an
+overlap. A player hitmark carries `overhead_at_sample` when it was read in the same native frame.
+For Hold Still, compare `stomp_dodge` and `stomp_walk_fallback` with `stomp_dodge_result`.
+Join the response to `npc_animation` by `cue_native_sequence`. `hover` records the sampled
+Walk tile, MiniMenu cycle, and source frame and client logic tick. In P1 and P3, a verified
+beam destination also carries `hover.beam_config`. `clear_of_stomp` records displacement
+outside the estimated radius, and `landed_on_beam` confirms that the observed player tile
+was on the strip. `observed_tick_delta` gives the position sample's offset from the cue.
+Check it against the hitmark. In one live P3 attempt, Dive moved the player at +8 and the
+stomp still landed at +9.
 
 Join an `ability_sent` row to the `npc_animation` row whose `native_sequence` matches `cue_native_sequence`. Use `cooldown_acknowledgement` and `surge_displacement` for later observations. A cooldown acknowledges a cast. Dodge success, damage prevention and healing each require their own evidence. Inspect `queue_loss` and `attempt_ended` before interpreting a run. The first practice trace predates NPC tile and NPC hitmark logging and has no explicit Anticipation acknowledgement at the phase boundary.
 

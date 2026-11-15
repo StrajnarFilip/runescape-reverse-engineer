@@ -274,35 +274,46 @@ static fixture *player_pose_fixture(void)
     return player_pose_fixture_for(&profile_primary);
 }
 
-static void compatibility_camera_requires_the_pinned_layout(void)
+static fixture *compatibility_pose_fixture(void)
 {
     fixture *test_fixture = player_pose_fixture_for(&profile_compatibility);
     const unsigned char position[] = {0x48, 0x8d, 0x81, 0x80, 2, 0, 0, 0xc3};
     const unsigned char owner[] = {0x49, 0x8b, 0x40, 8, 0x48, 0x89, 0x41, 0x60};
+    const uint64_t getter = FIXTURE_MODULE_BASE + 0x6ee110u;
+    const uint64_t owner_guard = FIXTURE_MODULE_BASE + 0x38523u;
+    fixture_add_block(test_fixture, getter, sizeof position);
+    fixture_add_block(test_fixture, owner_guard, sizeof owner);
+    memcpy(fixture_bytes(test_fixture, getter, sizeof position), position, sizeof position);
+    memcpy(fixture_bytes(test_fixture, owner_guard, sizeof owner), owner, sizeof owner);
+    const uint32_t vtables[] = {profile_compatibility.player_actor_vtable_rva,
+                                profile_compatibility.npc_entity_vtable_rva};
+    for (unsigned index = 0; index < sizeof vtables / sizeof *vtables; index++)
+    {
+        uint64_t slot = FIXTURE_MODULE_BASE + vtables[index] + 0xb0;
+        fixture_add_block(test_fixture, slot, sizeof(uint64_t));
+        fixture_put_u64(test_fixture, slot, getter);
+    }
+    return test_fixture;
+}
+
+static void compatibility_camera_requires_the_pinned_layout(void)
+{
+    fixture *test_fixture = compatibility_pose_fixture();
     const unsigned char matrix[] = {0x0f, 0x59, 0x81, 0, 0x39, 1, 0};
     const unsigned char manager[] = {0x48, 0x8b, 0x90, 0xe8, 0x99, 1, 0};
     const unsigned char viewport[] = {
         0xf3, 0x41, 0x0f, 0x2a, 0x80, 0x8c, 0,    0,    0,    0xf3, 0x0f, 0x59, 0x15,
         0x6e, 0x92, 0x58, 1,    0xf3, 0x41, 0x0f, 0x2a, 0x88, 0x84, 0,    0,    0,
     };
-    const uint32_t rvas[] = {0x6ee110u, 0x38523u, COMPAT_MATRIX_GUARD_RVA, COMPAT_MANAGER_GUARD_RVA,
+    const uint32_t rvas[] = {COMPAT_MATRIX_GUARD_RVA, COMPAT_MANAGER_GUARD_RVA,
                              COMPAT_VIEWPORT_GUARD_RVA};
-    const unsigned char *guards[] = {position, owner, matrix, manager, viewport};
-    const size_t sizes[] = {sizeof position, sizeof owner, sizeof matrix, sizeof manager,
-                            sizeof viewport};
+    const unsigned char *guards[] = {matrix, manager, viewport};
+    const size_t sizes[] = {sizeof matrix, sizeof manager, sizeof viewport};
     for (unsigned index = 0; index < sizeof guards / sizeof *guards; index++)
     {
         uint64_t address = FIXTURE_MODULE_BASE + rvas[index];
         fixture_add_block(test_fixture, address, sizes[index]);
         memcpy(fixture_bytes(test_fixture, address, sizes[index]), guards[index], sizes[index]);
-    }
-    uint32_t vtables[] = {profile_compatibility.player_actor_vtable_rva,
-                          profile_compatibility.npc_entity_vtable_rva};
-    for (unsigned index = 0; index < sizeof vtables / sizeof *vtables; index++)
-    {
-        uint64_t slot = FIXTURE_MODULE_BASE + vtables[index] + 0xb0;
-        fixture_add_block(test_fixture, slot, sizeof(uint64_t));
-        fixture_put_u64(test_fixture, slot, FIXTURE_MODULE_BASE + rvas[0]);
     }
     const uint32_t world_matrix_offset = 0x13900;
     const uint32_t scene_manager_offset = 0x199e8;
@@ -331,6 +342,51 @@ static void compatibility_camera_requires_the_pinned_layout(void)
     fixture_bytes(test_fixture, FIXTURE_MODULE_BASE + COMPAT_MANAGER_GUARD_RVA, 1)[0] = 0;
     spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
     assert(spatial->player.tile.valid && !spatial->camera.valid_mask);
+    fixture_destroy(test_fixture);
+}
+
+static void scene_walk_uses_the_local_plane(void)
+{
+    fixture *test_fixture = compatibility_pose_fixture();
+    const uint64_t menu = 0x940000, entries = 0x950000, entry = 0x960000;
+    const uint64_t guard = FIXTURE_MODULE_BASE + 0x39024b;
+    const uint64_t walk_action = FIXTURE_MODULE_BASE + 0x16be960;
+    const uint32_t data_offset = 0x48;
+    const unsigned char cycle_increment[] = {0xff, 0x81, 0xd0, 0x21, 0, 0};
+    fixture_add_block(test_fixture, guard, sizeof cycle_increment);
+    memcpy(fixture_bytes(test_fixture, guard, sizeof cycle_increment), cycle_increment,
+           sizeof cycle_increment);
+    fixture_add_block(test_fixture, menu, 0x21d8);
+    fixture_add_block(test_fixture, entries, 16);
+    fixture_add_block(test_fixture, entry, 0x54);
+    fixture_add_block(test_fixture, walk_action + 0x40, sizeof(uint32_t));
+    fixture_put_u64(test_fixture, FIXTURE_WORLD + 0x19938, menu);
+    fixture_put_u64(test_fixture, menu, FIXTURE_MODULE_BASE + 0x150d5b0);
+    fixture_put_u64(test_fixture, menu + 8, FIXTURE_WORLD);
+    fixture_put_u64(test_fixture, menu + 0x90, entries);
+    fixture_put_u64(test_fixture, menu + 0x98, entries + 16);
+    fixture_put_u64(test_fixture, menu + 0x21d0, 24);
+    fixture_put_u64(test_fixture, entries + 8, entry);
+    fixture_put_u64(test_fixture, entry + 0x38, walk_action);
+    fixture_put_u32(test_fixture, walk_action + 0x40, 23);
+    fixture_put_u32(test_fixture, entry + data_offset + 4, 13266);
+    fixture_put_u32(test_fixture, entry + data_offset + 8, 5095);
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    rs3_pointer_walk walk;
+    assert(rs3_snapshot_pointer_walk(test_fixture->snapshot, &walk, sizeof walk) == RS3_OK);
+    assert(walk.valid && walk.menu_cycle == 24 && walk.action == 23);
+    assert(walk.tile.valid && walk.tile.x == 13266 && walk.tile.y == 5095 && walk.tile.plane == 1);
+
+    fixture_put_u32(test_fixture, entry + data_offset, 1);
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    assert(rs3_snapshot_pointer_walk(test_fixture->snapshot, &walk, sizeof walk) == RS3_OK);
+    assert(walk.valid && walk.action == 23 && !walk.tile.valid);
+
+    fixture_put_u32(test_fixture, entry + data_offset, 0);
+    fixture_put_u64(test_fixture, LOCAL_PLAYER_ACTOR + POSE_WORLD_OFFSET, 0);
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    assert(rs3_snapshot_pointer_walk(test_fixture->snapshot, &walk, sizeof walk) == RS3_OK);
+    assert(walk.valid && walk.action == 23 && !walk.tile.valid);
     fixture_destroy(test_fixture);
 }
 
@@ -484,6 +540,7 @@ int main(void)
     RUN_TEST(rejects_unknown_height_plane_and_abi);
     RUN_TEST(snapshot_accessors_enforce_capacity_and_preserve_identity);
     RUN_TEST(compatibility_camera_requires_the_pinned_layout);
+    RUN_TEST(scene_walk_uses_the_local_plane);
     RUN_TEST(original_position_and_hit_channel_share_committed_player);
     RUN_TEST(rejects_pose_from_actor_different_from_hit_channel);
     RUN_TEST(spatial_commit_preserves_compatibility_position_decoder);
