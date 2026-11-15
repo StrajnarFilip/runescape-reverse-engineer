@@ -66,6 +66,20 @@ Present for every rung, with the kill switch within reach.
 Requests
 --------
 
+* End-of-session handoff, 2026-11-15: the user is offline and asked to continue
+  tomorrow. All game work is stopped; no controller is armed and no kill was
+  attempted. New ordered P1 policy, native 1..3-action key batches and A1
+  owned-snapshot batch transport are merged. D8's live combat runner still
+  needs connecting. Do not call these components an executable P1 attempt.
+  See ``docs/validation/telos-ladder-p1-handoff-2026-11-15.json`` for exact
+  bindings, A-S-G ordering, candidate wake cue, acknowledgements and blockers.
+* The user explicitly rejected more manual fight recordings. Next session's
+  objective is a supervised automatic P1 opening with user-controlled movement.
+  Berserk precedes renewal in one batch; A-S-G follows on the wake candidate.
+  Red EoF contents are a user declaration. Existing timing gates remain in
+  place; the project has no validated server protection deadline or ladder
+  pass. Begin further game input only after the user returns.
+
 * Integration checkpoint, 2026-11-13: all perception and decision modules are
   merged for shadow preparation. Pending live statuses remain unchanged. The
   release build, all 15 CTest targets (271 Python tests) and installation of
