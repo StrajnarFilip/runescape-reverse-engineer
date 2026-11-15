@@ -41,6 +41,7 @@ enum rs3_camera_flags
     RS3_CAMERA_MATRIX = 1u,
     RS3_CAMERA_VIEWPORT = 2u,
     RS3_CAMERA_PHYSICAL_ORIGIN = 4u,
+    RS3_CAMERA_SCALED_VIEWPORT = 8u, /**< Physical dimensions are in reserved[0..1]. */
     RS3_CAMERA_COMPLETE = 7u
 };
 
@@ -82,7 +83,7 @@ typedef struct rs3_camera
     int32_t client_screen_x; /**< Physical pixel origin, obtained with per-monitor DPI awareness. */
     int32_t client_screen_y;
     uint64_t process_creation_time;
-    uint32_t reserved[2];
+    uint32_t reserved[2]; /**< Physical client width and height when SCALED_VIEWPORT is set. */
 } rs3_camera;
 
 typedef struct rs3_spatial_info

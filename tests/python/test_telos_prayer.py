@@ -180,6 +180,9 @@ class TelosActionTests(unittest.TestCase):
         self.assertEqual([row["event_sequence"] for row in rows], [1, 2])
         self.assertTrue(all(row["isolated_p1_melee_sequence_lead"] for row in rows))
         self.assertTrue(all("user_labeled_melee_auto" not in row for row in rows))
+        rows = telos_actions(events, (1, 2, 3), 14, {7}, additional_samples={13: 20})
+        self.assertEqual([row["event_sequence"] for row in rows], [1, 2, 4])
+        self.assertEqual(rows[-1]["received_tick"], 20)
 
 
 class ManualPrayerKeyTests(unittest.TestCase):

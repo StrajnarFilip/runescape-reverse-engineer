@@ -383,8 +383,9 @@ class PrayerTrial:
         return updates
 
 
-def telos_actions(events, session, sample_sequence, instance_ids):
-    """Return the action events of the tracked Telos instances in this exact sample."""
+def telos_actions(events, session, sample_sequence, instance_ids, *, additional_samples=None):
+    """Return tracked Telos events from this sample and any known intervening samples."""
+    additional_samples = additional_samples or {}
     return [
         {
             "event_sequence": event.sequence,
@@ -394,6 +395,11 @@ def telos_actions(events, session, sample_sequence, instance_ids):
             "action_sequence": event.action_sequence,
             "previous_action_sequence": event.previous_action_sequence,
             "client_logic_tick": event.logic_tick,
+            **(
+                {"received_tick": additional_samples[event.sample_sequence]}
+                if event.sample_sequence in additional_samples
+                else {}
+            ),
             "application_stamp": (
                 event.application_stamp
                 if event.flags & NPCActionFlags.HAS_APPLICATION_STAMP
@@ -403,7 +409,7 @@ def telos_actions(events, session, sample_sequence, instance_ids):
         }
         for event in events
         if (event.pid, event.process_creation_time, event.scene_epoch) == session
-        and event.sample_sequence == sample_sequence
+        and (event.sample_sequence == sample_sequence or event.sample_sequence in additional_samples)
         and event.instance_id in instance_ids
     ]
 

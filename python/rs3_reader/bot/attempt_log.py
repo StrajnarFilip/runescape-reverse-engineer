@@ -134,6 +134,7 @@ class AttemptLog:
                 "received_tick", observed_ns=self.relative_ns(tick.observed_ns), reason=tick.reason
             )
         target = spatial_actor_record(reader, reader.spatial.player)["target"]
+        camera = reader.spatial.camera
         prayer_packed = player.variable(Variable.PRAYER_PACKED)
         tile = reader.position
         poses = {
@@ -242,6 +243,11 @@ class AttemptLog:
                 (hazard.tile.x, hazard.tile.y, hazard.tile.plane, reader.hazard_terrain_height(hazard))
                 for hazard in beams
                 if hazard.flags & HazardFlags.TERRAIN_HEIGHT
+            ),
+            "camera_viewport": (
+                (camera.viewport_width, camera.viewport_height, *camera.physical_viewport_size)
+                if camera.physical_viewport_size is not None
+                else None
             ),
             "hazard_observation_reason": reader.hazard_info.reason,
             "hazard_candidates_dropped": reader.hazard_info.dropped_count,

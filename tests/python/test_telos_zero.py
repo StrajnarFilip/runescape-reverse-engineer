@@ -496,7 +496,6 @@ class FontDutyTests(unittest.TestCase):
 
 
 BeamBlocker = controller["BeamBlocker"]
-beam_target = controller["beam_target"]
 
 
 class BeamTests(unittest.TestCase):
@@ -573,19 +572,11 @@ class BeamTests(unittest.TestCase):
         self.assertEqual(response.observe(3, 0, 46, 1180, absent), (None, None))
         self.assertEqual(response.observe(3, 0, 48, 1240, absent), (None, "timer_cleared"))
 
-    def test_target_is_stream_tile_against_telos(self):
-        # 250% P2 death (telos-20261114T174445): black strip x=7509, y=2456..2465; Telos 5x5
-        # at (7507, 2451); player at (7505, 2449).
-        strip = [(7509, y) for y in range(2456, 2466)]
-        self.assertEqual(beam_target(strip, (7507, 2451), 5, (7505, 2449)), (7509, 2456))
-        self.assertIsNone(beam_target([], (7507, 2451), 5, (7505, 2449)))
-        # A strip that stops short of Telos is not followed (300% P1 green, 175142).
-        self.assertIsNone(beam_target(strip[3:], (7507, 2451), 5, (7505, 2449)))
-
     def test_meter_rises_detect_feeding_but_projectile_spend_does_not(self):
         blocker = BeamBlocker()
         # Logged 174445 meter: 0 at the P2 opener, then +3 per tick while the stream fed Telos.
         self.assertFalse(blocker.observe(0, 6618))
+        self.assertFalse(blocker.observe(0, 6638))
         self.assertFalse(blocker.observe(3, 6639))
         self.assertTrue(blocker.observe(6, 6640))
         for tick in range(6641, 6649):
@@ -594,9 +585,15 @@ class BeamTests(unittest.TestCase):
         self.assertTrue(blocker.observe(23, 6649))
         self.assertTrue(blocker.observe(26, 6650))
         # Once blocked, an unfed Onslaught only falls (100% kill: 70, 60, 50 ...).
-        blocker.blocked()
         for tick, meter in ((5702, 60), (5706, 50), (5710, 40)):
             self.assertFalse(blocker.observe(meter, tick))
+
+    def test_multiple_meter_updates_at_one_tick_do_not_confirm_feeding(self):
+        blocker = BeamBlocker()
+        self.assertFalse(blocker.observe(0, 100))
+        self.assertFalse(blocker.observe(3, 101))
+        self.assertFalse(blocker.observe(6, 101))
+        self.assertTrue(blocker.observe(9, 102))
 
     def test_flat_meter_is_not_fed(self):
         # 175142 P2: the meter sat at 3 for 30 ticks after two early rises.
@@ -703,6 +700,12 @@ class PrayerFlickerTests(unittest.TestCase):
         self.assertIsNone(flicker.next_prayer(Prayer.MELEE, 10, 5))
         self.assertEqual(flicker.next_prayer(Prayer.MELEE, 11, 6), Prayer.SOUL_SPLIT)
 
+    def test_intervening_walk_sample_preserves_the_original_cue_tick(self):
+        flicker = PrayerFlicker()
+        action = dict(event(1, AUTO), received_tick=21)
+        flicker.observe([action], 22, 0)
+        self.assertIsNone(flicker.next_prayer(Prayer.SOUL_SPLIT, 22, 1))
+
     def test_uppercut_and_repeated_events_do_not_flick(self):
         flicker = PrayerFlicker()
         self.assertIsNone(flicker.observe([event(1, UPPERCUT)], 10, 0))
@@ -710,6 +713,22 @@ class PrayerFlickerTests(unittest.TestCase):
         flicker.observe([event(2, HOLD_STILL)], 10, 0)
         self.assertIsNone(flicker.observe([event(2, HOLD_STILL)], 11, 0))
         self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 10, 0), Prayer.MELEE)
+
+    def test_phase_lockout_ends_when_the_first_new_attack_arrives(self):
+        flicker = PrayerFlicker()
+        transition = controller["P1_TO_P2_TRANSITION"]
+        opener = controller["P2_OPENING_ATTACK"]
+        flicker.observe([event(1, AUTO)], 10, 0)
+        self.assertEqual(flicker.update_transition([event(2, transition)], 1), (True, 2))
+        self.assertFalse(flicker.windows)
+        self.assertIsNone(flicker.update_transition([event(3, transition)], 2))
+        self.assertIsNone(flicker.update_transition([event(4, opener)], 2))
+        self.assertEqual(flicker.transition_phase, 1)
+        self.assertIsNone(flicker.observe([event(4, opener)], 15, 1))
+        magic = [event(5, controller["MAGIC_ATTACK"])]
+        self.assertEqual(flicker.update_transition(magic, 2), (False, 5))
+        flicker.observe(magic, 16, 2, distance=2)
+        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 16, 3), Prayer.MAGIC)
 
     def test_long_range_magic_flick_is_delayed(self):
         magic = controller["MAGIC_ATTACK"]

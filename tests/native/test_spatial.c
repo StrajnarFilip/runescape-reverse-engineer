@@ -182,6 +182,24 @@ static void rejects_unknown_height_plane_and_abi(void)
     assert(rs3_spatial_sizeof(RS3_SPATIAL_SIZE_ACTOR) == sizeof(rs3_actor_spatial));
 }
 
+static void projects_compatibility_viewport_at_physical_size(void)
+{
+    rs3_camera camera = test_camera();
+    camera.valid_mask |= RS3_CAMERA_SCALED_VIEWPORT;
+    camera.reserved[0] = 1200;
+    camera.reserved[1] = 900;
+    rs3_actor_spatial actor = {.valid_mask = RS3_SPATIAL_FINE_POSITION | RS3_SPATIAL_SAME_WORLD,
+                               .tile = {1, 0, 0, 1},
+                               .fine_x = 0.5f,
+                               .fine_height = 0.5f};
+    rs3_screen_point point;
+    assert(rs3_project_actor(&camera, &actor, 0, &point, sizeof point) == RS3_OK);
+    assert(point.valid && point.x == 1000 && point.y == 425);
+    camera.reserved[1] = 0;
+    assert(rs3_project_actor(&camera, &actor, 0, &point, sizeof point) == RS3_OK);
+    assert(!point.valid && point.reason == RS3_SPATIAL_WINDOW_UNKNOWN);
+}
+
 static void snapshot_accessors_enforce_capacity_and_preserve_identity(void)
 {
     fixture *test_fixture = pose_fixture();
@@ -462,6 +480,7 @@ int main(void)
     RUN_TEST(rejects_torn_and_nonfinite_poses);
     RUN_TEST(compatibility_npc_tiles_require_the_shared_position_getter);
     RUN_TEST(projects_with_physical_origin_and_y_inversion);
+    RUN_TEST(projects_compatibility_viewport_at_physical_size);
     RUN_TEST(rejects_unknown_height_plane_and_abi);
     RUN_TEST(snapshot_accessors_enforce_capacity_and_preserve_identity);
     RUN_TEST(compatibility_camera_requires_the_pinned_layout);

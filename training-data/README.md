@@ -41,7 +41,12 @@ The practice controller relies on Revolution for normal damage. It uses client s
 
 Confirm the actual ability tooltips before using the example keys. `--displayed-keys` resolves the client window's keyboard layout to physical Arduino keys. `configured_abilities` records the displayed labels and resolved keys.
 
-`--flick-melee` is an unvalidated user-requested trial for phases 1-2. Each new Telos animation except Uppercut (`28938`) sends Deflect Melee (`--flick-melee-key`, default F3), then Soul Split (`--flick-soul-split-key`, default F4) on the next received tick (0.6 s when the counter is invalid). Soul Split is the overhead between cues. A toggle is only resent after the overhead matches or 1.2 s passes. `prayer_flick_cue` and `prayer_flick_sent` rows record each decision. Server protection deadlines remain unmeasured, so a hit can still land during a flick.
+The practice controller flicks by Telos animation and phase. It uses the measured distance
+bands for `28959` and holds melee through the unanimated follow-up from Tendrils release.
+Uppercut and the phase cues `28963` and `28930` do not schedule protection. A
+`prayer_transition_lockout` row marks when prayer inputs pause at a phase handoff or resume
+on the first recognized attack. A toggle is only resent after its overhead appears or 1.2 s
+passes. Server protection deadlines remain unmeasured.
 
 `--practice-enrage N` runs above 0%. It locks the first observed Telos maximum HP and assumes the 0% quarter phase split. Special timings remain calibrated at 0% only.
 
@@ -53,6 +58,7 @@ Each file starts with `attempt_started`. The first `state` row includes the init
 
 `beam_tiles` contains `[kind, x, y, plane, config_id]` tuples for the green, black and red
 streams. `beam_ground_heights` adds `[x, y, plane, fine_height]` for tiles the reader can project.
+`camera_viewport` records the render width and height followed by the physical width and height.
 The practice controller reads encounter VARP `6362` in P2 and P3. Join `anima_virus_detected`,
 `anima_virus_move`, `anima_virus_beam_arrival` and `anima_virus_outcome` by `onset_tick` in
 the same phase. The outcome `cleanse_confirmed` requires the countdown reset and a matching
@@ -60,6 +66,9 @@ the same phase. The outcome `cleanse_confirmed` requires the countdown reset and
 the message. The nearest logged beam row can be one tile away when a cleanse occurs.
 Movement rows include the projected target, the observed default action and tile in `hover`,
 and the verified `walk_target` and `dispatch_tick` when a click is sent.
+`--block-black-stream` enables the P2 Onslaught movement trial. Read `beam_feeding` and
+`beam_move` alongside player tiles, VARP `6363` and successive `28959` cues to verify the
+player blocked the stream and the meter drained.
 A log with no `attempt_ended` was interrupted before the writer could record its outcome.
 
 Join `prayer_flick_outcome.request_sequence` to the original `prayer_flick_sent` row. An

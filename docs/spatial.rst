@@ -67,6 +67,11 @@ window using a temporarily per-monitor-aware thread DPI context. The previous
 DPI context is restored. A viewport outside the physical client rectangle,
 multiple windows or an unavailable origin invalidates physical projection.
 This does not move/focus the window or pointer and reads no screenshot.
+On Compatibility Mode, a full-origin viewport whose dimensions scale
+proportionally to the physical client rectangle uses the physical extent for
+tile and actor projection. The raw viewport remains available in the camera
+record. ``RS3_CAMERA_SCALED_VIEWPORT`` marks the physical width and height in
+``reserved[0..1]``.
 
 ``rs3_project_actor`` projects the observed actor position plus a supplied
 vertical offset. ``rs3_project_tile`` requires an explicit terrain height in

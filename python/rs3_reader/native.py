@@ -616,6 +616,13 @@ class SpatialTargetKind(IntEnum):
     NPC = 1
 
 
+class CameraFlags(IntFlag):
+    MATRIX = 1
+    VIEWPORT = 2
+    PHYSICAL_ORIGIN = 4
+    SCALED_VIEWPORT = 8
+
+
 class Camera(ctypes.Structure):
     """rs3_camera; a complete physical projection requires all three validity bits."""
 
@@ -636,6 +643,14 @@ class Camera(ctypes.Structure):
         ("process_creation_time", ctypes.c_uint64),
         ("reserved", ctypes.c_uint32 * 2),
     ]
+
+    @property
+    def physical_viewport_size(self):
+        if not self.valid_mask & CameraFlags.PHYSICAL_ORIGIN:
+            return None
+        if self.valid_mask & CameraFlags.SCALED_VIEWPORT:
+            return tuple(self.reserved)
+        return (self.viewport_width, self.viewport_height)
 
 
 class SpatialInfo(ctypes.Structure):

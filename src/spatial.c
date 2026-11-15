@@ -2,6 +2,7 @@
 #include "spatial.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "clock.h"
@@ -295,7 +296,7 @@ static BOOL CALLBACK find_spatial_window(HWND window, LPARAM parameter)
 }
 
 /** Read physical window geometry without moving, focusing or clicking it. */
-static int physical_origin(uint32_t pid, rs3_camera *camera)
+static int physical_origin(uint32_t pid, int compatibility, rs3_camera *camera)
 {
     spatial_window selection = {.pid = pid};
     EnumWindows(find_spatial_window, (LPARAM)&selection);
@@ -321,6 +322,17 @@ static int physical_origin(uint32_t pid, rs3_camera *camera)
     {
         camera->client_screen_x = origin.x;
         camera->client_screen_y = origin.y;
+        /* Compatibility Mode can render a full-window logical viewport at 150% scaling.
+         * Apply the physical extent only for a full-origin, proportional viewport. */
+        if (compatibility && camera->viewport_x == 0 && camera->viewport_y == 0 &&
+            client.right > camera->viewport_width && client.bottom > camera->viewport_height &&
+            llabs((int64_t)client.right * camera->viewport_height -
+                  (int64_t)client.bottom * camera->viewport_width) <= client.right)
+        {
+            camera->reserved[0] = (uint32_t)client.right;
+            camera->reserved[1] = (uint32_t)client.bottom;
+            camera->valid_mask |= RS3_CAMERA_SCALED_VIEWPORT;
+        }
     }
     return valid;
 }
@@ -370,7 +382,8 @@ static void read_camera(rs3_context *context, uint64_t world_state, uint64_t act
     camera->viewport_height = viewport[3];
     camera->valid_mask = RS3_CAMERA_MATRIX | RS3_CAMERA_VIEWPORT;
     camera->reason = RS3_SPATIAL_WINDOW_UNKNOWN;
-    if (physical_origin(context->target.pid, camera))
+    if (physical_origin(context->target.pid, context->target.profile == &profile_compatibility,
+                        camera))
     {
         camera->valid_mask |= RS3_CAMERA_PHYSICAL_ORIGIN;
         camera->reason = RS3_REASON_NONE;
@@ -589,10 +602,21 @@ static int32_t project(const rs3_camera *camera, int32_t plane, double x, double
         out->reason = RS3_SPATIAL_OFF_SCREEN;
         return RS3_OK;
     }
-    double pixel_x = camera->client_screen_x + (double)camera->viewport_x +
-                     (nx + 1) * camera->viewport_width / 2;
-    double pixel_y = camera->client_screen_y + (double)camera->viewport_y +
-                     (ny + 1) * camera->viewport_height / 2;
+    double width = camera->viewport_width;
+    double height_pixels = camera->viewport_height;
+    if (camera->valid_mask & RS3_CAMERA_SCALED_VIEWPORT)
+    {
+        width = camera->reserved[0];
+        height_pixels = camera->reserved[1];
+        if (width <= 0 || height_pixels <= 0)
+        {
+            out->reason = RS3_SPATIAL_WINDOW_UNKNOWN;
+            return RS3_OK;
+        }
+    }
+    double pixel_x = camera->client_screen_x + (double)camera->viewport_x + (nx + 1) * width / 2;
+    double pixel_y =
+        camera->client_screen_y + (double)camera->viewport_y + (ny + 1) * height_pixels / 2;
     if (pixel_x < INT32_MIN || pixel_x > INT32_MAX || pixel_y < INT32_MIN || pixel_y > INT32_MAX)
     {
         out->reason = RS3_SPATIAL_OFF_SCREEN;

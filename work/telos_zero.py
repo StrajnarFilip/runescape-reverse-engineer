@@ -355,10 +355,8 @@ BEAM_KIND_BY_PHASE = {2: BLACK_BEAM_KIND}
 # The meter counts as fed after this many rises within the last BEAM_FEED_WINDOW received ticks.
 BEAM_FEED_RISES = 2
 BEAM_FEED_WINDOW = 3
+BEAM_MAX_GAP_TICKS = 4
 BEAM_MOVE_RETRY_TICKS = 3
-# Movement into the stream is off: in 175845 the Telos click after reaching the strip walked the
-# player 7 tiles away and later strip clicks did not bring them back. Feeding is still logged.
-BEAM_BLOCKING_ENABLED = False
 # Escape (Uppercut +4/+5) and the stomp Dive (Hold Still +4..+7) own movement for this long.
 BEAM_SPECIAL_HOLD_TICKS = 10
 VIRUS_TIMER_VARP = 6362
@@ -376,32 +374,30 @@ def footprint_distance(tile, boss_tile, size):
     return max(dx, dy)
 
 
-def beam_target(beam_tiles, boss_tile, size, player_tile):
-    """The stream tile next to Telos (melee range) nearest the player, or None.
-
-    Tiles further out are never chosen: clicking Telos from there walks the player out again.
-    """
-    adjacent = [tile for tile in beam_tiles if footprint_distance(tile, boss_tile, size) == 1]
-    if not adjacent:
-        return None
-    return min(adjacent, key=lambda tile: (chebyshev(tile, player_tile), tile))
-
-
 class BeamBlocker:
     """Detect a stream feeding Telos from the anima meter and keep the player in its path."""
 
     def __init__(self):
         self.last_meter = None
+        self.last_tick = None
         self.rise_ticks = []
         self.next_move_tick = None
-        self.reengage_due = False
+        self.feeding = False
+        self.holding = False
+        self.on_strip = False
+        self.rejected = set()
 
     def observe(self, meter, received_tick):
         """Record one meter reading; return whether a stream is feeding Telos now."""
         if meter is None:
             return False
+        if self.last_tick is None or not 0 <= received_tick - self.last_tick <= BEAM_MAX_GAP_TICKS:
+            self.last_meter = None
+            self.rise_ticks.clear()
+        self.last_tick = received_tick
         if self.last_meter is not None and meter > self.last_meter:
-            self.rise_ticks.append(received_tick)
+            if not self.rise_ticks or self.rise_ticks[-1] != received_tick:
+                self.rise_ticks.append(received_tick)
         self.last_meter = meter
         self.rise_ticks = [
             tick for tick in self.rise_ticks if received_tick - tick < BEAM_FEED_WINDOW
@@ -414,10 +410,6 @@ class BeamBlocker:
             return False
         self.next_move_tick = received_tick + BEAM_MOVE_RETRY_TICKS
         return True
-
-    def blocked(self):
-        """The player has reached the stream: forget the rises seen while it fed Telos."""
-        self.rise_ticks.clear()
 
 
 def virus_timer(encounter):
@@ -440,6 +432,7 @@ class VirusResponse:
         self.move_tick = None
         self.next_move = None
         self.arrival = None
+        self.walk_target = None
         self.rejected = set()
 
     def observe(self, phase, remaining, tick, client_tick, message):
@@ -624,7 +617,10 @@ P2_CARRY_OVER = {UPPERCUT: ONSLAUGHT}
 P2_OPENING_MAGIC_ATTACK_TICKS = 12
 P2_OPENING_ATTACK = 28930
 P1_TO_P2_TRANSITION = 28963
-FLICK_EXCLUDED_ANIMATIONS = frozenset({UPPERCUT})
+FLICK_EXCLUDED_ANIMATIONS = frozenset({UPPERCUT, P1_TO_P2_TRANSITION, P2_OPENING_ATTACK})
+TRANSITION_ATTACK_CUES = frozenset({
+    MELEE_AUTO_SEQUENCE, MAGIC_ATTACK, TENDRILS, HOLD_STILL, UPPERCUT,
+})
 DEFAULT_FLICK_HOLD_TICKS = 1
 # After the Tendrils release an unanimated melee auto followed at +2 received ticks in both
 # 100% captures (1,470 and 1,076). Melee stays active through that tick.
@@ -1012,6 +1008,31 @@ class PrayerFlicker:
         self.default_prayer = Prayer.MELEE
         self.cue_event = None
         self.requested = None
+        self.transition_phase = None
+
+    def update_transition(self, actions, phase):
+        """Suspend toggles until the first attack cue on the new platform."""
+        previous = self.transition_phase
+        changed_by = None
+        for action in actions:
+            animation = action["action_sequence"]
+            if animation == P1_TO_P2_TRANSITION:
+                if self.transition_phase is None:
+                    self.transition_phase = phase
+                    self.windows.clear()
+                    self.return_ns = None
+                    self.cue_event = None
+                    changed_by = action["event_sequence"]
+            elif (
+                self.transition_phase is not None
+                and phase >= self.transition_phase
+                and animation in TRANSITION_ATTACK_CUES
+            ):
+                self.transition_phase = None
+                changed_by = action["event_sequence"]
+        if (previous is None) != (self.transition_phase is None):
+            return self.transition_phase is not None, changed_by
+        return None
 
     def observe(self, actions, tick, now, distance=None):
         """Open each cue's deflect window. Return the latest cue.
@@ -1033,8 +1054,9 @@ class PrayerFlicker:
                 first, last = magic_flick_ticks(distance)
             else:
                 first, last = 0, self.hold_ticks.get(sequence, DEFAULT_FLICK_HOLD_TICKS) - 1
-            if tick is not None:
-                self.windows.append((tick + first, tick + last + 1, prayer))
+            cue_tick = action.get("received_tick", tick)
+            if cue_tick is not None:
+                self.windows.append((cue_tick + first, cue_tick + last + 1, prayer))
             self.hold_prayer = prayer
             return_ns = now + (last + 1) * TICK_FALLBACK_NS
             if self.return_ns is None or return_ns > self.return_ns:
@@ -1648,6 +1670,7 @@ def run(reader, args, board, attempt=None):
 
     beam_blocker = BeamBlocker()
     virus = VirusResponse()
+    walk_samples = {}
 
     def refresh_for_walk():
         """Observe a new client sample once the moved pointer has had time to update."""
@@ -1658,6 +1681,8 @@ def run(reader, args, board, attempt=None):
             and latest.status in (Status.AVAILABLE, Status.PARTIAL)
             and 0 <= reader.monotonic_ns() - latest.monotonic_ns <= MAX_SAMPLE_AGE_NS
         )
+        if fresh:
+            walk_samples[latest.sequence] = (current_phase, received_tick_counter())
         return fresh, current_boss, current_phase, hp
 
     def fill_walk_hover(hover):
@@ -1673,6 +1698,7 @@ def run(reader, args, board, attempt=None):
             return
         prior_phase = virus.phase
         prior_onset, prior_move, prior_arrival = virus.started, virus.move_tick, virus.arrival
+        prior_walk_target = virus.walk_target
         remaining = virus_timer(reader.encounter) if phase in VIRUS_BEAM_BY_PHASE else None
         if prior_onset is None and not remaining:
             return
@@ -1695,9 +1721,17 @@ def run(reader, args, board, attempt=None):
             ),
             default=None,
         )
-        if virus.started and virus.arrival is None and beam_distance == 0:
+        if virus.started and virus.arrival is None and (
+            beam_distance == 0 or (player_tile is not None and player_tile == virus.walk_target)
+        ):
             virus.arrival = received_tick
-            emit("anima_virus_beam_arrival", onset_tick=virus.started[0], tile=player_tile)
+            emit(
+                "anima_virus_beam_arrival",
+                onset_tick=virus.started[0],
+                tile=player_tile,
+                beam_distance=beam_distance,
+                walk_target=virus.walk_target,
+            )
         if outcome:
             emit(
                 "anima_virus_outcome",
@@ -1706,6 +1740,7 @@ def run(reader, args, board, attempt=None):
                 onset_tick=prior_onset[0] if prior_onset else None,
                 move_tick=prior_move,
                 arrival_tick=prior_arrival if outcome == "phase_changed" else virus.arrival,
+                walk_target=prior_walk_target,
                 timer=remaining,
                 tile=player_tile,
                 beam_distance=beam_distance,
@@ -1793,6 +1828,7 @@ def run(reader, args, board, attempt=None):
             virus.move_tick = dispatch_tick or received_tick
         if sent:
             virus.rejected.clear()
+            virus.walk_target = hover["tile"]
         elif hover:
             virus.rejected.add(screen_point)
         target, plane, config = destination
@@ -1816,73 +1852,105 @@ def run(reader, args, board, attempt=None):
         )
 
     def beam_step(phase, phase_one, boss, meter, received_tick):
-        """Walk into the stream feeding Telos, then click Telos to keep attacking."""
+        """Measure beam feeding and optionally trial a verified walk during P2 Onslaught."""
         if not isinstance(received_tick, int):
             return
         feeding = beam_blocker.observe(meter, received_tick)
-        if not BEAM_BLOCKING_ENABLED:
-            if feeding != beam_blocker.reengage_due:
-                # reengage_due doubles as the logged feeding state while movement is off.
-                beam_blocker.reengage_due = feeding
-                emit(
-                    "beam_feeding" if feeding else "beam_feeding_ended",
-                    phase=phase,
-                    meter=meter,
-                    received_tick=received_tick,
-                )
+        if feeding != beam_blocker.feeding:
+            beam_blocker.feeding = feeding
+            emit(
+                "beam_feeding" if feeding else "beam_feeding_ended",
+                phase=phase,
+                meter=meter,
+                received_tick=received_tick,
+            )
+        if not getattr(args, "block_black_stream", False) or not input_allowed:
             return
         player = reader.spatial.player
-        if (
-            not input_allowed
-            or not player.valid_mask & SpatialFlags.TILE
-            or not player.valid_mask & SpatialFlags.FINE_POSITION
-        ):
+        if not player.valid_mask & SpatialFlags.TILE:
             return
         player_tile = (player.tile.x, player.tile.y)
         beam_tiles = [
             (hazard.tile.x, hazard.tile.y)
             for hazard in reader.hazards[: reader.hazard_info.count]
-            if hazard.kind == BEAM_KIND_BY_PHASE[phase] and hazard.flags & HazardFlags.TILE
+            if hazard.kind == BLACK_BEAM_KIND
+            and hazard.flags & HazardFlags.SCENE_LOCATION
+            and hazard.tile.plane == player.tile.plane
         ]
-        if beam_blocker.reengage_due and player_tile in beam_tiles:
-            beam_blocker.reengage_due = False
-            beam_blocker.blocked()
-            emit("beam_blocking", tile=player_tile, meter=meter, received_tick=received_tick)
-            reengage_telos(boss, player)
+        onslaught = phase_one.special == ONSLAUGHT and meter is not None and meter > 0
+        if virus_timer(reader.encounter):
             return
-        busy = (
-            phase_one.special in (UPPERCUT, HOLD_STILL)
-            and isinstance(phase_one.special_tick, int)
-            and received_tick - phase_one.special_tick <= BEAM_SPECIAL_HOLD_TICKS
-        )
-        if not feeding or busy or not beam_tiles or player_tile in beam_tiles:
+        if beam_blocker.holding and not onslaught and meter is not None:
+            if reengage_telos(boss, player):
+                beam_blocker.holding = False
+                beam_blocker.on_strip = False
+                emit("beam_hold_ended", phase=phase, tile=player_tile, meter=meter)
             return
-        pose = next(
-            (
-                p
-                for p in reader.npc_spatial[: reader.spatial.npc_count]
-                if p.instance_id == boss.instance_id and p.valid_mask & SpatialFlags.TILE
-            ),
-            None,
-        )
-        if pose is None or not beam_blocker.move_due(received_tick):
+        if not onslaught:
             return
-        target = beam_target(
-            beam_tiles, (pose.tile.x, pose.tile.y), pose.footprint_size or 1, player_tile
+        on_strip = player_tile in beam_tiles
+        if on_strip != beam_blocker.on_strip:
+            beam_blocker.on_strip = on_strip
+            emit(
+                "beam_arrival" if on_strip else "beam_departure",
+                phase=phase,
+                tile=player_tile,
+                meter=meter,
+                cue_native_sequence=phase_one.special_event,
+            )
+        if not feeding or on_strip:
+            return
+        if not beam_blocker.move_due(received_tick):
+            return
+        route = virus_beam_destination(
+            reader, phase, player, boss, rejected=beam_blocker.rejected
         )
-        if target is None:
-            return  # The strip does not reach Telos: blocking it would end melee.
-        point = project_tile(reader, target, player.tile.plane, player.fine_height)
-        sent = None if point is None else click_point(point, select_dive=False)
+        if route is None:
+            beam_blocker.rejected.clear()
+            return
+        (target, plane, _), point = route
+        hover = {}
+        previous_cycle = reader.pointer_walk.menu_cycle
+        boss_id = boss.instance_id
+
+        def blocking_destination_current():
+            fresh, current_boss, current_phase, hp = refresh_for_walk()
+            fill_walk_hover(hover)
+            return (
+                fresh
+                and current_boss is not None
+                and current_boss.instance_id == boss_id
+                and current_phase == phase
+                and hp is not None
+                and hp > 0
+                and reader.pointer_walk.menu_cycle != previous_cycle
+                and hover.get("tile") is not None
+                and virus_beam_destination(
+                    reader, phase, reader.spatial.player, current_boss, use_tile=hover["tile"]
+                ) is not None
+            )
+
+        sent = click_point(
+            point,
+            select_dive=False,
+            validate=blocking_destination_current,
+            failure_event="beam_move_skipped",
+        )
         if sent:
-            beam_blocker.reengage_due = True
+            beam_blocker.holding = True
+            beam_blocker.rejected.clear()
+        elif hover:
+            beam_blocker.rejected.add(point)
         emit(
             "beam_move",
             sent=sent,
             phase=phase,
-            target=target,
+            target=(*target, plane),
+            hover=hover,
             player_tile=player_tile,
             meter=meter,
+            cue_native_sequence=phase_one.special_event,
+            dispatch_tick=received_tick_counter() if sent else None,
             beam_tiles=len(beam_tiles),
             received_tick=received_tick,
         )
@@ -2083,16 +2151,28 @@ def run(reader, args, board, attempt=None):
                 )
         return None
 
-    def flick_step(actions, prayer, now, sample_ns):
+    def flick_step(actions, phase, prayer, now, sample_ns):
         """Advance the melee flicker and send at most one prayer chord."""
         tick = received_tick_counter()
+        transition = flicker.update_transition(actions, phase)
+        if transition is not None:
+            active, cue = transition
+            emit(
+                "prayer_transition_lockout",
+                active=active,
+                phase=phase,
+                received_tick=tick,
+                cue_native_sequence=cue,
+            )
+        if flicker.transition_phase is not None:
+            return
         distance = telos_distance() if actions else None
         cue = flicker.observe(actions, tick, now, distance)
         if cue is not None:
             emit(
                 "prayer_flick_cue",
                 animation=cue["action_sequence"],
-                received_tick=tick,
+                received_tick=cue.get("received_tick", tick),
                 distance=distance,
                 cue_native_sequence=cue["event_sequence"],
             )
@@ -2155,6 +2235,12 @@ def run(reader, args, board, attempt=None):
         info, player, boss, phase, hp = boss_sample(reader)
         events, lost = reader.drain_npc_action_events()
         hits, hits_lost = reader.drain_player_hit_events()
+        intervening_samples = {
+            sequence: tick
+            for sequence, (walk_phase, tick) in walk_samples.items()
+            if walk_phase == phase
+        }
+        walk_samples.clear()
         if attempt:
             attempt.frame(
                 reader,
@@ -2241,7 +2327,10 @@ def run(reader, args, board, attempt=None):
             emit("encounter_reset", reason="Telos instance changed")
             return ENCOUNTER_RESET
 
-        actions = telos_actions(events, identity, info.sequence, {active_instance})
+        actions = telos_actions(
+            events, identity, info.sequence, {active_instance},
+            additional_samples=intervening_samples,
+        )
         if phase in (1, 2) and phase_two_at is None:
             for action in actions:
                 if action["action_sequence"] == P1_TO_P2_TRANSITION:
@@ -2277,7 +2366,7 @@ def run(reader, args, board, attempt=None):
         continue_phase_three = args.continue_phase_two
         if flicker is not None and (phase in (1, 2) or (phase >= 3 and continue_phase_three)):
             flicker.default_prayer = DEFAULT_FLICK_PRAYER_BY_PHASE[phase]
-            flick_step(actions, prayer, now, info.monotonic_ns)
+            flick_step(actions, phase, prayer, now, info.monotonic_ns)
         if not phase_one_started:
             if hp_known:
                 emit("engaged", boss_hp=boss.health_current, phase=phase, player_hp=hp)
@@ -2418,7 +2507,8 @@ def run(reader, args, board, attempt=None):
             tick = reader.encounter.game_tick
             if tick.valid:
                 received_tick = tick.counter
-            actions = [dict(action, received_tick=received_tick) for action in actions]
+            for action in actions:
+                action.setdefault("received_tick", received_tick)
         phase_one.observe(actions)
         phase_one.observe_hits(len(hits), received_tick)
         position = reader.position
@@ -2626,6 +2716,10 @@ def main():
     )
     parser.add_argument("--melee", type=int, nargs=2, help="Deflect Melee action-bar pixel")
     parser.add_argument("--practice-0-confirmed", action="store_true")
+    parser.add_argument(
+        "--block-black-stream", action="store_true",
+        help="Practice trial: walk into the black stream while it feeds P2 Onslaught",
+    )
     parser.add_argument(
         "--practice-enrage",
         type=int,

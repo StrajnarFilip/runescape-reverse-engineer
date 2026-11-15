@@ -10,8 +10,8 @@ The 2026-11-13 capture began with dormant Telos in a 0% Practice Mode instance. 
 | `28938` | Charge and Uppercut sequence. Two type `144` player hitmarks appeared about 4.09 and 4.20 seconds after separate applications. | Optional Surge trial 3.6–4.0 seconds after the cue. Verify displacement and damage from the resulting trace. |
 | `28935` | Hold Still after two separately animated autos. The capture showed a normal hit, a heavier hit and later landing damage within this sequence. | Prepare Anticipation after the second auto following Uppercut. The observed special can trigger Freedom. With Surge configured, try to leave the landing area after the follow-up hit. |
 | `28962` | Wake-up animation on dormant and active Telos. | Ignore for the auto count. |
-| `28963` | Seen before and through the change from P1 to P2. | Record the raw ID. Use phase bits and boss HP together to recognize the transition. |
-| `28930` | One application recorded early in P2. | Candidate for a magic auto. Correlate with visible casting and hitmarks in another run. |
+| `28963` | Repeats during phase handoffs, including the P1→P2 input lockout. | Record the raw ID. Use phase bits and boss HP to recognize the transition. This cue offers no protection flick. |
+| `28930` | Phase opener. A replay found no player hitmark within three received ticks of 53 occurrences across P2 to P4. | Use as a rotation cue. Wait for an attack cue before changing overhead protection. |
 
 The next Tendrils after Hold Still also followed two separate `28929` applications. An ordinary hit embedded in Hold Still could account for the shorter visible count. Keep the count for anticipation and use the special's animation ID to confirm the mechanic. If melee distance changes, capture the next auto before expanding the count to spells. [PVME attack pattern and mechanics](https://pvme.io/pvme-guides/basic-guides/telos-basic/#attack-pattern)
 
