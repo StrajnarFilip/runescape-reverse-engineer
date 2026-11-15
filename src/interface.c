@@ -1,6 +1,7 @@
 /* Action-bar slot and binding tables. No game calls or memory writes. */
 #include "interface.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -15,6 +16,27 @@ _Static_assert(sizeof(rs3_interface_observation) == 16, "ABI interface observati
 _Static_assert(sizeof(rs3_action_bar_slot) == 232, "ABI action bar layout");
 _Static_assert(offsetof(rs3_action_bar_slot, raw_packed) == 72, "ABI action bar alignment");
 _Static_assert(sizeof(rs3_pointer_candidate) == 304, "ABI pointer candidate layout");
+_Static_assert(sizeof(rs3_minimap_candidate) == 64, "ABI minimap candidate layout");
+
+#define MINIMAP_INTERFACE            1465u
+#define MINIMAP_COMPONENT            0u
+#define MINIMAP_COMPONENT_VTABLE_RVA 0x1531208u
+#define MINIMAP_HANDLER_SLOT_OFFSET  0x30u
+#define MINIMAP_HANDLER_RVA          0x320c00u
+#define MINIMAP_MANAGER_OFFSET       0x19898u
+#define MINIMAP_COMPONENT_BYTES      0x230u
+#define MINIMAP_RECT_OFFSET          0x78u
+#define MINIMAP_OWNER_OFFSET         0x220u
+#define MINIMAP_SPRITE_OFFSET        0x228u
+#define MINIMAP_SPRITE_VTABLE_RVA    0x15de040u
+#define MINIMAP_SPRITE_SCALE_OFFSET  0x548u
+#define MINIMAP_SPRITE_SHAPE_OFFSET  0x578u
+#define MINIMAP_MODE_OFFSET          0x10u
+#define MINIMAP_ZOOM_OFFSET          0x3cu
+#define MINIMAP_MAX_DIMENSION        32768
+#define UI_COMPONENT_VECTOR_OFFSET   8u
+#define UI_COMPONENT_ENTRY_BYTES     24u
+#define UI_COMPONENT_POINTER_OFFSET  16u
 
 #define STORED_BAR_COUNT            18u
 #define DISPLAY_PRESETS_VAR         10160u
@@ -588,9 +610,179 @@ uint32_t rs3_interface_sizeof(uint32_t structure)
             return sizeof(rs3_action_bar_slot);
         case 4:
             return sizeof(rs3_pointer_candidate);
+        case 5:
+            return sizeof(rs3_minimap_candidate);
         default:
             return 0;
     }
+}
+
+void interface_minimap_clear(rs3_minimap_candidate *out)
+{
+    memset(out, 0, sizeof *out);
+    out->status = RS3_UNAVAILABLE;
+    out->reason = RS3_UI_FRAME_UNAVAILABLE;
+}
+
+/** Pin the component's handler and its owner, sprite, geometry and zoom loads. */
+static int minimap_code_matches(rs3_context *context)
+{
+    static const ui_code_guard guards[] = {
+        {0x320c04, 7, {0x48, 0x8b, 0x91, 0x28, 0x02, 0, 0}},
+        {0x320c17, 7, {0x48, 0x8b, 0x89, 0x20, 0x02, 0, 0}},
+        {0x320c1e, 7, {0x48, 0x8b, 0x81, 0x98, 0x98, 0x01, 0}},
+        {0x320c50, 6, {0x8b, 0x8a, 0x78, 0x05, 0, 0}},
+        {0x320c9d, 7, {0x41, 0x8b, 0x83, 0x80, 0, 0, 0}},
+        {0x320cb2, 7, {0x41, 0x8b, 0x83, 0x84, 0, 0, 0}},
+        {0x320d9e, 5, {0xf3, 0x0f, 0x10, 0x48, 0x3c}},
+        {0x320f75, 8, {0xf3, 0x0f, 0x10, 0xa9, 0x48, 0x05, 0, 0}}};
+    unsigned char bytes[32];
+    uint64_t handler;
+    if (context->target.profile != &profile_primary || !ui_code_matches(context) ||
+        !memory_read_pointer(context,
+                             context->target.module_base + MINIMAP_COMPONENT_VTABLE_RVA +
+                                 MINIMAP_HANDLER_SLOT_OFFSET,
+                             &handler) ||
+        handler != context->target.module_base + MINIMAP_HANDLER_RVA)
+    {
+        return 0;
+    }
+    for (unsigned index = 0; index < sizeof guards / sizeof *guards; index++)
+    {
+        const ui_code_guard *guard = &guards[index];
+        if (!memory_read(context, context->target.module_base + guard->rva, bytes, guard->size) ||
+            memcmp(bytes, guard->bytes, guard->size) != 0)
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+void interface_minimap_stage(rs3_context *context, uint64_t world_state, rs3_minimap_candidate *out)
+{
+    interface_minimap_clear(out);
+    out->reason = RS3_UI_UNSUPPORTED_PROFILE;
+    if (!minimap_code_matches(context))
+    {
+        return;
+    }
+    out->reason = RS3_UI_READ_FAILED;
+    uint64_t manager, minimap, vtable;
+    uint32_t state;
+    unsigned char cache[16], pair[16], vector[16], entry[UI_COMPONENT_ENTRY_BYTES];
+    if (!memory_read(context, world_state + LAYOUT_GAME_STATE_OFFSET, &state, sizeof state) ||
+        state != LAYOUT_IN_GAME_STATE ||
+        !memory_read_pointer(context, world_state + UI_MANAGER_OFFSET, &manager) ||
+        !memory_read_pointer(context, manager, &vtable) ||
+        vtable != context->target.module_base + UI_MANAGER_VTABLE_RVA ||
+        !memory_read_pointer(context, world_state + MINIMAP_MANAGER_OFFSET, &minimap) ||
+        !memory_read(context, manager + UI_CACHE_HEADER_OFFSET, cache, sizeof cache))
+    {
+        return;
+    }
+    if (!ui_cache_has_id(context, cache, MINIMAP_INTERFACE))
+    {
+        out->reason = RS3_UI_UNMAPPED;
+        return;
+    }
+    uint64_t pair_address = decode_u64(cache) + MINIMAP_INTERFACE * 16ull;
+    if (!memory_read(context, pair_address, pair, sizeof pair) ||
+        !memory_read(context, decode_u64(pair + 8) + UI_COMPONENT_VECTOR_OFFSET, vector,
+                     sizeof vector))
+    {
+        return;
+    }
+    uint64_t begin = decode_u64(vector), end = decode_u64(vector + 8);
+    if (!is_valid_remote_pointer(begin) || end <= begin ||
+        (end - begin) % UI_COMPONENT_ENTRY_BYTES != 0 ||
+        (end - begin) / UI_COMPONENT_ENTRY_BYTES > UI_MAX_COMPONENTS ||
+        !memory_read(context, begin + MINIMAP_COMPONENT * UI_COMPONENT_ENTRY_BYTES, entry,
+                     sizeof entry))
+    {
+        return;
+    }
+    uint64_t component = decode_u64(entry + UI_COMPONENT_POINTER_OFFSET);
+    unsigned char data[MINIMAP_COMPONENT_BYTES], after[MINIMAP_COMPONENT_BYTES];
+    if (!memory_read(context, component, data, sizeof data) ||
+        decode_u64(data) != context->target.module_base + MINIMAP_COMPONENT_VTABLE_RVA ||
+        decode_u32(data + UI_COMPONENT_ID_OFFSET) !=
+            (MINIMAP_COMPONENT << 16 | MINIMAP_INTERFACE) ||
+        decode_u64(data + MINIMAP_OWNER_OFFSET) != world_state)
+    {
+        return;
+    }
+    uint64_t sprite = decode_u64(data + MINIMAP_SPRITE_OFFSET);
+    rs3_minimap_candidate staged = {0};
+    uint64_t sprite_vtable;
+    if (!memory_read_pointer(context, sprite, &sprite_vtable) ||
+        sprite_vtable != context->target.module_base + MINIMAP_SPRITE_VTABLE_RVA ||
+        !memory_read(context, sprite + MINIMAP_SPRITE_SCALE_OFFSET, &staged.raw_sprite_scale,
+                     sizeof staged.raw_sprite_scale) ||
+        !memory_read(context, sprite + MINIMAP_SPRITE_SHAPE_OFFSET, &staged.raw_shape,
+                     sizeof staged.raw_shape) ||
+        !memory_read(context, minimap + MINIMAP_MODE_OFFSET, &staged.raw_mode,
+                     sizeof staged.raw_mode) ||
+        !memory_read(context, minimap + MINIMAP_ZOOM_OFFSET, &staged.raw_zoom,
+                     sizeof staged.raw_zoom))
+    {
+        return;
+    }
+    staged.local_x = decode_i32(data + MINIMAP_RECT_OFFSET);
+    staged.local_y = decode_i32(data + MINIMAP_RECT_OFFSET + 4);
+    staged.width = decode_i32(data + MINIMAP_RECT_OFFSET + 8);
+    staged.height = decode_i32(data + MINIMAP_RECT_OFFSET + 12);
+    if (staged.width <= 0 || staged.width > MINIMAP_MAX_DIMENSION || staged.height <= 0 ||
+        staged.height > MINIMAP_MAX_DIMENSION || !isfinite(staged.raw_sprite_scale) ||
+        staged.raw_sprite_scale <= 0 || !isfinite(staged.raw_zoom) || staged.raw_zoom <= 0)
+    {
+        return;
+    }
+    float scale_after, zoom_after;
+    int32_t shape_after, mode_after;
+    uint32_t state_after, group_after;
+    uint64_t manager_after, minimap_after, sprite_vtable_after, vtable_after;
+    if (!memory_read(context, component, after, sizeof data) || memcmp(data, after, sizeof data) ||
+        !memory_read(context, sprite + MINIMAP_SPRITE_SCALE_OFFSET, &scale_after,
+                     sizeof scale_after) ||
+        memcmp(&scale_after, &staged.raw_sprite_scale, sizeof scale_after) ||
+        !memory_read(context, sprite + MINIMAP_SPRITE_SHAPE_OFFSET, &shape_after,
+                     sizeof shape_after) ||
+        shape_after != staged.raw_shape ||
+        !memory_read_pointer(context, sprite, &sprite_vtable_after) ||
+        sprite_vtable_after != sprite_vtable ||
+        !memory_read(context, minimap + MINIMAP_MODE_OFFSET, &mode_after, sizeof mode_after) ||
+        mode_after != staged.raw_mode ||
+        !memory_read(context, minimap + MINIMAP_ZOOM_OFFSET, &zoom_after, sizeof zoom_after) ||
+        memcmp(&zoom_after, &staged.raw_zoom, sizeof zoom_after) ||
+        !memory_read(context, begin, after, sizeof entry) || memcmp(entry, after, sizeof entry) ||
+        !memory_read(context, decode_u64(pair + 8) + UI_COMPONENT_VECTOR_OFFSET, after,
+                     sizeof vector) ||
+        memcmp(vector, after, sizeof vector) ||
+        !memory_read(context, decode_u64(pair + 8), &group_after, sizeof group_after) ||
+        group_after != MINIMAP_INTERFACE ||
+        !memory_read(context, pair_address, after, sizeof pair) ||
+        memcmp(pair, after, sizeof pair) ||
+        !memory_read(context, manager + UI_CACHE_HEADER_OFFSET, after, sizeof cache) ||
+        memcmp(cache, after, sizeof cache) ||
+        !memory_read_pointer(context, world_state + UI_MANAGER_OFFSET, &manager_after) ||
+        manager_after != manager ||
+        !memory_read_pointer(context, world_state + MINIMAP_MANAGER_OFFSET, &minimap_after) ||
+        minimap_after != minimap || !memory_read_pointer(context, manager, &vtable_after) ||
+        vtable_after != vtable ||
+        !memory_read(context, world_state + LAYOUT_GAME_STATE_OFFSET, &state_after,
+                     sizeof state_after) ||
+        state_after != state)
+    {
+        return;
+    }
+    staged.observed_ns = clock_monotonic_ns();
+    staged.status = RS3_PARTIAL;
+    staged.reason = RS3_UI_UNVALIDATED_SOURCE;
+    staged.flags = RS3_MINIMAP_RAW_COMPONENT | RS3_MINIMAP_RAW_SCALE | RS3_MINIMAP_RAW_ZOOM;
+    staged.interface_id = MINIMAP_INTERFACE;
+    staged.component_id = MINIMAP_COMPONENT;
+    *out = staged;
 }
 
 void interface_pointer_clear(rs3_pointer_candidate *out)

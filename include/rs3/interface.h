@@ -63,6 +63,40 @@ typedef struct rs3_pointer_candidate
     char verb[RS3_POINTER_TEXT_CAPACITY];
 } rs3_pointer_candidate;
 
+/** Read flags only. None establishes visibility, physical bounds or click permission. */
+enum rs3_minimap_candidate_flags
+{
+    RS3_MINIMAP_RAW_COMPONENT = 1u,
+    RS3_MINIMAP_RAW_SCALE = 2u,
+    RS3_MINIMAP_RAW_ZOOM = 4u
+};
+
+/**
+ * Raw cached minimap component and scale sources. local_x/local_y are relative
+ * to the component's parent, never screen coordinates. Cached presence does
+ * not prove attachment or visibility. Zoom and scale remain uncalibrated;
+ * these fields supply neither a tile transform nor a complete view signature.
+ * Successful reads remain PARTIAL/UNVALIDATED_SOURCE. No heap address escapes.
+ */
+typedef struct rs3_minimap_candidate
+{
+    uint64_t observed_ns;
+    uint32_t status;
+    uint32_t reason;
+    uint32_t flags;
+    uint32_t interface_id;
+    uint32_t component_id;
+    int32_t local_x;
+    int32_t local_y;
+    int32_t width;
+    int32_t height;
+    int32_t raw_shape;
+    int32_t raw_mode;
+    float raw_zoom;
+    float raw_sprite_scale;
+    uint32_t reserved;
+} rs3_minimap_candidate;
+
 enum rs3_interface_kind
 {
     RS3_UI_INSTANCE = 1,
@@ -150,8 +184,11 @@ typedef struct rs3_action_bar_slot
     char name[RS3_INTERFACE_NAME_BYTES]; /**< UTF-8, always terminated. */
 } rs3_action_bar_slot;
 
-/** 1=info, 2=interface observation, 3=slot, 4=raw pointer candidate; unknown IDs return 0. */
+/** 1=info, 2=observation, 3=slot, 4=pointer candidate, 5=minimap candidate; otherwise 0. */
 RS3_API uint32_t rs3_interface_sizeof(uint32_t structure);
+/** Copy raw cached minimap sources from one owned snapshot; never a click region. */
+RS3_API int32_t rs3_snapshot_minimap_candidate(const rs3_snapshot *snapshot,
+                                               rs3_minimap_candidate *out, uint32_t out_size);
 /** Copy raw unvalidated menu data from one owned snapshot; it is never a click hit-test. */
 RS3_API int32_t rs3_snapshot_pointer_candidate(const rs3_snapshot *snapshot,
                                                rs3_pointer_candidate *out, uint32_t out_size);

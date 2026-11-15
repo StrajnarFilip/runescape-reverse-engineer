@@ -16,4 +16,10 @@ void interface_pointer_clear(rs3_pointer_candidate *out);
 void interface_pointer_stage(rs3_context *context, uint64_t world_state,
                              rs3_pointer_candidate *out);
 
+/** Clear cached minimap diagnostics after an unavailable frame or process. */
+void interface_minimap_clear(rs3_minimap_candidate *out);
+/** Read guarded cached component/scale sources; no physical geometry is inferred. */
+void interface_minimap_stage(rs3_context *context, uint64_t world_state,
+                             rs3_minimap_candidate *out);
+
 #endif

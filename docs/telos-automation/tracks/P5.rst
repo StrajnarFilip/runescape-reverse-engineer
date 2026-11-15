@@ -167,3 +167,19 @@ sample identity and age remain mandatory for downstream use.
   connect a complete view signature and record manual clicks with confirmed
   tile arrivals. Do not fit or authorize movement from the candidate panel
   rectangle alone. See the compact minimap section of the interface report.
+* The user reports that scrolling over the minimap has no visible effect.
+  The bounded capture likewise kept raw zoom at 1.0 and sprite scale at 0.5.
+  That trial does not validate a zoom control or the relation between those
+  two fields. Do not request the same scroll sequence again as a known control.
+* Native follow-up: a new 64-byte ``rs3_minimap_candidate`` exposes cached
+  component-local bounds and raw shape/mode/zoom/scale sources. The C decoder
+  pins eight handler instructions and the vtable method, validates owner and
+  component identity, bounds the vector and rechecks all consumed fields and
+  roots. Successful results remain PARTIAL/UNVALIDATED_SOURCE: no attachment,
+  physical position, heading, safe radius or tile transform is established.
+  Three new fixture groups cover acquisition/reset and concurrent, corrupt,
+  nonfinite and changed-code cases (24 native interface groups total).
+* L wiring request: register one private ``rs3_minimap_candidate`` snapshot
+  field in ``src/context.h``, copy it with the other P5 data and add its
+  caller-owned accessor. P5 will add the stage/clear and Python registration
+  lines after that integration step. No existing public layout changes.

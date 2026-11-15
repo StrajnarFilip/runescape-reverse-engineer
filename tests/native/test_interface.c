@@ -49,6 +49,12 @@
 #define POINTER_HEAP_FLAG          0x80u
 #define POINTER_MODULE_SIZE        0x2000000u
 
+#define MINIMAP_COMPONENT_DATA 0xbc0000ull
+#define MINIMAP_SPRITE_DATA    0xbd0000ull
+#define MINIMAP_MANAGER_DATA   0xbe0000ull
+#define MINIMAP_GUARD_BASE     0x320c00u
+#define MINIMAP_GUARD_BYTES    0x500u
+
 static fixture *prayer_bar_fixture(void);
 
 /** Add independently pinned instruction fixtures and an attached bank root. */
@@ -625,6 +631,127 @@ static void pointer_snapshot_wiring_copy_and_unavailable_reset(void)
     fixture_destroy(test_fixture);
 }
 
+/** Synthetic cached minimap only: no attachment or physical geometry is asserted. */
+static fixture *minimap_fixture(void)
+{
+    fixture *test_fixture = bank_fixture();
+    static const struct
+    {
+        uint32_t rva;
+        uint32_t size;
+        unsigned char bytes[8];
+    } guards[] = {{0x320c04, 7, {0x48, 0x8b, 0x91, 0x28, 0x02, 0, 0}},
+                  {0x320c17, 7, {0x48, 0x8b, 0x89, 0x20, 0x02, 0, 0}},
+                  {0x320c1e, 7, {0x48, 0x8b, 0x81, 0x98, 0x98, 0x01, 0}},
+                  {0x320c50, 6, {0x8b, 0x8a, 0x78, 0x05, 0, 0}},
+                  {0x320c9d, 7, {0x41, 0x8b, 0x83, 0x80, 0, 0, 0}},
+                  {0x320cb2, 7, {0x41, 0x8b, 0x83, 0x84, 0, 0, 0}},
+                  {0x320d9e, 5, {0xf3, 0x0f, 0x10, 0x48, 0x3c}},
+                  {0x320f75, 8, {0xf3, 0x0f, 0x10, 0xa9, 0x48, 0x05, 0, 0}}};
+    fixture_add_block(test_fixture, FIXTURE_MODULE_BASE + MINIMAP_GUARD_BASE, MINIMAP_GUARD_BYTES);
+    for (unsigned index = 0; index < sizeof guards / sizeof *guards; index++)
+    {
+        memcpy(fixture_bytes(test_fixture, FIXTURE_MODULE_BASE + guards[index].rva,
+                             guards[index].size),
+               guards[index].bytes, guards[index].size);
+    }
+    fixture_add_block(test_fixture, FIXTURE_MODULE_BASE + 0x1531238, sizeof(uint64_t));
+    fixture_put_u64(test_fixture, FIXTURE_MODULE_BASE + 0x1531238, FIXTURE_MODULE_BASE + 0x320c00);
+    fixture_add_block(test_fixture, UI_COMPONENTS, 24);
+    fixture_add_block(test_fixture, MINIMAP_COMPONENT_DATA, 0x230);
+    fixture_add_block(test_fixture, MINIMAP_SPRITE_DATA, 0x580);
+    fixture_add_block(test_fixture, MINIMAP_MANAGER_DATA, 0x48);
+    fixture_put_u64(test_fixture, UI_CACHE + 1465 * 16 + 8, UI_RECORDS + 0x200);
+    fixture_put_u32(test_fixture, UI_RECORDS + 0x200, 1465);
+    fixture_put_u64(test_fixture, UI_RECORDS + 0x208, UI_COMPONENTS);
+    fixture_put_u64(test_fixture, UI_RECORDS + 0x210, UI_COMPONENTS + 24);
+    fixture_put_u64(test_fixture, UI_COMPONENTS + 16, MINIMAP_COMPONENT_DATA);
+    fixture_put_u64(test_fixture, MINIMAP_COMPONENT_DATA, FIXTURE_MODULE_BASE + 0x1531208);
+    fixture_put_u32(test_fixture, MINIMAP_COMPONENT_DATA + 0x18, 1465);
+    fixture_put_u32(test_fixture, MINIMAP_COMPONENT_DATA + 0x80, 283);
+    fixture_put_u32(test_fixture, MINIMAP_COMPONENT_DATA + 0x84, 245);
+    fixture_put_u64(test_fixture, MINIMAP_COMPONENT_DATA + 0x220, FIXTURE_WORLD);
+    fixture_put_u64(test_fixture, MINIMAP_COMPONENT_DATA + 0x228, MINIMAP_SPRITE_DATA);
+    fixture_put_u64(test_fixture, MINIMAP_SPRITE_DATA, FIXTURE_MODULE_BASE + 0x15de040);
+    float scale = 0.5f, zoom = 1.0f;
+    memcpy(fixture_bytes(test_fixture, MINIMAP_SPRITE_DATA + 0x548, sizeof scale), &scale,
+           sizeof scale);
+    memcpy(fixture_bytes(test_fixture, MINIMAP_MANAGER_DATA + 0x3c, sizeof zoom), &zoom,
+           sizeof zoom);
+    fixture_put_u64(test_fixture, FIXTURE_WORLD + 0x19898, MINIMAP_MANAGER_DATA);
+    return test_fixture;
+}
+
+static void minimap_cached_sources_remain_unvalidated(void)
+{
+    fixture *test_fixture = minimap_fixture();
+    rs3_minimap_candidate candidate;
+    interface_minimap_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(sizeof candidate == 64 && rs3_interface_sizeof(5) == sizeof candidate);
+    assert(candidate.status == RS3_PARTIAL && candidate.reason == RS3_UI_UNVALIDATED_SOURCE);
+    assert(candidate.flags ==
+           (RS3_MINIMAP_RAW_COMPONENT | RS3_MINIMAP_RAW_SCALE | RS3_MINIMAP_RAW_ZOOM));
+    assert(candidate.interface_id == 1465 && candidate.component_id == 0);
+    assert(candidate.local_x == 0 && candidate.local_y == 0);
+    assert(candidate.width == 283 && candidate.height == 245);
+    assert(candidate.raw_shape == 0 && candidate.raw_mode == 0);
+    assert(candidate.raw_zoom == 1.0f && candidate.raw_sprite_scale == 0.5f);
+    interface_minimap_clear(&candidate);
+    assert(candidate.status == RS3_UNAVAILABLE && candidate.reason == RS3_UI_FRAME_UNAVAILABLE);
+    assert(candidate.flags == 0 && candidate.observed_ns == 0 && candidate.width == 0);
+    fixture_destroy(test_fixture);
+}
+
+static void minimap_rejects_torn_component_scale_and_roots(void)
+{
+    fixture *test_fixture = minimap_fixture();
+    rs3_minimap_candidate candidate;
+    fixture_mutate_on_read(test_fixture, MINIMAP_COMPONENT_DATA, 2, MINIMAP_COMPONENT_DATA + 0x80,
+                           284);
+    interface_minimap_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.status == RS3_UNAVAILABLE && candidate.flags == 0);
+    fixture_clear_mutation(test_fixture);
+    fixture_mutate_on_read(test_fixture, MINIMAP_SPRITE_DATA + 0x548, 2,
+                           MINIMAP_SPRITE_DATA + 0x548, 0x3f800000);
+    interface_minimap_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.status == RS3_UNAVAILABLE && candidate.flags == 0);
+    fixture_clear_mutation(test_fixture);
+    fixture_mutate_on_read(test_fixture, FIXTURE_WORLD + 0x19898, 2, FIXTURE_WORLD + 0x19898, 0);
+    interface_minimap_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.status == RS3_UNAVAILABLE && candidate.flags == 0);
+    fixture_destroy(test_fixture);
+}
+
+static void minimap_rejects_bad_identity_bounds_values_and_guards(void)
+{
+    fixture *test_fixture = minimap_fixture();
+    rs3_minimap_candidate candidate;
+    fixture_put_u32(test_fixture, MINIMAP_COMPONENT_DATA + 0x18, 1466);
+    interface_minimap_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.flags == 0 && candidate.status == RS3_UNAVAILABLE);
+    fixture_put_u32(test_fixture, MINIMAP_COMPONENT_DATA + 0x18, 1465);
+    fixture_put_u32(test_fixture, MINIMAP_COMPONENT_DATA + 0x80, 0);
+    interface_minimap_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.flags == 0);
+    fixture_put_u32(test_fixture, MINIMAP_COMPONENT_DATA + 0x80, 283);
+    fixture_put_u32(test_fixture, MINIMAP_MANAGER_DATA + 0x3c, 0x7fc00000);
+    interface_minimap_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.flags == 0);
+    fixture_put_u32(test_fixture, MINIMAP_MANAGER_DATA + 0x3c, 0x3f800000);
+    fixture_put_u64(test_fixture, UI_RECORDS + 0x210, UI_COMPONENTS + 4097ull * 24);
+    interface_minimap_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.flags == 0);
+    fixture_put_u64(test_fixture, UI_RECORDS + 0x210, UI_COMPONENTS + 24);
+    fixture_put_u64(test_fixture, MINIMAP_COMPONENT_DATA + 0x220, FIXTURE_WORLD + 8);
+    interface_minimap_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.flags == 0);
+    fixture_put_u64(test_fixture, MINIMAP_COMPONENT_DATA + 0x220, FIXTURE_WORLD);
+    fixture_put_u32(test_fixture, FIXTURE_MODULE_BASE + 0x320d9e, 0);
+    interface_minimap_stage(test_fixture->context, FIXTURE_WORLD, &candidate);
+    assert(candidate.flags == 0 && candidate.reason == RS3_UI_UNSUPPORTED_PROFILE);
+    fixture_destroy(test_fixture);
+}
+
 int main(void)
 {
     RUN_TEST(four_curse_bindings);
@@ -648,5 +775,8 @@ int main(void)
     RUN_TEST(pointer_selects_modern_or_legacy_menu_without_changing_abi);
     RUN_TEST(pointer_rejects_changing_or_invalid_menu_backend_and_state);
     RUN_TEST(pointer_backend_instruction_guards_are_required);
+    RUN_TEST(minimap_cached_sources_remain_unvalidated);
+    RUN_TEST(minimap_rejects_torn_component_scale_and_roots);
+    RUN_TEST(minimap_rejects_bad_identity_bounds_values_and_guards);
     return 0;
 }
