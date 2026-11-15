@@ -25,8 +25,8 @@
 
 The account owner reports a player status for each of the three strips and for the virus.
 `work/log_variables.py` logged every varp and varc change during the 08:47 250% attempt (log
-kept local under `work/variable_logs/`), which reached P4 and stood on the red strip several
-times. Variable changes were aligned to the attempt log by player tile and ranked by how
+kept local under `work/variable_logs/`). The player stood on the red strip several times in P3.
+P4 has no strips (account owner). Variable changes were aligned to the attempt log by player tile and ranked by how
 often they fell within 1.2 s of strip arrivals, departures and virus events.
 
 - VARP `6362`, the virus countdown, matched every virus onset and cleanse. It is the virus
