@@ -14,6 +14,7 @@ from rs3_reader.bot.attempt_log import AttemptLog
 from rs3_reader.native import (
     EncounterState,
     HazardFlags,
+    NPCActionEvent,
     NPCFlags,
     Reason,
     SpatialFlags,
@@ -22,6 +23,7 @@ from rs3_reader.native import (
     Variable,
 )
 from rs3_reader.prayer import Prayer
+from rs3_reader.telos_prayer import telos_actions
 
 controller = runpy.run_path(str(Path(__file__).resolve().parents[2] / "work" / "telos_zero.py"))
 PhaseOne = controller["PhaseOne"]
@@ -38,6 +40,34 @@ def event(ordinal, animation):
 
 
 class PhaseOneTests(unittest.TestCase):
+    def test_uppercut_seen_during_beam_click_still_gets_escape_and_owns_movement(self):
+        # P3 Uppercut was sampled at frame 4962 during a beam click and drained at 4963.
+        marker = NPCActionEvent(
+            sequence=201,
+            observed_ns=166_125_031_800,
+            sample_sequence=4962,
+            scene_epoch=3,
+            process_creation_time=2,
+            instance_id=1,
+            pid=1,
+            action_sequence=UPPERCUT,
+        )
+        session = (1, 2, 3)
+        self.assertEqual(telos_actions([marker], session, 4963, {1}), [])
+        actions = telos_actions(
+            [marker], session, 4963, {1}, additional_samples={4962: None}
+        )
+        phase = PhaseOne(phase=3)
+        phase.observe(actions)
+        self.assertEqual(phase.expected, HOLD_STILL)
+        now = marker.observed_ns + 2_500_000_000
+        self.assertTrue(phase.owns_movement(now, 560))
+        self.assertEqual(
+            phase.next_action(now, {"Escape": 0}, 0, Prayer.SOUL_SPLIT, received_tick=560),
+            controller["Action"]("Escape", "Uppercut escape"),
+        )
+        self.assertFalse(phase.owns_movement(marker.observed_ns + 7 * SECOND_NS, 568))
+
     def test_repeated_ids_count_once_per_application(self):
         phase = PhaseOne()
         autos = [event(ordinal, AUTO) for ordinal in range(1, 8)]
@@ -778,6 +808,12 @@ class PrayerFlickerTests(unittest.TestCase):
         flicker.default_prayer = Prayer.MAGIC
         flicker.observe([event(1, AUTO)], 40, 0)
         self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 40, 0), Prayer.MAGIC)
+
+    def test_hold_still_uses_melee_even_when_phase_default_is_magic(self):
+        flicker = PrayerFlicker()
+        flicker.default_prayer = Prayer.MAGIC
+        flicker.observe([event(1, HOLD_STILL)], 40, 0)
+        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 40, 0), Prayer.MELEE)
 
     def test_phase_three_counts_magic_autos_before_hold_still(self):
         phase = PhaseOne(phase=3)

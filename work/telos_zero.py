@@ -83,7 +83,8 @@ MAGIC_ATTACK = 28959
 # The RuneScape Wiki strategy page names the P2 magic barrage Magical Onslaught: projectiles
 # grow in damage, matching the rising 28959 hits. Each projectile repeats the animation.
 ONSLAUGHT = MAGIC_ATTACK
-FLICK_PRAYER_BY_ANIMATION = {MAGIC_ATTACK: Prayer.MAGIC}
+# Hold Still's follow-up is melee even on P3, where Telos's standard attacks use magic.
+FLICK_PRAYER_BY_ANIMATION = {MAGIC_ATTACK: Prayer.MAGIC, HOLD_STILL: Prayer.MELEE}
 # Next special per phase, from the RuneScape Wiki rotation (guide-derived; P1 matches the live
 # captures). P2: Onslaught, Hold Still, Black Virus, Uppercut, Tendrils, each after 3 autos.
 # The virus has no mapped animation, so Hold Still is followed directly by Uppercut here.
@@ -911,6 +912,14 @@ class PhaseOne:
         earliest_ns, latest_ns = UPPERCUT_ESCAPE_FALLBACK_NS
         return earliest_ns <= elapsed_ns <= latest_ns
 
+    def owns_movement(self, now, received_tick):
+        """Reserve movement during a dodge even if pointer sampling interrupted the tick clock."""
+        if self.special not in (UPPERCUT, HOLD_STILL):
+            return False
+        if isinstance(received_tick, int) and isinstance(self.special_tick, int):
+            return 0 <= received_tick - self.special_tick <= BEAM_SPECIAL_HOLD_TICKS
+        return 0 <= now - self.special_ns <= BEAM_SPECIAL_HOLD_TICKS * TICK_FALLBACK_NS
+
     def observe_hits(self, hit_count, received_tick):
         """Record the first player hitmark from Hold Still's +2 hit onwards."""
         if (
@@ -1670,6 +1679,7 @@ def run(reader, args, board, attempt=None):
 
     beam_blocker = BeamBlocker()
     virus = VirusResponse()
+    virus_reengage = None
     walk_samples = {}
 
     def refresh_for_walk():
@@ -1694,13 +1704,19 @@ def run(reader, args, board, attempt=None):
 
     def virus_step(phase, boss, received_tick, *, movement_busy):
         """Walk to the live strip while the debuff is active and log its resolution."""
+        nonlocal virus_reengage
         if not isinstance(received_tick, int):
             return
         prior_phase = virus.phase
         prior_onset, prior_move, prior_arrival = virus.started, virus.move_tick, virus.arrival
         prior_walk_target = virus.walk_target
         remaining = virus_timer(reader.encounter) if phase in VIRUS_BEAM_BY_PHASE else None
+        if virus_reengage is not None and virus_reengage != (phase, boss.instance_id):
+            virus_reengage = None
         if prior_onset is None and not remaining:
+            if virus_reengage is not None and not movement_busy and input_allowed:
+                virus_reengage = None
+                reengage_telos(boss, reader.spatial.player)
             return
         message = reader.telos_cleanse
         onset, outcome = virus.observe(phase, remaining, received_tick, reader.info.logic_tick, message)
@@ -1748,8 +1764,8 @@ def run(reader, args, board, attempt=None):
             )
             if outcome != "phase_changed":
                 moved = virus.finish()
-                if moved and not movement_busy:
-                    reengage_telos(boss, player)
+                if moved:
+                    virus_reengage = (phase, boss.instance_id)
         if onset:
             emit(
                 "anima_virus_detected",
@@ -1851,7 +1867,7 @@ def run(reader, args, board, attempt=None):
             screen_point=screen_point,
         )
 
-    def beam_step(phase, phase_one, boss, meter, received_tick):
+    def beam_step(phase, phase_one, boss, meter, received_tick, *, movement_busy):
         """Measure beam feeding and optionally trial a verified walk during P2 Onslaught."""
         if not isinstance(received_tick, int):
             return
@@ -1864,7 +1880,7 @@ def run(reader, args, board, attempt=None):
                 meter=meter,
                 received_tick=received_tick,
             )
-        if not getattr(args, "block_black_stream", False) or not input_allowed:
+        if not getattr(args, "block_black_stream", False) or not input_allowed or movement_busy:
             return
         player = reader.spatial.player
         if not player.valid_mask & SpatialFlags.TILE:
@@ -2614,19 +2630,14 @@ def run(reader, args, board, attempt=None):
                 surge_cue = pending_cue
             log("ability_sent", ability=action.ability, reason=action.reason, sent_ns=sent_ns)
         remember_floor(phase, boss)
+        movement_busy = phase_one.owns_movement(reader.monotonic_ns(), received_tick)
         if phase is not None and phase >= 4:
             font_step(phase_one, boss, received_tick, timers)
         elif phase in BEAM_KIND_BY_PHASE:
             telos_raw = player.variable(Variable.TELOS_PACKED)
             meter = None if telos_raw is None else telos_raw & METER_MASK
-            beam_step(phase, phase_one, boss, meter, received_tick)
+            beam_step(phase, phase_one, boss, meter, received_tick, movement_busy=movement_busy)
         stomp_dodge(phase_one, boss, received_tick, timers)
-        movement_busy = (
-            phase_one.special in (UPPERCUT, HOLD_STILL)
-            and isinstance(phase_one.special_tick, int)
-            and isinstance(received_tick, int)
-            and received_tick - phase_one.special_tick <= BEAM_SPECIAL_HOLD_TICKS
-        )
         virus_step(phase, boss, received_tick, movement_busy=movement_busy)
         time.sleep(POLL_SECONDS)
     emit("timeout", active=active_instance is not None)
