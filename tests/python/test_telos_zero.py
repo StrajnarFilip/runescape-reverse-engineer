@@ -703,24 +703,33 @@ class PhaseOneTests(unittest.TestCase):
         self.assertEqual(phase.special, onslaught)
         self.assertEqual(phase.expected, HOLD_STILL)
 
-    def test_phase_four_forecasts_opening_and_cued_hold_still(self):
+    def test_phase_four_anticipates_hold_still_on_the_third_attack(self):
+        # P4 opening: opener, three autos, Hold Still four or five ticks after the third.
         phase = PhaseOne(phase=4, carried_expected=HOLD_STILL)
         self.assertEqual(phase.expected, HOLD_STILL)
-        phase.observe([event(1, controller["P2_OPENING_ATTACK"]), event(2, AUTO)])
+        phase.observe([event(1, controller["P2_OPENING_ATTACK"]), event(2, AUTO), event(3, AUTO)])
         timers = {"Anticipation": 0}
         self.assertIsNone(
-            phase.next_action(2 * SECOND_NS, timers, 0, Prayer.SOUL_SPLIT, flicking=True)
+            phase.next_action(3 * SECOND_NS, timers, 0, Prayer.SOUL_SPLIT, flicking=True)
         )
-        phase.observe([event(3, AUTO)])
-        action = phase.next_action(3 * SECOND_NS, timers, 0, Prayer.SOUL_SPLIT, flicking=True)
+        phase.observe([event(4, AUTO)])
+        action = phase.next_action(4 * SECOND_NS, timers, 0, Prayer.SOUL_SPLIT, flicking=True)
         self.assertEqual(action.ability, "Anticipation")
-        # Tendrils restarts the count; 28966 is anticipated at once.
+        # 08:47: Tendrils, then 28966 (Telos back from the font), three magic attacks, Hold
+        # Still. Anticipation on 28966 itself expired before the stun; now the third attack.
+        magic = controller["MAGIC_ATTACK"]
         phase = PhaseOne(phase=4)
         phase.observe([event(1, TENDRILS), event(2, RELEASE), event(3, AUTO)])
         self.assertIsNone(phase.expected)
-        phase.observe([event(4, controller["P4_HOLD_STILL_CUE"])])
+        phase.observe([event(4, controller["P4_RETURN_CUE"])])
         self.assertEqual(phase.expected, HOLD_STILL)
-        action = phase.next_action(4 * SECOND_NS, timers, 0, Prayer.SOUL_SPLIT, flicking=True)
+        for ordinal in (4, 5, 6):
+            self.assertIsNone(
+                phase.next_action(ordinal * SECOND_NS, timers, 0, Prayer.SOUL_SPLIT,
+                                  flicking=True)
+            )
+            phase.observe([event(ordinal + 1, magic)])
+        action = phase.next_action(7 * SECOND_NS, timers, 0, Prayer.SOUL_SPLIT, flicking=True)
         self.assertEqual(action.ability, "Anticipation")
 
     def test_hold_position_blocks_escape_and_surge(self):
@@ -1259,7 +1268,7 @@ class PrayerFlickerTests(unittest.TestCase):
     def test_phase_three_default_is_deflect_magic_but_melee_autos_keep_melee(self):
         flicker = PrayerFlicker()
         flicker.default_prayer = Prayer.MAGIC
-        flicker.observe([event(1, controller["P4_HOLD_STILL_CUE"])], 40, 0)
+        flicker.observe([event(1, controller["P4_RETURN_CUE"])], 40, 0)
         self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 40, 0), Prayer.MAGIC)
         # P3 28929 hits were type 133 melee.
         flicker.observe([event(2, AUTO)], 44, 0)

@@ -98,20 +98,21 @@ FLICK_PRAYER_BY_ANIMATION = {
 # Next special per phase, from the RuneScape Wiki rotation (guide-derived; P1 matches the live
 # captures). P2: Onslaught, Hold Still, Black Virus, Uppercut, Tendrils, each after 3 autos.
 # The virus has no mapped animation, so Hold Still is followed directly by Uppercut here.
-# Seen once, 4 received ticks before a P4 Hold Still (500%, 2026-11-14); probably the anima bomb.
-P4_HOLD_STILL_CUE = 28966
-# Specials after which the forecast Hold Still is anticipated at once rather than on an auto.
-IMMEDIATE_FORECAST_CUES = frozenset({P4_HOLD_STILL_CUE})
+# 28966 is not Hold Still (account owner). In every logged P4 it came 24-36 ticks after Tendrils,
+# when Telos resumed attacking after the font intermission; the next special followed one to
+# three attacks later and was Hold Still, Uppercut or the anima bomb. Pressing Anticipation on
+# it left it expired 16 ticks before a Hold Still stun (08:47, 250%), so it only restarts the
+# count for a forecast Hold Still after three attacks.
+P4_RETURN_CUE = 28966
 NEXT_SPECIAL_BY_PHASE = {
     1: {TENDRILS: UPPERCUT, UPPERCUT: HOLD_STILL, HOLD_STILL: TENDRILS},
     2: {ONSLAUGHT: HOLD_STILL, HOLD_STILL: UPPERCUT, UPPERCUT: TENDRILS, TENDRILS: ONSLAUGHT},
     # P3: Red Virus, a once-per-phase spec skip, Uppercut, Hold Still. Only the last two have
     # mapped animations, so Hold Still is forecast after Uppercut.
     3: {UPPERCUT: HOLD_STILL, HOLD_STILL: UPPERCUT},
-    # P4 (wiki): Uppercut, Weak Anima Bomb, Hold Still. In the one 2026-11-14 P4 capture that
-    # used it, 28966 preceded Hold Still by 4 received ticks, so it is the Hold Still cue here.
-    # Tendrils (seen once in P4) restarts the count without a forecast.
-    4: {UPPERCUT: None, TENDRILS: None, P4_HOLD_STILL_CUE: HOLD_STILL, HOLD_STILL: UPPERCUT},
+    # P4 (wiki): Uppercut, Weak Anima Bomb, Hold Still. Tendrils (the font intermission) restarts
+    # the count without a forecast; P4_RETURN_CUE forecasts Hold Still after three attacks.
+    4: {UPPERCUT: None, TENDRILS: None, P4_RETURN_CUE: HOLD_STILL, HOLD_STILL: UPPERCUT},
     # P5 (wiki): golems, viruses and the anima bomb; its specials are not mapped yet.
     5: {UPPERCUT: None, HOLD_STILL: None},
 }
@@ -1133,12 +1134,12 @@ class PhaseOne:
         In P2, 28959 is both a lone magic attack and each Onslaught projectile: at 500% a lone
         28959 and two autos were followed by a five-projectile Onslaught, so pressing on the
         second auto spent Anticipation 40 ticks early. P2 therefore waits for the last auto.
+        P4 does too: there Hold Still followed the third attack after the opener or 28966 by
+        four or five ticks, and an earlier press had expired by the stun (08:47, 250%).
         """
         # The carried-over P2 opening keeps the earlier press: there Hold Still followed 28930
         # and only one animated auto in one 500% capture.
-        if self.special in IMMEDIATE_FORECAST_CUES:
-            return 0
-        if self.phase == 2 and self.special is not None:
+        if self.phase == 4 or (self.phase == 2 and self.special is not None):
             return self.expected_after
         return self.expected_after - 1
 
@@ -1201,9 +1202,6 @@ class PhaseOne:
                 self.stomp_attempt_tick = None
                 self.stomp_tick_attempts = 0
                 self.expected = self.next_special[sequence]
-                if sequence in IMMEDIATE_FORECAST_CUES:
-                    # The forecast window counts from the cue itself.
-                    self.last_auto_ns = action["observed_ns"]
 
     def next_action(
         self,
