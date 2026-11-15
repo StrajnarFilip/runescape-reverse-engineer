@@ -452,6 +452,24 @@ class PhaseOneTests(unittest.TestCase):
         first.observe([dict(event(3, bomb), received_tick=50)])
         self.assertIsNone(first.next_action(SECOND_NS, timers, 0, Prayer.MELEE, received_tick=51))
 
+    def test_super_restore_at_fifty_prayer_points_waits_for_each_dose(self):
+        restorer = controller["PrayerRestorer"]()
+        retry = controller["SUPER_RESTORE_RETRY_NS"]
+        self.assertFalse(restorer.due(None, 0))
+        self.assertFalse(restorer.due(501, 0))
+        self.assertTrue(restorer.due(300, 0))
+        restorer.sent(300, 0)
+        # Still draining before the dose lands: no second dose yet.
+        self.assertFalse(restorer.due(280, retry - 1))
+        # The dose landed but points are still at most 50: drink again.
+        self.assertTrue(restorer.due(450, 1))
+        restorer.sent(450, 1)
+        # A dose that never landed is retried after the timeout.
+        self.assertTrue(restorer.due(430, 1 + retry))
+        # Above the threshold the restorer resets.
+        self.assertFalse(restorer.due(2400, 2 + retry))
+        self.assertTrue(restorer.due(500, 3 + retry))
+
     def test_gcd_remaining_now_counts_down_to_the_press(self):
         remaining = controller["gcd_remaining_now"]
         player = SimpleNamespace(gcd_reason=Reason.NONE, gcd_remaining_ms=160)

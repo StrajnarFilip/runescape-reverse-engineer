@@ -812,6 +812,37 @@ MOVEMENT_WINDOWS = {
 }
 
 
+# Super restore (account owner, 2026-11-15): one dose on the L keybind whenever prayer points
+# are 50 or fewer (500 in the tenths of PRAYER_POINTS_MASK). After a dose the next waits until
+# the points have risen or SUPER_RESTORE_RETRY_NS has passed.
+DEFAULT_SUPER_RESTORE_KEY = "L"
+SUPER_RESTORE_PRAYER_TENTHS = 500
+SUPER_RESTORE_RETRY_NS = 4 * TICK_FALLBACK_NS
+
+
+class PrayerRestorer:
+    """Decide when to drink a super restore dose from the sampled prayer points."""
+
+    def __init__(self):
+        self.sent_ns = None
+        self.sent_points = None
+
+    def due(self, points_tenths, now):
+        """Whether a dose should be drunk now, given prayer points in tenths."""
+        if points_tenths is None or points_tenths > SUPER_RESTORE_PRAYER_TENTHS:
+            self.sent_ns = None
+            return False
+        if self.sent_ns is None:
+            return True
+        landed = points_tenths > self.sent_points
+        return landed or now - self.sent_ns >= SUPER_RESTORE_RETRY_NS
+
+    def sent(self, points_tenths, now):
+        """Remember the dose so the next one waits for it to land."""
+        self.sent_ns = now
+        self.sent_points = points_tenths
+
+
 class FocusLostError(RuntimeError):
     """RuneScape lost foreground focus during a key press; input pauses, the run continues."""
 
@@ -2065,6 +2096,7 @@ def run(reader, args, board, attempt=None):
             phase_one.stomp_checked = True
 
     beam_keeper = BeamKeeper()
+    restorer = PrayerRestorer()
 
     def beam_keep_step(phase, phase_one, boss, received_tick, timers, now, *, movement_busy):
         """Keep the player on the P1 green or P3 red strip, by Dive when it is ready.
@@ -2786,6 +2818,7 @@ def run(reader, args, board, attempt=None):
         labels["Reflect"] = args.reflect
     if getattr(args, "devotion", None):
         labels["Devotion"] = args.devotion
+    labels["Super Restore"] = getattr(args, "super_restore", None) or DEFAULT_SUPER_RESTORE_KEY
     if args.reacquire:
         labels["Target Cycle"], labels["Opening Attack"] = args.reacquire
     layout = None
@@ -3099,6 +3132,15 @@ def run(reader, args, board, attempt=None):
                 info.monotonic_ns,
                 gcd_remaining_now(player, info.monotonic_ns, reader.monotonic_ns()),
             )
+        prayer_tenths = None if prayer_raw is None else prayer_raw & PRAYER_POINTS_MASK
+        if input_allowed and restorer.due(prayer_tenths, now):
+            if send_chord(bindings["Super Restore"]):
+                restorer.sent(prayer_tenths, reader.monotonic_ns())
+                emit(
+                    "super_restore_sent",
+                    prayer_points=prayer_tenths / 10,
+                    received_tick=received_tick_counter(),
+                )
         if not phase_one_started:
             if hp_known:
                 emit("engaged", boss_hp=boss.health_current, phase=phase, player_hp=hp)
@@ -3522,6 +3564,11 @@ def main():
     parser.add_argument(
         "--devotion",
         help="Optional Devotion binding, used for Hold Still's heavy hit when Resonance cannot",
+    )
+    parser.add_argument(
+        "--super-restore",
+        help=f"Super restore key, drunk at 50 prayer points or fewer "
+        f"(default {DEFAULT_SUPER_RESTORE_KEY})",
     )
     # Phases 2 and 3 are always handled; the old opt-in flag is still accepted as a no-op.
     parser.add_argument("--continue-phase-two", action="store_true", help=argparse.SUPPRESS)
