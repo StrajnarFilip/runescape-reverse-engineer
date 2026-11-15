@@ -838,18 +838,40 @@ class BeamTests(unittest.TestCase):
         # 07:54 P3: on (6874,1045) at 17074, the tile left the listed strip at 17075, and the
         # keeper walked one tile; the anchor keeps the player still instead.
         keeper = controller["BeamKeeper"]()
-        window = controller["BEAM_FEED_WINDOW"]
         tile = (6874, 1045)
-        self.assertTrue(keeper.holding(tile, True, False, 17074))
-        self.assertTrue(keeper.holding(tile, False, False, 17075))
-        # The meter still rising just after arrival does not count yet.
-        self.assertTrue(keeper.holding(tile, False, True, 17074 + window))
-        # A rising meter later means the strip no longer passes this tile.
-        self.assertFalse(keeper.holding(tile, False, True, 17075 + window))
+        column = [(6874, y) for y in range(1046, 1070)]
+        self.assertTrue(keeper.holding(tile, True, column))
+        # The listed window moved on along the same column: still in the beam.
+        self.assertTrue(keeper.holding(tile, False, column))
+        self.assertTrue(keeper.holding(tile, False, []))
+        # 08:01 at 17856: Telos's meter rose while the player stood on (9171,1046) in a row
+        # strip; the meter no longer ends the anchor.
+        row = [(x, 1046) for x in range(9172, 9190)]
+        self.assertTrue(keeper.holding((9171, 1046), True, row))
+        self.assertTrue(keeper.holding((9171, 1046), False, row))
+        # The strip reappeared on another line: the beam left the player.
+        elsewhere = [(9160, y) for y in range(1030, 1050)]
+        self.assertFalse(keeper.holding((9171, 1046), False, elsewhere))
         # A mechanic that moved the player ends the anchor too.
-        keeper.holding(tile, True, False, 17100)
-        self.assertFalse(keeper.holding((6874, 1042), False, False, 17101))
-        self.assertFalse(keeper.holding(tile, False, False, 17102))
+        keeper.holding(tile, True, column)
+        self.assertFalse(keeper.holding((6874, 1042), False, column))
+        self.assertFalse(keeper.holding(tile, False, column))
+
+    def test_beam_keeper_remembers_recent_strip_tiles_and_retries_once_per_tick(self):
+        keeper = controller["BeamKeeper"]()
+        recent = controller["BEAM_RECENT_TICKS"]
+        keeper.remember([(9178, 1038), (9178, 1039)], 17906)
+        keeper.remember([(9178, 1040)], 17908)
+        # 08:01: the hover matched (9178,1038) after it left the listed window.
+        self.assertTrue(keeper.recently_on_strip((9178, 1038)))
+        keeper.remember([], 17906 + recent + 1)
+        self.assertFalse(keeper.recently_on_strip((9178, 1038)))
+        self.assertTrue(keeper.recently_on_strip((9178, 1040)))
+        self.assertTrue(keeper.move_due(100))
+        keeper.retry_now(100)
+        self.assertTrue(keeper.move_due(100))
+        keeper.retry_now(100)
+        self.assertFalse(keeper.move_due(100))
 
     def test_beam_keeper_waits_between_moves(self):
         keeper = controller["BeamKeeper"]()

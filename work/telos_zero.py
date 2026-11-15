@@ -382,6 +382,10 @@ BEAM_KEEP_BY_PHASE = STOMP_BEAM_BY_PHASE
 # stands on it even out of melee reach. In the 07:25 run it was mostly 9-12 tiles from Telos.
 BEAM_BLOCK_ALWAYS_PHASES = frozenset({3})
 BEAM_KEEP_RETRY_TICKS = 3
+BEAM_KEEP_ATTEMPTS_PER_TICK = 2
+# The reader lists a moving window of the strip: a hovered tile listed this recently still
+# counts as strip (08:01 P3: a matching hover was rejected after its tile left the list).
+BEAM_RECENT_TICKS = 2
 MELEE_REACH_TILES = 1
 # Leave each Telos attack cue's protection tick alone: a move holds the loop for ~0.35 s.
 BEAM_KEEP_QUIET_TICKS_AFTER_CUE = 1
@@ -589,6 +593,24 @@ def on_strip(reader, kind, tile, plane):
     )
 
 
+def on_strip_line(tile, listed):
+    """Whether ``tile`` lies within a tile of the straight line through the listed strip.
+
+    With fewer than two listed tiles nothing contradicts the player's position.
+    """
+    tiles = list(listed)
+    if len(tiles) < 2:
+        return True
+    start = min(tiles)
+    end = max(tiles)
+    line_x, line_y = end[0] - start[0], end[1] - start[1]
+    length = math.hypot(line_x, line_y)
+    if not length:
+        return True
+    cross = line_x * (tile[1] - start[1]) - line_y * (tile[0] - start[0])
+    return abs(cross) / length <= 1
+
+
 class BeamKeeper:
     """Rate-limit P1/P3 strip moves and remember tiles whose hover was rejected."""
 
@@ -596,30 +618,55 @@ class BeamKeeper:
         self.next_move_tick = None
         self.rejected = set()
         self.on_strip = None
-        # Tile and received tick where the player last reached the strip (P3 anchor).
+        # Tile where the player last reached the strip (P3 anchor).
         self.anchor_tile = None
-        self.anchor_tick = None
+        # Strip tiles by the received tick they were last listed, for hover validation.
+        self.recent = {}
+        # Received tick of the latest attempt and the number of attempts in it.
+        self.attempt_tick = None
+        self.attempts = 0
 
-    def holding(self, tile, on_strip_now, fed, received_tick):
-        """Whether the player still blocks the strip from ``tile``.
+    def remember(self, tiles, received_tick):
+        """Record the listed strip tiles and forget those older than BEAM_RECENT_TICKS."""
+        for tile in tiles:
+            self.recent[tile] = received_tick
+        self.recent = {
+            tile: tick
+            for tile, tick in self.recent.items()
+            if received_tick - tick <= BEAM_RECENT_TICKS
+        }
+
+    def recently_on_strip(self, tile):
+        """Whether ``tile`` was a listed strip tile within the last BEAM_RECENT_TICKS."""
+        return tile in self.recent
+
+    def retry_now(self, received_tick):
+        """After a rejected hover, allow one more attempt in the same received tick.
+
+        In the 08:01 P3 run hovers were one or two tiles off the projected target or covered
+        by an NPC, and each rejection waited BEAM_KEEP_RETRY_TICKS.
+        """
+        if self.attempt_tick != received_tick:
+            self.attempt_tick = received_tick
+            self.attempts = 0
+        self.attempts += 1
+        if self.attempts < BEAM_KEEP_ATTEMPTS_PER_TICK:
+            self.next_move_tick = received_tick
+
+    def holding(self, tile, on_strip_now, listed):
+        """Whether the player still stands in the strip at ``tile``; the player then stays put.
 
         The reader lists a moving window of strip tiles, so the player's tile can drop out of
-        it while the player still blocks (07:54, 17074-17090). The anchor holds until the
-        player moves (a mechanic) or the meter rises again (``fed``) after the feed window
-        that follows the arrival has passed.
+        it while the player is still in the beam (07:54, 17074-17090). The anchor holds until
+        the player moves (a mechanic) or the listed strip runs along another line that does
+        not pass the player's tile (the beam moved away). Telos's meter is not used: in the
+        08:01 run it rose while the player stood in the beam (account owner).
         """
         if on_strip_now:
-            if self.anchor_tile != tile:
-                self.anchor_tick = received_tick
             self.anchor_tile = tile
             return True
-        settled = (
-            self.anchor_tick is not None
-            and received_tick - self.anchor_tick > BEAM_FEED_WINDOW
-        )
-        if self.anchor_tile != tile or (fed and settled):
+        if self.anchor_tile != tile or not on_strip_line(tile, listed):
             self.anchor_tile = None
-            self.anchor_tick = None
             return False
         return True
 
@@ -2227,11 +2274,18 @@ def run(reader, args, board, attempt=None):
             return
         player_tile = (player.tile.x, player.tile.y)
         plane = player.tile.plane
-        standing = on_strip(reader, kind, player_tile, plane)
-        if phase in BEAM_BLOCK_ALWAYS_PHASES:
-            standing = beam_keeper.holding(
-                player_tile, standing, beam_blocker.feeding, received_tick
-            )
+        listed = [
+            (hazard.tile.x, hazard.tile.y)
+            for hazard in reader.hazards[: reader.hazard_info.count]
+            if hazard.kind == kind
+            and hazard.flags & HazardFlags.SCENE_LOCATION
+            and hazard.tile.plane == plane
+        ]
+        beam_keeper.remember(listed, received_tick)
+        # On the strip the player stays put in P1 and P3 alike, until a mechanic moves it.
+        standing = beam_keeper.holding(
+            player_tile, on_strip(reader, kind, player_tile, plane), listed
+        )
         if standing != beam_keeper.on_strip:
             beam_keeper.on_strip = standing
             emit(
@@ -2335,9 +2389,17 @@ def run(reader, args, board, attempt=None):
                 ),
                 None,
             )
-            return current_pose is not None and (
-                stream_destination(reader, kind, current, current_pose, use_tile=hover["tile"])
-                is not None
+            if current_pose is None or hover["tile"][2] != plane:
+                return False
+            if stream_destination(reader, kind, current, current_pose, use_tile=hover["tile"]):
+                return True
+            # A tile that left the listed window moments ago is still on the strip.
+            return beam_keeper.recently_on_strip(landing) and bool(
+                footprint_distance(
+                    landing,
+                    (current_pose.tile.x, current_pose.tile.y),
+                    current_pose.footprint_size or 1,
+                )
             )
 
         sent = click_point(
@@ -2346,8 +2408,10 @@ def run(reader, args, board, attempt=None):
             validate=landing_current,
             failure_event="beam_keep_skipped",
         )
-        if sent is None and hover:
-            beam_keeper.rejected.add(target)
+        if sent is None:
+            if hover:
+                beam_keeper.rejected.add(target)
+            beam_keeper.retry_now(received_tick)
         elif sent:
             beam_keeper.rejected.clear()
         emit(
