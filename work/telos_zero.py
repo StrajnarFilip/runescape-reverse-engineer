@@ -47,6 +47,9 @@ from rs3_reader.telos_prayer import MELEE_AUTO_SEQUENCE, ManualPrayerKeys, telos
 
 ACTIVE_TELOS = 22891
 DORMANT_TELOS = 22892
+PHASE_FIVE_TELOS = 22908
+PHASE_FIVE_MIN_ENRAGE = 100
+PHASE_FIVE_HANDOFF_NS = 18_000_000_000
 TENDRILS = 28931
 TENDRILS_RELEASE = 28932
 HOLD_STILL = 28935
@@ -254,6 +257,9 @@ FONT_HOLD_TICKS = 30
 FONT_EARLIEST_RELEASE_TICK = 12
 # Move again when the player is still not inside after this many received ticks.
 FONT_MOVE_RETRY_TICKS = 3
+FONT_WAYPOINT_STEPS = (10, 7, 4)
+FONT_WAYPOINT_OFFSETS = (0, 2, -2, 4, -4)
+FONT_WAYPOINT_HOVER_TOLERANCE = 2
 # Font health falls within four client logic ticks of a type 144 pulse. In normal charging
 # the native hitmark starts are 90 logic ticks apart (three game ticks).
 FONT_PULSE_HIT_TYPE = 144
@@ -302,6 +308,44 @@ def font_stand_tiles(font_tile, player_tile, occupied):
         and tile not in occupied
     ]
     return sorted(free, key=lambda tile: (chebyshev(tile, player_tile), tile)) or [font_tile]
+
+
+def font_waypoint_tiles(font_tile, player_tile, stand, occupied):
+    """Yield nearby candidate tiles toward an off-screen font, with lateral alternatives."""
+    offset_x, offset_y = (finish - start for start, finish in zip(player_tile, stand))
+    distance = chebyshev(player_tile, stand)
+    if not distance:
+        return
+    current_distance = footprint_distance(player_tile, font_tile, FONT_FOOTPRINT)
+    side_x, side_y = (1, 0) if abs(offset_y) >= abs(offset_x) else (0, 1)
+    seen = set()
+    for step in FONT_WAYPOINT_STEPS:
+        if step >= distance:
+            continue
+        base_x = player_tile[0] + round(offset_x * step / distance)
+        base_y = player_tile[1] + round(offset_y * step / distance)
+        for lateral in FONT_WAYPOINT_OFFSETS:
+            tile = base_x + side_x * lateral, base_y + side_y * lateral
+            if tile in occupied or tile in seen:
+                continue
+            if footprint_distance(tile, font_tile, FONT_FOOTPRINT) < current_distance:
+                yield tile
+                seen.add(tile)
+
+
+def font_walk_destination(hover_tile, player_tile, font_tile, plane, accepted, waypoint, occupied):
+    """Accept a native Walk hover inside the charge ring or at a nearer waypoint."""
+    if hover_tile is None or hover_tile[2] != plane:
+        return False
+    if waypoint is None:
+        return hover_tile in accepted
+    tile = hover_tile[:2]
+    return (
+        tile not in occupied
+        and chebyshev(tile, waypoint) <= FONT_WAYPOINT_HOVER_TOLERANCE
+        and footprint_distance(tile, font_tile, FONT_FOOTPRINT)
+        < footprint_distance(player_tile, font_tile, FONT_FOOTPRINT)
+    )
 
 
 class FontDuty:
@@ -1876,15 +1920,14 @@ def log(event, **fields):
     print(json.dumps({"event": event, **fields}), flush=True)
 
 
-def boss_sample(reader):
+def boss_sample(reader, *, phase_five=False):
     """Read the unique Telos NPC, with independently valid health and phase evidence."""
     info, player, npcs, _ = reader.sample()
-    bosses = [
-        npc for npc in npcs[: info.npc_count] if npc.config_id in (ACTIVE_TELOS, DORMANT_TELOS)
-    ]
-    boss = bosses[0] if len(bosses) == 1 else None
     phase_raw = player.variable(Variable.TELOS_PACKED)
     phase = None if phase_raw is None else ((phase_raw >> PHASE_SHIFT) & PHASE_MASK) + 1
+    configs = (PHASE_FIVE_TELOS,) if phase_five and phase == 5 else (ACTIVE_TELOS, DORMANT_TELOS)
+    bosses = [npc for npc in npcs[: info.npc_count] if npc.config_id in configs]
+    boss = bosses[0] if len(bosses) == 1 else None
     hp = player.variable(Variable.HEALTH)
     return info, player, boss, phase, hp
 
@@ -2059,14 +2102,16 @@ def replay(path):
             )
 
 
-def observe(reader, duration, attempt=None):
+def observe(reader, duration, attempt=None, *, phase_five=False, before_sample=None):
     """Record post-transition cues without foreground focus or Arduino input."""
     deadline = time.monotonic() + duration
     last_state = None
     last_status = None
     active_seen = attempt is not None and attempt.engaged
     while time.monotonic() < deadline:
-        info, player, boss, phase, hp = boss_sample(reader)
+        if before_sample is not None:
+            before_sample()
+        info, player, boss, phase, hp = boss_sample(reader, phase_five=phase_five)
         session = (info.pid, info.process_creation_time, reader.combat.scene_epoch)
         events, lost = reader.drain_npc_action_events()
         hits, hits_lost = reader.drain_player_hit_events()
@@ -2770,6 +2815,7 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
         )
 
     font_duty = FontDuty()
+    pending_font_waypoint = None
     target_picker = TargetPicker()
     seen_p4_actors = set()
 
@@ -2811,6 +2857,7 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
 
     def font_step(phase_one, boss, received_tick, timers, hits, hits_lost, *, action_pending):
         """Go to the chargeable P4 font, stay through the instakill, then pick targets."""
+        nonlocal pending_font_waypoint
         if not isinstance(received_tick, int):
             return
         fonts, minions = p4_actors()
@@ -2827,6 +2874,24 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
         player_tile = (
             (player.tile.x, player.tile.y) if player.valid_mask & SpatialFlags.TILE else None
         )
+        if pending_font_waypoint is not None and player_tile is not None:
+            font, waypoint_tile, start_distance, sent_tick = pending_font_waypoint
+            remaining = footprint_distance(player_tile, target, FONT_FOOTPRINT) if target else None
+            advanced = (
+                font == font_duty.font and remaining is not None and remaining < start_distance
+            )
+            if advanced or received_tick >= sent_tick + FONT_MOVE_RETRY_TICKS or event:
+                emit(
+                    "font_waypoint_outcome",
+                    font_instance_id=font,
+                    waypoint=waypoint_tile,
+                    sent_tick=sent_tick,
+                    player_tile=player_tile,
+                    distance_before=start_distance,
+                    distance_after=remaining if font == font_duty.font else None,
+                    advanced=advanced,
+                )
+                pending_font_waypoint = None
         if pulse is not None:
             before, after, hit_tick, hit_sequence, damage = pulse
             emit(
@@ -2908,11 +2973,18 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
             accepted = {(x, y, plane) for x, y in stand_tiles if in_font((x, y), target)}
             hover = {}
             stand = point = sent = None
+            waypoint = None
             for candidate in stand_tiles:
                 projected = project_tile(reader, candidate, plane, player.fine_height)
                 if projected is not None and projected not in font_duty.rejected_points:
                     stand, point = candidate, projected
                     break
+            if point is None:
+                for candidate in font_waypoint_tiles(target, player_tile, stand_tiles[0], occupied):
+                    projected = project_tile(reader, candidate, plane, player.fine_height)
+                    if projected is not None and projected not in font_duty.rejected_points:
+                        waypoint, point = candidate, projected
+                        break
             if point is None:
                 font_duty.rejected_points.clear()
             else:
@@ -2931,7 +3003,17 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                         and hp is not None
                         and hp > 0
                         and reader.pointer_walk.menu_cycle != previous_menu_cycle
-                        and hover.get("tile") in accepted
+                        and reader.spatial.player.valid_mask & SpatialFlags.TILE
+                        and reader.spatial.player.tile.plane == plane
+                        and font_walk_destination(
+                            hover.get("tile"),
+                            (reader.spatial.player.tile.x, reader.spatial.player.tile.y),
+                            target,
+                            plane,
+                            accepted,
+                            waypoint,
+                            occupied,
+                        )
                         and any(
                             font[0] == font_duty.font and font[3] == target
                             for font in p4_actors()[0]
@@ -2944,21 +3026,26 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                     validate=font_destination_current,
                     failure_event="font_move_skipped",
                 )
-                if not sent and hover and hover.get("tile") not in accepted:
+                if sent is None and hover:
                     font_duty.rejected_points.add(point)
                     font_duty.next_move_tick = received_tick + 1
             if sent:
                 font_duty.rejected_points.clear()
                 target_picker.moved()
+                if waypoint is not None:
+                    pending_font_waypoint = (font_duty.font, waypoint, distance, received_tick)
             emit(
                 "font_move",
                 sent=sent,
+                font_instance_id=font_duty.font,
                 target=target,
                 stand=stand,
+                waypoint=waypoint,
                 hover=hover,
                 player_tile=player_tile,
                 distance=distance,
                 attempt=font_duty.move_attempts,
+                received_tick=received_tick,
             )
         elif not action_pending and in_font(player_tile, target):
             dispatch_ns = reader.monotonic_ns()
@@ -3800,6 +3887,7 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
     phase_two_at = None
     phase_three_at = None
     phase_four_at = {}
+    phase_four_defeated_ns = None
     reacquire_at = None
     reacquire_hp = None
     # Monotonic time from which Disruption Shield can be cast again (self-timed).
@@ -3813,7 +3901,9 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
 
     while time.monotonic() < deadline:
         update_focus()
-        info, player, boss, phase, hp = boss_sample(reader)
+        info, player, boss, phase, hp = boss_sample(
+            reader, phase_five=phase_four_defeated_ns is not None
+        )
         events, lost = reader.drain_npc_action_events()
         hits, hits_lost = reader.drain_player_hit_events()
         intervening_samples = {
@@ -3838,10 +3928,16 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
         if (info.pid, info.process_creation_time) != identity[:2]:
             # A restarted client has nothing left to control.
             raise RuntimeError("Client process changed")
-        if reader.combat.scene_epoch != identity[2]:
+        if reader.combat.scene_epoch != identity[2] and phase_four_defeated_ns is None:
             emit("encounter_reset", reason="Scene changed")
             return ENCOUNTER_RESET
         now = reader.monotonic_ns()
+        if (
+            phase_four_defeated_ns is not None
+            and now - phase_four_defeated_ns >= PHASE_FIVE_HANDOFF_NS
+        ):
+            emit("encounter_reset", reason="Phase 5 actor was not observed after phase 4")
+            return ENCOUNTER_RESET
         if (
             info.status not in (Status.AVAILABLE, Status.PARTIAL)
             or not (0 <= now - info.monotonic_ns <= MAX_SAMPLE_AGE_NS)
@@ -3853,6 +3949,47 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
         if hp == 0:
             raise RuntimeError("Player HP reached zero")
         if hp is None or hp < 0:
+            time.sleep(POLL_SECONDS)
+            continue
+        if (
+            phase_four_defeated_ns is None
+            and practice_enrage >= PHASE_FIVE_MIN_ENRAGE
+            and phase == 4
+            and boss is not None
+            and boss.config_id == ACTIVE_TELOS
+            and boss.instance_id == active_instance
+            and boss.flags & NPCFlags.HEALTH
+            and boss.health_max > 1
+            and boss.health_current == 0
+        ):
+            phase_four_defeated_ns = now
+            emit("phase_5_handoff_started", boss_instance_id=active_instance)
+        if phase_four_defeated_ns is not None:
+            if (
+                phase == 5
+                and boss is not None
+                and boss.config_id == PHASE_FIVE_TELOS
+                and boss.flags & NPCFlags.HEALTH
+                and boss.health_max > 1
+                and boss.health_current > 0
+            ):
+                emit(
+                    "phase_5_observed",
+                    boss_instance_id=boss.instance_id,
+                    boss_config_id=boss.config_id,
+                    boss_hp=boss.health_current,
+                    player_hp=hp,
+                )
+                reason = observe(
+                    reader,
+                    max(0, deadline - time.monotonic()),
+                    attempt,
+                    phase_five=True,
+                    before_sample=update_focus,
+                )
+                if attempt:
+                    attempt.end_reason = reason
+                return 2
             time.sleep(POLL_SECONDS)
             continue
         if lost or hits_lost:

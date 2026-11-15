@@ -16,7 +16,7 @@ from reference_memory import MemoryReadError, ProcessMemory  # noqa: E402
 from rs3_reader.native import Reader, SpatialFlags  # noqa: E402
 
 SUPPORTED_VERSION = "6ada3f59-1a86000"
-TELOS_CONFIGS = frozenset({22891, 22892})
+TELOS_CONFIGS = frozenset({22891, 22892, 22908})
 TELOS_STAGE_VARP = 6363
 SCENE_MANAGER = 0x199E8
 MANAGER_SCENES = 0x58
@@ -184,7 +184,7 @@ def nearby_positional_effects(memory, scene, center):
     return sorted(records)
 
 
-def capture(pid, duration):
+def capture(pid, duration, phase=None):
     """Correlate scene state changes with native attempt timestamps and received ticks."""
     with ProcessMemory(pid) as memory, Reader(pid, worker_hz=0) as reader:
         profile = load_matching_profile(memory.identity()["sha256"])
@@ -217,6 +217,9 @@ def capture(pid, duration):
                     ),
                     None,
                 )
+                if phase is not None and (packed is None or ((packed >> 21) & 7) + 1 != phase):
+                    time.sleep(POLL_INTERVAL_SECONDS)
+                    continue
                 try:
                     first = observe_locations(memory, scene_rva, boss_positions[0])
                     second = observe_locations(memory, scene_rva, boss_positions[0])
@@ -252,10 +255,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pid", required=True, type=int)
     parser.add_argument("--duration", type=int, default=140)
+    parser.add_argument("--phase", type=int, choices=range(1, 6))
     args = parser.parse_args()
     if args.duration <= 0:
         parser.error("Duration must be positive")
-    capture(args.pid, args.duration)
+    capture(args.pid, args.duration, args.phase)
 
 
 if __name__ == "__main__":

@@ -131,6 +131,15 @@ on the same charged actor. The third font started charging 32 tiles from the pla
 All sixteen projected Walk attempts were rejected. The font still had its full
 6,000-point charge when the player returned to staging. [100% font trace](../../../training-data/telos-20261115T100113.908512Z.jsonl)
 
+When the charging ring has no usable screen projection, the controller projects
+waypoints 10, 7 or 4 tiles toward the ring with lateral alternatives. It checks the
+native Walk hover for a closer tile on the same plane before clicking. It measures
+progress from the next player tile samples and switches to a direct ring walk as
+soon as one is available. The archived 32-tile route is covered by the tests.
+In the 100% waypoint trial, four verified intermediate clicks made progress toward
+the third font. The player reached its ring at tick 919 after starting 29 tiles away
+at 900. All three fonts released while the player was in range. [100% waypoint trace](../../../training-data/telos-20261115T151037.550733Z.jsonl)
+
 **P4 to P5 handoff at 100%.** Actor config `22891` reached zero HP at received tick
 6047 and disappeared by 6062. The input controller ended on that disappearance.
 The continued recording saw config `22908` with 100,000 HP on plane 1 at 6067,
@@ -138,8 +147,20 @@ one tick before VARP `6363` changed to phase 5. Three 1-HP actors used configs
 `22912`, `22913` and `22914`. Six golems with config `22911` had 4,500 maximum HP.
 The boss used `28950` sixteen times and reached zero HP at 6133, then applied
 `28957`. The log later saw dormant config `22892` and ended without a result event.
-For the next handoff, corroborate the new config and health with the packed phase.
+After a sampled zero-HP `22891` in P4 at 100% enrage or higher, the controller keeps
+the attempt open for up to 18 seconds. Config `22908`, positive actor HP and the packed
+phase-5 field together start phase 5 observation in the same log. This uses the existing
+`rs3_snapshot_npcs`, packed phase and native event queues. Phase 5 combat responses
+still need timing and outcome evidence.
 [100% handoff trace](../../../training-data/telos-20261114T173454.045394Z.jsonl)
+
+The 100% waypoint trial reached the handoff again. A separate read-only probe saw
+config `22908` with 100,000 HP at logic tick 1830745 and the phase 5 field at 1830776.
+It saw golem config `22910` with 4,500 HP. The player reached zero HP at 1831918.
+The starting controller stopped at the actor gap, so its attempt log ends at that
+point. The account owner confirmed to stay in the green beam throughout phase 5.
+Use `work/probe_telos_locations.py --phase 5` to calibrate the green location IDs.
+[100% waypoint trace](../../../training-data/telos-20261115T151037.550733Z.jsonl)
 
 Guide-derived from the [RuneScape Wiki strategy page](https://runescape.wiki/w/Telos,_the_Warden/Strategies#Phase_2), which warns it may predate the March 2026 combat modernisation. Rows marked *live* match the 2026-11-14 Compatibility Mode captures.
 

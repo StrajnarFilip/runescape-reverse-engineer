@@ -857,6 +857,22 @@ class FontDutyTests(unittest.TestCase):
         self.assertEqual(duty.update([], 11), (None, "font_lost"))
         self.assertFalse(duty.active)
 
+    def test_offscreen_font_waypoints_advance_along_the_failed_32_tile_route(self):
+        player, font, stand = (9829, 2606), (9821, 2573), (9823, 2575)
+        waypoint_tiles = controller["font_waypoint_tiles"]
+        points = list(waypoint_tiles(font, player, stand, {(9827, 2596)}))
+        self.assertEqual(points[0], (9829, 2596))
+        for tile in points:
+            self.assertLess(controller["footprint_distance"](tile, font, 2), 32)
+            self.assertFalse(controller["in_font"](tile, font))
+
+    def test_waypoint_requires_a_nearer_unoccupied_walk_tile_on_the_same_plane(self):
+        walk = controller["font_walk_destination"]
+        player, font, waypoint = (9829, 2606), (9821, 2573), (9827, 2596)
+        self.assertTrue(walk((9828, 2597, 1), player, font, 1, set(), waypoint, set()))
+        for tile in ((9828, 2597, 0), (9829, 2606, 1), (9827, 2596, 1)):
+            self.assertFalse(walk(tile, player, font, 1, set(), waypoint, {(9827, 2596)}))
+
     def test_font_stays_active_through_missing_pose_and_releases_after_charged_despawn(self):
         duty = FontDuty()
         target, _ = duty.update(fonts(22896, 7500), 21493)
@@ -1475,6 +1491,17 @@ class PrayerFlickerTests(unittest.TestCase):
 
 
 class PracticeRunTests(unittest.TestCase):
+    def test_new_telos_actor_requires_the_phase_five_field(self):
+        sample = controller["boss_sample"]
+        boss = SimpleNamespace(config_id=22908, instance_id=45, health_current=100_000)
+        variables = {Variable.TELOS_PACKED: 3 << 21, Variable.HEALTH: 6461}
+        player = SimpleNamespace(variable=variables.get)
+        reader = SimpleNamespace(sample=lambda: (SimpleNamespace(npc_count=1), player, [boss], ()))
+        self.assertEqual(sample(reader, phase_five=True)[2:4], (None, 4))
+        variables[Variable.TELOS_PACKED] = 4 << 21
+        self.assertEqual(sample(reader, phase_five=True)[2:4], (boss, 5))
+        self.assertEqual(sample(reader)[2:4], (None, 5))
+
     def test_confirmed_phase_survives_tendrils_healing_above_previous_threshold(self):
         check = controller["check_active_phase"]
         health = {"current": 450_309, "max": 600_000}

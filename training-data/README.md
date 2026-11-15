@@ -165,6 +165,12 @@ changes to a released config (`22902`–`22904`) or disappears after the measure
 `font_lost` records an earlier disappearance. Use the surrounding hitmarks to
 check the damage outcome.
 
+A `font_move` row with `waypoint` records an intermediate destination toward an
+off-screen font. Its native hover must resolve to a nearer tile on the same plane.
+Join its `received_tick` or game tick to `font_waypoint_outcome.sent_tick`, then
+compare `distance_before` and `distance_after`. `font_arrival` confirms the actual
+charging ring was reached.
+
 `font_charge_pulse` pairs the charging actor's health decrease with a nearby type 144
 `player_hitmark` from the existing native hit queue. Match `player_hit_sequence` to the
 hitmark's `native_sequence`. `font_resonance` records the cue and predicted hit ticks,
@@ -180,6 +186,11 @@ Compare the requested `auto_retaliate_sent.enabled` value with
 `auto_retaliate_outcome.observed`. The controller restores an initially enabled
 setting after charging or when the attempt ends with the game in focus. A
 `auto_retaliate_restore_deferred` row means the final setting needs checking.
+
+`phase_5_handoff_started` records the old Telos actor at zero HP. The controller
+waits for the new actor and packed phase to agree, then records `phase_5_observed` and
+keeps logging native state in the same file. Reaching the handoff alone leaves the
+attempt incomplete.
 
 For phase 4 golems, join `golem_prayer_cue.cue_native_sequence` to the stamped
 `npc_animation` and any associated `prayer_flick_sent`. Inspect `prayer_flick_outcome`

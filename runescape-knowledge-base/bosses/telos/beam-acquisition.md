@@ -5,6 +5,7 @@
 | 1 | Green | Scene locations `103545` and `103546` matched the visible beam. At 1000%, the visible line held a fixed direction as Telos moved. The meter rose by 3 on some ticks while the beam was visible and stayed flat on others. |
 | 2 | Black | Scene locations `103547` and `103548` matched the visible beam in two placements during the same 500% attempt. Walking into the beam is the account owner's confirmed black-virus cleanse. |
 | 3 | Red | Scene locations `103549` and `103550` matched the visible red stream in a 250% capture. The location probe observed the strip along Y 3537 at tick 10154 and along X 6485 after relocation. |
+| 5 | Green | The account owner confirmed the player should stay in the green stream throughout phase 5. Locate its same-plane tiles and reacquire the strip when it moves. The phase 5 location IDs still need a live capture. |
 
 ## Virus onset and cleanse
 
