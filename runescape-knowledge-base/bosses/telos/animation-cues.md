@@ -69,3 +69,31 @@ overhead of the heavy-hit frame was missing from that trace. In P2 the 347-damag
 at +2 also had Deflect Melee. Soul Split was requested at +3, but Resonance was on cooldown
 through the heavy hit, which dealt 5,124. The cooldown restarted at logic tick 144620
 without a corresponding controller ability request. [250% retest](../../../training-data/telos-20261115T055239.542334Z.jsonl)
+
+The first P1 Resonance request went out on `28935` while the GCD had 1,720 ms left.
+Its cooldown started at logic tick 143089. The controller also sent its retry against
+the first sample at 143089 with a free GCD and no cooldown yet visible. The restart
+at 144620 is consistent with a duplicate press remaining in the ability queue.
+[250% retest](../../../training-data/telos-20261115T055239.542334Z.jsonl)
+
+**Ability queueing off (2026-11-15).** With queueing disabled in the client, a GCD ability
+pressed while the GCD runs is dropped. Anticipation and Resonance presses with 1,140–1,800 ms
+left never cast; presses with 360–620 ms left or an idle GCD cast one received tick later.
+Escape cast at any GCD. The controller sends Resonance, Anticipation, Freedom and Hurricane
+only in the last 100 ms of the GCD (`GCD_PRESS_LEAD_MS`) or while it is idle. It re-checks
+the remaining time just before the key goes down and logs it as `gcd_at_press_ms`.
+[Queueing-off death](../../../training-data/telos-20261115T060159.222253Z.jsonl)
+
+Across 89 Hold Stills from P1 to P3, one small hit lands at +1 (a type `482` zero under
+Deflect) or +2, rarely +3, and the heavy type `133` hit lands at +4. The small hit is type
+`133` in P1 and P2 and type `139` in P3 (11 of 11 damaging P3 small hits). A press in
+received tick T casts at T+1, which matches Deflect on the cue protecting a hit at +1. Resonance
+is therefore pressed in the tick after the small hit is seen at +1 or +2, or at +3 regardless,
+so that it casts on +2..+4 and only the heavy hit consumes it. If no GCD slot falls in that
+window, Revolution takes the slot and Resonance waits for the next Hold Still. The flicker
+deflects the small hit from +0 through +2 (Deflect Magic in P3, Deflect Melee otherwise). It
+holds Deflect Melee at +3 for the heavy hit and returns to Soul Split as soon as Resonance's
+cooldown confirms the cast (`prayer_window_released`). Deflect halved melee autos (682 against
+1,487 median at 250%), so Deflect Melee also halves an unabsorbed heavy hit. The 2,083 heavy
+hit at 5743 came under Deflect Melee, against 5,036 on Soul Split.
+The +3 cursor preflight is skipped while the Resonance press is still possible.

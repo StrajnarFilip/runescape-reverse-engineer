@@ -53,8 +53,12 @@ Confirm the actual ability tooltips before using the example keys. `--displayed-
 
 The practice controller flicks by Telos animation and phase. It uses the measured distance
 bands for `28959` and holds melee through the unanimated follow-up from Tendrils release.
-For Hold Still, Deflect Melee covers +0 through +2 from `28935`. The controller requests
-Soul Split at +3 ahead of the heavy +4 hit with Resonance when protection is clear.
+For Hold Still, the controller deflects the small hit from +0 through +2 after `28935`, using
+Deflect Magic in P3 and Deflect Melee otherwise. It holds Deflect Melee at +3 for the heavy +4
+hit. Once Resonance's cooldown confirms its cast, a `prayer_window_released` row marks the
+return to Soul Split. GCD abilities are pressed only in the last 100 ms of the GCD because
+ability queueing is off. `ability_sent.gcd_at_press_ms` records the time left, and
+`ability_press_skipped` marks a GCD window that passed while deciding.
 Uppercut and the phase cues `28963` and `28930` do not schedule protection. A
 `prayer_transition_lockout` row marks when prayer inputs pause at a phase handoff or resume
 on the first recognized attack. A toggle is only resent after its overhead appears or 1.2 s

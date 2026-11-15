@@ -90,7 +90,11 @@ class PhaseOneTests(unittest.TestCase):
         # Hold Still alone never triggers Freedom; Anticipation is the planned answer.
         self.assertIsNone(phase.next_action(4 * SECOND_NS, timers, 1000, Prayer.MELEE))
         self.assertEqual(phase.cast_result, ("Anticipation", False))
-        action = phase.next_action(4 * SECOND_NS, timers, 1000, Prayer.MELEE, stun_expiry=900)
+        # Freedom is on the GCD and the client drops presses made while it runs.
+        self.assertIsNone(
+            phase.next_action(4 * SECOND_NS, timers, 1000, Prayer.MELEE, stun_expiry=900)
+        )
+        action = phase.next_action(4 * SECOND_NS, timers, 80, Prayer.MELEE, stun_expiry=900)
         self.assertEqual(action, controller["Action"]("Freedom", "Player stunned"))
         phase.sent(action, 4 * SECOND_NS)
         self.assertIsNone(phase.next_action(5 * SECOND_NS, {"Freedom": 16000}, 0, Prayer.NONE))
@@ -188,21 +192,26 @@ class PhaseOneTests(unittest.TestCase):
         phase = PhaseOne()
         phase.observe([event(1, TENDRILS)])
         timers = {"Hurricane": None}
-        self.assertIsNone(phase.next_action(SECOND_NS, timers, 20, Prayer.MELEE))
+        self.assertIsNone(phase.next_action(SECOND_NS, timers, 120, Prayer.MELEE))
         self.assertEqual(phase.next_action(SECOND_NS, timers, 0, Prayer.MELEE).ability, "Hurricane")
         phase.observe([event(2, RELEASE)])
         self.assertIsNone(phase.next_action(2 * SECOND_NS, timers, 0, Prayer.MELEE))
 
-    def test_anticipation_ignores_gcd_and_retries_once(self):
+    def test_anticipation_waits_for_the_gcd_end_and_retries_once(self):
         phase = PhaseOne()
         phase.observe([event(1, UPPERCUT), event(2, AUTO), event(3, AUTO)])
         timers = {"Anticipation": 0}
         now = 3 * SECOND_NS
         timeout = controller["ACK_TIMEOUT_NS"]
-        action = phase.next_action(now, timers, 1200, Prayer.SOUL_SPLIT, flicking=True)
+        # 2026-11-15: presses with 1,760-1,780 ms left never cast, 360-600 ms always did.
+        for gcd in (1780, 600, 101, None):
+            self.assertIsNone(
+                phase.next_action(now, timers, gcd, Prayer.SOUL_SPLIT, flicking=True)
+            )
+        action = phase.next_action(now, timers, 100, Prayer.SOUL_SPLIT, flicking=True)
         self.assertEqual(action.ability, "Anticipation")
         phase.sent(action, now)
-        retry = phase.next_action(now + timeout, timers, 1200, Prayer.SOUL_SPLIT, flicking=True)
+        retry = phase.next_action(now + timeout, timers, 40, Prayer.SOUL_SPLIT, flicking=True)
         self.assertEqual(phase.cast_result, ("Anticipation", False))
         self.assertEqual(retry.ability, "Anticipation")
         phase.sent(retry, now + timeout)
@@ -233,76 +242,88 @@ class PhaseOneTests(unittest.TestCase):
         timers = controller["cooldowns"](reader, {"Resonance", "Surge"})
         self.assertEqual(timers, {"Resonance": None, "Escape": 0})
 
-    def test_resonance_queues_into_the_gcd_slot_at_plus_three(self):
-        # The 500% case: Revolution started a GCD on the Hold Still tick, freeing +3.
-        phase = PhaseOne()
-        phase.observe([dict(event(1, HOLD_STILL), received_tick=5171)])
-        action = phase.next_action(
-            SECOND_NS, {"Resonance": None}, 1780, Prayer.SOUL_SPLIT, received_tick=5171
-        )
-        self.assertEqual(action.ability, "Resonance")
+    @staticmethod
+    def hit(type_id):
+        return SimpleNamespace(hit=SimpleNamespace(type_id=type_id))
 
-    def test_resonance_retries_once_when_queued_press_did_not_cast(self):
-        # The 500% P2 case: queued at +0, but the slot freed at +3 without a cast.
+    def test_resonance_waits_for_the_gcd_end_after_the_small_hit(self):
+        # 5743 at 250%: Resonance pressed at +0 with 620 ms left cast at +1, so the +2 small hit
+        # used it and the heavy +4 hit dealt 2,083. Now nothing is pressed before the small hit.
         phase = PhaseOne()
-        phase.observe([dict(event(1, HOLD_STILL), received_tick=5791)])
+        phase.observe([dict(event(1, HOLD_STILL), received_tick=5743)])
         timers = {"Resonance": 0}
-        first = phase.next_action(SECOND_NS, timers, 1780, Prayer.SOUL_SPLIT, received_tick=5791)
-        phase.sent(first, SECOND_NS)
-        for tick, gcd in ((5792, 1180), (5793, 580)):
+        for tick, gcd in ((5743, 620), (5743, 80), (5744, 0), (5744, 60)):
             self.assertIsNone(
-                phase.next_action(SECOND_NS, timers, gcd, Prayer.SOUL_SPLIT, received_tick=tick)
+                phase.next_action(SECOND_NS, timers, gcd, Prayer.MELEE, received_tick=tick)
             )
-        retry = phase.next_action(SECOND_NS, timers, 0, Prayer.SOUL_SPLIT, received_tick=5794)
-        self.assertEqual(retry.ability, "Resonance")
-        phase.sent(retry, SECOND_NS)
-        self.assertIsNone(phase.next_action(SECOND_NS, timers, 0, Prayer.MELEE, received_tick=5794))
-
-    def test_resonance_skips_free_slot_before_plus_two(self):
-        phase = PhaseOne()
-        phase.observe([dict(event(1, HOLD_STILL), received_tick=50)])
-        timers = {"Resonance": 0}
-        # Free at +0/+1 (Revolution takes it); a GCD started at +2 would free +5, too late.
-        for tick, gcd in ((50, 0), (51, 0), (52, 1780)):
-            self.assertIsNone(
-                phase.next_action(SECOND_NS, timers, gcd, Prayer.SOUL_SPLIT, received_tick=tick)
-            )
-        action = phase.next_action(SECOND_NS, timers, 600, Prayer.SOUL_SPLIT, received_tick=53)
-        self.assertEqual(action.ability, "Resonance")
-        self.assertIsNone(phase.next_action(SECOND_NS, timers, 0, Prayer.MELEE, received_tick=55))
-
-    def test_resonance_without_gcd_reading_waits_for_first_hold_still_hit(self):
-        phase = PhaseOne()
-        phase.observe([dict(event(1, HOLD_STILL), received_tick=50)])
-        timers = {"Resonance": 0}
-        phase.observe_hits(1, 51)
+        phase.observe_hits([self.hit(133)], 5745)
+        self.assertEqual(phase.small_hit_tick, 5745)
+        # The GCD still runs for 540 ms: a press now would be dropped.
         self.assertIsNone(
-            phase.next_action(SECOND_NS, timers, None, Prayer.SOUL_SPLIT, received_tick=51)
+            phase.next_action(SECOND_NS, timers, 540, Prayer.MELEE, received_tick=5745)
         )
-        self.assertIsNone(
-            phase.next_action(SECOND_NS, timers, None, Prayer.SOUL_SPLIT, received_tick=52)
-        )
-        phase.observe_hits(1, 52)
-        action = phase.next_action(SECOND_NS, timers, None, Prayer.SOUL_SPLIT, received_tick=52)
+        action = phase.next_action(SECOND_NS, timers, 90, Prayer.MELEE, received_tick=5745)
         self.assertEqual(action, controller["Action"]("Resonance", "Hold Still second melee hit"))
-        phase.sent(action, SECOND_NS)
+
+    def test_resonance_after_a_blocked_small_hit_at_plus_one(self):
+        # 5629 at 250%: the small hit was a 0 (type 482) at +1.
+        phase = PhaseOne()
+        phase.observe([dict(event(1, HOLD_STILL), received_tick=5629)])
+        timers = {"Resonance": 0}
+        for type_id in (143, 144):
+            phase.observe_hits([self.hit(type_id)], 5630)
+        self.assertIsNone(phase.small_hit_tick)
+        phase.observe_hits([self.hit(482)], 5630)
+        action = phase.next_action(SECOND_NS, timers, 100, Prayer.MELEE, received_tick=5630)
+        self.assertEqual(action.ability, "Resonance")
+
+    def test_resonance_at_plus_three_needs_no_small_hit_and_is_pressed_once(self):
+        phase = PhaseOne(phase=3)
+        phase.observe([dict(event(1, HOLD_STILL), received_tick=50)])
         self.assertIsNone(
-            phase.next_action(SECOND_NS, timers, None, Prayer.SOUL_SPLIT, received_tick=53)
+            phase.next_action(SECOND_NS, {"Resonance": 0}, 50, Prayer.MELEE, received_tick=52)
+        )
+        self.assertIsNone(
+            phase.next_action(SECOND_NS, {"Resonance": 3000}, 50, Prayer.MELEE, received_tick=53)
+        )
+        timers = {"Resonance": None}
+        self.assertTrue(phase.resonance_press_possible(timers, 53))
+        action = phase.next_action(SECOND_NS, timers, 50, Prayer.MELEE, received_tick=53)
+        self.assertEqual(action.ability, "Resonance")
+        phase.sent(action, SECOND_NS)
+        self.assertFalse(phase.resonance_press_possible(timers, 53))
+        self.assertFalse(phase.resonance_active(timers))
+        self.assertIsNone(
+            phase.next_action(SECOND_NS + 20_000_000, timers, 0, Prayer.MELEE, received_tick=53)
+        )
+        cooling = {"Resonance": 30_000}
+        self.assertTrue(phase.resonance_active(cooling))
+        self.assertIsNone(
+            phase.next_action(
+                SECOND_NS + 600_000_000, cooling, 1780, Prayer.MELEE, received_tick=54
+            )
+        )
+        self.assertEqual(phase.cast_result, ("Resonance", True))
+        # Too late after +3: the cast would follow the heavy hit.
+        late = PhaseOne()
+        late.observe([dict(event(1, HOLD_STILL), received_tick=50)])
+        self.assertFalse(late.resonance_press_possible({"Resonance": 0}, 54))
+        self.assertIsNone(
+            late.next_action(SECOND_NS, {"Resonance": 0}, 0, Prayer.MELEE, received_tick=54)
         )
 
-    def test_resonance_without_gcd_reading_falls_back_to_third_tick(self):
-        phase = PhaseOne()
-        phase.observe([dict(event(1, HOLD_STILL), received_tick=50)])
-        timers = {"Resonance": 0}
-        self.assertIsNone(
-            phase.next_action(SECOND_NS, timers, None, Prayer.MELEE, received_tick=54)
-        )
+    def test_gcd_remaining_now_counts_down_to_the_press(self):
+        remaining = controller["gcd_remaining_now"]
+        player = SimpleNamespace(gcd_reason=Reason.NONE, gcd_remaining_ms=160)
+        self.assertEqual(remaining(player, 0, 70_000_000), 90)
+        self.assertIsNone(remaining(player, 0, 170_000_000))
+        player.gcd_remaining_ms = 0
+        self.assertEqual(remaining(player, 0, 500_000_000), 0)
+        player.gcd_reason = Reason.NOT_SET
+        self.assertIsNone(remaining(player, 0, 0))
+        ready = controller["gcd_press_ready"]
         self.assertEqual(
-            phase.next_action(SECOND_NS, timers, None, Prayer.MELEE, received_tick=53).ability,
-            "Resonance",
-        )
-        self.assertIsNone(
-            phase.next_action(SECOND_NS, {"Resonance": 3000}, None, Prayer.MELEE, received_tick=53)
+            [ready(value) for value in (None, 0, 100, 101)], [False, True, True, False]
         )
 
     def test_uppercut_escape_uses_received_ticks_once(self):
@@ -858,25 +879,54 @@ class PrayerFlickerTests(unittest.TestCase):
         flicker.observe([event(2, AUTO)], 33, 2)
         self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 33, 3), Prayer.MELEE)
 
-    def test_phase_three_default_is_deflect_magic(self):
+    def test_phase_three_default_is_deflect_magic_but_melee_autos_keep_melee(self):
         flicker = PrayerFlicker()
         flicker.default_prayer = Prayer.MAGIC
-        flicker.observe([event(1, AUTO)], 40, 0)
+        flicker.observe([event(1, controller["P4_HOLD_STILL_CUE"])], 40, 0)
         self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 40, 0), Prayer.MAGIC)
+        # P3 28929 hits were type 133 melee.
+        flicker.observe([event(2, AUTO)], 44, 0)
+        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 44, 0), Prayer.MELEE)
 
-    def test_hold_still_protects_the_first_hit_and_restores_soul_split_for_resonance(self):
+    def test_hold_still_deflects_both_hits_without_resonance(self):
         flicker = PrayerFlicker()
         flicker.default_prayer = Prayer.MAGIC
-        # Recorded P1 cue at 3518 and melee hit of 1,068 at 3520.
+        # Recorded P1 cue at 3518: the small hit at +2 and the heavy hit at +4.
         flicker.observe([event(1, HOLD_STILL)], 3518, 0)
-        self.assertEqual(flicker.next_prayer(Prayer.SOUL_SPLIT, 3518, 0), Prayer.MELEE)
-        flicker.sent(Prayer.MELEE, 0)
-        self.assertIsNone(flicker.next_prayer(Prayer.MELEE, 3519, 600_000_000))
-        self.assertIsNone(flicker.next_prayer(Prayer.MELEE, 3520, 1_200_000_000))
-        self.assertIsNone(flicker.next_prayer(Prayer.MELEE, None, 1_799_999_999))
-        self.assertEqual(flicker.next_prayer(Prayer.MELEE, 3521, 1_800_000_000), Prayer.SOUL_SPLIT)
-        flicker.sent(Prayer.SOUL_SPLIT, 1_800_000_000)
-        self.assertIsNone(flicker.next_prayer(Prayer.SOUL_SPLIT, 3522, 2_400_000_000))
+        self.assertEqual(
+            [flicker.active_prayer(tick, 0) for tick in range(3518, 3524)],
+            [Prayer.MELEE] * 4 + [None, None],
+        )
+        self.assertEqual(flicker.next_prayer(Prayer.MELEE, 3522, 0), Prayer.SOUL_SPLIT)
+
+    def test_hold_still_returns_to_soul_split_once_resonance_is_confirmed(self):
+        flicker = PrayerFlicker()
+        flicker.observe([event(7, HOLD_STILL)], 100, 0)
+        # Confirmed at +3 (pressed at +2): Soul Split is requested at +3 for the heavy hit.
+        self.assertTrue(flicker.release(7, 103))
+        self.assertFalse(flicker.release(7, 103))
+        self.assertEqual(
+            [flicker.active_prayer(tick, 0) for tick in range(100, 104)],
+            [Prayer.MELEE, Prayer.MELEE, Prayer.MELEE, None],
+        )
+
+    def test_phase_three_hold_still_deflects_magic_then_melee(self):
+        flicker = PrayerFlicker()
+        flicker.phase = 3
+        flicker.default_prayer = Prayer.MAGIC
+        # 5862 at 250% P3: a type 139 hit of 954 at +2 under Deflect Melee, 5,035 melee at +4.
+        flicker.observe([event(1, HOLD_STILL)], 5862, 0)
+        self.assertEqual(
+            [flicker.active_prayer(tick, 0) for tick in range(5862, 5867)],
+            [Prayer.MAGIC, Prayer.MAGIC, Prayer.MAGIC, Prayer.MELEE, None],
+        )
+        # Release from +3 drops the melee window but keeps the protected small-hit ticks.
+        released = PrayerFlicker()
+        released.phase = 3
+        released.observe([event(1, HOLD_STILL)], 5862, 0)
+        released.release(1, 5865)
+        self.assertEqual(released.active_prayer(5864, 0), Prayer.MAGIC)
+        self.assertIsNone(released.active_prayer(5865, 0))
 
     def test_phase_three_counts_magic_autos_before_hold_still(self):
         phase = PhaseOne(phase=3)

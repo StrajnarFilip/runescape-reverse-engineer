@@ -83,8 +83,13 @@ MAGIC_ATTACK = 28959
 # The RuneScape Wiki strategy page names the P2 magic barrage Magical Onslaught: projectiles
 # grow in damage, matching the rising 28959 hits. Each projectile repeats the animation.
 ONSLAUGHT = MAGIC_ATTACK
-# Hold Still's follow-up is melee even on P3, where Telos's standard attacks use magic.
-FLICK_PRAYER_BY_ANIMATION = {MAGIC_ATTACK: Prayer.MAGIC, HOLD_STILL: Prayer.MELEE}
+# 28929 hits are type 133 melee in every phase, including the nine P3 applications logged so far.
+# Hold Still's prayers follow HOLD_STILL_SMALL_HIT_PRAYER_BY_PHASE and the heavy melee hit.
+FLICK_PRAYER_BY_ANIMATION = {
+    MAGIC_ATTACK: Prayer.MAGIC,
+    MELEE_AUTO_SEQUENCE: Prayer.MELEE,
+    HOLD_STILL: Prayer.MELEE,
+}
 # Next special per phase, from the RuneScape Wiki rotation (guide-derived; P1 matches the live
 # captures). P2: Onslaught, Hold Still, Black Virus, Uppercut, Tendrils, each after 3 autos.
 # The virus has no mapped animation, so Hold Still is followed directly by Uppercut here.
@@ -637,9 +642,16 @@ TRANSITION_ATTACK_CUES = frozenset({
     MELEE_AUTO_SEQUENCE, MAGIC_ATTACK, TENDRILS, HOLD_STILL, UPPERCUT,
 })
 DEFAULT_FLICK_HOLD_TICKS = 1
-# The unanimated Tendrils follow-up and the first Hold Still melee hit can land at +2.
-# Hold Still then requests Soul Split at +3 for the heavy +4 hit and queued Resonance.
-FLICK_HOLD_TICKS = {TENDRILS_RELEASE: 3, HOLD_STILL: 3}
+# The unanimated Tendrils follow-up can land at +2.
+FLICK_HOLD_TICKS = {TENDRILS_RELEASE: 3}
+# Window ticks name the received tick of the press; the overhead is then up on the next tick.
+# Hold Still: Deflect for the small hit through +3, then Deflect Melee for the heavy +4 hit
+# unless Resonance's cooldown confirms that it will take that hit (PrayerFlicker.release).
+HOLD_STILL_SMALL_PRESS_TICKS = (0, 2)
+HOLD_STILL_HEAVY_PRESS_TICKS = (3, 3)
+# The small hit was type 139 (magic) in all 11 P3 Hold Stills where it dealt damage at +2, and
+# type 133 in P1, P2 and P4 (2026-11-14/15 logs); the heavy hit was type 133 in every phase.
+HOLD_STILL_SMALL_HIT_PRAYER_BY_PHASE = {3: Prayer.MAGIC}
 
 
 def magic_flick_ticks(distance):
@@ -673,19 +685,41 @@ def magic_flick_ticks(distance):
 # Uppercut's 2,634 hitmark appeared 7 received ticks after 28938 on 2026-11-14 at 100%.
 # Escape is sent two to three ticks before that hitmark; the server hit deadline is unmeasured.
 UPPERCUT_ESCAPE_TICKS = (4, 5)
-# Hold Still lands a smaller melee hit at +1 or +2 received ticks and a 4,000+ melee hit at +4
-# (250%: 1,094 then 4,384; 500%: blocked 0 at +1 then 8,612). Resonance must miss the first
-# and absorb the second. Resonance shares the GCD with Revolution, which takes every free slot
-# (one every 3 ticks), and a press made after Revolution fires waits for the next slot: at 500%
-# presses with 1,780 ms of GCD left at +2 and +3 never cast before the +4 hit. The press is
-# therefore queued during the GCD so that Resonance takes the slot that falls in +2..+4.
-RESONANCE_FIRST_HIT_TICK = 2
-RESONANCE_LATEST_TICK = 3
-RESONANCE_SLOT_TICKS = (2, 4)
-# In the 500% P1 Hold Still the queued press cast at +3 and the +4 hit healed 4,195. In P2 the
-# same queued press did not cast when the slot freed, so one immediate retry follows.
-RESONANCE_MAX_ATTEMPTS = 2
-TICK_MS = 600
+# Ability queueing is off in the client, so a GCD ability pressed while the GCD runs is dropped.
+# 2026-11-15 250% logs: Anticipation and Resonance pressed with 1,140-1,800 ms left never cast;
+# with 360-620 ms left or an idle GCD they cast on the next tick. A press is therefore sent only
+# in the last GCD_PRESS_LEAD_MS before the GCD ends (or while it is idle) and reaches the server
+# on the tick the GCD ends, ahead of Revolution. Escape, Surge and Dive are off the GCD.
+GCD_PRESS_LEAD_MS = 100
+GCD_ABILITIES = frozenset({"Resonance", "Anticipation", "Freedom", "Hurricane"})
+# Hold Still: one small hit lands at +1 (a 0 under Deflect, type 482) or +2 (type 133 in P1/P2,
+# 139 in P3), rarely +3, and the heavy type 133 hit at +4 (45 P1, 24 P2 and 20 P3 cues). A press
+# sent during received tick T casts on T+1, so Resonance must be pressed in the tick after the
+# small hit is seen and no later than +3: its cast on +2..+4 then absorbs only the heavy hit.
+HOLD_STILL_SMALL_HIT_TYPES = frozenset({133, 139, 482})
+HOLD_STILL_SMALL_HIT_TICKS = (1, 3)
+HOLD_STILL_HEAVY_HIT_TICK = 4
+RESONANCE_LATEST_PRESS_TICK = HOLD_STILL_HEAVY_HIT_TICK - 1
+
+
+def gcd_press_ready(gcd_remaining_ms):
+    """Whether a GCD ability pressed now casts on the tick the global cooldown ends."""
+    return gcd_remaining_ms is not None and gcd_remaining_ms <= GCD_PRESS_LEAD_MS
+
+
+def gcd_remaining_now(player, sample_ns, now_ns):
+    """GCD milliseconds left at ``now_ns``: 0 while idle, None if unknown or ended since sampling.
+
+    A GCD that ended after the sample has probably restarted with Revolution's next ability, so
+    the next fresh sample decides instead.
+    """
+    if player.gcd_reason != Reason.NONE:
+        return None
+    remaining = player.gcd_remaining_ms
+    if remaining <= 0:
+        return 0
+    remaining -= (now_ns - sample_ns) // 1_000_000
+    return remaining if remaining > 0 else None
 UPPERCUT_ESCAPE_FALLBACK_NS = (2_400_000_000, 3_000_000_000)
 MOVEMENT_ABILITIES = frozenset({"Surge", "Escape"})
 MOVEMENT_WINDOWS = {
@@ -760,8 +794,7 @@ class PhaseOne:
         self.handled = set()
         self.forecast_handled = False
         self.forecast_attempts = 0
-        self.first_hit_tick = None
-        self.resonance_attempts = 0
+        self.small_hit_tick = None
         self.cast_result = None
 
     @property
@@ -830,8 +863,7 @@ class PhaseOne:
                 self.handled.clear()
                 self.forecast_handled = False
                 self.forecast_attempts = 0
-                self.first_hit_tick = None
-                self.resonance_attempts = 0
+                self.small_hit_tick = None
                 self.stomp_checked = False
                 self.stomp_pending = None
                 self.stomp_prepared = None
@@ -859,12 +891,16 @@ class PhaseOne:
         With ``flicking``, the melee flicker owns protection, so Anticipation no longer
         requires Deflect Melee to be the current overhead. ``stun_expiry`` is the player's
         active stun timer (None when not stunned); Freedom is used only then, once per stun.
-        ``timed_freedom`` is accepted for older callers and no longer changes behavior.
+        GCD abilities wait for gcd_press_ready(``gcd_remaining_ms``) because the client drops
+        presses made during the GCD. ``timed_freedom`` is accepted for older callers and no
+        longer changes behavior.
         """
+        gcd_ready = gcd_press_ready(gcd_remaining_ms)
         # Freedom is reactive: only an observed stun justifies it, and it precedes the rest.
         if (
             stun_expiry is not None
             and stun_expiry != self.last_freedom_stun
+            and gcd_ready
             and "Freedom" in cooldowns
             and not cooldowns["Freedom"]
         ):
@@ -872,6 +908,8 @@ class PhaseOne:
             return Action("Freedom", "Player stunned")
         # Resonance is tick-critical, so it precedes any acknowledgement still pending.
         if self.resonance_due(cooldowns, received_tick, gcd_remaining_ms):
+            if self.pending:
+                self.cast_result = self.acknowledge(cooldowns, now, ending=True)
             return Action("Resonance", "Hold Still second melee hit")
         if self.pending:
             self.cast_result = self.acknowledge(
@@ -900,7 +938,8 @@ class PhaseOne:
             if earliest_ns <= elapsed_ns <= latest_ns and "Surge" in cooldowns:
                 if not cooldowns["Surge"]:
                     return Action("Surge", reason)
-        # The client queues an ability pressed during the GCD, so Anticipation does not wait for it.
+        if not gcd_ready:
+            return None
         if (
             self.expected == HOLD_STILL
             and self.autos == self.anticipation_auto
@@ -912,8 +951,6 @@ class PhaseOne:
             and not self.forecast_handled
         ):
             return Action("Anticipation", "Hold Still forecast after Uppercut")
-        if gcd_remaining_ms != 0:
-            return None
         if (
             active_special
             and self.special == TENDRILS
@@ -940,56 +977,66 @@ class PhaseOne:
             return 0 <= received_tick - self.special_tick <= BEAM_SPECIAL_HOLD_TICKS
         return 0 <= now - self.special_ns <= BEAM_SPECIAL_HOLD_TICKS * TICK_FALLBACK_NS
 
-    def observe_hits(self, hit_count, received_tick):
-        """Record the first player hitmark from Hold Still's +2 hit onwards."""
+    def observe_hits(self, hits, received_tick):
+        """Record the received tick of Hold Still's small hit (+1 to +3, damage, block or miss).
+
+        Soul Split heals (type 143) and typeless marks do not count.
+        """
+        earliest, latest = HOLD_STILL_SMALL_HIT_TICKS
         if (
-            hit_count
-            and self.special == HOLD_STILL
-            and self.first_hit_tick is None
+            self.special == HOLD_STILL
+            and self.small_hit_tick is None
             and isinstance(received_tick, int)
             and isinstance(self.special_tick, int)
-            and received_tick - self.special_tick >= RESONANCE_FIRST_HIT_TICK
+            and earliest <= received_tick - self.special_tick <= latest
+            and any(event.hit.type_id in HOLD_STILL_SMALL_HIT_TYPES for event in hits)
         ):
-            self.first_hit_tick = received_tick
+            self.small_hit_tick = received_tick
 
     def resonance_due(self, cooldowns, received_tick, gcd_remaining_ms=None):
-        """Press when the next free GCD slot falls on Hold Still +2..+4.
+        """Press once per Hold Still so that the cast lands after the small hit, by the heavy hit.
 
-        A press during the GCD queues Resonance ahead of Revolution for that slot. With a free
-        GCD before +2 the press waits, because Revolution takes that early slot and the next
-        one is then three ticks later. Without a GCD reading, the earlier rule applies: after
-        the +2 hit is seen, or at +3.
+        The press goes out in the GCD's last moments, so it casts on the next received tick.
+        Before +3 it requires the small hit to have been seen; at +3 it casts on the heavy hit's
+        tick whether or not the small hit was seen.
         """
         if (
             self.special != HOLD_STILL
-            or self.resonance_attempts >= RESONANCE_MAX_ATTEMPTS
+            or "Resonance" in self.handled
             or "Resonance" not in cooldowns
             or cooldowns["Resonance"]
+            or not gcd_press_ready(gcd_remaining_ms)
             or not isinstance(received_tick, int)
             or not isinstance(self.special_tick, int)
         ):
             return False
         tick_delta = received_tick - self.special_tick
-        earliest_slot, latest_slot = RESONANCE_SLOT_TICKS
-        if not 0 <= tick_delta <= latest_slot:
-            return False
-        if self.resonance_attempts:
-            # The queued press did not cast: retry once the slot is free and still in range.
-            return gcd_remaining_ms == 0 and earliest_slot <= tick_delta
-        if not isinstance(gcd_remaining_ms, int):
-            if tick_delta == RESONANCE_FIRST_HIT_TICK:
-                return self.first_hit_tick is not None
-            return tick_delta == RESONANCE_LATEST_TICK
-        slot_delta = tick_delta + math.ceil(gcd_remaining_ms / TICK_MS)
-        return earliest_slot <= slot_delta <= latest_slot
+        if tick_delta == RESONANCE_LATEST_PRESS_TICK:
+            return True
+        return 0 < tick_delta < RESONANCE_LATEST_PRESS_TICK and self.small_hit_tick is not None
+
+    def resonance_press_possible(self, cooldowns, received_tick):
+        """Whether this Hold Still's Resonance press can still come in this or a later tick."""
+        return (
+            self.special == HOLD_STILL
+            and "Resonance" not in self.handled
+            and "Resonance" in cooldowns
+            and not cooldowns["Resonance"]
+            and isinstance(received_tick, int)
+            and isinstance(self.special_tick, int)
+            and received_tick - self.special_tick <= RESONANCE_LATEST_PRESS_TICK
+        )
+
+    def resonance_active(self, cooldowns):
+        """Whether this Hold Still's Resonance press has been confirmed by its cooldown."""
+        return (
+            self.special == HOLD_STILL
+            and "Resonance" in self.handled
+            and (cooldowns.get("Resonance") or 0) > 0
+        )
 
     def sent(self, action, now):
         """Wait for the sampled cooldown before treating this command as a cast."""
-        if action.ability == "Resonance":
-            self.resonance_attempts += 1
-            # Never displace another ability's pending acknowledgement.
-            if self.pending is not None:
-                return
         self.pending = (action.ability, now + ACK_TIMEOUT_NS)
         if action.ability == "Anticipation":
             # An unacknowledged press may be retried while the forecast window is still open.
@@ -1036,6 +1083,8 @@ class PrayerFlicker:
         self.hold_cue = None
         # Deflect for animations without an override; P3 switches this to Deflect Magic.
         self.default_prayer = Prayer.MELEE
+        # Selects the phase-specific Hold Still small-hit prayer.
+        self.phase = 1
         self.cue_event = None
         self.requested = None
         self.transition_phase = None
@@ -1069,7 +1118,8 @@ class PrayerFlicker:
         """Open each cue's deflect window. Return the latest cue.
 
         Most cues deflect from their own tick for their hold count. A 28959 magic attack
-        deflects during magic_flick_ticks(distance), later for a player far from Telos.
+        deflects during magic_flick_ticks(distance), later for a player far from Telos. Hold
+        Still opens one window for its small hit and one for its heavy melee hit.
         """
         trigger = None
         for action in actions:
@@ -1082,19 +1132,41 @@ class PrayerFlicker:
             trigger = action
             prayer = self.prayers.get(sequence, self.default_prayer)
             if sequence == MAGIC_ATTACK:
-                first, last = magic_flick_ticks(distance)
+                spans = [(*magic_flick_ticks(distance), prayer)]
+            elif sequence == HOLD_STILL:
+                small_prayer = HOLD_STILL_SMALL_HIT_PRAYER_BY_PHASE.get(self.phase, prayer)
+                spans = [
+                    (*HOLD_STILL_SMALL_PRESS_TICKS, small_prayer),
+                    (*HOLD_STILL_HEAVY_PRESS_TICKS, Prayer.MELEE),
+                ]
             else:
-                first, last = 0, self.hold_ticks.get(sequence, DEFAULT_FLICK_HOLD_TICKS) - 1
+                last = self.hold_ticks.get(sequence, DEFAULT_FLICK_HOLD_TICKS) - 1
+                spans = [(0, last, prayer)]
             cue_tick = action.get("received_tick", tick)
             cue = action["event_sequence"]
             if cue_tick is not None:
-                self.windows.append((cue_tick + first, cue_tick + last + 1, prayer, cue))
-            self.hold_prayer = prayer
+                for first, last, span_prayer in spans:
+                    self.windows.append((cue_tick + first, cue_tick + last + 1, span_prayer, cue))
+            # Without received ticks the first span's prayer holds until the last span ends.
+            self.hold_prayer = spans[0][2]
             self.hold_cue = cue
-            return_ns = now + (last + 1) * TICK_FALLBACK_NS
+            return_ns = now + (max(span[1] for span in spans) + 1) * TICK_FALLBACK_NS
             if self.return_ns is None or return_ns > self.return_ns:
                 self.return_ns = return_ns
         return trigger
+
+    def release(self, cue, tick):
+        """End one cue's windows from received tick ``tick``; return whether any changed."""
+        kept = []
+        for first, end, prayer, window_cue in self.windows:
+            if window_cue == cue and end > tick:
+                if first < tick:
+                    kept.append((first, tick, prayer, window_cue))
+                continue
+            kept.append((first, end, prayer, window_cue))
+        changed = kept != self.windows
+        self.windows = kept
+        return changed
 
     def active_prayer(self, tick, now):
         """The deflect to show now, or None for Soul Split. The latest-starting window wins."""
@@ -1476,6 +1548,10 @@ def run(reader, args, board, attempt=None):
         if delta < STOMP_PREFLIGHT_TICK:
             return
         preflight = delta == STOMP_PREFLIGHT_TICK
+        if preflight and phase_one.resonance_press_possible(timers, received_tick):
+            # The +3 Resonance press comes in the GCD's last 100 ms; a pointer check now could
+            # hold the loop past it. The dodge itself is checked from +4.
+            return
         pending = phase_one.stomp_pending
         movement_window_open = delta <= STOMP_CHECK_TICKS[1]
         if not movement_window_open and pending is None:
@@ -2367,8 +2443,9 @@ def run(reader, args, board, attempt=None):
         return None
 
     def flick_step(actions, phase, prayer, now, sample_ns):
-        """Advance the melee flicker and send at most one prayer chord."""
+        """Advance the flicker and send at most one prayer chord."""
         tick = received_tick_counter()
+        flicker.phase = phase
         transition = flicker.update_transition(actions, phase)
         if transition is not None:
             active, cue = transition
@@ -2390,6 +2467,19 @@ def run(reader, args, board, attempt=None):
                 received_tick=cue.get("received_tick", tick),
                 distance=distance,
                 cue_native_sequence=cue["event_sequence"],
+            )
+        if (
+            tick is not None
+            and phase_one.special == HOLD_STILL
+            and phase_one.resonance_active(cooldowns(reader, bindings))
+            and flicker.release(phase_one.special_event, tick)
+        ):
+            # Resonance takes the heavy hit, so Soul Split returns for it.
+            emit(
+                "prayer_window_released",
+                reason="Resonance cast confirmed",
+                received_tick=tick,
+                cue_native_sequence=phase_one.special_event,
             )
         target = flicker.next_prayer(prayer, tick, now)
         if target is None:
@@ -2728,7 +2818,7 @@ def run(reader, args, board, attempt=None):
             for action in actions:
                 action.setdefault("received_tick", received_tick)
         phase_one.observe(actions)
-        phase_one.observe_hits(len(hits), received_tick)
+        phase_one.observe_hits(hits, received_tick)
         position = reader.position
         tile = (position.x, position.y, position.plane) if position.valid else None
         if surge_sent_ns is not None:
@@ -2765,7 +2855,7 @@ def run(reader, args, board, attempt=None):
         timers = {
             name: value for name, value in cooldowns(reader, bindings).items() if name in bindings
         }
-        gcd_remaining_ms = player.gcd_remaining_ms if player.gcd_reason == Reason.NONE else None
+        gcd_remaining_ms = gcd_remaining_now(player, info.monotonic_ns, reader.monotonic_ns())
         phase_one.hold_position = font_duty.active  # A new phase object starts without it.
         action = phase_one.next_action(
             now,
@@ -2806,10 +2896,22 @@ def run(reader, args, board, attempt=None):
                     ability=action.ability,
                     reason=action.reason,
                     cue_native_sequence=pending_cue,
-                    # Shows whether a Revolution GCD could delay this press past its target tick.
                     gcd_remaining_ms=gcd_remaining_ms,
                     received_tick=received_tick,
                 )
+            press_gcd_ms = gcd_remaining_now(player, info.monotonic_ns, reader.monotonic_ns())
+            if action.ability in GCD_ABILITIES and not gcd_press_ready(press_gcd_ms):
+                # The GCD ended while deciding: Revolution has the slot, so decide again later.
+                emit(
+                    "ability_press_skipped",
+                    ability=action.ability,
+                    reason="GCD window passed before the press",
+                    received_tick=received_tick,
+                )
+                if action.ability == "Freedom":
+                    phase_one.last_freedom_stun = None
+                time.sleep(POLL_SECONDS)
+                continue
             if not send_chord(bindings[action.ability]):
                 # Interrupted by focus loss; the decision is made again after focus returns.
                 if action.ability == "Freedom":
@@ -2825,6 +2927,8 @@ def run(reader, args, board, attempt=None):
                     reason=action.reason,
                     sent_ns=attempt.relative_ns(sent_ns),
                     cue_native_sequence=pending_cue,
+                    # GCD left when the key went down; measures the GCD_PRESS_LEAD_MS rule.
+                    gcd_at_press_ms=press_gcd_ms,
                 )
             if action.ability in MOVEMENT_ABILITIES:
                 surge_origin = tile
