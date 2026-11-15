@@ -22,6 +22,7 @@ from rs3_reader.bot.actuator_sendinput import (
     KeyBinding,
     MinimapBinding,
     NativeSnapshotDevice,
+    NativeKeyAction,
     NpcClickBinding,
     SendInputActuator,
     observed_binding,
@@ -833,7 +834,16 @@ class FakeFunction:
 
 
 class NativeAdapterTests(unittest.TestCase):
-    def device(self, *, chord_api=True, owned_copy=False, pointer_api=False, minimap_size=64):
+    def device(
+        self,
+        *,
+        chord_api=True,
+        owned_copy=False,
+        pointer_api=False,
+        minimap_size=64,
+        batch_api=False,
+        batch_size=48,
+    ):
         from rs3_reader.native import CombatState, Info
 
         info, combat, calls = Info(), CombatState(), []
@@ -867,6 +877,26 @@ class NativeAdapterTests(unittest.TestCase):
                 }
             )
         copies = []
+        if batch_api:
+
+            def batch(snapshot, actions, size, count):
+                calls.append(
+                    (
+                        "batch",
+                        size,
+                        [
+                            {
+                                name: getattr(actions[index], name)
+                                for name, _ in NativeKeyAction._fields_
+                            }
+                            for index in range(count)
+                        ],
+                    )
+                )
+                return 0
+
+            functions["rs3_key_action_sizeof"] = lambda: batch_size
+            functions["rs3_activate_key_batch"] = batch
         if owned_copy:
             functions["rs3_snapshot_copy"] = (
                 lambda source, target: copies.append((source.value, target.value)) or 0
@@ -904,6 +934,52 @@ class NativeAdapterTests(unittest.TestCase):
         device = NativeSnapshotDevice(reader)
         self.addCleanup(device.close)
         return device, info, calls
+
+    def test_ordered_native_batch_uses_one_owned_frame_and_one_input_call(self):
+        device, _, calls = self.device(batch_api=True, owned_copy=True)
+        world = BackendTests().world()
+        commands = [
+            NativeKeyAction(
+                kind=3, virtual_key=ord("A"), expected_instance_id=99, expected_config_id=42
+            ),
+            NativeKeyAction(
+                kind=2, virtual_key=ord("S"), slot=3, expected_item_id=200, expected_token=123
+            ),
+            NativeKeyAction(kind=1, virtual_key=ord("G"), ability_id=14678),
+        ]
+        device.dispatch_key_batch(commands, world)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][:2], ("batch", 48))
+        self.assertEqual([action["virtual_key"] for action in calls[0][2]], [65, 83, 71])
+        self.assertEqual(calls[0][2][0]["expected_instance_id"], 99)
+        self.assertEqual(calls[0][2][1]["expected_token"], 123)
+        self.assertEqual(device.library.copy_sources, [(9876, 1234)])
+
+    def test_key_batch_rejects_missing_api_wrong_size_or_advanced_frame(self):
+        world = BackendTests().world()
+        command = NativeKeyAction(kind=1, virtual_key=ord("F"), ability_id=14707)
+        device, _, calls = self.device()
+        with self.assertRaisesRegex(InputRejected, "key_batch_api_unavailable"):
+            device.dispatch_key_batch([command], world)
+        self.assertEqual(calls, [])
+        with self.assertRaisesRegex(DeviceFault, "key_action_layout_mismatch"):
+            self.device(batch_api=True, batch_size=47)
+        device, info, calls = self.device(batch_api=True, owned_copy=True)
+        info.sequence += 1
+        with self.assertRaisesRegex(InputRejected, "native_snapshot_advanced"):
+            device.dispatch_key_batch([command], world)
+        self.assertEqual(calls, [])
+
+    def test_key_batch_errors_preserve_rejection_and_input_uncertainty(self):
+        world = BackendTests().world()
+        command = NativeKeyAction(kind=1, virtual_key=ord("F"), ability_id=14707)
+        device, _, _ = self.device(batch_api=True)
+        device.key_batch.callback = lambda *args: -5
+        with self.assertRaisesRegex(InputRejected, "native_rejected"):
+            device.dispatch_key_batch([command], world)
+        device.key_batch.callback = lambda *args: -6
+        with self.assertRaisesRegex(DeviceFault, "native_input_fault"):
+            device.dispatch_key_batch([command], world)
 
     def test_typed_native_pointer_calls_preserve_coordinates_axes_and_instance(self):
         device, _, calls = self.device(pointer_api=True, owned_copy=True)

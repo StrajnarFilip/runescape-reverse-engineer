@@ -69,6 +69,22 @@ are in ``docs/arduino-keyboard.rst``.
 Requests
 --------
 
+* Ordered P1 transport, 2026-11-15: ``NativeKeyAction`` mirrors the new 48-byte
+  C descriptor. ``NativeSnapshotDevice.dispatch_key_batch`` checks that layout,
+  copies the exact policy consumer snapshot and submits at most three actions
+  through one C call. A batch API missing from an older DLL rejects explicitly;
+  there is no fallback to separate key presses. Conventional dispatch and
+  batches share a device lock. The caller still serializes Reader sampling,
+  validates each action/binding and owns the supervisor's tick budget.
+* Three new native-adapter cases cover one ordered A-S-G call, copied-frame
+  ownership, missing/changed ABI, an advanced snapshot and input uncertainty.
+  All 46 actuator tests pass, including the firmware host test. KeyBinding now
+  accepts the narrowly supported PgUp/PgDn/OEM plus virtual keys; this does not
+  assert a serial keyboard-layout calibration or successful game casts.
+* D8/L: connect the ordered P1 coordinator and explicit readiness/confirmation
+  adapter to this transport. No live game input was sent during this work.
+  Existing D2 prayer timing gates and ordinary D6/D8 live-mode gates are unchanged.
+
 * Native input request resolved by A2/L on 2026-11-14: the DLL exports
   ``rs3_activate_ability_chord`` and ``rs3_activate_item_chord``, with balanced
   modifiers, 150 ms freshness, active-scene and exact inventory guards plus

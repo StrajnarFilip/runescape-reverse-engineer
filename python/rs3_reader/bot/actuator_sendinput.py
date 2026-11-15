@@ -57,9 +57,12 @@ class KeyBinding:
     def __post_init__(self):
         key = self.virtual_key
         if type(key) is not int or not (
-            0x30 <= key <= 0x39 or 0x41 <= key <= 0x5A or 0x70 <= key <= 0x7B
+            0x30 <= key <= 0x39
+            or 0x41 <= key <= 0x5A
+            or 0x70 <= key <= 0x7B
+            or key in (0x21, 0x22, 0xBB)
         ):
-            raise ValueError("Binding requires a Windows A-Z, 0-9 or F1-F12 virtual key")
+            raise ValueError("Binding requires a supported Windows action-bar virtual key")
         if type(self.modifiers) is not int or self.modifiers < 0 or self.modifiers & ~7:
             raise ValueError("Invalid native modifier mask")
         if type(self.validated) is not bool or not isinstance(self.source, str):
@@ -715,6 +718,27 @@ class SerializedActuator:
         self.close()
 
 
+class NativeKeyAction(ctypes.Structure):
+    """Additive 48-byte rs3_key_action; the caller supplies calibrated key semantics.
+
+    kind 1 is a sampled ability, 2 an exact inventory item, and 3 a target-cycle
+    key guarded by an expected NPC lifetime/config. No field asserts castability,
+    targetability or that the intended server tick will receive these inputs.
+    """
+
+    _fields_ = [
+        *(
+            (name, ctypes.c_uint32)
+            for name in ("kind", "virtual_key", "modifiers", "ability_id", "slot")
+        ),
+        ("expected_item_id", ctypes.c_int32),
+        ("expected_config_id", ctypes.c_int32),
+        ("reserved", ctypes.c_uint32),
+        ("expected_token", ctypes.c_uint64),
+        ("expected_instance_id", ctypes.c_uint64),
+    ]
+
+
 class NativeSnapshotDevice:
     """Borrow a live Reader context; own a separate copied snapshot.
 
@@ -729,6 +753,7 @@ class NativeSnapshotDevice:
         from ..native import CombatState, Info
 
         self.reader, self.library = reader, reader.library
+        self._dispatch_lock = RLock()
         self.snapshot = ctypes.c_void_p()
         self.info, self.combat = Info(), CombatState()
         self.snapshot_copy = getattr(self.library, "rs3_snapshot_copy", None)
@@ -753,6 +778,19 @@ class NativeSnapshotDevice:
                 ctypes.c_uint32,
             ]
             self.item_chord.restype = ctypes.c_int32
+        self.key_batch = getattr(self.library, "rs3_activate_key_batch", None)
+        if self.key_batch is not None:
+            size_query = self.library.rs3_key_action_sizeof
+            size_query.argtypes, size_query.restype = [], ctypes.c_uint32
+            if size_query() != ctypes.sizeof(NativeKeyAction):
+                raise DeviceFault("native_key_action_layout_mismatch")
+            self.key_batch.argtypes = [
+                ctypes.c_void_p,
+                ctypes.POINTER(NativeKeyAction),
+                ctypes.c_uint32,
+                ctypes.c_uint32,
+            ]
+            self.key_batch.restype = ctypes.c_int32
         self.move_to_tile = getattr(self.library, "rs3_move_to_tile", None)
         self.interact = getattr(self.library, "rs3_interact", None)
         if self.move_to_tile is not None:
@@ -811,8 +849,8 @@ class NativeSnapshotDevice:
         elif not isinstance(action, SetPrayer):
             raise InputRejected("pointer_mapping_unavailable")
 
-    def dispatch(self, action, binding, world):
-        self.supports(action, binding)
+    def _copy_world_snapshot(self, world):
+        """Own the exact consumer frame checked by the policy, never a worker-latest guess."""
         lib, snapshot = self.library, self.snapshot
         if not snapshot or not self.reader.context:
             raise DeviceFault("native_device_closed")
@@ -849,6 +887,41 @@ class NativeSnapshotDevice:
         if self.info.sequence != world.sample_sequence:
             # Re-evaluate against a newer WorldState, including its bindings and inventory.
             raise InputRejected("native_snapshot_advanced")
+        return snapshot
+
+    def dispatch_key_batch(self, actions, world):
+        """Submit 1..3 prepared actions with one owned, exact policy snapshot.
+
+        The supervised caller serializes Reader sampling with dispatch and
+        supplies per-action policy/binding evidence before this transport call.
+        The transport never substitutes separate calls for an unavailable batch
+        API. Results are OS acceptance; each action still needs native feedback.
+        """
+        actions = tuple(actions)
+        if not 1 <= len(actions) <= 3 or any(type(a) is not NativeKeyAction for a in actions):
+            raise InputRejected("invalid_native_key_batch")
+        if self.key_batch is None:
+            raise InputRejected("native_key_batch_api_unavailable")
+        with self._dispatch_lock:
+            snapshot = self._copy_world_snapshot(world)
+            native_actions = (NativeKeyAction * len(actions))(*actions)
+            result = self.key_batch(
+                snapshot, native_actions, ctypes.sizeof(NativeKeyAction), len(actions)
+            )
+            if result in (-5, -7):
+                raise InputRejected("native_rejected:" + str(result))
+            if result != 0:
+                raise DeviceFault("native_input_fault:" + str(result))
+
+    def dispatch(self, action, binding, world):
+        """Serialize a conventional action with any ordered native batch."""
+        with self._dispatch_lock:
+            self._dispatch_one(action, binding, world)
+
+    def _dispatch_one(self, action, binding, world):
+        self.supports(action, binding)
+        lib = self.library
+        snapshot = self._copy_world_snapshot(world)
         if isinstance(action, SetPrayer):
             result = lib.rs3_set_prayer(
                 snapshot, PRAYER_IDS[action.prayer], binding.virtual_key, binding.modifiers
