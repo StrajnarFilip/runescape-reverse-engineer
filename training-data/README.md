@@ -9,7 +9,8 @@ handling. See the coverage table for the evidence and open timing questions. [Se
 
 Stand on the staging platform with Telos dormant and Revolution on bar 18. Put Freedom,
 Anticipation, Escape, Resonance, Dive and the Deflect Magic, Deflect Melee and Soul Split prayers on
-any displayed action bar. The controller reads their keys from game memory
+any displayed action bar. Reflect and Devotion are optional, and super restores go on the `L`
+keybind (`--super-restore` changes it). The controller reads their keys from game memory
 (`rs3_reader.action_bar_keys`) and logs them as `keys_resolved`; a key passed on the command line
 takes precedence. Start the script, click into RuneScape, and wake Telos yourself. After engagement,
 leaving the encounter closes its attempt log. Losing focus pauses input until RuneScape is focused

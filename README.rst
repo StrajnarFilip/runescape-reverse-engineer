@@ -32,7 +32,8 @@ Current capabilities
   planner with Soul Split support. The original executable also provides a
   guarded local-player hitmark snapshot and event queue. See
   `Prayer timing <docs/prayer-flick.rst>`_ for the observer and initial Telos
-  calibration; automatic flicking remains disabled pending validated deadlines.
+  calibration. The C planner keeps automatic flicking disabled pending validated
+  deadlines. The separate Telos practice controller below flicks on Telos cues.
 
 Previously verified in live combat: Goblin **550/550 HP**, Giant spider
 **1000/1000 HP**, and Goblin **550 -> 326 HP** alongside the independently reported
@@ -109,6 +110,41 @@ JSONL records carry ``position`` with integer ``x`` (east), ``y`` (north), and
 ``plane`` (0–3). The tile is ``null`` when unavailable. For repeatable boss
 markers, record tile offsets relative to a recognizable arena landmark and
 locate that landmark each run.
+
+Telos practice controller
+-------------------------
+
+``work/telos_zero.py`` fights Telos through an Arduino keyboard on a COM port. It
+flicks prayers, times defensives and moves the character. Build the DLL first, then
+stand on the staging platform with Telos dormant, Revolution on bar 18 and
+auto-retaliate on. Start the script, click into RuneScape and wake Telos yourself::
+
+    $env:PYTHONPATH = "python"
+    python work/telos_zero.py --port COM8
+
+The enrage comes from memory (VARP 6359). Ability and prayer keys come from the
+displayed action bars: Freedom and Anticipation are required. Escape, Resonance,
+Dive, Deflect Magic, Deflect Melee and Soul Split are used when present, and
+Reflect and Devotion are optional. Super restore is drunk with ``L`` at 50 prayer
+points or fewer. The script runs until the player dies or F12 is pressed. Losing
+foreground focus pauses input. Each attempt is logged to ``training-data/telos-*.jsonl``.
+
+Optional arguments:
+
+* ``--practice-enrage N`` overrides the enrage read from memory.
+* ``--duration SECONDS`` bounds the session.
+* ``--pid ID`` selects the client process.
+* ``--freedom``, ``--anticipation``, ``--escape``, ``--resonance``, ``--dive``,
+  ``--reflect``, ``--devotion`` and ``--flick-melee-key`` / ``--flick-magic-key`` /
+  ``--flick-soul-split-key`` override a key read from the bars. Displayed letters are
+  translated through the game window's keyboard layout.
+* ``--super-restore KEY`` changes the super restore key (default ``L``).
+* Without ``--port`` the script only observes, and ``--replay FILE`` replays a capture.
+
+`Attempt logs <training-data/README.md>`_ describe the log rows and timing
+rules. `Animation cues <runescape-knowledge-base/bosses/telos/animation-cues.md>`_
+and the `run log <runescape-knowledge-base/bosses/telos/run-log.md>`_ hold the
+evidence behind them.
 
 Layout and verification
 -----------------------
