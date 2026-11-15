@@ -999,6 +999,15 @@ class PrayerFlickerTests(unittest.TestCase):
         self.assertIsNone(flicker.next_prayer(Prayer.MELEE, 10, 5))
         self.assertEqual(flicker.next_prayer(Prayer.MELEE, 11, 6), Prayer.SOUL_SPLIT)
 
+    def test_cue_without_its_own_tick_uses_the_sample_tick(self):
+        # 07:12: Hold Still arrived with an invalid counter; the estimated tick opens its windows.
+        flicker = PrayerFlicker()
+        flicker.observe([dict(event(1, HOLD_STILL), received_tick=None)], 12727, 0)
+        self.assertEqual(
+            [flicker.active_prayer(tick, 0) for tick in range(12727, 12732)],
+            [Prayer.MELEE] * 4 + [None],
+        )
+
     def test_intervening_walk_sample_preserves_the_original_cue_tick(self):
         flicker = PrayerFlicker()
         action = dict(event(1, AUTO), received_tick=21)

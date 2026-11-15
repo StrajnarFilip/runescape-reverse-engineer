@@ -74,6 +74,8 @@ REACQUIRE_TIMEOUT_NS = 3_600_000_000
 REACQUIRE_CUE_TIMEOUT_NS = 10_000_000_000
 # Fallback when the received server tick counter is invalid. One game tick is 0.6 seconds.
 TICK_FALLBACK_NS = 600_000_000
+# An invalid counter is estimated from the last valid tick for at most this long.
+TICK_ESTIMATE_MAX_NS = 3 * TICK_FALLBACK_NS
 # Action bar 9 keys observed on 2026-11-14: F3 Deflect Melee, F4 Soul Split. Ctrl+F3 did not
 # change the overhead in that session.
 DEFAULT_FLICK_MELEE_KEY = "F3"
@@ -1383,7 +1385,9 @@ class PrayerFlicker:
             else:
                 last = self.hold_ticks.get(sequence, DEFAULT_FLICK_HOLD_TICKS) - 1
                 spans = [(0, last, prayer)]
-            cue_tick = action.get("received_tick", tick)
+            cue_tick = action.get("received_tick")
+            if cue_tick is None:
+                cue_tick = tick
             cue = action["event_sequence"]
             if cue_tick is not None:
                 self.last_cue_tick = cue_tick
@@ -2860,18 +2864,33 @@ def run(reader, args, board, attempt=None):
     tick_clock = {"tick": None, "since_ns": None}
 
     def received_tick_counter():
+        """The client's received server tick, estimated briefly while the counter is invalid.
+
+        In the 07:12 run the Hold Still cue arrived in a sample with an invalid counter, and
+        without a cue tick the flick windows, Resonance and the stomp dodge all lapsed. A gap of
+        up to TICK_ESTIMATE_MAX_NS counts on from the last valid tick by elapsed time.
+        """
         tick = reader.encounter.game_tick
         counter = tick.counter if tick.valid else None
-        if counter is not None and counter != tick_clock["tick"]:
-            tick_clock["tick"] = counter
-            tick_clock["since_ns"] = reader.monotonic_ns()
-        return counter
+        now_ns = reader.monotonic_ns()
+        if counter is not None:
+            if counter != tick_clock["tick"]:
+                tick_clock["tick"] = counter
+                tick_clock["since_ns"] = now_ns
+            return counter
+        since_ns = tick_clock["since_ns"]
+        if since_ns is None or now_ns - since_ns > TICK_ESTIMATE_MAX_NS:
+            return None
+        return tick_clock["tick"] + (now_ns - since_ns) // TICK_FALLBACK_NS
 
     def tick_elapsed_ms(tick):
         """Milliseconds since received tick ``tick`` was first seen, or None if unknown."""
-        if tick is None or tick != tick_clock["tick"] or tick_clock["since_ns"] is None:
+        if tick is None or tick_clock["tick"] is None or tick_clock["since_ns"] is None:
             return None
-        return (reader.monotonic_ns() - tick_clock["since_ns"]) // 1_000_000
+        # An estimated tick counts whole ticks on from the last valid one.
+        elapsed_ms = (reader.monotonic_ns() - tick_clock["since_ns"]) // 1_000_000
+        elapsed_ms -= (tick - tick_clock["tick"]) * TICK_MS
+        return elapsed_ms if 0 <= elapsed_ms <= TICK_MS else None
 
     def telos_distance():
         """Player's grid distance to Telos's footprint, or None without both tiles."""
@@ -3278,11 +3297,10 @@ def run(reader, args, board, attempt=None):
         timed_freedom = getattr(args, "timed_freedom", False)
         received_tick = None
         if timed_freedom or "Escape" in bindings or "Resonance" in bindings:
-            tick = reader.encounter.game_tick
-            if tick.valid:
-                received_tick = tick.counter
+            received_tick = received_tick_counter()
             for action in actions:
-                action.setdefault("received_tick", received_tick)
+                if action.get("received_tick") is None:
+                    action["received_tick"] = received_tick
         phase_one.observe(actions)
         phase_one.observe_hits(hits, received_tick)
         position = reader.position
