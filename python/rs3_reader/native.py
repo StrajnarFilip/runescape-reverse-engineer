@@ -943,6 +943,7 @@ def _function_prototypes():
         "snapshot_telos_cleanse": (i32, [handle, ctypes.POINTER(TelosCleanse), u32]),
         "combat_sizeof": (u32, [u32]),
         "snapshot_combat": (i32, [handle, ctypes.POINTER(CombatState), u32]),
+        "snapshot_auto_retaliate": (i32, [handle, ctypes.POINTER(i32)]),
         "snapshot_npc_animations": (
             i32,
             [handle, ctypes.POINTER(NPCAnimation), u32, ctypes.POINTER(u32)],
@@ -1067,6 +1068,7 @@ class Reader:
         self.player = Player()
         self.position = Position()
         self.combat = CombatState()
+        self.auto_retaliate = None
         self.spatial = SpatialInfo()
         self.pointer_walk = PointerWalk()
         self.npc_spatial = (ActorSpatial * MAX_NPCS)()
@@ -1150,6 +1152,9 @@ class Reader:
         copy_record(library.rs3_snapshot_player, self.player)
         copy_record(library.rs3_snapshot_position, self.position)
         copy_record(library.rs3_snapshot_combat, self.combat)
+        retaliate = ctypes.c_int32()
+        self.check_result(library.rs3_snapshot_auto_retaliate(snapshot, ctypes.byref(retaliate)))
+        self.auto_retaliate = bool(retaliate.value) if retaliate.value >= 0 else None
         copy_record(library.rs3_snapshot_spatial, self.spatial)
         copy_record(library.rs3_snapshot_pointer_walk, self.pointer_walk)
         copy_array(library.rs3_snapshot_npc_spatial, self.npc_spatial)

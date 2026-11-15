@@ -89,6 +89,7 @@ static void copy_frame(rs3_snapshot *destination, const rs3_snapshot *source)
     destination->profile = source->profile;
     destination->position = source->position;
     destination->combat = source->combat;
+    destination->auto_retaliate = source->auto_retaliate;
     destination->spatial = source->spatial;
     memcpy(destination->npc_spatial, source->npc_spatial,
            source->spatial.npc_count * sizeof(rs3_actor_spatial));

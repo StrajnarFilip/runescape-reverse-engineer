@@ -61,6 +61,7 @@ _Static_assert(sizeof(rs3_telos_cleanse) == 16, "ABI Telos cleanse");
 void encounter_clear(rs3_snapshot *snapshot)
 {
     memset(&snapshot->encounter, 0, sizeof snapshot->encounter);
+    snapshot->auto_retaliate = -1;
     snapshot->telos_cleanse = (rs3_telos_cleanse){.reason = RS3_ENCOUNTER_UNMAPPED};
     snapshot->encounter.game_tick.phase_ms = NAN;
     snapshot->encounter.game_tick.uncertainty_ms = NAN;
@@ -403,6 +404,22 @@ void encounter_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t play
     variable_table table;
     uint64_t header = player_address + LAYOUT_PLAYER_VARIABLE_TABLE_OFFSET;
     int opened = variable_table_open(context, header, &table);
+    /* Compatibility Mode: five live toggles correlated the settings icon with VARP 462. */
+    static const uint32_t auto_retaliate_varp = 462;
+    if (opened && context->target.profile == &profile_compatibility)
+    {
+        int first_present, second_present;
+        int64_t first_value, second_value;
+        if (variable_table_find(context, &table, auto_retaliate_varp, &first_value,
+                                &first_present) &&
+            first_present &&
+            variable_table_find(context, &table, auto_retaliate_varp, &second_value,
+                                &second_present) &&
+            second_present && first_value == second_value && (first_value == 0 || first_value == 1))
+        {
+            snapshot->auto_retaliate = first_value == 0;
+        }
+    }
     for (uint32_t index = 0; index < RS3_ENCOUNTER_RAW_CAPACITY; index++)
     {
         rs3_encounter_raw *raw = &state->raw[index];
@@ -431,6 +448,7 @@ void encounter_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t play
     }
     if (!opened || !variable_table_unchanged(context, header, &table))
     {
+        snapshot->auto_retaliate = -1;
         for (uint32_t index = 0; index < state->raw_count; index++)
         {
             state->raw[index].valid = 0;

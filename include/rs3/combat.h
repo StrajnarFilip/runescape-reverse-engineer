@@ -113,6 +113,9 @@ typedef struct rs3_player_hit_event
 /** Returns the size of the structure identified by enum rs3_combat_structure, or 0. */
 RS3_API uint32_t rs3_combat_sizeof(uint32_t structure);
 
+/** Copy the observed auto-retaliate setting (0 off, 1 on, -1 unavailable). */
+RS3_API int32_t rs3_snapshot_auto_retaliate(const rs3_snapshot *snapshot, int32_t *out);
+
 RS3_API int32_t rs3_snapshot_player_hit_info(const rs3_snapshot *snapshot, rs3_player_hit_info *out,
                                              uint32_t out_size);
 

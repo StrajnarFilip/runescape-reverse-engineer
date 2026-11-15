@@ -11,6 +11,7 @@ import ctypes
 import json
 import math
 import time
+from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2104,7 +2105,7 @@ def observe(reader, duration, attempt=None):
     return "time_limit" if attempt else 0
 
 
-def run(reader, args, board, attempt=None):
+def run(reader, args, board, attempt=None, *, cleanup=None):
     """Track an attached practice encounter and dispatch only from fresh native state."""
     from game_console import GameWindow, frame_target, move_pointer
 
@@ -2847,6 +2848,8 @@ def run(reader, args, board, attempt=None):
                 player_tile=player_tile,
                 received_tick=received_tick,
             )
+        if sync_font_retaliation(font_duty.state == "charging"):
+            return
         if located and input_allowed:
             attack_step(minions, boss, player, received_tick)
         if target is None or not located or not input_allowed:
@@ -3384,6 +3387,76 @@ def run(reader, args, board, attempt=None):
         # Validate both points before changing the character's overhead.
         frame_target(game, args.frame, *args.approach)
         frame_target(game, args.frame, *args.melee)
+
+    retaliation_point = getattr(args, "auto_retaliate", None)
+    retaliation_pending = None
+    retaliation_changed = False
+    retaliation_initial = getattr(reader, "auto_retaliate", None)
+    if retaliation_point is not None:
+        frame_target(game, args.frame, *retaliation_point)
+
+    def sync_font_retaliation(charging, *, restoring=False):
+        """Suspend automatic targeting during a font charge and observe the settings change."""
+        nonlocal retaliation_pending, retaliation_changed
+        if retaliation_point is None or retaliation_initial is not True:
+            return False
+        now = reader.monotonic_ns()
+        current = reader.auto_retaliate
+        if retaliation_pending is not None:
+            expected, deadline = retaliation_pending
+            if current == expected or now >= deadline:
+                emit("auto_retaliate_outcome", enabled=expected, observed=current)
+                retaliation_pending = None
+                if current is True and expected is True:
+                    retaliation_changed = False
+            else:
+                return False
+        desired = not charging
+        if (desired and not retaliation_changed) or current is None or current == desired:
+            return False
+        if not input_allowed or not 0 <= now - reader.info.monotonic_ns <= MAX_SAMPLE_AGE_NS:
+            return False
+        _, point = frame_target(game, args.frame, *retaliation_point)
+
+        def state_still_current():
+            info, _, boss, phase, hp = boss_sample(reader)
+            return (
+                (info.pid, info.process_creation_time) == identity[:2]
+                and reader.auto_retaliate is current
+                and (restoring or (hp and boss and boss.config_id == ACTIVE_TELOS and phase == 4))
+                and 0 <= reader.monotonic_ns() - info.monotonic_ns <= MAX_SAMPLE_AGE_NS
+            )
+
+        if not click_point(point, select_dive=False, validate=state_still_current):
+            return False
+        retaliation_changed = True
+        retaliation_pending = (desired, reader.monotonic_ns() + ACK_TIMEOUT_NS)
+        emit("auto_retaliate_sent", enabled=desired, font_instance_id=font_duty.font)
+        return True
+
+    def restore_font_retaliation():
+        """Restore the setting when an attempt ends mid-charge and the game still has focus."""
+        if not retaliation_changed:
+            return
+        if keys.game_window(identity) != window:
+            emit("auto_retaliate_restore_deferred", reason="RuneScape lost foreground focus")
+            return
+        try:
+            deadline = reader.monotonic_ns() + 2 * ACK_TIMEOUT_NS
+            while reader.monotonic_ns() < deadline:
+                info, _, _, _, _ = boss_sample(reader)
+                if (info.pid, info.process_creation_time) != identity[:2]:
+                    break
+                sync_font_retaliation(False, restoring=True)
+                if reader.auto_retaliate is True and retaliation_pending is None:
+                    return
+                time.sleep(POLL_SECONDS)
+            emit("auto_retaliate_restore_deferred", reason="Restore could not be verified")
+        except (OSError, RuntimeError, ValueError) as error:
+            emit("auto_retaliate_restore_deferred", reason=str(error))
+
+    if cleanup is not None and retaliation_point is not None:
+        cleanup.callback(restore_font_retaliation)
 
     def click_frame(point, expected_boss, *, require_melee=False):
         bounds, target = frame_target(game, args.frame, *point)
@@ -4343,6 +4416,13 @@ def main():
         help=f"Super restore key, drunk at 50 prayer points or fewer "
         f"(default {DEFAULT_SUPER_RESTORE_KEY})",
     )
+    parser.add_argument(
+        "--auto-retaliate",
+        nargs=2,
+        metavar=("X", "Y"),
+        type=int,
+        help="Auto-retaliate icon in --frame, switched off during P4 font charging",
+    )
     # Phases 2 and 3 are always handled; the old opt-in flag is still accepted as a no-op.
     parser.add_argument("--continue-phase-two", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
@@ -4369,6 +4449,8 @@ def main():
     args.manual_engage = not any(approach_points)
     if args.port and not args.manual_engage and not all(approach_points):
         parser.error("The automatic approach needs --frame, --melee and --approach together")
+    if args.auto_retaliate is not None and (not args.port or not all(approach_points)):
+        parser.error("--auto-retaliate needs --port, --frame, --melee and --approach")
     board = stream = attempt = None
     end_reason = "error"
     outcome = "incomplete"
@@ -4401,11 +4483,13 @@ def main():
                 result = 0
             else:
                 board = ArduinoBackend(args.port)
-                result = run(reader, args, board, attempt)
+                with ExitStack() as cleanup:
+                    result = run(reader, args, board, attempt, cleanup=cleanup)
                 # Setup can cross scenes before engaging. After that, leaving the encounter
                 # closes its log even when the game returns to staging between samples.
                 while result == ENCOUNTER_RESET and not attempt.engaged:
-                    result = run(reader, args, board, attempt)
+                    with ExitStack() as cleanup:
+                        result = run(reader, args, board, attempt, cleanup=cleanup)
                 result_reasons = {2: "phase_limit", ENCOUNTER_RESET: "encounter_ended"}
                 end_reason = attempt.end_reason or result_reasons.get(result, "time_limit")
             return result

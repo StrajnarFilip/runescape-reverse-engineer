@@ -71,6 +71,18 @@ int32_t rs3_snapshot_pointer_walk(const rs3_snapshot *snapshot, rs3_pointer_walk
     return copy_record(&snapshot->pointer_walk, sizeof *out, out, out_size);
 }
 
+int32_t rs3_snapshot_auto_retaliate(const rs3_snapshot *snapshot, int32_t *out)
+{
+    if (!snapshot || !out)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    *out = snapshot->info.status == RS3_AVAILABLE || snapshot->info.status == RS3_PARTIAL
+               ? snapshot->auto_retaliate
+               : -1;
+    return RS3_OK;
+}
+
 int32_t rs3_snapshot_telos_cleanse(const rs3_snapshot *snapshot, rs3_telos_cleanse *out,
                                   uint32_t out_size)
 {

@@ -200,6 +200,7 @@ class AttemptLog:
             "gcd_end_client_tick": player.variable(Variable.GCD_CLIENT_END),
             "gcd_active": bool(player.gcd_remaining_ms) if player.gcd_reason == 0 else None,
             "effects": effects,
+            "auto_retaliate": getattr(reader, "auto_retaliate", None),
             "ability_cooldowns": {
                 ability.struct_id: (
                     ability.reason,

@@ -6,12 +6,35 @@
 #include <string.h>
 
 #define PACKED_VARP            6363u
+#define RETALIATE_VARP         462u
 #define RAW_NODE               0x880000ull
 #define TICK_OWNER             0x990000ull
 #define TICK_OWNER_GLOBAL_RVA  0x17345a8u
 #define TICK_HANDLER_GUARD_RVA 0x36960du
 #define TICK_COUNTER_OFFSET    0xdbf0u
 #define STALE_TICK_AGE_NS      2000000000ull
+
+static void auto_retaliate_requires_the_pinned_profile_and_stable_boolean(void)
+{
+    fixture *sample = fixture_create_for_profile(&profile_compatibility);
+    sample->snapshot->info.status = RS3_AVAILABLE;
+    fixture_add_block(sample, RAW_NODE, FIXTURE_VARIABLE_NODE_BYTES);
+    fixture_put_variable(sample, FIXTURE_PLAYER_TABLE, RAW_NODE, RETALIATE_VARP, 0);
+    const int32_t states[] = {1, 0, -1};
+    int32_t observed;
+    for (uint32_t raw = 0; raw < sizeof states / sizeof states[0]; raw++)
+    {
+        fixture_put_u64(sample, RAW_NODE + LAYOUT_VARIABLE_NODE_VALUE_OFFSET, raw);
+        encounter_stage(sample->context, sample->snapshot, FIXTURE_PLAYER, FIXTURE_WORLD);
+        assert(rs3_snapshot_auto_retaliate(sample->snapshot, &observed) == RS3_OK);
+        assert(observed == states[raw]);
+    }
+    sample->context->target.profile = &profile_primary;
+    fixture_put_u64(sample, RAW_NODE + LAYOUT_VARIABLE_NODE_VALUE_OFFSET, 0);
+    encounter_stage(sample->context, sample->snapshot, FIXTURE_PLAYER, FIXTURE_WORLD);
+    assert(rs3_snapshot_auto_retaliate(sample->snapshot, &observed) == RS3_OK && observed == -1);
+    fixture_destroy(sample);
+}
 
 static void present_stage_is_not_a_phase_or_game_tick(void)
 {
@@ -375,6 +398,7 @@ static void compatibility_cleanse_requires_a_scoped_exact_system_message(void)
 
 int main(void)
 {
+    RUN_TEST(auto_retaliate_requires_the_pinned_profile_and_stable_boolean);
     RUN_TEST(present_stage_is_not_a_phase_or_game_tick);
     RUN_TEST(absence_and_zero_are_distinct);
     RUN_TEST(changed_table_invalidates_raw_fields);

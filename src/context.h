@@ -70,6 +70,7 @@ struct rs3_snapshot
     rs3_effect effects[RS3_EFFECT_COUNT];
     rs3_position position;
     rs3_combat_state combat;
+    int32_t auto_retaliate;
     rs3_spatial_info spatial;
     rs3_pointer_walk pointer_walk;
     rs3_actor_spatial npc_spatial[RS3_MAX_NPCS];

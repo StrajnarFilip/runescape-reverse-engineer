@@ -171,6 +171,15 @@ the press tick and the GCD at press. Match it to `font_resonance_outcome` by fon
 and expected hit tick. The outcome records the observed cooldown and the paired pulse
 damage. A missing damage field means the charge decrease and hitmark could not be paired.
 
+To suspend auto-retaliate during font charging, add `--auto-retaliate X Y` to the
+automatic approach command. Use the centre of the auto-retaliate icon in the same
+`--frame` PNG and hover it in staging to confirm its label. On Compatibility Mode,
+`auto_retaliate` in the state reflects the `rs3_snapshot_auto_retaliate` result.
+Compare the requested `auto_retaliate_sent.enabled` value with
+`auto_retaliate_outcome.observed`. The controller restores an initially enabled
+setting after charging or when the attempt ends with the game in focus. A
+`auto_retaliate_restore_deferred` row means the final setting needs checking.
+
 `anima_bomb_observed` records a phase 4 cue and the response window in milliseconds from
 its observation. The opener sequence `28930`, three `28929` melee attacks, then `28959`
 has a later impact than `28942`. Match the cue, defensive press, cooldown or spell

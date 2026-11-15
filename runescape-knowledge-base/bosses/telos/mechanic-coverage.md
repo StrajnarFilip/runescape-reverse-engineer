@@ -78,6 +78,27 @@ third pulse after entering the phase with 2,385 HP. The native cue and cadence a
 verified. The defensive cast remains to be verified with a free GCD slot.
 [100% font pulse trace](../../../training-data/telos-20261115T093525.671562Z.jsonl)
 
+In that trace the combat target changed to Telos at logic tick 819160 as the GCD
+restarted. The player had just walked into the font. Two planned pulse windows were
+then covered by consecutive GCDs. On Compatibility Mode, the auto-retaliate icon and
+VARP `462` followed five consecutive staging switches. Raw `0` means enabled and raw
+`1` means disabled. The `rs3_snapshot_auto_retaliate` binding samples that state.
+With the icon configured, the controller disables auto-retaliate during the charge
+and restores it after charging. Verify the toggle, combat target, GCD and actual
+pulse damage in the same trace.
+
+In the 100% auto-retaliate trial, native state confirmed both switches for the first
+two fonts. At the first font, Telos remained untargeted during the charge. Freedom
+started one GCD after a stun, and Resonance was still on cooldown from Hold Still.
+At the second font, the controller predicted logic tick 866355 from the preceding
+charge decrement, pressed Resonance with an idle GCD 24 logic ticks before impact,
+and observed its cooldown. The type 144 hit landed at 866355 for 1 damage and the
+font charge fell by 1,200. The same sequence reduced a third-font pulse at 868125 to
+1 damage. The first two fonts released with the player alive in the ring. The player
+received three ordinary melee hits of 478, 730 and 669 under Soul Split in the last
+five ticks of the third charge and died to the final pulse. Native state confirmed
+the setting was restored in the attempt cleanup. [100% defensive timing trace](../../../training-data/telos-20261115T095005.120680Z.jsonl)
+
 **P4 golem attack timing.** In archived P4 phases, all three golem configs (`22905`,
 `22906`, `22907`) used animation `28998`. With no other `28998` within four logic ticks
 and no Telos action near the cue and hit, a lone type 133 mark appeared 25–35 logic
