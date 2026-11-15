@@ -593,6 +593,23 @@ def on_strip(reader, kind, tile, plane):
     )
 
 
+def wall_end_under_telos(listed, boss_tile, size):
+    """The strip end under Telos when every listed strip tile is under his footprint.
+
+    Account owner: Telos can stand on the red beam at the wall; the player must then stand
+    under him, which displaces him. Of the two line ends, the one farther from Telos's centre is
+    the wall side. Returns None when any listed tile lies outside the footprint.
+    """
+    tiles = list(listed)
+    if not tiles or any(footprint_distance(tile, boss_tile, size) for tile in tiles):
+        return None
+    centre = (boss_tile[0] + (size - 1) / 2, boss_tile[1] + (size - 1) / 2)
+    return max(
+        (min(tiles), max(tiles)),
+        key=lambda tile: max(abs(tile[0] - centre[0]), abs(tile[1] - centre[1])),
+    )
+
+
 def on_strip_line(tile, listed):
     """Whether ``tile`` lies within a tile of the straight line through the listed strip.
 
@@ -2258,6 +2275,85 @@ def run(reader, args, board, attempt=None):
     beam_keeper = BeamKeeper()
     restorer = PrayerRestorer()
 
+    def dive_under_telos(phase, phase_one, boss, pose, tile, player, timers):
+        """Dive onto the strip's wall end under Telos to displace him (P3, account owner).
+
+        A walk click there would attack Telos, so only Dive is used, and the landing is
+        checked against the strip and Telos's footprint instead of the Walk hover.
+        """
+        plane = player.tile.plane
+        player_tile = (player.tile.x, player.tile.y)
+        if (
+            "Dive" not in bindings
+            or timers.get("Dive")
+            or phase_one.expected == HOLD_STILL
+            or not 0 < chebyshev(tile, player_tile) <= DIVE_RANGE_TILES
+        ):
+            emit(
+                "beam_under_telos_waiting",
+                phase=phase,
+                target=(*tile, plane),
+                dive_cooldown_ms=timers.get("Dive"),
+                player_tile=(*player_tile, plane),
+            )
+            return
+        height = next(
+            (
+                reader.hazard_terrain_height(hazard)
+                for hazard in reader.hazards[: reader.hazard_info.count]
+                if (hazard.tile.x, hazard.tile.y, hazard.tile.plane) == (*tile, plane)
+                and hazard.flags & HazardFlags.TERRAIN_HEIGHT
+            ),
+            player.fine_height,
+        )
+        point = project_tile(reader, tile, plane, height)
+        if point is None:
+            return
+        boss_id = boss.instance_id
+
+        def still_under():
+            fresh, current_boss, current_phase, hp = refresh_for_walk()
+            if (
+                not fresh
+                or current_boss is None
+                or current_boss.instance_id != boss_id
+                or current_phase != phase
+                or hp is None
+                or hp <= 0
+            ):
+                return False
+            current = next(
+                (
+                    candidate
+                    for candidate in reader.npc_spatial[: reader.spatial.npc_count]
+                    if candidate.instance_id == boss_id
+                    and candidate.valid_mask & SpatialFlags.TILE
+                ),
+                None,
+            )
+            return (
+                current is not None
+                and not footprint_distance(
+                    tile, (current.tile.x, current.tile.y), current.footprint_size or 1
+                )
+                and beam_keeper.recently_on_strip(tile)
+            )
+
+        sent = click_point(
+            point, select_dive=True, validate=still_under, failure_event="beam_keep_skipped"
+        )
+        if sent is None:
+            beam_keeper.retry_now(received_tick_counter() or 0)
+        emit(
+            "beam_under_telos_dive",
+            sent=sent,
+            phase=phase,
+            target=(*tile, plane),
+            boss_tile=(pose.tile.x, pose.tile.y),
+            player_tile=(*player_tile, plane),
+            dispatch_tick=received_tick_counter() if sent else None,
+        )
+
     def beam_keep_step(phase, phase_one, boss, received_tick, timers, now, *, movement_busy):
         """Keep the player on the P1 green or P3 red strip, by Dive when it is ready.
 
@@ -2317,7 +2413,8 @@ def run(reader, args, board, attempt=None):
         boss_tile = (pose.tile.x, pose.tile.y)
         size = pose.footprint_size or 1
         always_block = phase in BEAM_BLOCK_ALWAYS_PHASES
-        in_reach_now = footprint_distance(player_tile, boss_tile, size) <= MELEE_REACH_TILES
+        # Under Telos (blocking the strip at the wall) the player is not sent back to attack.
+        in_reach_now = 1 <= footprint_distance(player_tile, boss_tile, size) <= MELEE_REACH_TILES
         if standing and in_reach_now:
             untargeted = (
                 player.valid_mask & SpatialFlags.TARGET
@@ -2344,6 +2441,9 @@ def run(reader, args, board, attempt=None):
         )
         if route is None:
             beam_keeper.rejected.clear()
+            under = wall_end_under_telos(listed, boss_tile, size) if always_block else None
+            if under is not None:
+                dive_under_telos(phase, phase_one, boss, pose, under, player, timers)
             return
         (target, _, config), point = route
         reach = footprint_distance(target, boss_tile, size)

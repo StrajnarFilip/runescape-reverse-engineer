@@ -78,7 +78,10 @@ The reader lists a moving window of strip tiles, so the arrival tile stays ancho
 leaves that list. The anchor ends when a mechanic moves the player or the listed strip runs
 along a line that misses the player's tile. A hover on a tile listed in the last two ticks
 still validates, and a rejected hover is retried once in the same tick. After walking onto a
-tile in reach it clicks Telos again. It never lands under Telos. Dive is
+tile in reach it clicks Telos again. When every listed P3 strip tile is under Telos, he is
+standing on the beam at the wall. The player then Dives onto the strip end farther from his
+centre to displace him (`beam_under_telos_dive`), because a walk click there would attack him.
+`beam_under_telos_waiting` marks a tick when Dive is cooling or kept for the Hold Still stomp. It never lands under Telos. Dive is
 used only for tiles in reach and within Dive range, while it is ready and Hold Still is not the
 forecast special. Its cooldown is read from Bladed Dive's shared timer. `beam_feeding` rows
 show whether the meter still rises in P3. The stomp dodge treats 5 tiles from Telos's centre

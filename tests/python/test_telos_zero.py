@@ -873,6 +873,16 @@ class BeamTests(unittest.TestCase):
         keeper.retry_now(100)
         self.assertFalse(keeper.move_due(100))
 
+    def test_wall_end_under_telos_is_chosen_only_when_telos_covers_the_strip(self):
+        wall_end = controller["wall_end_under_telos"]
+        boss, size = (100, 200), 5  # Footprint x 100..104, y 200..204, centre (102,202).
+        # The strip runs from the wall at x=100 under Telos: its far end from the centre.
+        covered = [(x, 202) for x in range(100, 104)]
+        self.assertEqual(wall_end(covered, boss, size), (100, 202))
+        # Any strip tile outside the footprint means the normal strip tiles are used.
+        self.assertIsNone(wall_end(covered + [(105, 202)], boss, size))
+        self.assertIsNone(wall_end([], boss, size))
+
     def test_beam_keeper_waits_between_moves(self):
         keeper = controller["BeamKeeper"]()
         retry = controller["BEAM_KEEP_RETRY_TICKS"]
