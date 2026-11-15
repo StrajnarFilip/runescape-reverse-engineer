@@ -21,6 +21,23 @@
 - The next 250% attempt confirmed automatic cleanses on black in P2 and twice on red in P3. It issued the first Walk on each onset tick. Black started seven tiles from the strip at 1317 and cleared at 1325 after the target was updated for the moving strip. Red started ten tiles away at 1433 and cleared at 1441. A second red infection cleared at 1491, four ticks after onset and one tile from the Walk target. The countdown reached zero and the native cleanse message was observed in each case. [Black and red cleanse attempt](../../../training-data/telos-20261115T051748.568834Z.jsonl)
 - A later 250% attempt confirmed black at 2454 and red at 2549. The black strip moved as the player approached. The first Walk tile was occupied at 2433, but the player was two tiles from the new strip. Escape took priority during the next Uppercut. The red virus cleared four ticks after onset. [Moving-strip attempt](../../../training-data/telos-20261115T052849.237600Z.jsonl)
 
+## Player status search
+
+The account owner reports a player status for each of the three strips and for the virus.
+`work/log_variables.py` logged every varp and varc change during the 08:47 250% attempt (log
+kept local under `work/variable_logs/`), which reached P4 and stood on the red strip several
+times. Variable changes were aligned to the attempt log by player tile and ranked by how
+often they fell within 1.2 s of strip arrivals, departures and virus events.
+
+- VARP `6362`, the virus countdown, matched every virus onset and cleanse. It is the virus
+  status the controller already uses.
+- No varp or varc tracked standing on a strip. The best match, VARP `1776`, sets bits `0x1800`
+  about three ticks after each Hold Still cue in every phase and clears them later. It is
+  most likely the Hold Still stun or bind state. VARP `11726` toggles 0 and 4 every 15–20 s
+  in all phases, and VARP `95` reads 1320 around Hold Still.
+- The strip statuses are therefore probably drawn from the buff bar interface rather than sent
+  as player or client variables. The reader does not read that interface yet. [Status search attempt](../../../training-data/telos-20261115T084759.202810Z.jsonl)
+
 ## Hold Still Dive
 
 - For a required Hold Still dodge in P1 and P3, prefer the nearest reachable tile on the green or red strip respectively (account owner, 2026-11-15). A landing under Telos can make him move back into the beam. Require a same-plane stream location with a terrain height, within ten tiles, outside his current footprint and outside the provisional four-tile stomp radius. Recheck the pointer's actual Walk tile against the current strip and actor pose before sending Dive. Use observed safe floor when no beam tile qualifies.
