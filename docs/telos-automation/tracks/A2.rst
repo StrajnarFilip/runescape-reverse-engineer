@@ -136,6 +136,9 @@ Requests
   runner. Partial-insertion cleanup now releases only keyboard keys still down
   in the inserted prefix, preserving dedicated navigation-key flags. This
   change does not establish targetability or same-server-tick execution.
+* L registered the bounded descriptor, size query and batch function in the
+  public C header. Existing ABI layouts are unchanged. Runtime A1/D8 hookup is
+  still required before this batch path is used by the P1 coordinator.
 
 * P1/P5: publish native minimap center/safe radius in physical pixels, plus a
   fresh signature covering minimap/camera rotation, zoom, DPI, window and UI

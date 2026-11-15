@@ -637,6 +637,53 @@ RS3_API int32_t rs3_activate_ability_then_item(const rs3_snapshot *snapshot, uin
                                                uint64_t expected_token, uint32_t item_key,
                                                uint32_t item_modifiers);
 
+#ifndef RS3_KEY_BATCH_TYPES
+#define RS3_KEY_BATCH_TYPES
+#define RS3_MAX_KEY_ACTIONS 3u
+/** Preconditions for a calibrated key; these are not castability or targetability results. */
+enum rs3_key_action_kind
+{
+    RS3_KEY_ACTION_ABILITY = 1,
+    RS3_KEY_ACTION_ITEM = 2,
+    RS3_KEY_ACTION_TARGET_CYCLE = 3
+};
+
+/**
+ * One caller-owned action in a bounded input batch. Initialize unused fields
+ * to zero. ABILITY needs a sampled ability_id; ITEM needs the exact backpack
+ * slot, item ID and nonzero token; TARGET_CYCLE needs the current NPC lifetime
+ * and config ID. Keys/modifiers follow rs3_activate_ability_chord. Presence in
+ * a snapshot does not prove that the action is currently usable or targetable.
+ */
+typedef struct rs3_key_action
+{
+    uint32_t kind;
+    uint32_t virtual_key;
+    uint32_t modifiers;
+    uint32_t ability_id;
+    uint32_t slot;
+    int32_t expected_item_id;
+    int32_t expected_config_id;
+    uint32_t reserved;
+    uint64_t expected_token;
+    uint64_t expected_instance_id;
+} rs3_key_action;
+#endif
+
+/** Return sizeof(rs3_key_action); no existing public structure is extended. */
+RS3_API uint32_t rs3_key_action_sizeof(void);
+/**
+ * Prepare all 1..3 actions, then submit their complete chords in array order
+ * through one foreground-guarded SendInput call. Reject a changed/missing NPC,
+ * item identity, unknown ability, stale scene, wrong process or held key before
+ * dispatch. action_size must equal rs3_key_action_sizeof(). Caller retains the
+ * array. Success means OS acceptance only; check individual native results
+ * afterward, including the actual target selected by target cycling.
+ * No same-server-tick guarantee, full castability or binding discovery is implied.
+ */
+RS3_API int32_t rs3_activate_key_batch(const rs3_snapshot *snapshot, const rs3_key_action *actions,
+                                       uint32_t action_size, uint32_t action_count);
+
 /**
  * Clicks a visible entity or menu row at a physical screen pixel.
  *
