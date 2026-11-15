@@ -234,10 +234,9 @@ def chebyshev(first, second):
 # instakill. Their configs are assumed to be the other two idle ones, again plus 3 and 6.
 FONT_IDLE_CONFIGS = frozenset({22893, 22894, 22895})
 FONT_STAGE_STEP = 3
-FONT_STAGES = 3
-FONT_CONFIGS = frozenset(
-    config + stage * FONT_STAGE_STEP for config in FONT_IDLE_CONFIGS for stage in range(FONT_STAGES)
-)
+FONT_CHARGING_CONFIGS = frozenset(config + FONT_STAGE_STEP for config in FONT_IDLE_CONFIGS)
+FONT_CHARGED_CONFIGS = frozenset(config + FONT_STAGE_STEP for config in FONT_CHARGING_CONFIGS)
+FONT_CONFIGS = FONT_IDLE_CONFIGS | FONT_CHARGING_CONFIGS | FONT_CHARGED_CONFIGS
 # Idle and charged fonts report this health; a charging font reports its remaining charge.
 FONT_UNCHARGED_HEALTH = 1
 # Fonts are 2x2 (logged footprint). Charges ran with the player inside it (173454) or one tile
@@ -246,6 +245,8 @@ FONT_FOOTPRINT = 2
 FONT_REACH_TILES = 1
 # Stay in the charged font this many received ticks for Telos's instakill (timing unmeasured).
 FONT_HOLD_TICKS = 30
+# The earliest charged-font despawn in the recorded completed holds is at +12.
+FONT_EARLIEST_RELEASE_TICK = 12
 # Move again when the player is still not inside after this many received ticks.
 FONT_MOVE_RETRY_TICKS = 3
 # 100% kill of 2026-11-14 (telos-20261114T173454): Pure Anima Font (green) 22893/22896/22899,
@@ -297,8 +298,11 @@ class FontDuty:
 
     def __init__(self):
         self.font = None
+        self.tile = None
         self.state = None
+        self.charge_started_tick = None
         self.charged_tick = None
+        self.arrived_tick = None
         self.next_move_tick = None
         self.move_attempts = 0
         self.resonance_sent = False
@@ -314,10 +318,20 @@ class FontDuty:
         """Advance the duty; return (target tile or None, event name or None)."""
         by_instance = {font[0]: font for font in fonts}
         if self.state is None:
-            for instance_id, _config, health, tile in fonts:
-                if health > FONT_UNCHARGED_HEALTH and instance_id not in self.finished:
+            for instance_id, config, health, tile in fonts:
+                if (
+                    config in FONT_CHARGING_CONFIGS
+                    and health is not None
+                    and health > FONT_UNCHARGED_HEALTH
+                    and tile is not None
+                    and instance_id not in self.finished
+                ):
                     self.font = instance_id
+                    self.tile = tile
                     self.state = "charging"
+                    self.charge_started_tick = received_tick
+                    self.charged_tick = None
+                    self.arrived_tick = None
                     self.next_move_tick = received_tick
                     self.move_attempts = 0
                     self.rejected_points.clear()
@@ -326,20 +340,27 @@ class FontDuty:
             return None, None
         current = by_instance.get(self.font)
         if current is None:
-            return self.finish("font_lost")
-        _, _config, health, tile = current
-        if self.state == "charging" and health <= FONT_UNCHARGED_HEALTH:
+            release_due = (
+                self.state == "holding"
+                and received_tick - self.charged_tick >= FONT_EARLIEST_RELEASE_TICK
+            )
+            return self.finish("font_released" if release_due else "font_lost")
+        _, config, _health, tile = current
+        if tile is not None:
+            self.tile = tile
+        if self.state == "charging" and config in FONT_CHARGED_CONFIGS:
             self.state = "holding"
             self.charged_tick = received_tick
-            return tile, "font_charged"
+            return self.tile, "font_charged"
         if self.state == "holding" and received_tick - self.charged_tick >= FONT_HOLD_TICKS:
             return self.finish("font_hold_ended")
-        return tile, None
+        return self.tile, None
 
     def finish(self, event):
         """End the duty for this font; it is not taken again in this attempt."""
         self.finished.add(self.font)
         self.font = None
+        self.tile = None
         self.state = None
         return None, event
 
@@ -2647,6 +2668,8 @@ def run(reader, args, board, attempt=None):
         for npc in reader.npcs[: reader.info.npc_count]:
             if npc.config_id not in FONT_CONFIGS and npc.config_id not in MINION_CONFIGS:
                 continue
+            is_font = npc.config_id in FONT_CONFIGS
+            health = npc.health_current if npc.flags & NPCFlags.HEALTH else None
             pose = poses.get(npc.instance_id)
             tile = (pose.tile.x, pose.tile.y) if pose is not None else None
             key = (npc.instance_id, npc.config_id)
@@ -2655,18 +2678,19 @@ def run(reader, args, board, attempt=None):
                 seen_p4_actors.add(key)
                 emit(
                     "p4_actor_seen",
-                    kind="font" if npc.config_id in FONT_CONFIGS else "minion",
+                    kind="font" if is_font else "minion",
                     instance_id=npc.instance_id,
                     config_id=npc.config_id,
                     name=npc.name.decode(errors="replace"),
-                    health=npc.health_current,
+                    health=health,
                     tile=tile,
                     footprint=pose.footprint_size if pose is not None else None,
                 )
-            if tile is None:
-                continue
-            record = (npc.instance_id, npc.config_id, npc.health_current, tile)
-            (fonts if npc.config_id in FONT_CONFIGS else minions).append(record)
+            record = (npc.instance_id, npc.config_id, health, tile)
+            if is_font:
+                fonts.append(record)
+            elif tile is not None and health is not None:
+                minions.append(record)
         return fonts, minions
 
     def font_step(phase_one, boss, received_tick, timers):
@@ -2674,21 +2698,50 @@ def run(reader, args, board, attempt=None):
         if not isinstance(received_tick, int):
             return
         fonts, minions = p4_actors()
+        prior_font, prior_tile = font_duty.font, font_duty.tile
         target, event = font_duty.update(fonts, received_tick)
         phase_one.hold_position = font_duty.active
         player = reader.spatial.player
         located = player.valid_mask & SpatialFlags.TILE and player.valid_mask & (
             SpatialFlags.FINE_POSITION
         )
-        player_tile = (player.tile.x, player.tile.y) if located else None
+        player_tile = (
+            (player.tile.x, player.tile.y) if player.valid_mask & SpatialFlags.TILE else None
+        )
         if event:
-            emit(event, target=target, player_tile=player_tile, received_tick=received_tick)
-            if event in ("font_hold_ended", "font_lost"):
+            font_tile = target if target is not None else prior_tile
+            emit(
+                event,
+                font_instance_id=font_duty.font if font_duty.active else prior_font,
+                target=font_tile,
+                player_tile=player_tile,
+                player_hp=reader.player.variable(Variable.HEALTH),
+                in_range=in_font(player_tile, font_tile) if player_tile and font_tile else None,
+                received_tick=received_tick,
+                charge_started_tick=font_duty.charge_started_tick,
+                charged_tick=font_duty.charged_tick,
+                arrived_tick=font_duty.arrived_tick,
+            )
+            if event in ("font_hold_ended", "font_lost", "font_released"):
                 # The player left Telos for the font; melee must be restarted by a click.
                 target_picker.telos_due = True
-        if player_tile is not None and input_allowed:
+        if (
+            player_tile is not None
+            and target is not None
+            and font_duty.arrived_tick is None
+            and in_font(player_tile, target)
+        ):
+            font_duty.arrived_tick = received_tick
+            emit(
+                "font_arrival",
+                font_instance_id=font_duty.font,
+                target=target,
+                player_tile=player_tile,
+                received_tick=received_tick,
+            )
+        if located and input_allowed:
             attack_step(minions, boss, player, received_tick)
-        if target is None or player_tile is None or not input_allowed:
+        if target is None or not located or not input_allowed:
             return
         if font_duty.move_due(player_tile, target, received_tick):
             distance = footprint_distance(player_tile, target, FONT_FOOTPRINT)

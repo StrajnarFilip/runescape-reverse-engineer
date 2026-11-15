@@ -27,8 +27,12 @@ The practice controller has 0% evidence through the phase 3 handoff on Compatibi
 **P4 walk validation.** In the [250% follow-up](../../../training-data/telos-20261114T193511.217029Z.jsonl),
 the first font became chargeable at tick 3986. Fourteen projected clicks followed while the
 player stayed outside charging range. The controller now checks the client's default Walk tile
-before clicking and accepts a free tile in the font's charging ring. Confirm charge steps and
-survival after using this check in a live encounter.
+before clicking and accepts a free tile in the font's charging ring. In the 08:37 run,
+the player reached the first two fonts. Configs 22899 and 22900 confirmed the end of
+their charges. The fonts disappeared at +14 and +13 received ticks with the player
+still in the ring. The controller now records arrival and the observed charged-font
+release separately from an actor disappearing early. Use release position and HP with
+the nearby hitmarks to assess protection. [08:37 practice log](../../../training-data/telos-20261115T083752.833586Z.jsonl)
 
 Guide-derived from the [RuneScape Wiki strategy page](https://runescape.wiki/w/Telos,_the_Warden/Strategies#Phase_2), which warns it may predate the March 2026 combat modernisation. Rows marked *live* match the 2026-11-14 Compatibility Mode captures.
 

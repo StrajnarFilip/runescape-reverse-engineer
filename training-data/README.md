@@ -154,6 +154,12 @@ was on the strip. `observed_tick_delta` gives the position sample's offset from 
 Check it against the hitmark. In one live P3 attempt, Dive moved the player at +8 and the
 stomp still landed at +9.
 
+For P4 fonts, follow `font_charge_started`, `font_arrival`, `font_charged` and
+`font_released` by `font_instance_id`. The charge must reach a charged actor config.
+At release, `in_range` and `player_hp` report the observed position and HP when the
+charged actor disappears. `font_lost` records an earlier disappearance. Use the
+surrounding hitmarks to check the damage outcome.
+
 Join an `ability_sent` row to the `npc_animation` row whose `native_sequence` matches `cue_native_sequence`. Use `cooldown_acknowledgement` and `surge_displacement` for later observations. A cooldown acknowledges a cast. Dodge success, damage prevention and healing each require their own evidence. Inspect `queue_loss` and `attempt_ended` before interpreting a run. The first practice trace predates NPC tile and NPC hitmark logging and has no explicit Anticipation acknowledgement at the phase boundary.
 
 ```powershell

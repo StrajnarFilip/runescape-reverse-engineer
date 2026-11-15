@@ -836,6 +836,15 @@ class FontDutyTests(unittest.TestCase):
         self.assertEqual(duty.update([], 11), (None, "font_lost"))
         self.assertFalse(duty.active)
 
+    def test_font_stays_active_through_missing_pose_and_releases_after_charged_despawn(self):
+        duty = FontDuty()
+        target, _ = duty.update(fonts(22896, 7500), 21493)
+        self.assertEqual(duty.update([(GREEN_FONT[0], 22896, None, None)], 21500), (target, None))
+        self.assertEqual(duty.update(fonts(22896, 1), 21510), (target, None))
+        self.assertEqual(duty.update(fonts(22899, 1), 21511), (target, "font_charged"))
+        self.assertEqual(duty.update([], 21525), (None, "font_released"))
+        self.assertFalse(duty.active)
+
 
 BeamBlocker = controller["BeamBlocker"]
 
