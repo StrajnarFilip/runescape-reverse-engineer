@@ -1003,6 +1003,8 @@ GCD_ABILITIES = frozenset(
 # enough for the press to reach the server (a 76 ms lead was too late for GCD presses).
 # Reflect lasts several ticks and may go from 0.6 s.
 ANIMA_BOMB_SINGLE_HIT_WINDOW_NS = (1_750_000_000, 2_050_000_000)
+ANIMA_BOMB_EARLY_GCD_END_NS = 1_650_000_000
+ANIMA_BOMB_PRECEDING_HIT_TICKS = (50, 60)
 # In nine P4 openings, 28930, three melee autos and 28959 preceded a typeless hit by
 # 146-151 logic ticks after 28959. The other 28959 magic attacks retain their own response.
 P4_OPENING_BOMB_WINDOW_NS = (2_350_000_000, 2_650_000_000)
@@ -1258,6 +1260,8 @@ class PhaseOne:
         self.bomb_event = None
         self.bomb_handled = False
         self.bomb_window_ns = ANIMA_BOMB_SINGLE_HIT_WINDOW_NS
+        self.bomb_logic_tick = None
+        self.bomb_preceding_hit = None
         self.p4_opening_melee_left = None
 
     @property
@@ -1324,6 +1328,8 @@ class PhaseOne:
                 self.bomb_ns = action["observed_ns"]
                 self.bomb_event = action["event_sequence"]
                 self.bomb_handled = False
+                self.bomb_logic_tick = None if opening_bomb else action.get("client_logic_tick")
+                self.bomb_preceding_hit = None
                 self.bomb_window_ns = (
                     P4_OPENING_BOMB_WINDOW_NS if opening_bomb else ANIMA_BOMB_SINGLE_HIT_WINDOW_NS
                 )
@@ -1369,6 +1375,7 @@ class PhaseOne:
         adrenaline_tenths=None,
         uppercut_choice=None,
         tick_elapsed_ms=None,
+        earlier_bomb_slot_clear=False,
     ):
         """Use cooldown acknowledgement and bound the number of attempts for each mechanic.
 
@@ -1407,7 +1414,9 @@ class PhaseOne:
             if self.pending:
                 self.cast_result = self.acknowledge(cooldowns, now, ending=True)
             return Action("Devotion", "Hold Still heavy hit without Resonance")
-        bomb_defence = self.bomb_defence(cooldowns, now, gcd_remaining_ms)
+        bomb_defence = self.bomb_defence(
+            cooldowns, now, gcd_remaining_ms, earlier_slot_clear=earlier_bomb_slot_clear
+        )
         if bomb_defence is not None:
             if self.pending:
                 self.cast_result = self.acknowledge(cooldowns, now, ending=True)
@@ -1481,10 +1490,20 @@ class PhaseOne:
         return 0 <= now - self.special_ns <= BEAM_SPECIAL_HOLD_TICKS * TICK_FALLBACK_NS
 
     def observe_hits(self, hits, received_tick):
-        """Record the received tick of Hold Still's small hit (+1 to +3, damage, block or miss).
-
-        Soul Split heals (type 143) and typeless marks do not count.
-        """
+        """Record preceding hits that distinguish a safe single-hit defensive window."""
+        if (
+            not self.bomb_handled
+            and self.bomb_logic_tick is not None
+            and self.bomb_preceding_hit is None
+        ):
+            earliest, latest = ANIMA_BOMB_PRECEDING_HIT_TICKS
+            for event in hits:
+                if event.hit.type_id not in HOLD_STILL_SMALL_HIT_TYPES:
+                    continue
+                delta = (event.hit.start_tick - self.bomb_logic_tick) & 0xFFFFFFFF
+                if earliest <= delta <= latest:
+                    self.bomb_preceding_hit = event.sequence
+                    break
         earliest, latest = HOLD_STILL_SMALL_HIT_TICKS
         if (
             self.special == HOLD_STILL
@@ -1596,7 +1615,7 @@ class PhaseOne:
             return None
         return now - self.bomb_ns
 
-    def bomb_defence(self, cooldowns, now, gcd_remaining_ms):
+    def bomb_defence(self, cooldowns, now, gcd_remaining_ms, *, earlier_slot_clear=False):
         """The GCD defensive to press for the P4 anima bomb now, or None.
 
         Resonance only inside this cue's window, so it is up on the typeless hit
@@ -1609,7 +1628,16 @@ class PhaseOne:
         earliest, latest = self.bomb_window_ns
         if elapsed > latest:
             return None
-        if earliest <= elapsed and "Resonance" in cooldowns and not cooldowns["Resonance"]:
+        gcd_end = elapsed + gcd_remaining_ms * 1_000_000
+        earlier_slot = (
+            earlier_slot_clear
+            and self.bomb_preceding_hit is not None
+            and not self.shield_ready(cooldowns)
+            and gcd_remaining_ms > 0
+            and ANIMA_BOMB_EARLY_GCD_END_NS <= gcd_end < earliest
+        )
+        resonance_ready = "Resonance" in cooldowns and not cooldowns["Resonance"]
+        if resonance_ready and (earliest <= elapsed or earlier_slot):
             return "Resonance"
         if (
             elapsed >= ANIMA_BOMB_REFLECT_EARLIEST_NS
@@ -4266,7 +4294,14 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                 cue_native_sequence=phase_one.bomb_event,
                 press_window_ms=tuple(offset // 1_000_000 for offset in phase_one.bomb_window_ns),
             )
+        previous_bomb_hit = phase_one.bomb_preceding_hit
         phase_one.observe_hits(hits, received_tick)
+        if phase_one.bomb_preceding_hit != previous_bomb_hit:
+            emit(
+                "anima_bomb_preceding_hit",
+                cue_native_sequence=phase_one.bomb_event,
+                player_hit_sequence=phase_one.bomb_preceding_hit,
+            )
         position = reader.position
         tile = (position.x, position.y, position.plane) if position.valid else None
         if surge_sent_ns is not None:
@@ -4325,6 +4360,17 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
             adrenaline_tenths=player.variable(Variable.ADRENALINE),
             uppercut_choice=dodge_choice["ability"] if dodge_choice else None,
             tick_elapsed_ms=tick_elapsed_ms(received_tick),
+            earlier_bomb_slot_clear=(
+                phase == 4
+                and phase_one.bomb_preceding_hit is not None
+                and not phase_one.bomb_handled
+                and info.status == Status.AVAILABLE
+                and not any(
+                    npc.config_id in MINION_CONFIGS
+                    and (not npc.flags & NPCFlags.HEALTH or npc.health_current > 0)
+                    for npc in reader.npcs[:info.npc_count]
+                )
+            ),
         )
         if phase_one.cast_result:
             ability, confirmed = phase_one.cast_result

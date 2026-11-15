@@ -512,6 +512,24 @@ class PhaseOneTests(unittest.TestCase):
         action = phase.next_action(7_360_000_000, timers, 1500, Prayer.MELEE)
         self.assertEqual(action, controller["Action"](shield, "Anima bomb"))
 
+    def test_anima_bomb_can_take_the_measured_early_gcd_after_the_preceding_hit(self):
+        phase = PhaseOne(phase=4)
+        phase.observe([dict(event(1, controller["ANIMA_BOMB"]), client_logic_tick=1855080)])
+        cooldowns = {"Resonance": 0, controller["DISRUPTION_SHIELD"]: 24_000}
+        press_ns = SECOND_NS + 1_520_000_000
+        self.assertIsNone(phase.bomb_defence(cooldowns, press_ns, 200, earlier_slot_clear=True))
+        hit = PlayerHitEvent(sequence=22)
+        hit.hit.type_id = 133
+        hit.hit.start_tick = 1855136
+        phase.observe_hits([hit], 1777)
+        self.assertEqual(phase.bomb_preceding_hit, 22)
+        self.assertIsNone(phase.bomb_defence(cooldowns, press_ns, 200))
+        self.assertIsNone(phase.bomb_defence(cooldowns, press_ns, 201, earlier_slot_clear=True))
+        self.assertIsNone(phase.bomb_defence(cooldowns, press_ns, 0, earlier_slot_clear=True))
+        self.assertEqual(
+            phase.bomb_defence(cooldowns, press_ns, 200, earlier_slot_clear=True), "Resonance"
+        )
+
     def test_other_28959_attacks_do_not_trigger_opening_bomb_defence(self):
         opener = controller["P2_OPENING_ATTACK"]
         magic = controller["MAGIC_ATTACK"]

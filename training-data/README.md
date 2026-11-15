@@ -203,6 +203,12 @@ its observation. The opener sequence `28930`, three `28929` melee attacks, then 
 has a later impact than `28942`. Match the cue, defensive press, cooldown or spell
 acknowledgement, and nearby type 144 hitmarks to check the outcome.
 
+`anima_bomb_preceding_hit` links the ordinary `28942` bomb cue to an earlier melee,
+magic or blocked hitmark by `player_hit_sequence`. With a complete NPC sample free
+of golems and no Disruption Shield available, this can open the preceding GCD slot
+for Resonance. Use `ability_sent.gcd_at_press_ms`, the `state` GCD fields and the
+cue timestamp to check where the press fell.
+
 Join an `ability_sent` row to the `npc_animation` row whose `native_sequence` matches `cue_native_sequence`. Use `cooldown_acknowledgement` and `surge_displacement` for later observations. A cooldown acknowledges a cast. Dodge success, damage prevention and healing each require their own evidence. Inspect `queue_loss` and `attempt_ended` before interpreting a run. The first practice trace predates NPC tile and NPC hitmark logging and has no explicit Anticipation acknowledgement at the phase boundary.
 
 ```powershell

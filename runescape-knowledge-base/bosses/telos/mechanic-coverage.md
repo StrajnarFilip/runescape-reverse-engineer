@@ -56,10 +56,21 @@ unverified. [100% opening bomb](../../../training-data/telos-20261115T093004.670
 In the 100% follow-up, the ordinary `28942` cue arrived at logic tick 1855080.
 The GCD ended at 1855166, about 1.72 s after the cue, and restarted by 1855168.
 The current 1.75–2.05 s window missed that slot even though Resonance was ready.
-Disruption Shield had been used about 34 s earlier. The bomb hit for 4,399 at
-1855199. Use this trace to calibrate the earlier GCD boundary and check for
-intervening hits before changing the press window.
+Disruption Shield had been used about 34 s earlier. The type 144 mark at logic tick
+1855197 dealt 4,399. Across eight traces, the `28942` impact landed 113–117 logic
+ticks after the cue. The last preceding damaging or blocked mark arrived no later
+than +56 in those traces. The controller can now take a GCD ending at 1.65–1.75 s
+if a preceding mark appears at +50–60, the native NPC sample is complete and has
+no live golems, and Disruption Shield is unavailable. It still presses with at most
+200 ms of GCD remaining. This earlier slot needs live confirmation.
 [100% follow-up](../../../training-data/telos-20261115T151940.657825Z.jsonl)
+
+The next 100% run matched the ordinary bomb's preceding 1-damage melee hit at
++56 logic ticks. The GCD ended 1.70 s after the cue, while Resonance and Disruption
+Shield were both cooling down. The type 144 hit at +116 dealt 5,785. The opening
+bomb in the same run dealt 2,625 after a Resonance input with 36 ms of GCD remaining
+and no cooldown acknowledgement. The player released two fonts and died before P5.
+[100% early-slot trial](../../../training-data/telos-20261115T153024.506049Z.jsonl)
 
 **P4 font defence.** In the 300% Uppercut opener, the first font started at game tick
 24893. The verified walk reached the charging ring at 24902. Resonance cast on arrival
