@@ -2081,7 +2081,6 @@ def run(reader, args, board, attempt=None):
         if (
             not input_allowed
             or font_duty.active
-            or "Dive" not in bindings
             or phase_one.special != HOLD_STILL
             or phase_one.stomp_checked
             or not isinstance(received_tick, int)
@@ -2322,7 +2321,8 @@ def run(reader, args, board, attempt=None):
             and phase_one.stomp_tick_attempts >= STOMP_ATTEMPTS_PER_TICK
         ):
             return
-        use_dive = not timers.get("Dive")
+        # Without a Dive key the dodge still walks to the safe tile.
+        use_dive = "Dive" in bindings and not timers.get("Dive")
         movement = attempt_ground_move(dive=use_dive)
         if movement is None:
             return
@@ -4013,6 +4013,9 @@ KEY_FALLBACKS = {
     "flick_soul_split_key": DEFAULT_FLICK_SOUL_SPLIT_KEY,
     "devotion": "F7",
     "surge": "K",
+    # Dive was on P (action bar 3:8) until the 08:31 scan found no Dive and the stomp dodge
+    # was skipped, which ended that run.
+    "dive": "P",
     "disruption_shield": DEFAULT_DISRUPTION_SHIELD_KEY,
     "spellbook_swap": DEFAULT_SPELLBOOK_SWAP_KEY,
 }
