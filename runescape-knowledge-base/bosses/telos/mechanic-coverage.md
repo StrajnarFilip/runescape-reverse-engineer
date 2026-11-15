@@ -34,6 +34,28 @@ still in the ring. The controller now records arrival and the observed charged-f
 release separately from an actor disappearing early. Use release position and HP with
 the nearby hitmarks to assess protection. [08:37 practice log](../../../training-data/telos-20261115T083752.833586Z.jsonl)
 
+**P4 opening bomb.** Nine captures show the sequence `28930`, three `28929` melee
+attacks, then `28959` and a type 144 hit 146–151 client logic ticks after `28959`.
+In eight captures the follow-up type 144 pulses were about 60 logic ticks apart.
+The response uses the whole opening sequence and a 2.35–2.65 s window for single-hit
+defences. The separate `28942` cue keeps its 1.75–2.05 s window. Ordinary `28959`
+outside this opener keeps its magic prayer response. [300% opening](../../../training-data/telos-20261115T090122.812714Z.jsonl) · [500% opening](../../../training-data/telos-20261114T181758.065826Z.jsonl)
+
+The recognizer matched ten archived phase 4 encounters. The tenth logged a zero-damage
+hitmark at +148 logic ticks followed by recurring type 144 pulses starting at +208.
+Another 300% practice run opened with Uppercut after the three melee attacks. No opening
+bomb defence was triggered in that run. The timing of the new response still needs a live
+bomb capture. [Zero-damage opener](../../../training-data/telos-20261115T054049.902492Z.jsonl) · [Uppercut opener](../../../training-data/telos-20261115T091100.770410Z.jsonl)
+
+**P4 font defence.** In the 300% Uppercut opener, the first font started at game tick
+24893. The verified walk reached the charging ring at 24902. Resonance cast on arrival
+and a melee hit consumed it at 24904. Type 144 pulses of 1,600, 1,600, 1,566 and 1,477
+were spaced 90 client logic ticks apart. The player died at 24913 during the charge.
+The separate native-effects probe showed the raw Resonance expiry stamp still present
+after the melee hit. Use the font charge decrements and hit timestamps to validate a
+pulse-specific defence.
+[300% font arrival](../../../training-data/telos-20261115T091100.770410Z.jsonl)
+
 Guide-derived from the [RuneScape Wiki strategy page](https://runescape.wiki/w/Telos,_the_Warden/Strategies#Phase_2), which warns it may predate the March 2026 combat modernisation. Rows marked *live* match the 2026-11-14 Compatibility Mode captures.
 
 | Phase | Rotation (3 autos between specials unless stated) | Live evidence |

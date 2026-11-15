@@ -499,6 +499,26 @@ class PhaseOneTests(unittest.TestCase):
         first.observe([event(4, bomb)])
         self.assertIsNone(first.next_action(4 * SECOND_NS + 1_800_000_000, timers, 0, Prayer.MELEE))
 
+    def test_p4_opening_bomb_uses_the_later_window(self):
+        opener = controller["P2_OPENING_ATTACK"]
+        magic = controller["MAGIC_ATTACK"]
+        shield = controller["DISRUPTION_SHIELD"]
+        phase = PhaseOne(phase=4)
+        phase.observe([event(i, cue) for i, cue in enumerate((opener, AUTO, AUTO, AUTO, magic), 1)])
+        timers = {"Resonance": 3000, shield: 0}
+        self.assertEqual(phase.bomb_event, 5)
+        self.assertIsNone(phase.next_action(7 * SECOND_NS, timers, 0, Prayer.MELEE))
+        action = phase.next_action(7_360_000_000, timers, 1500, Prayer.MELEE)
+        self.assertEqual(action, controller["Action"](shield, "Anima bomb"))
+
+    def test_other_28959_attacks_do_not_trigger_opening_bomb_defence(self):
+        opener = controller["P2_OPENING_ATTACK"]
+        magic = controller["MAGIC_ATTACK"]
+        for pattern in ((opener, magic), (opener, AUTO, AUTO, AUTO, UPPERCUT, magic)):
+            phase = PhaseOne(phase=4)
+            phase.observe([event(i, cue) for i, cue in enumerate(pattern, 1)])
+            self.assertIsNone(phase.bomb_event)
+
     def test_disruption_shield_is_tick_perfect_for_the_anima_bomb(self):
         shield = controller["DISRUPTION_SHIELD"]
         bomb = controller["ANIMA_BOMB"]

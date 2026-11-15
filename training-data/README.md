@@ -116,6 +116,10 @@ appear a few microseconds out of order.
 
 `actors` maps attempt-local instance IDs to `[config_id, current_hp, max_hp, action_animation, movement_animation]`. `actor_tiles` maps the same IDs to `[x, y, plane, same_world_confirmed]` when the reader has a tile. `ability_cooldowns` maps ability struct IDs to `[reason, start_client_tick, end_client_tick, active]`. A missing timer stays unknown. NPC and player hitmark rows retain native timing and recipient evidence. Hitmarks lack an attacker field.
 
+`effects` records the native player-effect entries, validated presence and raw candidates.
+The raw expiry stamp is logged on change. For an entry with validated expiry, compare
+that stamp to `client_logic_tick` to reconstruct the countdown.
+
 `beam_tiles` contains `[kind, x, y, plane, config_id]` tuples for the green, black and red
 streams. `beam_ground_heights` adds `[x, y, plane, fine_height]` for tiles the reader can project.
 `camera_viewport` records the render width and height followed by the physical width and height.
@@ -159,6 +163,11 @@ For P4 fonts, follow `font_charge_started`, `font_arrival`, `font_charged` and
 At release, `in_range` and `player_hp` report the observed position and HP when the
 charged actor disappears. `font_lost` records an earlier disappearance. Use the
 surrounding hitmarks to check the damage outcome.
+
+`anima_bomb_observed` records a phase 4 cue and the response window in milliseconds from
+its observation. The opener sequence `28930`, three `28929` melee attacks, then `28959`
+has a later impact than `28942`. Match the cue, defensive press, cooldown or spell
+acknowledgement, and nearby type 144 hitmarks to check the outcome.
 
 Join an `ability_sent` row to the `npc_animation` row whose `native_sequence` matches `cue_native_sequence`. Use `cooldown_acknowledgement` and `surge_displacement` for later observations. A cooldown acknowledges a cast. Dodge success, damage prevention and healing each require their own evidence. Inspect `queue_loss` and `attempt_ended` before interpreting a run. The first practice trace predates NPC tile and NPC hitmark logging and has no explicit Anticipation acknowledgement at the phase boundary.
 

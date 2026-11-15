@@ -48,6 +48,12 @@ often they fell within 1.2 s of strip arrivals, departures and virus events.
   Verify position after the action and check any type 144 hitmarks at the expected landing
   time. A beam location matched on the cursor and a subsequent player position on the beam
   are logged separately.
+- In the [300% green-beam test](../../../training-data/telos-20261115T091100.770410Z.jsonl),
+  phase 1 Dive was sent at +4 and the player arrived on green tile `(7648, 1871, 0)`
+  at +6. Telos's 5×5 footprint started at `(7639, 1869, 0)`. The landing was seven
+  tiles from its centre and no stomp hit appeared. In phase 3 the shared Dive cooldown
+  was still active. The verified fallback Walk headed for a red tile eight tiles away
+  and was still inside the stomp radius when a 3,918 typeless hit landed at +5.
 
 The captured phase 1 line was roughly at world X 15698 and spanned approximately Z 2826–2850. These are estimates from the rendered beam and the arena camera. They describe one instance and one beam placement. The ends of the visible effect and the tiles that clear a virus still need independent confirmation.
 

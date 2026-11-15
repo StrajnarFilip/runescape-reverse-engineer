@@ -15,7 +15,7 @@ from ..native import (
     Variable,
 )
 from ..prayer import Prayer
-from ..telemetry import hit_record, spatial_actor_record
+from ..telemetry import effects_record, hit_record, spatial_actor_record
 
 SCHEMA_VERSION = 1
 CLEANSE_MAX_AGE_CLIENT_TICKS = 50
@@ -151,6 +151,10 @@ class AttemptLog:
             for hazard in reader.hazards[: reader.hazard_info.count]
             if hazard.flags & HazardFlags.SCENE_LOCATION
         ]
+        effects = effects_record(reader)
+        for effect in effects["entries"] or ():
+            # Expiry stamps and presence changes suffice to reconstruct a validated timer.
+            effect.pop("remaining_ms")
         state = {
             "session": self.session_index,
             "status": info.status,
@@ -195,6 +199,7 @@ class AttemptLog:
             "combat_target_reason": target["reason"],
             "gcd_end_client_tick": player.variable(Variable.GCD_CLIENT_END),
             "gcd_active": bool(player.gcd_remaining_ms) if player.gcd_reason == 0 else None,
+            "effects": effects,
             "ability_cooldowns": {
                 ability.struct_id: (
                     ability.reason,

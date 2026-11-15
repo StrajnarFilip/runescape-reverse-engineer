@@ -890,6 +890,9 @@ GCD_ABILITIES = frozenset(
 # enough for the press to reach the server (a 76 ms lead was too late for GCD presses).
 # Reflect lasts several ticks and may go from 0.6 s.
 ANIMA_BOMB_SINGLE_HIT_WINDOW_NS = (1_750_000_000, 2_050_000_000)
+# In nine P4 openings, 28930, three melee autos and 28959 preceded a typeless hit by
+# 146-151 logic ticks after 28959. The other 28959 magic attacks retain their own response.
+P4_OPENING_BOMB_WINDOW_NS = (2_350_000_000, 2_650_000_000)
 ANIMA_BOMB_REFLECT_EARLIEST_NS = 600_000_000
 ANIMA_BOMB_DEFENCES = ("Resonance", "Reflect")
 ANIMA_BOMB_REASON = "Anima bomb"
@@ -1137,10 +1140,12 @@ class PhaseOne:
         # Set when this Hold Still's Resonance press produced no cooldown.
         self.resonance_failed = False
         self.cast_result = None
-        # P4 anima bomb: observation time and native event of 28942, and whether a defensive went.
+        # P4 anima bomb: observation time, native event and whether a defensive was sent.
         self.bomb_ns = None
         self.bomb_event = None
         self.bomb_handled = False
+        self.bomb_window_ns = ANIMA_BOMB_SINGLE_HIT_WINDOW_NS
+        self.p4_opening_melee_left = None
 
     @property
     def expected_after(self):
@@ -1191,11 +1196,24 @@ class PhaseOne:
                 self.opening_tick = tick
             if self.is_p2_opening_magic_attack(sequence, tick):
                 sequence = MELEE_AUTO_SEQUENCE  # Counted as an ordinary attack.
-            if sequence == ANIMA_BOMB and self.phase == 4:
+            opening_bomb = False
+            if self.phase == 4:
+                if sequence == P2_OPENING_ATTACK:
+                    self.p4_opening_melee_left = LOOP_AUTOS
+                elif self.p4_opening_melee_left is not None:
+                    if sequence == MELEE_AUTO_SEQUENCE and self.p4_opening_melee_left > 0:
+                        self.p4_opening_melee_left -= 1
+                    else:
+                        opening_bomb = sequence == MAGIC_ATTACK and self.p4_opening_melee_left == 0
+                        self.p4_opening_melee_left = None
+            if self.phase == 4 and (sequence == ANIMA_BOMB or opening_bomb):
                 # Tracked beside the rotation: the forecast and special state stay unchanged.
                 self.bomb_ns = action["observed_ns"]
                 self.bomb_event = action["event_sequence"]
                 self.bomb_handled = False
+                self.bomb_window_ns = (
+                    P4_OPENING_BOMB_WINDOW_NS if opening_bomb else ANIMA_BOMB_SINGLE_HIT_WINDOW_NS
+                )
                 continue
             if sequence in self.auto_sequences:
                 self.autos += 1
@@ -1468,14 +1486,14 @@ class PhaseOne:
     def bomb_defence(self, cooldowns, now, gcd_remaining_ms):
         """The GCD defensive to press for the P4 anima bomb now, or None.
 
-        Resonance only inside ANIMA_BOMB_SINGLE_HIT_WINDOW_NS, so it is up on the typeless hit
+        Resonance only inside this cue's window, so it is up on the typeless hit
         and not spent on a golem hit first; Reflect from ANIMA_BOMB_REFLECT_EARLIEST_NS. Both
         need the GCD's last moments, and only one defensive is pressed per bomb.
         """
         elapsed = self.bomb_elapsed(now)
         if elapsed is None or not gcd_press_ready(gcd_remaining_ms):
             return None
-        earliest, latest = ANIMA_BOMB_SINGLE_HIT_WINDOW_NS
+        earliest, latest = self.bomb_window_ns
         if elapsed > latest:
             return None
         if earliest <= elapsed and "Resonance" in cooldowns and not cooldowns["Resonance"]:
@@ -1527,14 +1545,14 @@ class PhaseOne:
         return self.small_hit_tick is not None and not resonance_usable
 
     def bomb_shield_due(self, cooldowns, now, gcd_remaining_ms):
-        """Cast Disruption Shield in ANIMA_BOMB_SINGLE_HIT_WINDOW_NS so it takes the bomb hit.
+        """Cast Disruption Shield in this cue's window so it takes the bomb hit.
 
         It ignores the GCD, so it goes at the window's start unless Resonance is being pressed
         at that moment (they must not both be up). Golem hits may still use the shield up first
         (account owner).
         """
         elapsed = self.bomb_elapsed(now)
-        earliest, latest = ANIMA_BOMB_SINGLE_HIT_WINDOW_NS
+        earliest, latest = self.bomb_window_ns
         if (
             elapsed is None
             or not earliest <= elapsed <= latest
@@ -3869,7 +3887,14 @@ def run(reader, args, board, attempt=None):
             for action in actions:
                 if action.get("received_tick") is None:
                     action["received_tick"] = received_tick
+        previous_bomb_event = phase_one.bomb_event
         phase_one.observe(actions)
+        if phase_one.bomb_event != previous_bomb_event:
+            emit(
+                "anima_bomb_observed",
+                cue_native_sequence=phase_one.bomb_event,
+                press_window_ms=tuple(offset // 1_000_000 for offset in phase_one.bomb_window_ns),
+            )
         phase_one.observe_hits(hits, received_tick)
         position = reader.position
         tile = (position.x, position.y, position.plane) if position.valid else None
