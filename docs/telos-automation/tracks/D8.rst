@@ -153,3 +153,19 @@ Requests
   keys are cleared. All 30 D8 cases pass in the isolated worktree, with the one
   intentionally local capture test skipped there. This is software evidence,
   not a physical delivery/release or combat ladder pass.
+
+* Connected supervised P1 experiment, 2026-11-16: explicit --mode supervised-p1,
+  synchronous C acquisition, current C UI labels, D4 ordered coordinator and
+  D6 batch writer. It waits outside the encounter without pinning that scene,
+  then requires dormant Telos, dual Lengs, Melee protection and 115% adrenaline.
+  Stops latch on process/scene/focus/health/protection/queue/acknowledgement faults,
+  P1 ending, or Ctrl+Shift+F12. Movement stays manual. No retry or rearming.
+* First-use cooldowns and castability stay unknown in telemetry. The explicitly
+  supervised experiment permits attempts when no known blocker is present;
+  input acceptance is never a cast acknowledgement. Ability timers, decoded
+  potion dose/quantity changes, exact target and gear readback confirm actions.
+  Unmapped special acknowledgements will stop the sequence. Automatic prayer
+  flicking remains disabled. This is not an unattended kill or a ladder pass.
+* Six new synthetic groups exercise ordered batches and independent readback,
+  no GCD-only confirmation, no retry, scene arming, live role changes, EoF role
+  bindings and stop paths. Existing shadow/assist/full behavior is preserved.

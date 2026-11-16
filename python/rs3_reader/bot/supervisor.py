@@ -44,6 +44,396 @@ def _integer(value, minimum=0):
     return type(value) is int and value >= minimum
 
 
+class P1Attempt:
+    """Bounded supervised experiment using C observations and the D6 batch writer.
+
+    The user owns movement and encounter entry. The coordinator is created only
+    after a dormant Telos is observed, so an outside-to-instance scene change
+    cannot pin the wrong encounter. Unknown first-use cooldowns are logged as
+    unknown and may be attempted; they never become castable=True or GCD zero.
+    Native acknowledgements, not OS acceptance, advance the ordered rotation.
+    No prayer timing policy, movement backend or unattended kill mode is enabled.
+    """
+
+    def __init__(self, writer, read_label, clock, kill_switch, focus_checker):
+        from .rotation import OrderedP1Rotation
+
+        self.template = OrderedP1Rotation()
+        self.writer, self.read_label, self.clock = writer, read_label, clock
+        self.kill_switch, self.focus_checker = kill_switch, focus_checker
+        self.engine = None
+        self.locations, self.pending = {}, None
+        self.identity, self.previous = None, None
+        self.stopped, self.reason = False, "waiting_for_dormant_telos"
+        self.sent, self.confirmed = [], []
+        self.last_log, self.blocked_since = {}, None
+        self.armed_ns = None
+
+    @staticmethod
+    def _text(value):
+        return value.decode("utf-8", "strict") if isinstance(value, bytes) else value
+
+    def _matches(self, action, label):
+        name = self._text(label.name)
+        if action["kind"] == "equip":
+            return label.item_id == action["item_id"]
+        if action.get("role") == "adrenaline_renewal":
+            return name == "Adrenaline renewal"
+        if action.get("role") == "vulnerability_bomb":
+            return label.item_id == action["item_id"] and name == "Vulnerability bomb"
+        return name == action.get("name") and label.item_id == -1
+
+    def discover_bindings(self):
+        """Find unique current action roles; no input and no raw memory reads in Python."""
+        actions = [
+            action
+            for step in self.template.document["steps"]
+            for action in step["actions"]
+            if action["kind"] != "target_cycle"
+        ]
+        found = {action["id"]: [] for action in actions}
+        for bar in range(1, 6):
+            for slot in range(1, 15):
+                try:
+                    label = self.read_label(bar, slot)
+                except RuntimeError:
+                    continue
+                for action in actions:
+                    if label.flags == 15 and self._matches(action, label):
+                        found[action["id"]].append((bar, slot, self._text(label.key_label)))
+        missing = [name for name, matches in found.items() if len(matches) != 1]
+        if missing:
+            raise ValueError("p1_binding_missing_or_ambiguous:" + ",".join(missing))
+        self.locations = {name: matches[0] for name, matches in found.items()}
+        return dict(self.locations)
+
+    def _fresh(self, observation):
+        return observation.is_fresh(150) and observation.reason is None and bool(observation.source)
+
+    def _ability(self, action, world):
+        if not self._fresh(world.abilities):
+            return None
+        entries = [
+            entry
+            for entry in world.abilities.value
+            if entry.get("struct_id") == action.get("ability_id")
+        ]
+        return entries[0] if len(entries) == 1 else None
+
+    def _item(self, action, world):
+        if not self._fresh(world.inventory):
+            return None
+        matches = []
+        for item in world.inventory.value:
+            expected = action.get("item_id")
+            match = (
+                item.get("item_id") == expected
+                if expected is not None
+                else (
+                    isinstance(item.get("name"), str)
+                    and item["name"].startswith("Adrenaline renewal potion (")
+                )
+            )
+            if (
+                match
+                and _integer(item.get("quantity"), 1)
+                and _integer(item.get("tracking_token"), 1)
+                and item.get("identity_ambiguous") is False
+            ):
+                matches.append(item)
+        return matches[0] if len(matches) == 1 else None
+
+    def _equipped(self, world, slot, item_id):
+        return self._fresh(world.equipment) and any(
+            item.get("slot") == slot
+            and item.get("item_id") == item_id
+            and item.get("quantity") == 1
+            and item.get("identity_ambiguous") is False
+            for item in world.equipment.value.get("slots", ())
+        )
+
+    def _ready(self, action, world):
+        kind = action["kind"]
+        if kind == "target_cycle":
+            return True
+        if kind in ("item", "equip"):
+            return self._item(action, world) is not None
+        entry = self._ability(action, world)
+        if (
+            entry is None
+            or entry.get("in_ability_book") is not True
+            or entry.get("castable") is False
+            or entry.get("equipment_match") != "allowed"
+        ):
+            return False
+        cooldown = entry.get("cooldown") or {}
+        remaining, reason = cooldown.get("remaining_ms"), cooldown.get("reason")
+        # A missing first-use timer permits an experimental attempt, not a ready claim.
+        if reason == "not_set":
+            if remaining is not None:
+                return False
+        elif kind in ("weapon_special", "eof_special") and reason == "timer_mapping_pending":
+            pass
+        elif reason is not None or not _integer(remaining) or remaining != 0:
+            return False
+        if not self._fresh(world.player.adrenaline_percent):
+            return False
+        cost = (entry.get("requirements") or {}).get("adrenaline_raw")
+        if not _integer(cost) or world.player.adrenaline_percent.value < cost / 10:
+            return False
+        if action.get("required_weapon_id") and not self._equipped(
+            world, 3, action["required_weapon_id"]
+        ):
+            return False
+        if action.get("required_amulet_id") and not self._equipped(
+            world, 2, action["required_amulet_id"]
+        ):
+            return False
+        gcd = world.player.gcd
+        return self._fresh(gcd) and (
+            (gcd.value.get("reason") is None and gcd.value.get("remaining_ms") == 0)
+            or (self.engine.index < 2 and gcd.value.get("reason") == "not_set")
+        )
+
+    def prepare(self, action, world):
+        """Re-read the C label and exact slot identity immediately before D6 sends."""
+        from .actuator_sendinput import NativeKeyAction
+
+        descriptor = NativeKeyAction()
+        kind = action["kind"]
+        if kind == "target_cycle":
+            target = self.engine._encounter_npc(world)
+            if target is None:
+                raise ValueError("p1_cycle_target_disappeared")
+            descriptor.kind, descriptor.virtual_key = 3, ord("A")
+            descriptor.expected_instance_id = target.instance_id
+            descriptor.expected_config_id = target.config_id
+            return descriptor, None
+        bar, slot, _ = self.locations[action["id"]]
+        label = self.read_label(bar, slot)
+        if not self._matches(action, label) or not self._ready(action, world):
+            raise ValueError("p1_role_or_readiness_changed:" + action["id"])
+        descriptor.virtual_key, descriptor.modifiers = label.virtual_key, label.modifiers
+        if kind in ("item", "equip"):
+            item = self._item(action, world)
+            descriptor.kind, descriptor.slot = 2, item["slot"]
+            descriptor.expected_item_id = item["item_id"]
+            descriptor.expected_token = item["tracking_token"]
+        else:
+            descriptor.kind, descriptor.ability_id = 1, action["ability_id"]
+        return descriptor, label
+
+    def _acknowledged(self, action, before, world):
+        kind = action["kind"]
+        if kind == "target_cycle":
+            return self._fresh(world.player.target) and (
+                world.player.target.value == self.engine._encounter_npc(world)
+            )
+        if kind == "equip":
+            return self._equipped(
+                world, {"main_hand": 3, "neck": 2}[action["equipment_slot"]], action["item_id"]
+            )
+        if kind == "item":
+            previous = self._item(action, before)
+            if previous is None or not self._fresh(world.inventory):
+                return False
+            current = [
+                item for item in world.inventory.value if item.get("slot") == previous["slot"]
+            ]
+            if len(current) != 1 or current[0].get("identity_ambiguous") is not False:
+                return False
+            current = current[0]
+            if action["id"] == "vulnerability":
+                return (
+                    current.get("item_id") == previous["item_id"]
+                    and current.get("tracking_token") == previous["tracking_token"]
+                    and current.get("quantity") == previous["quantity"] - 1
+                )
+            # Explicit decoded potion names/IDs are evidence, not inferred family metadata.
+            prefix = "Adrenaline renewal potion ("
+            old_name, new_name = previous.get("name", ""), current.get("name", "")
+            return (
+                isinstance(new_name, str)
+                and new_name.startswith(prefix)
+                and old_name.endswith(")")
+                and new_name.endswith(")")
+                and old_name[len(prefix) : -1].isdigit()
+                and new_name[len(prefix) : -1].isdigit()
+                and int(old_name[len(prefix) : -1]) - 1 == int(new_name[len(prefix) : -1])
+                and current.get("item_id") != previous["item_id"]
+                and current.get("quantity") == previous["quantity"]
+            )
+        entry, old = self._ability(action, world), self._ability(action, before)
+        if entry is None or old is None:
+            return False
+        cooldown, old_timer = entry.get("cooldown") or {}, old.get("cooldown") or {}
+        return (
+            cooldown.get("reason") is None
+            and _integer(cooldown.get("remaining_ms"), 1)
+            and cooldown.get("start_tick") != old_timer.get("start_tick")
+        )
+
+    def stop(self, reason):
+        """Latch a stop; another encounter requires a new explicitly started process."""
+        if not self.stopped:
+            self.stopped, self.reason = True, reason
+            self.writer.close()
+
+    def _guard(self, world):
+        now = self.clock()
+        if self.kill_switch():
+            return "kill_switch"
+        if (
+            not world.session.complete
+            or world.status not in ("available", "partial")
+            or not _integer(world.observed_ns)
+            or not _integer(world.sample_sequence, 1)
+            or not 0 <= now - world.observed_ns <= 150 * NS_PER_MS
+            or world.raw.get("executable_sha256") != self.template.document["client_sha256"]
+        ):
+            return "snapshot_identity_or_age_unavailable"
+        identity = world.session.pid, world.session.process_creation_time
+        if self.identity is not None and identity != self.identity:
+            return "process_changed"
+        self.identity = identity
+        if self.previous and (world.sample_sequence <= self.previous[0] or now < self.previous[1]):
+            return "sample_or_clock_regressed"
+        self.previous = world.sample_sequence, now
+        for name in NATIVE_EVENT_STREAMS:
+            stream = getattr(world.events, name)
+            if (
+                not stream.records.known
+                or stream.records.reason is not None
+                or type(stream.lost.value) is not int
+                or stream.lost.value != 0
+                or stream.lost.reason is not None
+                or not stream.lost.source
+            ):
+                return "event_queue_loss_or_unknown:" + name
+        if self.engine is not None:
+            if world.session != self.engine.session:
+                return "encounter_session_changed"
+            if self.focus_checker(world) is not True:
+                return "window_focus_lost_or_unknown"
+            if (
+                not self._fresh(world.player.active_prayer)
+                or world.player.active_prayer.value != "melee"
+            ):
+                return "melee_protection_lost_or_unknown"
+            hp, maximum = world.player.health.current, world.player.health.maximum
+            if not self._fresh(hp) or not self._fresh(maximum) or hp.value <= maximum.value / 2:
+                return "health_below_half_or_unknown"
+            if self._fresh(world.telos.phase) and world.telos.phase.value != 1:
+                return "phase_one_ended"
+            if now - self.armed_ns > 60_000 * NS_PER_MS:
+                return "armed_time_cap"
+        return None
+
+    def step(self, world):
+        """Observe once, confirm pending actions, then offer at most one ordered batch."""
+        events = []
+        if self.stopped:
+            return self.last_log
+        guard = self._guard(world)
+        if guard:
+            self.stop(guard)
+        elif self.engine is None:
+            dormant = [
+                npc
+                for npc in world.npcs.value or ()
+                if self._fresh(npc.config_id) and npc.config_id.value == 22892
+            ]
+            ready = (
+                len(dormant) == 1
+                and self.focus_checker(world) is True
+                and self._fresh(world.player.active_prayer)
+                and world.player.active_prayer.value == "melee"
+                and self._fresh(world.player.adrenaline_percent)
+                and world.player.adrenaline_percent.value >= 115
+                and self._equipped(world, 3, 52061)
+                and self._equipped(world, 5, 52063)
+                and self._fresh(world.game_tick)
+            )
+            if ready:
+                from .rotation import OrderedP1Rotation
+
+                self.engine, self.armed_ns = OrderedP1Rotation(), self.clock()
+                self.engine.session = world.session
+                events.append({"event": "armed", "prayer_policy": "hold_melee_no_flicks"})
+            else:
+                self.reason = "waiting_for_dormant_telos_melee_dual_lengs_115_adrenaline_and_tick"
+        if self.engine is not None and not self.stopped:
+            if self.pending:
+                batch, before, sent_ns = self.pending
+                for action in batch.actions:
+                    if self._acknowledged(action, before, world) and self.engine.confirm(
+                        action["id"],
+                        Observation(True, 0, "native_action_specific_transition"),
+                        world,
+                    ):
+                        self.confirmed.append(action["id"])
+                        events.append({"event": "confirmed", "action": action["id"]})
+                if self.engine.complete or self.engine.current_step["id"] != batch.step_id:
+                    self.pending, self.blocked_since = None, None
+            if self.engine.complete:
+                self.stop("p1_sequence_confirmed")
+            else:
+                readiness = {
+                    action["id"]: Observation(True, 0, "supervised_attempt_permission")
+                    for action in self.engine.current_step["actions"]
+                    if self._ready(action, world)
+                }
+                batch = self.engine.step(world, readiness)
+                if self.engine.fault:
+                    self.stop(self.engine.fault)
+                elif batch is not None:
+                    try:
+                        accepted, sent_ns = self.writer.send(batch, world, self.prepare)
+                        self.engine.note_sent(batch, accepted, sent_ns)
+                        self.pending = batch, world, sent_ns
+                        self.sent.extend(accepted)
+                        self.reason = "awaiting_individual_native_confirmations"
+                        events.append(
+                            {
+                                "event": "batch_accepted",
+                                "actions": list(accepted),
+                                "server_same_tick_confirmed": False,
+                            }
+                        )
+                        self.blocked_since = None
+                    except Exception as error:
+                        self.stop("dispatch_stopped:" + str(error))
+                else:
+                    self.reason = ",".join(self.engine.reasons)
+                    if (
+                        self.pending is None
+                        and "waiting_for_native_wake_candidate" not in self.engine.reasons
+                    ):
+                        if self.blocked_since is None:
+                            self.blocked_since = self.clock()
+                        elif self.clock() - self.blocked_since > 6000 * NS_PER_MS:
+                            self.stop("readiness_timeout:" + self.reason)
+        self.last_log = {
+            "kind": "supervised_p1",
+            "sample_sequence": world.sample_sequence,
+            "observed_ns": world.observed_ns,
+            "stopped": self.stopped,
+            "reason": self.reason,
+            "step": (
+                self.engine.current_step["id"] if self.engine and not self.engine.complete else None
+            ),
+            "events": events,
+            "sent": list(self.sent),
+            "confirmed": list(self.confirmed),
+            "adrenaline": world.player.adrenaline_percent.value,
+            "health": world.player.health.current.value,
+            "phase": world.telos.phase.value,
+            "castability_is_fully_known": False,
+            "prayer_flicking_enabled": False,
+        }
+        return self.last_log
+
+
 def _field(value, name, default=None):
     return value.get(name, default) if isinstance(value, Mapping) else getattr(value, name, default)
 
@@ -723,10 +1113,96 @@ def _write_readiness(arguments, output):
         telemetry.close()
 
 
+def _run_p1_attempt(arguments, output):
+    """Run one opt-in experiment; all acquisition and balanced input are native C."""
+    from ..telemetry import NativeTelemetry
+    from .actuator_sendinput import NativeSnapshotDevice
+    from .arbiter import P1BatchArbiter
+
+    telemetry = device = hotkey = attempt = None
+
+    def emit(record):
+        output.write(json.dumps(record, sort_keys=True, allow_nan=False) + "\n")
+        output.flush()
+
+    started = time.monotonic()
+    try:
+        hotkey = GlobalKillSwitch(arguments.kill_key)
+        telemetry = NativeTelemetry(arguments.pid, 0)
+        device = NativeSnapshotDevice(telemetry.reader)
+        writer = P1BatchArbiter(
+            device, telemetry.reader.monotonic_ns, hotkey, foreground_matches, enabled=True
+        )
+        attempt = P1Attempt(
+            writer,
+            telemetry.reader.read_action_label,
+            telemetry.reader.monotonic_ns,
+            hotkey,
+            foreground_matches,
+        )
+        telemetry.sample(False)
+        bindings = attempt.discover_bindings()
+        emit(
+            {
+                "kind": "p1_preflight",
+                "bindings": bindings,
+                "input_sent": False,
+                "movement_owner": "user",
+                "prayer_policy": "hold_melee_no_flicks",
+                "mode": "supervised_p1_experiment",
+                "ladder_pass": False,
+            }
+        )
+        while not attempt.stopped:
+            frame_start = time.monotonic()
+            record = telemetry.sample(False)
+            world = WorldState.from_telemetry(record, now_ns=telemetry.reader.monotonic_ns())
+            line = dict(attempt.step(world))
+            # Keep action-specific evidence locally for replay/debugging. No images.
+            wanted = {
+                a.get("ability_id")
+                for s in attempt.template.document["steps"]
+                for a in s["actions"]
+            }
+            record["abilities"] = dict(record.get("abilities") or {})
+            record["abilities"]["entries"] = [
+                a for a in record["abilities"].get("entries", ()) if a.get("struct_id") in wanted
+            ]
+            record["action_bar"] = None  # Fresh labels are read separately by the writer.
+            line["telemetry"] = record
+            emit(line)
+            if time.monotonic() - started >= arguments.max_seconds:
+                attempt.stop("wall_time_cap")
+            time.sleep(max(0, 0.02 - (time.monotonic() - frame_start)))
+        emit(
+            {
+                "kind": "p1_report",
+                "reason": attempt.reason,
+                "sent": attempt.sent,
+                "confirmed": attempt.confirmed,
+                "ladder_pass": False,
+                "prayer_flicking_enabled": False,
+                "elapsed_seconds": time.monotonic() - started,
+            }
+        )
+        return 0
+    finally:
+        if attempt:
+            attempt.stop("closed")
+        if device:
+            device.close()
+        if telemetry:
+            telemetry.close()
+        if hotkey:
+            hotkey.close()
+
+
 def main(argv=None):
     """Run bounded shadow capture/live observation; live actuation belongs to L."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--mode", choices=("shadow", "assist", "full"), default="shadow")
+    parser.add_argument(
+        "--mode", choices=("shadow", "assist", "full", "supervised-p1"), default="shadow"
+    )
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--capture", type=Path)
     source.add_argument("--pid", type=int)
@@ -747,8 +1223,16 @@ def main(argv=None):
         help="Include D6 shadow decisions; dispatch remains disabled",
     )
     arguments = parser.parse_args(argv)
-    if arguments.mode != "shadow":
+    if arguments.mode not in ("shadow", "supervised-p1"):
         parser.error("assist/full require track L authorization; use shadow")
+    if arguments.mode == "supervised-p1" and (
+        not arguments.pid
+        or arguments.readiness
+        or arguments.arbitrate
+        or arguments.capture
+        or arguments.max_seconds > 600
+    ):
+        parser.error("supervised-p1 requires a live PID and a cap of at most 600 seconds")
     if not 1 <= arguments.readiness_samples <= 10000:
         parser.error("readiness-samples must be 1..10000")
     if not math.isfinite(arguments.max_seconds) or arguments.max_seconds <= 0:
@@ -761,6 +1245,11 @@ def main(argv=None):
         parser.error("Capture and output must differ")
     output, telemetry, hotkey, supervisor = None, None, None, None
     try:
+        if arguments.mode == "supervised-p1":
+            output = (
+                arguments.output.open("x", encoding="utf-8") if arguments.output else sys.stdout
+            )
+            return _run_p1_attempt(arguments, output)
         if arguments.readiness:
             output = (
                 arguments.output.open("x", encoding="utf-8") if arguments.output else sys.stdout

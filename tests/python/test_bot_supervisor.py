@@ -17,6 +17,7 @@ from rs3_reader.bot.actuator import RecordingActuator
 from rs3_reader.bot.replay import replay
 from rs3_reader.bot.supervisor import (
     DEFAULT_KILL_KEY,
+    P1Attempt,
     Supervisor,
     create_shadow_supervisor,
     hotkey_codes,
@@ -620,6 +621,268 @@ class ReadinessTests(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     main(["--capture", str(capture), "--readiness", *extra])
             self.assertEqual(capture.read_text(), json.dumps(row()) + "\n")
+
+
+class P1AttemptTests(unittest.TestCase):
+    def setUp(self):
+        from rs3_reader.bot.arbiter import P1BatchArbiter
+
+        self.now, self.focus, self.kill = 10000 * MS, True, False
+        self.calls, self.releases, self.labels = [], [], {}
+        self.device = SimpleNamespace(
+            dispatch_key_batch=lambda actions, current: self.calls.append(tuple(actions)),
+            release_all=lambda: self.releases.append(True),
+        )
+        self.writer = P1BatchArbiter(
+            self.device,
+            lambda: self.now,
+            lambda: self.kill,
+            lambda current: self.focus,
+            enabled=True,
+        )
+        self.attempt = P1Attempt(
+            self.writer, self.label, lambda: self.now, lambda: self.kill, lambda current: self.focus
+        )
+        actions = [
+            a
+            for s in self.attempt.template.document["steps"]
+            for a in s["actions"]
+            if a["kind"] != "target_cycle"
+        ]
+        for index, action in enumerate(actions):
+            self.labels[(1, index + 1)] = action
+        self.attempt.discover_bindings()
+        self.sample = 0
+
+    def label(self, bar, slot):
+        action = self.labels.get((bar, slot))
+        if action is None:
+            raise RuntimeError("empty fixture slot")
+        name = action.get(
+            "name", "Adrenaline renewal" if action["id"] == "renewal" else "Vulnerability bomb"
+        )
+        # Intentionally reverse the stale plan's EoF keys, just like the live bars.
+        key = (
+            "6"
+            if action["kind"] == "eof_special"
+            else "7" if action["id"] == "equip_red_eof" else action["key"]
+        )
+        vk = {"PgUp": 0x21, "PgDn": 0x22, "=": 0xBB, "Alt+G": ord("G")}.get(key)
+        return SimpleNamespace(
+            name=name.encode(),
+            key_label=key.encode(),
+            flags=15,
+            item_id=action.get("item_id") or -1,
+            virtual_key=vk if vk is not None else ord(key),
+            modifiers=4 if key == "Alt+G" else 0,
+            sample_sequence=self.current.sample_sequence if hasattr(self, "current") else 1,
+            pid=1,
+            process_creation_time=2,
+            observed_ns=self.now,
+        )
+
+    def frame(self, *, dormant=True, selected=False, time_ms=None, **changes):
+        self.sample += 1
+        self.now = (time_ms if time_ms is not None else 10000 + self.sample * 50) * MS
+        record = row(self.sample, self.now / MS)
+        record.update(
+            {
+                "executable_sha256": self.attempt.template.document["client_sha256"],
+                "combat": {"scene_epoch": 4, "active_prayer": "melee"},
+                "health": {"current": 10000, "max": 10000},
+                "prayer": {"current": 990, "max": 990},
+                "adrenaline_percent": 120,
+                "gcd": {"remaining_ms": 0, "reason": None},
+                "game_tick": {
+                    "value": {"index": 20},
+                    "age_ms": 0,
+                    "source": "synthetic_received_tick",
+                },
+                "telos": {"phase": None if dormant else 1},
+                "player": {
+                    "target": (
+                        {"kind": "npc", "instance_id": 4, "runtime_id": 7, "config_id": 22891}
+                        if selected
+                        else {"kind": "none"}
+                    )
+                },
+                "npcs": {
+                    "status": "available",
+                    "entities": [
+                        {
+                            "instance_id": 4,
+                            "runtime_id": 7,
+                            "config_id": 22892 if dormant else 22891,
+                            "health": {"current": 100000, "max": 100000},
+                        }
+                    ],
+                },
+                "equipment": {
+                    "status": "available",
+                    "slots": [
+                        dict(slot=slot, item_id=item, quantity=1, identity_ambiguous=False)
+                        for slot, item in ((3, 52061), (5, 52063))
+                    ],
+                },
+                "inventory": {
+                    "status": "available",
+                    "slots": [
+                        dict(
+                            slot=1,
+                            item_id=49079,
+                            quantity=1,
+                            tracking_token=2,
+                            identity_ambiguous=False,
+                            name="Adrenaline renewal potion (4)",
+                        ),
+                        dict(
+                            slot=5,
+                            item_id=48951,
+                            quantity=10,
+                            tracking_token=6,
+                            identity_ambiguous=False,
+                            name="Vulnerability bomb",
+                        ),
+                        dict(
+                            slot=10,
+                            item_id=52543,
+                            quantity=1,
+                            tracking_token=10,
+                            identity_ambiguous=False,
+                            name="Augmented Ek-ZekKil",
+                        ),
+                        dict(
+                            slot=22,
+                            item_id=51065,
+                            quantity=1,
+                            tracking_token=22,
+                            identity_ambiguous=False,
+                            name="red EoF",
+                        ),
+                    ],
+                },
+                "abilities": {
+                    "status": "available",
+                    "entries": [
+                        dict(
+                            struct_id=a["ability_id"],
+                            in_ability_book=True,
+                            castable=None,
+                            equipment_match="allowed",
+                            cooldown=dict(remaining_ms=None, reason="not_set", start_tick=None),
+                            requirements=dict(adrenaline_raw=1000 if a["id"] == "berserk" else 0),
+                        )
+                        for s in self.attempt.template.document["steps"]
+                        for a in s["actions"]
+                        if "ability_id" in a
+                    ],
+                },
+            }
+        )
+        record.update(changes)
+        self.current = WorldState.from_telemetry(record)
+        return record
+
+    def step(self, record):
+        self.current = WorldState.from_telemetry(record)
+        return self.attempt.step(self.current)
+
+    def cooldown(self, record, ability_id):
+        for ability in record["abilities"]["entries"]:
+            if ability["struct_id"] == ability_id:
+                ability["cooldown"] = dict(remaining_ms=60000, reason=None, start_tick=500)
+
+    def opening(self):
+        self.step(self.frame())
+        self.assertEqual(self.attempt.sent, ["devotion"])
+        record = self.frame()
+        self.cooldown(record, 25028)
+        self.step(record)
+        self.assertEqual(self.attempt.sent, ["devotion", "berserk", "renewal"])
+        record = self.frame()
+        self.cooldown(record, 14707)
+        record["inventory"]["slots"][0].update(item_id=49081, name="Adrenaline renewal potion (3)")
+        self.step(record)
+        self.assertEqual(self.attempt.engine.index, 2)
+
+    def test_opening_and_asg_use_one_batch_each_and_individual_readback(self):
+        self.opening()
+        self.assertEqual([len(call) for call in self.calls], [1, 2])
+        self.step(self.frame(dormant=False))
+        self.assertEqual([a.kind for a in self.calls[-1]], [3, 2, 1])
+        self.assertEqual([a.virtual_key for a in self.calls[-1]], list(map(ord, "ASG")))
+        self.assertEqual(self.attempt.engine.index, 2)
+        record = self.frame(dormant=False, selected=True)
+        record["inventory"]["slots"][1]["quantity"] = 9
+        self.cooldown(record, 14678)
+        # Prevent the next step while checking the three independent confirmations.
+        record["gcd"] = dict(remaining_ms=1200, reason=None)
+        self.step(record)
+        self.assertEqual(self.attempt.engine.index, 3)
+        self.assertEqual(
+            self.attempt.confirmed[-3:], ["target_cycle", "vulnerability", "greater_barge"]
+        )
+
+    def test_gcd_or_input_acceptance_alone_does_not_confirm_or_retry(self):
+        self.step(self.frame())
+        self.assertEqual(self.attempt.engine.index, 0)
+        self.step(self.frame(gcd=dict(remaining_ms=1800, reason=None)))
+        self.assertEqual(self.attempt.confirmed, [])
+        self.step(self.frame(time_ms=12600))
+        self.assertTrue(self.attempt.stopped)
+        self.assertEqual(self.attempt.reason, "acknowledgement_timeout")
+        self.assertEqual(len(self.calls), 1)
+
+    def test_outside_scene_is_not_pinned_and_low_adrenaline_does_not_arm(self):
+        self.step(
+            self.frame(npcs={"status": "available", "entities": []}, combat={"scene_epoch": 3})
+        )
+        self.step(self.frame(adrenaline_percent=34))
+        self.assertIsNone(self.attempt.engine)
+        self.assertEqual(self.calls, [])
+        self.step(self.frame())
+        self.assertEqual(self.attempt.engine.session.scene_epoch, 4)
+
+    def test_native_role_change_blocks_batch_and_does_not_skip(self):
+        action = next(a for a in self.labels.values() if a["id"] == "devotion")
+        action = dict(action, name="Wrong ability")
+        location = self.attempt.locations["devotion"][:2]
+        self.labels[location] = action
+        self.step(self.frame())
+        self.assertTrue(self.attempt.stopped)
+        self.assertEqual(self.calls, [])
+        self.assertIn("role_or_readiness_changed", self.attempt.reason)
+
+    def test_current_eof_roles_override_stale_plan_keys(self):
+        self.assertEqual(self.attempt.locations["equip_red_eof"][2], "7")
+        self.assertEqual(self.attempt.locations["dragon_scimitar_special"][2], "6")
+
+    def test_stop_focus_health_scene_and_event_loss_latch(self):
+        cases = ["kill", "focus", "health", "scene", *range(4)]
+        for case in cases:
+            with self.subTest(case=case):
+                self.setUp()
+                self.step(self.frame())
+                record = self.frame()
+                if case == "kill":
+                    self.kill = True
+                elif case == "focus":
+                    self.focus = False
+                elif case == "health":
+                    record["health"]["current"] = 4999
+                elif case == "scene":
+                    record["combat"]["scene_epoch"] = 5
+                elif case == 0:
+                    record["npc_action_events_lost"] = 1
+                else:
+                    record[("hit_splats", "player_hit_splats", "inventory_changes")[case - 1]][
+                        "events_lost"
+                    ] = 1
+                self.step(record)
+                self.assertTrue(self.attempt.stopped)
+                self.assertFalse(self.writer.enabled)
+                self.step(self.frame())
+                self.assertEqual(len(self.calls), 1)
 
 
 if __name__ == "__main__":
