@@ -97,6 +97,46 @@ typedef struct rs3_minimap_candidate
     uint32_t reserved;
 } rs3_minimap_candidate;
 
+/** An observed native action-bar label; it supplies neither castability nor input permission. */
+enum rs3_action_label_flags
+{
+    RS3_LABEL_KEY_READ = 1u,
+    RS3_LABEL_NAME_READ = 2u,
+    RS3_LABEL_CHORD_KNOWN = 4u,
+    RS3_LABEL_PRESET_MATCHED = 8u
+};
+
+typedef struct rs3_action_label
+{
+    uint64_t observed_ns;
+    uint64_t sample_sequence;
+    uint64_t process_creation_time;
+    uint32_t pid;
+    uint32_t display_bar;
+    uint32_t preset_bar;
+    uint32_t slot;
+    uint32_t flags; /**< rs3_action_label_flags. */
+    uint32_t virtual_key;
+    uint32_t modifiers; /**< rs3_key_modifiers, not the game's opaque modifier code. */
+    uint32_t reason;
+    int32_t item_id;
+    int32_t sprite_id;
+    char key_label[32];
+    char name[128];
+} rs3_action_label;
+
+/**
+ * Read one current UI key label and icon name in C, without changing the snapshot.
+ * Binds the read to expected_sequence and the selected displayed preset. The
+ * context lifecycle lock serializes memory access with sampling. A worker that
+ * advanced past the caller's frame causes RS3_E_STATE; use synchronous sampling
+ * for a strict policy/input loop. No remote address escapes. Cached label/name
+ * observation does not establish visibility, full castability or stored EoF contents.
+ */
+RS3_API int32_t rs3_read_action_label(rs3_context *context, uint64_t expected_sequence,
+                                      uint32_t display_bar, uint32_t slot, rs3_action_label *out,
+                                      uint32_t out_size);
+
 enum rs3_interface_kind
 {
     RS3_UI_INSTANCE = 1,
@@ -184,7 +224,7 @@ typedef struct rs3_action_bar_slot
     char name[RS3_INTERFACE_NAME_BYTES]; /**< UTF-8, always terminated. */
 } rs3_action_bar_slot;
 
-/** 1=info, 2=observation, 3=slot, 4=pointer candidate, 5=minimap candidate; otherwise 0. */
+/** 1=info, 2=observation, 3=slot, 4=pointer, 5=minimap, 6=action label; otherwise 0. */
 RS3_API uint32_t rs3_interface_sizeof(uint32_t structure);
 /** Copy raw cached minimap sources from one owned snapshot; never a click region. */
 RS3_API int32_t rs3_snapshot_minimap_candidate(const rs3_snapshot *snapshot,

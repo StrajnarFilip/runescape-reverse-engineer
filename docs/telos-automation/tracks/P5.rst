@@ -205,3 +205,12 @@ sample identity and age remain mandatory for downstream use.
   from the primary build by a planner test; rebuilding integration resolved
   that dependency. Existing blank-line-only formatting differences in other
   tracks' shared Python sections were left unchanged.
+
+* P1 connection, 2026-11-16: an additive 224-byte action-label read binds
+  native UI chord/name to the caller sample, PID/creation and selected preset.
+  It rechecks bounded component/text/owner sources and exports no addresses.
+  Two fixture groups cover identity, layout, preset mismatch and torn text.
+  A fresh C DLL check resolved the P1 labels, including PgUp/PgDn and letter
+  chords. Red EoF equip is currently 7 and the EoF special is 6; consumers
+  must read roles afresh instead of copying the earlier reversed constants.
+  No input is sent by this accessor; castability and EoF contents stay separate.

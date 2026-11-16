@@ -468,6 +468,34 @@ class MinimapCandidate(ctypes.Structure):
     ]
 
 
+class ActionLabel(ctypes.Structure):
+    """Current C-read key/icon label, scoped to one consumer sample and displayed preset."""
+
+    _fields_ = [
+        *(
+            (name, ctypes.c_uint64)
+            for name in ("observed_ns", "sample_sequence", "process_creation_time")
+        ),
+        *(
+            (name, ctypes.c_uint32)
+            for name in (
+                "pid",
+                "display_bar",
+                "preset_bar",
+                "slot",
+                "flags",
+                "virtual_key",
+                "modifiers",
+                "reason",
+            )
+        ),
+        ("item_id", ctypes.c_int32),
+        ("sprite_id", ctypes.c_int32),
+        ("key_label", ctypes.c_char * 32),
+        ("name", ctypes.c_char * 128),
+    ]
+
+
 class InterfaceInfo(ctypes.Structure):
     _fields_ = [
         *(
@@ -967,6 +995,7 @@ def _function_prototypes():
             [handle, u64, ctypes.POINTER(NPCActionEvent), u32, *cursor_outputs],
         ),
         "interface_sizeof": (u32, [u32]),
+        "read_action_label": (i32, [handle, u64, u32, u32, ctypes.POINTER(ActionLabel), u32]),
         "snapshot_pointer_candidate": (i32, [handle, ctypes.POINTER(PointerCandidate), u32]),
         "snapshot_minimap_candidate": (i32, [handle, ctypes.POINTER(MinimapCandidate), u32]),
         "snapshot_interface_info": (i32, [handle, ctypes.POINTER(InterfaceInfo), u32]),
@@ -1010,6 +1039,7 @@ def _verify_layouts(library):
         (3, ActionBarSlot),
         (4, PointerCandidate),
         (5, MinimapCandidate),
+        (6, ActionLabel),
     ):
         if library.rs3_interface_sizeof(structure_id) != ctypes.sizeof(structure):
             raise RuntimeError("C/Python interface layout mismatch for " + structure.__name__)
@@ -1127,6 +1157,21 @@ class Reader:
         """Raise RuntimeError with the library's description of a failed result."""
         if result != Result.OK:
             raise RuntimeError(self.library.rs3_result_string(result).decode())
+
+    def read_action_label(self, display_bar, slot):
+        """Read the native UI chord/name for this consumer frame; no input or sampling occurs."""
+        label = ActionLabel()
+        self.check_result(
+            self.library.rs3_read_action_label(
+                self.context,
+                self.info.sequence,
+                display_bar,
+                slot,
+                ctypes.byref(label),
+                ctypes.sizeof(label),
+            )
+        )
+        return label
 
     def monotonic_ns(self) -> int:
         """Return the native monotonic clock used by Info.monotonic_ns."""

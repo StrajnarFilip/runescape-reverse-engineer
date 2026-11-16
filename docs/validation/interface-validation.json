@@ -909,5 +909,29 @@
         "existing_shared_python_blank_line_formatting_left_unchanged": true
       }
     }
+  },
+  "live_action_labels_2026_11_16": {
+    "abi_bytes": 224,
+    "acquisition": "C read-only UI components; selected preset, exact caller sample and process identity; bounded double reads",
+    "source_profile_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+    "current_client_checked": true,
+    "native_fixture_groups": 27,
+    "confirmed_labels": {
+      "Berserk": "F",
+      "Adrenaline renewal": "PgDn",
+      "Greater Barge": "G",
+      "Devotion": "Alt+G",
+      "Augmented Ek-ZekKil": "PgUp",
+      "Vulnerability bomb": "S",
+      "Weapon Special Attack": "=",
+      "red EoF equip": "7",
+      "EoF special": "6"
+    },
+    "limits": [
+      "Cached name/label does not establish full castability or visibility.",
+      "Source only supports the original profile.",
+      "EoF stored weapon is still user-declared.",
+      "No game input sent."
+    ]
   }
 }

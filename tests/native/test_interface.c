@@ -780,6 +780,91 @@ static void minimap_snapshot_copy_and_unavailable_reset(void)
     fixture_destroy(test_fixture);
 }
 
+#define LABEL_TEST_NODES 0xbf0000ull
+#define LABEL_TEST_NAME  0xbf1000ull
+
+/** Build a selected main-bar slot with native text and graphic components. */
+static fixture *action_label_fixture(void)
+{
+    fixture *test_fixture = bank_fixture();
+    fixture_put_variable(test_fixture, FIXTURE_PLAYER_TABLE, PRESET_NODE, 10160, 1u | (6u << 5));
+    fixture_add_block(test_fixture, UI_COMPONENTS, 266 * 24);
+    fixture_add_block(test_fixture, LABEL_TEST_NODES, 3 * 0x200);
+    fixture_add_block(test_fixture, LABEL_TEST_NAME, 128);
+    fixture_put_u64(test_fixture, UI_CACHE + 1430 * 16 + 8, UI_RECORDS + 0x200);
+    fixture_put_u32(test_fixture, UI_RECORDS + 0x200, 1430);
+    fixture_put_u64(test_fixture, UI_RECORDS + 0x208, UI_COMPONENTS);
+    fixture_put_u64(test_fixture, UI_RECORDS + 0x210, UI_COMPONENTS + 266 * 24);
+    const uint32_t ids[] = {265, 216, 209};
+    const char *labels[] = {"1", "PgDn"};
+    for (unsigned index = 0; index < 3; index++)
+    {
+        uint64_t node = LABEL_TEST_NODES + index * 0x200;
+        fixture_put_u64(test_fixture, UI_COMPONENTS + ids[index] * 24 + 16, node);
+        fixture_put_u64(test_fixture, node,
+                        FIXTURE_MODULE_BASE + (index == 2 ? 0x1530520 : 0x1530678));
+        fixture_put_u32(test_fixture, node + 0x18, ids[index] << 16 | 1430);
+        if (index < 2)
+        {
+            unsigned char *header = fixture_bytes(test_fixture, node + 0x190, 24);
+            size_t length = strlen(labels[index]);
+            memcpy(header, labels[index], length);
+            header[23] = (unsigned char)(23 - length);
+        }
+    }
+    fixture_put_u64(test_fixture, LABEL_TEST_NODES + 0x400 + 0x98, LABEL_TEST_NAME);
+    fixture_put_u32(test_fixture, LABEL_TEST_NODES + 0x400 + 0x1b8, UINT32_MAX);
+    fixture_put_u32(test_fixture, LABEL_TEST_NODES + 0x400 + 0x188, 14264);
+    strcpy(fixture_bytes(test_fixture, LABEL_TEST_NAME, 128), "<col=00ff00>Berserk</col>");
+    assert(fixture_decode(test_fixture));
+    test_fixture->snapshot->info.pid = FIXTURE_PID;
+    test_fixture->snapshot->info.process_creation_time = FIXTURE_PROCESS_CREATION_TIME;
+    assert(rs3_snapshot_copy(test_fixture->snapshot, test_fixture->context->latest_frame) ==
+           RS3_OK);
+    return test_fixture;
+}
+
+static void action_labels_have_checked_identity_chord_and_copy_contract(void)
+{
+    fixture *test_fixture = action_label_fixture();
+    rs3_action_label label;
+    uint64_t sequence = test_fixture->context->sample_sequence;
+    assert(rs3_interface_sizeof(6) == sizeof label);
+    assert(rs3_read_action_label(test_fixture->context, sequence, 1, 12, &label, sizeof label) ==
+           RS3_OK);
+    assert(label.flags == 15 && label.virtual_key == VK_NEXT && label.modifiers == 0);
+    assert(!strcmp(label.key_label, "PgDn") && !strcmp(label.name, "Berserk"));
+    assert(label.pid == FIXTURE_PID && label.sample_sequence == sequence);
+    assert(label.preset_bar == 1 && label.slot == 12 && label.item_id == -1);
+    assert(rs3_read_action_label(test_fixture->context, sequence + 1, 1, 12, &label,
+                                 sizeof label) == RS3_E_STATE);
+    assert(label.flags == 0 && label.observed_ns == 0);
+    assert(rs3_read_action_label(test_fixture->context, sequence, 1, 12, &label,
+                                 sizeof label - 1) == RS3_E_ABI);
+    assert(rs3_read_action_label(test_fixture->context, sequence, 0, 12, &label, sizeof label) ==
+           RS3_E_ARGUMENT);
+    fixture_destroy(test_fixture);
+}
+
+static void action_labels_reject_preset_and_concurrent_text_changes(void)
+{
+    fixture *test_fixture = action_label_fixture();
+    rs3_action_label label;
+    uint64_t sequence = test_fixture->context->sample_sequence;
+    fixture_mutate_on_read(test_fixture, LABEL_TEST_NODES + 0x200 + 0x190, 1,
+                           LABEL_TEST_NODES + 0x200 + 0x190, 0);
+    assert(rs3_read_action_label(test_fixture->context, sequence, 1, 12, &label, sizeof label) ==
+           RS3_E_STATE);
+    assert(label.flags == 0);
+    fixture_destroy(test_fixture);
+    test_fixture = action_label_fixture();
+    sequence = test_fixture->context->sample_sequence;
+    fixture_put_u32(test_fixture, LABEL_TEST_NODES + 0x190, '2');
+    assert(rs3_read_action_label(test_fixture->context, sequence, 1, 12, &label, sizeof label) ==
+           RS3_E_STATE);
+    fixture_destroy(test_fixture);
+}
+
 int main(void)
 {
     RUN_TEST(four_curse_bindings);
@@ -807,5 +892,7 @@ int main(void)
     RUN_TEST(minimap_rejects_torn_component_scale_and_roots);
     RUN_TEST(minimap_rejects_bad_identity_bounds_values_and_guards);
     RUN_TEST(minimap_snapshot_copy_and_unavailable_reset);
+    RUN_TEST(action_labels_have_checked_identity_chord_and_copy_contract);
+    RUN_TEST(action_labels_reject_preset_and_concurrent_text_changes);
     return 0;
 }
