@@ -145,3 +145,10 @@ Requests
   Tests reject the actual outside value 1498611712, wrong enrage, stale/foreign
   data and missing provenance before the device is called. This guards the
   writer itself, independently of the supervisor arming conditions.
+* A separate, disabled-by-default opening-prayer writer now uses the same
+  native device and tick budget as rotation batches. It requires the bounded
+  experiment opt-in, native P1/300%/instance evidence, fresh overhead/points,
+  current C UI role/chord, and the final focus/stop check. The restored
+  two-cycle controller owns timing and acknowledgement state. This method
+  cannot promote production validation flags. Synthetic Ctrl+F3 dispatch and
+  default refusal are covered without a game process.

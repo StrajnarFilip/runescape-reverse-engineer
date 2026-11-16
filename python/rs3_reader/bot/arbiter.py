@@ -16,7 +16,7 @@ import json
 import math
 from dataclasses import dataclass, field
 from threading import RLock
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from typing import Mapping, Optional, Tuple
 
 from .actuator import RecordingActuator, SendResult
@@ -43,12 +43,22 @@ class P1BatchArbiter:
     It accepts no prayer actions and makes no server-tick execution claim.
     """
 
-    def __init__(self, device, clock, kill_switch, focus_checker, *, enabled=False):
+    def __init__(
+        self,
+        device,
+        clock,
+        kill_switch,
+        focus_checker,
+        *,
+        enabled=False,
+        opening_trial_enabled=False,
+    ):
         self.device, self.clock = device, clock
         self.kill_switch, self.focus_checker = kill_switch, focus_checker
         self.enabled, self.fault = enabled is True, None
         self.session, self.tick, self.count = None, None, 0
         self.history = set()
+        self.opening_trial_enabled = opening_trial_enabled is True
 
     def encounter_ready(self, world):
         """Require the same-frame native instance bit at 300% before any P1 input.
@@ -182,6 +192,72 @@ class P1BatchArbiter:
         """Disable further writes; native calls own balanced key release."""
         self.enabled = False
         self.device.release_all()
+
+    def send_opening_prayer(self, prayer, world, label):
+        """Write one opt-in bounded experiment request through the same native device.
+
+        The restored two-cycle controller owns timing/acknowledgement state.
+        This method cannot enable the production planner or mark timing valid.
+        It independently checks instance, phase, overhead, points, exact native
+        UI role/chord, tick budget and stop/focus again before the C call.
+        """
+        from .actuator_sendinput import KeyBinding
+
+        try:
+            if not self.opening_trial_enabled or prayer not in ("melee", "soul_split"):
+                raise ValueError("opening_prayer_trial_disabled_or_invalid")
+            now = self.clock()
+            batch = SimpleNamespace(
+                actions=(prayer,),
+                session=world.session,
+                sample_sequence=world.sample_sequence,
+                issued_ns=world.now_ns,
+                deadline_ns=world.observed_ns + 150 * NS_PER_MS,
+                batch_id="opening-prayer:{}:{}".format(world.sample_sequence, prayer),
+            )
+            self._guard(batch, world)
+            active, points, phase = (
+                world.player.active_prayer,
+                world.player.prayer.current,
+                world.telos.phase,
+            )
+            if not all(
+                o.is_fresh(150) and o.reason is None and o.source for o in (active, points, phase)
+            ):
+                raise ValueError("opening_prayer_state_unavailable")
+            if (
+                active.value not in ("melee", "soul_split")
+                or active.value == prayer
+                or phase.value != 1
+            ):
+                raise ValueError("opening_prayer_scope_changed")
+            if not _number(points.value) or points.value <= 0:
+                raise ValueError("opening_prayer_points_unavailable")
+            expected_name = b"Deflect Melee" if prayer == "melee" else b"Soul Split"
+            if (
+                label.flags != 15
+                or label.name != expected_name
+                or label.item_id != -1
+                or label.pid != world.session.pid
+                or label.process_creation_time != world.session.process_creation_time
+                or label.sample_sequence != world.sample_sequence
+                or not world.observed_ns <= label.observed_ns <= now
+            ):
+                raise ValueError("opening_prayer_native_binding_changed")
+            binding = KeyBinding(
+                label.virtual_key, label.modifiers, True, "current_native_ui_label"
+            )
+            self._guard(batch, world)
+            self.history.add(batch.batch_id)
+            self.count += 1
+            self.session = world.session
+            accepted_ns = self.clock()
+            self.device.dispatch(SetPrayer(prayer), binding, world)
+            return accepted_ns
+        except Exception as error:
+            self.fault = str(error)
+            self.close()
+            raise
 
 
 def _integer(value, minimum=0):

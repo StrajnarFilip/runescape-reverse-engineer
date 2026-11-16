@@ -203,6 +203,40 @@ class P1BatchWriterTests(unittest.TestCase):
                     writer.send(batch, self.world, self.prepare)
                 self.assertEqual(self.calls, ["released"])
 
+    def test_opening_prayer_is_opt_in_and_uses_current_ctrl_binding(self):
+        from types import SimpleNamespace
+        from rs3_reader.bot.world_state import to_jsonable
+
+        for enabled in (False, True):
+            writer, _ = self.writer_and_batch()
+            writer.opening_trial_enabled = enabled
+            record = to_jsonable(self.world.raw)
+            record["telos"] = dict(phase=1)
+            self.world = WorldState.from_telemetry(record)
+            self.device.dispatch = lambda action, binding, current: self.calls.append(
+                (action, binding)
+            )
+            label = SimpleNamespace(
+                flags=15,
+                name=b"Soul Split",
+                item_id=-1,
+                pid=1,
+                process_creation_time=2,
+                sample_sequence=1,
+                observed_ns=self.world.now_ns,
+                virtual_key=0x72,
+                modifiers=1,
+            )
+            if enabled:
+                writer.send_opening_prayer("soul_split", self.world, label)
+                action, binding = self.calls[0]
+                self.assertEqual(action.prayer, "soul_split")
+                self.assertEqual((binding.virtual_key, binding.modifiers), (0x72, 1))
+            else:
+                with self.assertRaisesRegex(ValueError, "trial_disabled"):
+                    writer.send_opening_prayer("soul_split", self.world, label)
+                self.assertEqual(self.calls, ["released"])
+
 
 def intent(
     value,
