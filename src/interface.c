@@ -17,6 +17,7 @@ _Static_assert(sizeof(rs3_action_bar_slot) == 232, "ABI action bar layout");
 _Static_assert(offsetof(rs3_action_bar_slot, raw_packed) == 72, "ABI action bar alignment");
 _Static_assert(sizeof(rs3_pointer_candidate) == 304, "ABI pointer candidate layout");
 _Static_assert(sizeof(rs3_minimap_candidate) == 64, "ABI minimap candidate layout");
+_Static_assert(sizeof(rs3_action_label) == 224, "ABI action label layout");
 
 #define MINIMAP_INTERFACE            1465u
 #define MINIMAP_COMPONENT            0u
@@ -612,9 +613,291 @@ uint32_t rs3_interface_sizeof(uint32_t structure)
             return sizeof(rs3_pointer_candidate);
         case 5:
             return sizeof(rs3_minimap_candidate);
+        case 6:
+            return sizeof(rs3_action_label);
         default:
             return 0;
     }
+}
+
+#define LABEL_COMPONENT_BYTES     0x1c0u
+#define LABEL_TEXT_OFFSET         0x190u
+#define LABEL_GRAPHIC_VTABLE_RVA  0x1530520u
+#define LABEL_NAME_POINTER_OFFSET 0x98u
+#define LABEL_ICON_OFFSET         0x188u
+#define LABEL_ITEM_OFFSET         0x1b8u
+
+/** Read one bounded ASCII SSO member and verify both its header and heap text. */
+static int label_text(rs3_context *context, uint64_t component, const unsigned char *data,
+                      char *out, size_t capacity)
+{
+    const unsigned char *header = data + LABEL_TEXT_OFFSET;
+    int heap = (header[23] & 128) != 0;
+    uint64_t length = heap ? decode_u64(header + 8) : 23u - header[23];
+    if (length == 0 || length >= capacity || (!heap && header[23] > 23))
+    {
+        return 0;
+    }
+    if (heap)
+    {
+        if (!memory_read(context, decode_u64(header), out, (size_t)length))
+        {
+            return 0;
+        }
+    }
+    else
+    {
+        memcpy(out, header, (size_t)length);
+    }
+    for (uint64_t index = 0; index < length; index++)
+    {
+        if ((unsigned char)out[index] < 32 || (unsigned char)out[index] > 126)
+        {
+            return 0;
+        }
+    }
+    unsigned char after[32];
+    if (!memory_read(context, component + LABEL_TEXT_OFFSET, after, 24) ||
+        memcmp(header, after, 24) != 0 ||
+        (heap && (!memory_read(context, decode_u64(header), after, (size_t)length) ||
+                  memcmp(out, after, (size_t)length) != 0)))
+    {
+        return 0;
+    }
+    out[length] = '\0';
+    return 1;
+}
+
+/** Translate the small key-label vocabulary needed by the observed native bars. */
+static int label_chord(const char *label, uint32_t *key, uint32_t *modifiers)
+{
+    *modifiers = 0;
+    if (label[0] && label[1] == '-')
+    {
+        *modifiers = label[0] == 'c'   ? RS3_KEY_CTRL
+                     : label[0] == 's' ? RS3_KEY_SHIFT
+                     : label[0] == 'a' ? RS3_KEY_ALT
+                                       : 0;
+        if (*modifiers == 0)
+        {
+            return 0;
+        }
+        label += 2;
+    }
+    size_t length = strlen(label);
+    if (length == 1 &&
+        ((label[0] >= 'A' && label[0] <= 'Z') || (label[0] >= '0' && label[0] <= '9')))
+    {
+        *key = (unsigned char)label[0];
+        return 1;
+    }
+    if (length >= 2 && length <= 3 && label[0] == 'F' && label[1] >= '1' && label[1] <= '9')
+    {
+        uint32_t number = (uint32_t)(label[1] - '0');
+        if (length == 3)
+        {
+            if (label[2] < '0' || label[2] > '9')
+            {
+                return 0;
+            }
+            number = number * 10 + (uint32_t)(label[2] - '0');
+        }
+        if (number <= 12)
+        {
+            *key = VK_F1 + number - 1;
+            return 1;
+        }
+    }
+    if (!strcmp(label, "PgUp") || !strcmp(label, "PgDn") || !strcmp(label, "="))
+    {
+        *key = !strcmp(label, "PgUp") ? VK_PRIOR : !strcmp(label, "PgDn") ? VK_NEXT : VK_OEM_PLUS;
+        return 1;
+    }
+    return 0;
+}
+
+/** Read a static definition-indexed component; the pointer at entry+16 is the component. */
+static int label_component(rs3_context *context, uint64_t begin, uint64_t end, uint32_t group,
+                           uint32_t component_id, uint64_t expected_vtable, uint64_t *address,
+                           unsigned char *data)
+{
+    unsigned char entry[24], after[24];
+    if (!is_valid_remote_pointer(begin) || end < begin || (end - begin) % 24 != 0 ||
+        (end - begin) / 24 > UI_MAX_COMPONENTS || component_id >= (end - begin) / 24 ||
+        !memory_read(context, begin + component_id * 24ull, entry, sizeof entry))
+    {
+        return 0;
+    }
+    *address = decode_u64(entry + 16);
+    return memory_read(context, *address, data, LABEL_COMPONENT_BYTES) &&
+           decode_u64(data) == expected_vtable &&
+           decode_u32(data + UI_COMPONENT_ID_OFFSET) == (component_id << 16 | group) &&
+           memory_read(context, begin + component_id * 24ull, after, sizeof after) &&
+           memcmp(entry, after, sizeof entry) == 0;
+}
+
+/** All memory and snapshot state is protected by the caller's lifecycle lock. */
+static int read_action_label_locked(rs3_context *context, uint64_t sequence, uint32_t display_bar,
+                                    uint32_t slot, rs3_action_label *out)
+{
+    static const uint32_t groups[5] = {1430, 1670, 1671, 1672, 1673};
+    static const uint32_t first_label[5] = {73, 28, 26, 23, 23};
+    static const uint32_t preset_label[5] = {265, 13, 13, 10, 10};
+    const rs3_snapshot *frame = context->latest_frame;
+    const rs3_action_bar_slot *bar_slot = &frame->action_bar[(display_bar - 1) * 14 + slot - 1];
+    if (context->target.profile != &profile_primary || !ui_code_matches(context) ||
+        context->sample_sequence != sequence || frame->info.sequence != sequence ||
+        frame->info.pid != context->target.pid ||
+        frame->info.process_creation_time != context->target.process_creation_time ||
+        !(bar_slot->flags & RS3_BAR_PRESET_KNOWN) || bar_slot->display_bar != display_bar ||
+        bar_slot->slot != slot)
+    {
+        return 0;
+    }
+    uint64_t client, world, manager, vtable;
+    uint32_t state;
+    unsigned char cache[16], pair[16], vector[16], component[LABEL_COMPONENT_BYTES];
+    uint32_t group = groups[display_bar - 1];
+    if (!domain_capture(context, DOMAIN_CLIENT, &client) ||
+        !memory_read_pointer(context, client + 8, &world) ||
+        !memory_read(context, world + LAYOUT_GAME_STATE_OFFSET, &state, sizeof state) ||
+        state != LAYOUT_IN_GAME_STATE ||
+        !memory_read_pointer(context, world + UI_MANAGER_OFFSET, &manager) ||
+        !memory_read_pointer(context, manager, &vtable) ||
+        vtable != context->target.module_base + UI_MANAGER_VTABLE_RVA ||
+        !memory_read(context, manager + UI_CACHE_HEADER_OFFSET, cache, sizeof cache) ||
+        !ui_cache_has_id(context, cache, group) ||
+        !memory_read(context, decode_u64(cache) + group * 16ull, pair, sizeof pair) ||
+        !memory_read(context, decode_u64(pair + 8) + 8, vector, sizeof vector))
+    {
+        return 0;
+    }
+    uint64_t begin = decode_u64(vector), end = decode_u64(vector + 8), address;
+    char preset[8];
+    if (!label_component(context, begin, end, group, preset_label[display_bar - 1],
+                         context->target.module_base + UI_TEXT_VTABLE_RVA, &address, component) ||
+        !label_text(context, address, component, preset, sizeof preset))
+    {
+        return 0;
+    }
+    char expected[8];
+    snprintf(expected, sizeof expected, "%u", bar_slot->preset_bar);
+    if (strcmp(preset, expected))
+    {
+        return 0;
+    }
+    uint64_t preset_component = address;
+    unsigned char preset_before[LABEL_COMPONENT_BYTES];
+    memcpy(preset_before, component, sizeof component);
+    uint32_t label_id = first_label[display_bar - 1] + (slot - 1) * 13;
+    if (!label_component(context, begin, end, group, label_id,
+                         context->target.module_base + UI_TEXT_VTABLE_RVA, &address, component) ||
+        !label_text(context, address, component, out->key_label, sizeof out->key_label))
+    {
+        return 0;
+    }
+    uint64_t text_component = address;
+    unsigned char text_before[LABEL_COMPONENT_BYTES];
+    memcpy(text_before, component, sizeof component);
+    if (!label_component(context, begin, end, group, label_id - 7,
+                         context->target.module_base + LABEL_GRAPHIC_VTABLE_RVA, &address,
+                         component))
+    {
+        return 0;
+    }
+    uint64_t name_address = decode_u64(component + LABEL_NAME_POINTER_OFFSET);
+    char name[128], name_after[128];
+    if (!memory_read(context, name_address, name, sizeof name) ||
+        memchr(name, 0, sizeof name) == NULL ||
+        !memory_read(context, name_address, name_after, sizeof name_after) ||
+        memcmp(name, name_after, sizeof name) != 0)
+    {
+        return 0;
+    }
+    size_t used = 0;
+    int tag = 0;
+    for (size_t index = 0; index < sizeof name && name[index]; index++)
+    {
+        if (name[index] == '<')
+        {
+            tag = 1;
+        }
+        else if (name[index] == '>')
+        {
+            tag = 0;
+        }
+        else if (!tag && used + 1 < sizeof out->name)
+        {
+            out->name[used++] = name[index];
+        }
+    }
+    out->name[used] = '\0';
+    unsigned char after[LABEL_COMPONENT_BYTES];
+    uint64_t world_after, manager_after, client_after;
+    uint32_t state_after;
+    if (!used || !memory_read(context, address, after, sizeof after) ||
+        memcmp(component, after, sizeof after) != 0 ||
+        !memory_read(context, text_component, after, sizeof after) ||
+        memcmp(text_before, after, sizeof after) != 0 ||
+        !memory_read(context, preset_component, after, sizeof after) ||
+        memcmp(preset_before, after, sizeof after) != 0 ||
+        !memory_read(context, decode_u64(pair + 8) + 8, after, sizeof vector) ||
+        memcmp(vector, after, sizeof vector) != 0 ||
+        !memory_read(context, decode_u64(cache) + group * 16ull, after, sizeof pair) ||
+        memcmp(pair, after, sizeof pair) != 0 ||
+        !memory_read(context, manager + UI_CACHE_HEADER_OFFSET, after, sizeof cache) ||
+        memcmp(cache, after, sizeof cache) != 0 ||
+        !domain_capture(context, DOMAIN_CLIENT, &client_after) || client_after != client ||
+        !memory_read_pointer(context, client + 8, &world_after) || world_after != world ||
+        !memory_read_pointer(context, world + UI_MANAGER_OFFSET, &manager_after) ||
+        manager_after != manager ||
+        !memory_read(context, world + LAYOUT_GAME_STATE_OFFSET, &state_after, sizeof state_after) ||
+        state_after != state)
+    {
+        return 0;
+    }
+    out->observed_ns = clock_monotonic_ns();
+    out->sample_sequence = sequence;
+    out->pid = frame->info.pid;
+    out->process_creation_time = frame->info.process_creation_time;
+    out->display_bar = display_bar;
+    out->preset_bar = bar_slot->preset_bar;
+    out->slot = slot;
+    out->item_id = decode_i32(component + LABEL_ITEM_OFFSET);
+    out->sprite_id = decode_i32(component + LABEL_ICON_OFFSET);
+    out->flags = RS3_LABEL_KEY_READ | RS3_LABEL_NAME_READ | RS3_LABEL_PRESET_MATCHED;
+    if (label_chord(out->key_label, &out->virtual_key, &out->modifiers))
+    {
+        out->flags |= RS3_LABEL_CHORD_KNOWN;
+    }
+    out->reason = (out->flags & RS3_LABEL_CHORD_KNOWN) ? RS3_UI_CONFIRMED : RS3_UI_KEY_UNMAPPED;
+    return 1;
+}
+
+int32_t rs3_read_action_label(rs3_context *context, uint64_t expected_sequence,
+                              uint32_t display_bar, uint32_t slot, rs3_action_label *out,
+                              uint32_t out_size)
+{
+    if (context == NULL || out == NULL || display_bar < 1 || display_bar > 5 || slot < 1 ||
+        slot > 14)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    if (out_size < sizeof *out)
+    {
+        return RS3_E_ABI;
+    }
+    memset(out, 0, sizeof *out);
+    out->reason = RS3_UI_READ_FAILED;
+    rs3_action_label staged = {0};
+    AcquireSRWLockExclusive(&context->lifecycle_lock);
+    int result = read_action_label_locked(context, expected_sequence, display_bar, slot, &staged);
+    ReleaseSRWLockExclusive(&context->lifecycle_lock);
+    if (result)
+    {
+        *out = staged;
+    }
+    return result ? RS3_OK : RS3_E_STATE;
 }
 
 void interface_minimap_clear(rs3_minimap_candidate *out)
