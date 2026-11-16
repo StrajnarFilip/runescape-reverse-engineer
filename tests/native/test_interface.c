@@ -863,6 +863,14 @@ static void action_labels_reject_preset_and_concurrent_text_changes(void)
     assert(rs3_read_action_label(test_fixture->context, sequence, 1, 12, &label, sizeof label) ==
            RS3_E_STATE);
     fixture_destroy(test_fixture);
+    test_fixture = action_label_fixture();
+    sequence = test_fixture->context->sample_sequence;
+    fixture_mutate_on_read(test_fixture, LABEL_TEST_NODES + 0x400, 2, UI_COMPONENTS + 209 * 24 + 16,
+                           0);
+    assert(rs3_read_action_label(test_fixture->context, sequence, 1, 12, &label, sizeof label) ==
+           RS3_E_STATE);
+    assert(label.flags == 0);
+    fixture_destroy(test_fixture);
 }
 
 int main(void)

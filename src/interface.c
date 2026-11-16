@@ -806,6 +806,7 @@ static int read_action_label_locked(rs3_context *context, uint64_t sequence, uin
         return 0;
     }
     uint64_t name_address = decode_u64(component + LABEL_NAME_POINTER_OFFSET);
+    uint64_t icon_component = address;
     char name[128], name_after[128];
     if (!memory_read(context, name_address, name, sizeof name) ||
         memchr(name, 0, sizeof name) == NULL ||
@@ -833,7 +834,7 @@ static int read_action_label_locked(rs3_context *context, uint64_t sequence, uin
     }
     out->name[used] = '\0';
     unsigned char after[LABEL_COMPONENT_BYTES];
-    uint64_t world_after, manager_after, client_after;
+    uint64_t world_after, manager_after, client_after, current_component, current_vtable;
     uint32_t state_after;
     if (!used || !memory_read(context, address, after, sizeof after) ||
         memcmp(component, after, sizeof after) != 0 ||
@@ -841,6 +842,13 @@ static int read_action_label_locked(rs3_context *context, uint64_t sequence, uin
         memcmp(text_before, after, sizeof after) != 0 ||
         !memory_read(context, preset_component, after, sizeof after) ||
         memcmp(preset_before, after, sizeof after) != 0 ||
+        !memory_read_pointer(context, begin + preset_label[display_bar - 1] * 24ull + 16,
+                             &current_component) ||
+        current_component != preset_component ||
+        !memory_read_pointer(context, begin + label_id * 24ull + 16, &current_component) ||
+        current_component != text_component ||
+        !memory_read_pointer(context, begin + (label_id - 7) * 24ull + 16, &current_component) ||
+        current_component != icon_component ||
         !memory_read(context, decode_u64(pair + 8) + 8, after, sizeof vector) ||
         memcmp(vector, after, sizeof vector) != 0 ||
         !memory_read(context, decode_u64(cache) + group * 16ull, after, sizeof pair) ||
@@ -850,7 +858,8 @@ static int read_action_label_locked(rs3_context *context, uint64_t sequence, uin
         !domain_capture(context, DOMAIN_CLIENT, &client_after) || client_after != client ||
         !memory_read_pointer(context, client + 8, &world_after) || world_after != world ||
         !memory_read_pointer(context, world + UI_MANAGER_OFFSET, &manager_after) ||
-        manager_after != manager ||
+        manager_after != manager || !memory_read_pointer(context, manager_after, &current_vtable) ||
+        current_vtable != vtable ||
         !memory_read(context, world + LAYOUT_GAME_STATE_OFFSET, &state_after, sizeof state_after) ||
         state_after != state)
     {

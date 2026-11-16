@@ -214,3 +214,7 @@ sample identity and age remain mandatory for downstream use.
   chords. Red EoF equip is currently 7 and the EoF special is 6; consumers
   must read roles afresh instead of copying the earlier reversed constants.
   No input is sent by this accessor; castability and EoF contents stay separate.
+* The final label pass also rechecks all three consumed component-entry
+  pointers and the manager vtable. A fixture swaps the graphic entry while
+  leaving the old object readable; the read is rejected instead of returning
+  a stale role/name. Public layouts and the 27-group test count are unchanged.
