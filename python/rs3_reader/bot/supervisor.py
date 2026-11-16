@@ -284,8 +284,12 @@ class P1Attempt:
         if self.kill_switch():
             return "kill_switch"
         if (
-            not world.session.complete
-            or world.status not in ("available", "partial")
+            not _integer(world.session.pid, 1)
+            or not _integer(world.session.process_creation_time, 1)
+            or (
+                self.engine is not None
+                and (not world.session.complete or world.status not in ("available", "partial"))
+            )
             or not _integer(world.observed_ns)
             or not _integer(world.sample_sequence, 1)
             or not 0 <= now - world.observed_ns <= 150 * NS_PER_MS
@@ -344,7 +348,9 @@ class P1Attempt:
                 if self._fresh(npc.config_id) and npc.config_id.value == 22892
             ]
             ready = (
-                len(dormant) == 1
+                world.status in ("available", "partial")
+                and world.session.complete
+                and len(dormant) == 1
                 and self.focus_checker(world) is True
                 and self._fresh(world.player.active_prayer)
                 and world.player.active_prayer.value == "melee"
@@ -389,10 +395,7 @@ class P1Attempt:
                 elif batch is not None:
                     try:
                         accepted, sent_ns = self.writer.send(batch, world, self.prepare)
-                        self.engine.note_sent(batch, accepted, sent_ns)
-                        self.pending = batch, world, sent_ns
                         self.sent.extend(accepted)
-                        self.reason = "awaiting_individual_native_confirmations"
                         events.append(
                             {
                                 "event": "batch_accepted",
@@ -400,6 +403,9 @@ class P1Attempt:
                                 "server_same_tick_confirmed": False,
                             }
                         )
+                        self.engine.note_sent(batch, accepted, sent_ns)
+                        self.pending = batch, world, sent_ns
+                        self.reason = "awaiting_individual_native_confirmations"
                         self.blocked_since = None
                     except Exception as error:
                         self.stop("dispatch_stopped:" + str(error))

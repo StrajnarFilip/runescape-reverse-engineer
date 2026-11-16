@@ -834,6 +834,9 @@ class P1AttemptTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
 
     def test_outside_scene_is_not_pinned_and_low_adrenaline_does_not_arm(self):
+        self.step(self.frame(status="unavailable"))
+        self.assertFalse(self.attempt.stopped)
+        self.assertEqual(self.calls, [])
         self.step(
             self.frame(npcs={"status": "available", "entities": []}, combat={"scene_epoch": 3})
         )
