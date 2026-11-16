@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from rs3_reader.bot.actuator import RecordingActuator, SendResult
-from rs3_reader.bot.arbiter import Arbiter, ArbiterPolicy, ReplayArbiter
+from rs3_reader.bot.arbiter import Arbiter, ArbiterPolicy, P1BatchArbiter, ReplayArbiter
 from rs3_reader.bot.intents import (
     ActionLane,
     ActivateAbility,
@@ -70,6 +70,93 @@ def row(sequence=1, time_ms=10000, tick=20):
 
 def world(**kwargs):
     return WorldState.from_telemetry(row(**kwargs))
+
+
+class P1BatchWriterTests(unittest.TestCase):
+    def writer_and_batch(self, enabled=True, **changes):
+        from types import SimpleNamespace
+        from rs3_reader.bot.rotation import SequenceBatch
+        from rs3_reader.bot.world_state import EntityRef
+
+        self.world = world()
+        self.calls = []
+        self.device = SimpleNamespace(
+            dispatch_key_batch=lambda actions, current: self.calls.append(actions),
+            release_all=lambda: self.calls.append("released"),
+        )
+        kwargs = dict(
+            clock=lambda: self.world.now_ns,
+            kill_switch=lambda: False,
+            focus_checker=lambda current: True,
+            enabled=enabled,
+        )
+        kwargs.update(changes)
+        writer = P1BatchArbiter(self.device, **kwargs)
+        batch = SequenceBatch(
+            "test",
+            "wake",
+            ({"id": "target_cycle", "kind": "target_cycle", "key": "A"},),
+            True,
+            self.world.session,
+            EntityRef("npc", 4, 7, 22891),
+            self.world.sample_sequence,
+            self.world.observed_ns,
+            self.world.now_ns,
+            self.world.now_ns + 150 * MS,
+        )
+        return writer, batch
+
+    def prepare(self, action, current):
+        from rs3_reader.bot.actuator_sendinput import NativeKeyAction
+
+        descriptor = NativeKeyAction(
+            kind=3, virtual_key=ord("A"), expected_instance_id=4, expected_config_id=22891
+        )
+        return descriptor, None
+
+    def test_batch_writer_is_opt_in_and_latches_without_retry(self):
+        writer, batch = self.writer_and_batch(False)
+        with self.assertRaisesRegex(ValueError, "disabled"):
+            writer.send(batch, self.world, self.prepare)
+        self.assertEqual(self.calls, ["released"])
+        writer, batch = self.writer_and_batch()
+        accepted, _ = writer.send(batch, self.world, self.prepare)
+        self.assertEqual(accepted, ("target_cycle",))
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            writer.send(batch, self.world, self.prepare)
+        self.assertEqual(len([c for c in self.calls if isinstance(c, list)]), 1)
+
+    def test_kill_focus_stale_and_unknown_tick_block_all_input(self):
+        for changes in (
+            dict(kill_switch=lambda: True),
+            dict(focus_checker=lambda current: False),
+            dict(clock=lambda: 10200 * MS),
+        ):
+            writer, batch = self.writer_and_batch(**changes)
+            with self.assertRaises(ValueError):
+                writer.send(batch, self.world, self.prepare)
+            self.assertEqual(self.calls, ["released"])
+        writer, batch = self.writer_and_batch()
+        self.world = world(tick=None)
+        with self.assertRaisesRegex(ValueError, "tick_unavailable"):
+            writer.send(batch, self.world, self.prepare)
+
+    def test_every_descriptor_is_prepared_before_first_send(self):
+        from dataclasses import replace
+
+        writer, batch = self.writer_and_batch()
+        batch = replace(batch, actions=batch.actions * 3)
+        count = []
+
+        def prepare(action, current):
+            count.append(action)
+            if len(count) == 3:
+                raise ValueError("third preflight failed")
+            return self.prepare(action, current)
+
+        with self.assertRaisesRegex(ValueError, "third preflight"):
+            writer.send(batch, self.world, prepare)
+        self.assertEqual(self.calls, ["released"])
 
 
 def intent(
