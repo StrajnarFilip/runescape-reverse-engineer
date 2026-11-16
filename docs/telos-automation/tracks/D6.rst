@@ -1,7 +1,7 @@
 D6 - Arbiter
 ============
 
-:Status: done
+:Status: in progress
 :Wave: 1
 :Branch: ``telos/D6``
 :Kind: Python
@@ -133,3 +133,9 @@ Requests
   Twenty-five D6 cases pass, including a real A1 serialized backend around a
   fake native device. The isolated worktree skips one local raw-capture check.
   No DLL/device/game input is used by the integration fixture.
+
+* Supervised P1 writer: opt-in ordered native batches, fresh exact-frame C UI
+  labels, received-tick budget, final focus/stop-key check and duplicate latch.
+  Three synthetic test groups cover refusals, ordered preflight and no retry.
+  Ordinary live modes and prayer-timing gates remain unchanged.
+

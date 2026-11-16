@@ -33,6 +33,125 @@ EXCLUSIVE_LANES = {
 }
 
 
+class P1BatchArbiter:
+    """Single writer for one explicitly enabled, supervised P1 experiment.
+
+    This adapter preserves the ordinary arbiter's disabled live modes. The
+    ordered coordinator owns action-specific acknowledgements; this writer
+    enforces exact-frame evidence, a received-tick budget and no batch retries.
+    Unknown castability remains unknown in the source and experiment log.
+    It accepts no prayer actions and makes no server-tick execution claim.
+    """
+
+    def __init__(self, device, clock, kill_switch, focus_checker, *, enabled=False):
+        self.device, self.clock = device, clock
+        self.kill_switch, self.focus_checker = kill_switch, focus_checker
+        self.enabled, self.fault = enabled is True, None
+        self.session, self.tick, self.count = None, None, 0
+        self.history = set()
+
+    def _guard(self, batch, world):
+        now = self.clock()
+        if not self.enabled or self.fault:
+            raise ValueError("p1_writer_disabled_or_faulted")
+        if self.kill_switch() or self.focus_checker(world) is not True:
+            raise ValueError("p1_stop_key_or_focus_lost")
+        if (
+            not world.session.complete
+            or world.session != batch.session
+            or (self.session is not None and self.session != world.session)
+            or world.sample_sequence != batch.sample_sequence
+            or not batch.issued_ns <= now <= batch.deadline_ns
+            or not 0 <= now - world.observed_ns <= 150 * NS_PER_MS
+        ):
+            raise ValueError("p1_batch_identity_or_age_changed")
+        tick = world.game_tick
+        if (
+            not tick.is_fresh(150)
+            or tick.reason is not None
+            or not tick.source
+            or not isinstance(tick.value, Mapping)
+            or not _integer(tick.value.get("index"))
+        ):
+            raise ValueError("p1_received_tick_unavailable")
+        index = tick.value["index"]
+        if self.tick is not None and index < self.tick:
+            raise ValueError("p1_received_tick_regressed")
+        if index != self.tick:
+            self.tick, self.count = index, 0
+        if self.count + len(batch.actions) > 12:
+            raise ValueError("p1_tick_budget_exhausted")
+        if batch.batch_id in self.history or len(self.history) >= 32:
+            raise ValueError("p1_duplicate_or_excess_batch")
+
+    def send(self, batch, world, prepare):
+        """Prepare every descriptor before submitting one balanced native batch.
+
+        prepare returns (descriptor, native_label), with None for the user's
+        A target-cycle binding only. Every UI label must belong to this exact
+        process/sample and must agree with its descriptor's translated chord.
+        A refusal or transport fault latches; this writer never retries it.
+        """
+        from .actuator_sendinput import NativeKeyAction
+
+        try:
+            self._guard(batch, world)
+            if not 1 <= len(batch.actions) <= 3:
+                raise ValueError("p1_invalid_batch_size")
+            descriptors = []
+            for action in batch.actions:
+                descriptor, label = prepare(action, world)
+                if type(descriptor) is not NativeKeyAction:
+                    raise ValueError("p1_invalid_descriptor")
+                kind = action["kind"]
+                expected_kind = (
+                    3 if kind == "target_cycle" else 2 if kind in ("item", "equip") else 1
+                )
+                if descriptor.kind != expected_kind:
+                    raise ValueError("p1_descriptor_kind_changed")
+                if expected_kind == 1 and descriptor.ability_id != action["ability_id"]:
+                    raise ValueError("p1_ability_changed")
+                if expected_kind == 3:
+                    if (
+                        action["key"] != "A"
+                        or descriptor.virtual_key != ord("A")
+                        or descriptor.modifiers != 0
+                        or label is not None
+                        or descriptor.expected_instance_id != batch.target.instance_id
+                        or descriptor.expected_config_id != batch.target.config_id
+                    ):
+                        raise ValueError("p1_target_cycle_changed")
+                elif (
+                    label is None
+                    or label.flags != 15
+                    or label.sample_sequence != world.sample_sequence
+                    or label.pid != world.session.pid
+                    or label.process_creation_time != world.session.process_creation_time
+                    or not world.observed_ns <= label.observed_ns <= self.clock()
+                    or label.virtual_key != descriptor.virtual_key
+                    or label.modifiers != descriptor.modifiers
+                ):
+                    raise ValueError("p1_live_binding_unavailable_or_changed")
+                descriptors.append(descriptor)
+            # Label preparation is read-only but can take time or lose focus.
+            self._guard(batch, world)
+            self.history.add(batch.batch_id)
+            self.count += len(descriptors)
+            self.session = world.session
+            sent_ns = self.clock()
+            self.device.dispatch_key_batch(descriptors, world)
+            return tuple(action["id"] for action in batch.actions), sent_ns
+        except Exception as error:
+            self.fault = str(error)
+            self.close()
+            raise
+
+    def close(self):
+        """Disable further writes; native calls own balanced key release."""
+        self.enabled = False
+        self.device.release_all()
+
+
 def _integer(value, minimum=0):
     return type(value) is int and value >= minimum
 
