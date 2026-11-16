@@ -79,6 +79,23 @@ class P1BatchWriterTests(unittest.TestCase):
         from rs3_reader.bot.world_state import EntityRef
 
         self.world = world()
+        record = row()
+        record["encounter"] = {
+            "pid": 1,
+            "process_creation_time": 2,
+            "scene_epoch": 3,
+            "sample_sequence": 1,
+            "status": "partial",
+            "raw_candidates": {
+                "6359": {
+                    "value": (1 << 29) | 300,
+                    "source": "native_encounter",
+                    "age_ms": 0,
+                    "reason": None,
+                }
+            },
+        }
+        self.world = WorldState.from_telemetry(record)
         self.calls = []
         self.device = SimpleNamespace(
             dispatch_key_batch=lambda actions, current: self.calls.append(actions),
@@ -137,7 +154,9 @@ class P1BatchWriterTests(unittest.TestCase):
                 writer.send(batch, self.world, self.prepare)
             self.assertEqual(self.calls, ["released"])
         writer, batch = self.writer_and_batch()
-        self.world = world(tick=None)
+        record = json.loads(json.dumps(row(tick=None)))
+        record["encounter"] = dict(self.world.raw["encounter"])
+        self.world = WorldState.from_telemetry(record)
         with self.assertRaisesRegex(ValueError, "tick_unavailable"):
             writer.send(batch, self.world, self.prepare)
 
@@ -157,6 +176,32 @@ class P1BatchWriterTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "third preflight"):
             writer.send(batch, self.world, prepare)
         self.assertEqual(self.calls, ["released"])
+
+    def test_native_instance_guard_rejects_outside_stale_and_foreign_evidence(self):
+        from rs3_reader.bot.world_state import to_jsonable
+
+        for change in ("outside", "enrage", "stale", "sequence", "process", "source"):
+            with self.subTest(change=change):
+                writer, batch = self.writer_and_batch()
+                record = to_jsonable(self.world.raw)
+                encounter = record["encounter"]
+                field = encounter["raw_candidates"]["6359"]
+                if change == "outside":
+                    field["value"] = 1498611712
+                elif change == "enrage":
+                    field["value"] = (1 << 29) | 2000
+                elif change == "stale":
+                    field["age_ms"] = 151
+                elif change == "sequence":
+                    encounter["sample_sequence"] = 0
+                elif change == "process":
+                    encounter["pid"] = 7
+                else:
+                    field["source"] = "unknown"
+                self.world = WorldState.from_telemetry(record)
+                with self.assertRaisesRegex(ValueError, "instance_or_enrage"):
+                    writer.send(batch, self.world, self.prepare)
+                self.assertEqual(self.calls, ["released"])
 
 
 def intent(

@@ -139,3 +139,9 @@ Requests
   Three synthetic test groups cover refusals, ordered preflight and no retry.
   Ordinary live modes and prayer-timing gates remain unchanged.
 
+* Incident correction, 2026-11-16: dormant Telos also appears outside the
+  instance. Every supervised batch now requires fresh, same-frame native VARP
+  6359 bit 29 and 300% enrage, with exact process/scene/sequence metadata.
+  Tests reject the actual outside value 1498611712, wrong enrage, stale/foreign
+  data and missing provenance before the device is called. This guards the
+  writer itself, independently of the supervisor arming conditions.

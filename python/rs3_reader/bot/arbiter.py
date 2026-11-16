@@ -50,12 +50,44 @@ class P1BatchArbiter:
         self.session, self.tick, self.count = None, None, 0
         self.history = set()
 
+    def encounter_ready(self, world):
+        """Require the same-frame native instance bit at 300% before any P1 input.
+
+        Dormant config 22892 also exists outside the encounter. It is never an
+        entry guard. VARP 6359 bit 29 distinguishes the captured in-instance
+        intervals, including dormant intervals; low 12 bits carry enrage.
+        Raw data must retain the C sampler's process/scene/sequence and age.
+        This is an experiment entry check, not a successful fight/result claim.
+        """
+        instance_variable, instance_bit, enrage_mask = "6359", 1 << 29, 4095
+        encounter = world.raw.get("encounter") or {}
+        field = (encounter.get("raw_candidates") or {}).get(instance_variable) or {}
+        value, age = field.get("value"), field.get("age_ms")
+        return (
+            encounter.get("pid") == world.session.pid
+            and encounter.get("process_creation_time") == world.session.process_creation_time
+            and encounter.get("scene_epoch") == world.session.scene_epoch
+            and encounter.get("sample_sequence") == world.sample_sequence
+            and encounter.get("status") in ("available", "partial")
+            and field.get("source") == "native_encounter"
+            and field.get("reason") is None
+            and type(value) is int
+            and -(2**31) <= value < 2**32
+            and _number(age)
+            and 0 <= age <= 150
+            and 0 <= self.clock() - world.observed_ns <= (150 - age) * NS_PER_MS
+            and value & instance_bit != 0
+            and value & enrage_mask == 300
+        )
+
     def _guard(self, batch, world):
         now = self.clock()
         if not self.enabled or self.fault:
             raise ValueError("p1_writer_disabled_or_faulted")
         if self.kill_switch() or self.focus_checker(world) is not True:
             raise ValueError("p1_stop_key_or_focus_lost")
+        if not self.encounter_ready(world):
+            raise ValueError("p1_native_instance_or_enrage_not_confirmed")
         if (
             not world.session.complete
             or world.session != batch.session
