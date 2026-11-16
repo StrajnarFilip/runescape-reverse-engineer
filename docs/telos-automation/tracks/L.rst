@@ -66,6 +66,16 @@ Present for every rung, with the kill switch within reach.
 Requests
 --------
 
+* Prayer recovery, 2026-11-16: integration omitted the existing cd40688 and
+  ec084e9 calibration/predictor commits from the refactor branch. They are now
+  merged, preserving the current AGENTS.md restrictions, S0a/P6 loss/provenance
+  semantics and all production validation gates. The canonical two-cycle
+  opening can be selected explicitly beside rotation; D6 remains the sole
+  native writer. Sixteen suites pass. No live prayer input was sent.
+  Continuous flicking and an automated P1 clear remain unproven. The user
+  stopped to request a plain-language list of remaining kill blockers.
+  See ``docs/validation/telos-ladder-prayer-recovery-2026-11-16.json``.
+
 * Current handoff, 2026-11-16: the first connected P1 pilot incorrectly cast
   Devotion, Berserk and renewal outside combat. Dormant config 22892 is also
   present outside. The native instance flag was clear and the arming guard

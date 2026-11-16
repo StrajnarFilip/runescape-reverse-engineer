@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-16",
+  "finding": "The integration branch omitted cd40688 and ec084e9 from refactor/code-style-and-structure, including native prediction and the user-tested retuned opening.",
+  "restored": [
+    "src/prayer_cycle.c",
+    "CyclePredictor",
+    "controlled and anticipatory calibration state machines, reports and tests"
+  ],
+  "other_branch_review": {
+    "branch": "origin/telos/S0b",
+    "contains": "Separate broader practice controller, Arduino transport and documented experimental flicking",
+    "merged_whole_branch": false,
+    "reason": "Different account/setup, experimental coverage and raw training-data files; do not import wholesale."
+  },
+  "connected_mode": "supervised-p1 --opening-prayer-trial",
+  "scope": {
+    "phase": 1,
+    "enrage": 300,
+    "cadence_ms": 2400,
+    "protection_lead_ms": 100,
+    "predicted_cycles_after_control": 2,
+    "control": "fresh Devotion cooldown plus one-damage melee control",
+    "binding_source": "current C native labels, Ctrl+F3 Soul Split and Ctrl+F4 Melee",
+    "movement_owner": "user"
+  },
+  "integration": "The existing canonical research state machine receives the same C frame and already-drained queues; D6 writes prayer and rotation through one native device.",
+  "production_flags_promoted": false,
+  "checks": {
+    "ctest_targets_passed": 16,
+    "stateless_C_predictor_tested": true,
+    "combined_fake_device_sequence": "control, Soul Split, Melee, Soul Split, Melee; two-cycle cap and newer-frame overhead acknowledgements",
+    "game_input_sent_during_checks": false
+  },
+  "live_retry": {
+    "capture_local": "p1-attempt-2026-11-16-02.jsonl",
+    "sent_rotation_actions": [],
+    "sent_prayer_actions": [],
+    "stopped_reason": "kill_switch",
+    "stopped_after_seconds": 130.234,
+    "raw_capture_published": false
+  },
+  "current_status": "All controllers stopped. Continuous prayer coverage, a live combined opening and a completed automated P1 remain unproven."
+}
