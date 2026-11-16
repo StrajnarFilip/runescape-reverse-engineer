@@ -935,10 +935,86 @@ class P1AttemptTests(unittest.TestCase):
             GetAsyncKeyState=lambda key: 0x8000 if key in held else 0,
         )
         self.assertFalse(switch.start_requested())
+
         self.assertTrue(switch.start_pending)
         held.clear()
         self.assertTrue(switch.start_requested())
         self.assertFalse(switch.start_requested())
+
+    def test_restored_two_cycle_controller_uses_c_frames_and_shared_prayer_writer(self):
+        from rs3_reader.bot.supervisor import _load_bounded_prayer_trial
+        from rs3_reader.bot.rotation import OrderedP1Rotation
+
+        base_reader = self.attempt.read_label
+
+        def label(bar, slot):
+            if bar != 2:
+                return base_reader(bar, slot)
+            return SimpleNamespace(
+                flags=15,
+                name=b"Deflect Melee" if slot == 1 else b"Soul Split",
+                item_id=-1,
+                pid=1,
+                process_creation_time=2,
+                sample_sequence=self.current.sample_sequence,
+                observed_ns=self.now,
+                virtual_key=0x73 if slot == 1 else 0x72,
+                modifiers=1,
+            )
+
+        prayers = []
+        self.device.dispatch = lambda action, binding, current: prayers.append(
+            (action.prayer, binding.virtual_key, binding.modifiers)
+        )
+        self.writer.opening_trial_enabled = True
+        self.attempt.read_label = label
+        self.attempt.prayer_locations = {"melee": (2, 1), "soul_split": (2, 2)}
+        self.attempt.prayer_trial = _load_bounded_prayer_trial(self.attempt.send_opening_prayer)
+        self.attempt.engine = OrderedP1Rotation()
+
+        def tick(at, prayer="melee", *, dormant=False, cue=None, hit=False):
+            record = self.frame(time_ms=at, dormant=dormant)
+            record["combat"]["active_prayer"] = prayer
+            record["gcd"]["clock_raw"] = at // 20
+            if not dormant:
+                self.cooldown(record, 25028)
+            record["encounter"]["stage_raw"] = {
+                "value": 0,
+                "age_ms": 0,
+                "reason": None,
+                "source": "native_encounter",
+            }
+            identity = dict(pid=1, process_creation_time=2, scene_epoch=4, observed_ns=at * MS)
+            if cue:
+                record["npc_action_events"] = [
+                    dict(identity, sequence=cue, instance_id=4, action_sequence=28929)
+                ]
+            if hit:
+                record["player_hit_splats"]["newly_observed"] = [
+                    dict(identity, amount=1, type_id=133)
+                ]
+            self.current = WorldState.from_telemetry(record)
+            return self.attempt._step_opening_prayer(self.current)
+
+        tick(10000, dormant=True)
+        tick(10100)
+        tick(10200, cue=1)
+        tick(10750, hit=True)
+        self.assertEqual(prayers, [("soul_split", 0x72, 1)])
+        tick(11300, "soul_split")
+        tick(12499, "soul_split")
+        self.assertEqual(len(prayers), 1)
+        tick(12500, "soul_split")
+        tick(12580, "soul_split", cue=2)
+        tick(13100)
+        tick(13130, hit=True)
+        tick(13700, "soul_split")
+        tick(14880, "soul_split")
+        tick(14960, "soul_split", cue=3)
+        tick(15510, hit=True)
+        self.assertEqual(prayers, [("soul_split", 0x72, 1), ("melee", 0x73, 1)] * 2)
+        self.assertTrue(self.attempt.prayer_trial.finished)
+        self.assertEqual(self.attempt.prayer_trial.completed_cycles, 2)
 
     def test_outside_dormant_telos_never_arms_even_with_start_key(self):
         record = self.frame()

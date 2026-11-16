@@ -183,3 +183,15 @@ Requests
   The positive synthetic route reaches EZK; its unmapped spec acknowledgement
   causes a stop rather than a fabricated confirmation or another cast.
   No further live input was sent and no controller was restarted.
+* Restored opening integration, 2026-11-16: --opening-prayer-trial explicitly
+  selects the existing two-cycle PrayerCheckTrial with the native CyclePredictor.
+  The opt-in adapter reuses that canonical research state machine, feeds the
+  same C frame and already-drained queues, and routes all prayer requests through
+  D6 and the existing native device. Current native Ctrl+F3/Ctrl+F4 role labels
+  are rechecked; normal production D2 validation flags are unchanged.
+* A synthetic native-frame integration exercises the one-damage control, two
+  2400 ms predictions with 100 ms lead, four Ctrl+F3/F4 dispatches, newer-frame
+  overhead acknowledgements and the two-cycle cap. It uses the real stateless
+  C predictor and a fake device. No game input was sent. This does not make
+  continuous P1 or other mechanics live-validated. The first rotation-only
+  retry was stopped with zero inputs when the user expected prayer flicking.

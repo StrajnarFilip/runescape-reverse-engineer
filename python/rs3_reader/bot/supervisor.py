@@ -72,6 +72,9 @@ class P1Attempt:
         self.sent, self.confirmed = [], []
         self.last_log, self.blocked_since = {}, None
         self.armed_ns = None
+        self.prayer_trial = None
+        self.prayer_locations = {}
+        self._current_world = None
 
     @staticmethod
     def _text(value):
@@ -102,6 +105,11 @@ class P1Attempt:
                     label = self.read_label(bar, slot)
                 except RuntimeError:
                     continue
+                if label.flags == 15 and label.name in (b"Deflect Melee", b"Soul Split"):
+                    role = "melee" if label.name == b"Deflect Melee" else "soul_split"
+                    if role in self.prayer_locations:
+                        raise ValueError("p1_prayer_binding_ambiguous:" + role)
+                    self.prayer_locations[role] = bar, slot
                 for action in actions:
                     if label.flags == 15 and self._matches(action, label):
                         found[action["id"]].append((bar, slot, self._text(label.key_label)))
@@ -110,6 +118,86 @@ class P1Attempt:
             raise ValueError("p1_binding_missing_or_ambiguous:" + ",".join(missing))
         self.locations = {name: matches[0] for name, matches in found.items()}
         return dict(self.locations)
+
+    def send_opening_prayer(self, prayer):
+        """Callback for the restored bounded controller; D6 remains the sole writer."""
+        name = {2: "melee", 5: "soul_split"}.get(int(prayer))
+        if name not in self.prayer_locations or self._current_world is None:
+            raise RuntimeError("opening_prayer_binding_or_frame_unavailable")
+        try:
+            label = self.read_label(*self.prayer_locations[name])
+            return self.writer.send_opening_prayer(name, self._current_world, label)
+        except Exception as error:
+            raise RuntimeError(str(error)) from error
+
+    def _step_opening_prayer(self, world):
+        """Feed same-frame C observations without draining any native queue twice."""
+        from ..prayer import Prayer
+
+        actor = self.engine._encounter_npc(world)
+        timer = (self._ability({"ability_id": 25028}, world) or {}).get("cooldown") or {}
+        start = timer.get("start_tick")
+        logic = (world.raw.get("gcd") or {}).get("clock_raw")
+        stage = (world.raw.get("encounter") or {}).get("stage_raw") or {}
+        stage_age = stage.get("age_ms")
+        signature = (
+            stage.get("value")
+            if (
+                stage.get("reason") is None
+                and type(stage_age) in (int, float)
+                and 0 <= stage_age <= 150
+            )
+            else None
+        )
+        prayer = {
+            "melee": Prayer.MELEE,
+            "soul_split": Prayer.SOUL_SPLIT,
+            "magic": Prayer.MAGIC,
+            "ranged": Prayer.RANGED,
+        }.get(world.player.active_prayer.value, Prayer.UNKNOWN)
+        frame = dict(
+            now_ns=self.clock(),
+            observed_ns=world.observed_ns,
+            sequence=world.sample_sequence,
+            session=(
+                world.session.pid,
+                world.session.process_creation_time,
+                world.session.scene_epoch,
+            ),
+            fresh=actor is not None and self._fresh(world.npcs),
+            focused=self.focus_checker(world) is True,
+            prayer=prayer,
+            telos_form=actor.config_id if actor else None,
+            telos_instance=actor.instance_id if actor else None,
+            devotion_start=start,
+            devotion_age_ms=(
+                (((logic - start) & 0xFFFFFFFF) * 20)
+                if type(start) is int and type(logic) is int
+                else None
+            ),
+            stage_signature=signature,
+        )
+
+        def same_session(event):
+            return (
+                event.get("pid"),
+                event.get("process_creation_time"),
+                event.get("scene_epoch"),
+            ) == frame["session"]
+
+        actions = [
+            event for event in world.events.npc_actions.records.value or () if same_session(event)
+        ]
+        hits = [
+            dict(event, hit=dict(event))
+            for event in world.events.player_hits.records.value or ()
+            if same_session(event)
+        ]
+        self._current_world = world
+        updates = self.prayer_trial.step(frame, actions, hits)
+        if self.prayer_trial.finished and self.prayer_trial.state != "completed":
+            self.stop("bounded_prayer_trial_aborted")
+        return [dict(update, component="bounded_opening_prayer") for update in updates]
 
     def _fresh(self, observation):
         return observation.is_fresh(150) and observation.reason is None and bool(observation.source)
@@ -325,9 +413,12 @@ class P1Attempt:
                 return "encounter_session_changed"
             if self.focus_checker(world) is not True:
                 return "window_focus_lost_or_unknown"
-            if (
-                not self._fresh(world.player.active_prayer)
-                or world.player.active_prayer.value != "melee"
+            if not self._fresh(
+                world.player.active_prayer
+            ) or world.player.active_prayer.value not in (
+                ("melee", "soul_split")
+                if self.prayer_trial and not self.prayer_trial.finished
+                else ("melee",)
             ):
                 return "melee_protection_lost_or_unknown"
             hp, maximum = world.player.health.current, world.player.health.maximum
@@ -373,7 +464,16 @@ class P1Attempt:
 
                 self.engine, self.armed_ns = OrderedP1Rotation(), self.clock()
                 self.engine.session = world.session
-                events.append({"event": "armed", "prayer_policy": "hold_melee_no_flicks"})
+                events.append(
+                    {
+                        "event": "armed",
+                        "prayer_policy": (
+                            "bounded_two_cycle_predictor"
+                            if self.prayer_trial
+                            else "hold_melee_no_flicks"
+                        ),
+                    }
+                )
             else:
                 self.reason = (
                     "instance_ready_waiting_for_explicit_start"
@@ -382,6 +482,12 @@ class P1Attempt:
                 )
                 if requested:
                     events.append({"event": "start_refused", "reason": self.reason})
+        if self.engine is not None and not self.stopped:
+            if self.prayer_trial is not None:
+                try:
+                    events.extend(self._step_opening_prayer(world))
+                except Exception as error:
+                    self.stop("bounded_prayer_trial_fault:" + str(error))
         if self.engine is not None and not self.stopped:
             if self.pending:
                 batch, before, sent_ns = self.pending
@@ -449,7 +555,10 @@ class P1Attempt:
             "health": world.player.health.current.value,
             "phase": world.telos.phase.value,
             "castability_is_fully_known": False,
-            "prayer_flicking_enabled": False,
+            "prayer_flicking_enabled": self.prayer_trial is not None
+            and not self.prayer_trial.finished,
+            "bounded_prayer_trial": self.prayer_trial.state if self.prayer_trial else None,
+            "production_prayer_timing_validated": False,
         }
         return self.last_log
 
@@ -1171,6 +1280,31 @@ def _write_readiness(arguments, output):
         telemetry.close()
 
 
+def _load_bounded_prayer_trial(send_prayer):
+    """Reuse the restored canonical two-cycle experiment and its C predictor.
+
+    This opt-in research adapter deliberately shares the original tested state
+    machine. It does not replace the gated D2 production executor or duplicate
+    its safety/acknowledgement logic. Installed packages without the research
+    script cannot select this experiment.
+    """
+    from ..prayer import CyclePredictor
+
+    directory = Path(__file__).resolve().parents[3] / "work"
+    specification = importlib.util.spec_from_file_location(
+        "_rs3_bounded_opening", directory / "calibrate_prayer_check.py"
+    )
+    if specification is None or specification.loader is None:
+        raise RuntimeError("Bounded prayer experiment source unavailable")
+    sys.path.insert(0, str(directory))
+    try:
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(directory))
+    return module.PrayerCheckTrial(0, send_prayer, predictor=CyclePredictor(), cycles=2)
+
+
 def _run_p1_attempt(arguments, output):
     """Run one opt-in experiment; all acquisition and balanced input are native C."""
     from ..telemetry import NativeTelemetry
@@ -1189,7 +1323,12 @@ def _run_p1_attempt(arguments, output):
         telemetry = NativeTelemetry(arguments.pid, 0)
         device = NativeSnapshotDevice(telemetry.reader)
         writer = P1BatchArbiter(
-            device, telemetry.reader.monotonic_ns, hotkey, foreground_matches, enabled=True
+            device,
+            telemetry.reader.monotonic_ns,
+            hotkey,
+            foreground_matches,
+            enabled=True,
+            opening_trial_enabled=arguments.opening_prayer_trial,
         )
         attempt = P1Attempt(
             writer,
@@ -1201,13 +1340,21 @@ def _run_p1_attempt(arguments, output):
         )
         telemetry.sample(False)
         bindings = attempt.discover_bindings()
+        if arguments.opening_prayer_trial:
+            if set(attempt.prayer_locations) != {"melee", "soul_split"}:
+                raise ValueError("Current native Melee/Soul Split bindings unavailable")
+            attempt.prayer_trial = _load_bounded_prayer_trial(attempt.send_opening_prayer)
         emit(
             {
                 "kind": "p1_preflight",
                 "bindings": bindings,
                 "input_sent": False,
                 "movement_owner": "user",
-                "prayer_policy": "hold_melee_no_flicks",
+                "prayer_policy": (
+                    "bounded_two_cycle_predictor"
+                    if arguments.opening_prayer_trial
+                    else "hold_melee_no_flicks"
+                ),
                 "mode": "supervised_p1_experiment",
                 "ladder_pass": False,
                 "start_key": "Ctrl+Shift+F11",
@@ -1241,7 +1388,9 @@ def _run_p1_attempt(arguments, output):
                 "sent": attempt.sent,
                 "confirmed": attempt.confirmed,
                 "ladder_pass": False,
-                "prayer_flicking_enabled": False,
+                "prayer_trial_selected": arguments.opening_prayer_trial,
+                "prayer_trial_state": attempt.prayer_trial.state if attempt.prayer_trial else None,
+                "production_prayer_timing_validated": False,
                 "elapsed_seconds": time.monotonic() - started,
             }
         )
@@ -1272,6 +1421,11 @@ def main(argv=None):
     parser.add_argument("--kill-key", default=DEFAULT_KILL_KEY)
     parser.add_argument("--output", type=Path)
     parser.add_argument(
+        "--opening-prayer-trial",
+        action="store_true",
+        help="Opt in to the previously tested two-cycle Devotion opening experiment",
+    )
+    parser.add_argument(
         "--readiness",
         action="store_true",
         help="Inspect bounded field availability without controllers or input backends",
@@ -1283,6 +1437,8 @@ def main(argv=None):
         help="Include D6 shadow decisions; dispatch remains disabled",
     )
     arguments = parser.parse_args(argv)
+    if arguments.opening_prayer_trial and arguments.mode != "supervised-p1":
+        parser.error("opening-prayer-trial requires supervised-p1")
     if arguments.mode not in ("shadow", "supervised-p1"):
         parser.error("assist/full require track L authorization; use shadow")
     if arguments.mode == "supervised-p1" and (
