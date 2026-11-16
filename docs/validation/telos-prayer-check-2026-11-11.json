@@ -1,0 +1,836 @@
+{
+  "client_session_date": "2026-11-11",
+  "enrage_user_label": null,
+  "enrage_user_labels": [
+    300,
+    2000
+  ],
+  "phase_user_label": 1,
+  "input_sent_by_calibration": true,
+  "sources": [
+    {
+      "capture_sha256": "b71f95008b56134c5c7f69ee9f0e0649f30cc5d808a4218874aa4e027d3238fd",
+      "enrage_user_label": 300,
+      "summary": {
+        "retained_rows": 465,
+        "player_hit_data_present": true,
+        "executable_sha256_values": [
+          "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45"
+        ],
+        "observed_curse_raw_values": [
+          0,
+          512,
+          262144
+        ],
+        "action_sequence_counts": {},
+        "player_hit_events": 0,
+        "hit_type_counts": {},
+        "cue_hit_pairs": [],
+        "cue_to_observed_damage_delay": {
+          "count": 0
+        },
+        "cue_to_observed_miss_delay": {
+          "count": 0
+        },
+        "manual_key_events": 4,
+        "matched_keyboard_changes": [
+          {
+            "prayer": "soul_split",
+            "virtual_key": 114,
+            "modifiers": 1,
+            "sampled_key_to_overhead_ms": 534.312,
+            "key_poll_interval_ms": 15.718
+          },
+          {
+            "prayer": "melee",
+            "virtual_key": 115,
+            "modifiers": 1,
+            "sampled_key_to_overhead_ms": 287.474,
+            "key_poll_interval_ms": 15.869
+          },
+          {
+            "prayer": "soul_split",
+            "virtual_key": 114,
+            "modifiers": 1,
+            "sampled_key_to_overhead_ms": 649.17,
+            "key_poll_interval_ms": 15.231
+          },
+          {
+            "prayer": "melee",
+            "virtual_key": 115,
+            "modifiers": 1,
+            "sampled_key_to_overhead_ms": 208.97,
+            "key_poll_interval_ms": 15.327
+          }
+        ],
+        "sampled_key_to_overhead_delay": {
+          "count": 4,
+          "min_ms": 208.97,
+          "median_ms": 410.893,
+          "max_ms": 649.17
+        },
+        "npc_action_events_lost": 0,
+        "player_hit_events_lost": 0
+      },
+      "devotion_opening": null,
+      "controlled_trial": null
+    },
+    {
+      "capture_sha256": "fd72017549601655663224a7d58d8cfd9ac3457fd870d94d4e7f52acbad6c21d",
+      "enrage_user_label": 300,
+      "summary": {
+        "retained_rows": 256,
+        "player_hit_data_present": true,
+        "executable_sha256_values": [
+          "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45"
+        ],
+        "observed_curse_raw_values": [
+          0,
+          512,
+          262144
+        ],
+        "action_sequence_counts": {
+          "28962": 1,
+          "28929": 7,
+          "28931": 1,
+          "28932": 1
+        },
+        "player_hit_events": 31,
+        "hit_type_counts": {
+          "133": 7,
+          "482": 1,
+          "144": 22,
+          "143": 1
+        },
+        "cue_hit_pairs": [
+          {
+            "cue_event": 2,
+            "hit_event": 1,
+            "cue_to_observed_hit_ms": 529.956,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 3,
+            "hit_event": 2,
+            "cue_to_observed_hit_ms": 549.759,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 4,
+            "hit_event": 3,
+            "cue_to_observed_hit_ms": 619.546,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "soul_split"
+          },
+          {
+            "cue_event": 5,
+            "hit_event": 4,
+            "cue_to_observed_hit_ms": -0.007,
+            "hit_type": 482,
+            "amount": 0,
+            "prayer_near_hit_observation": "soul_split"
+          },
+          {
+            "cue_event": 6,
+            "hit_event": 5,
+            "cue_to_observed_hit_ms": 570.741,
+            "hit_type": 133,
+            "amount": 1186,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 7,
+            "hit_event": 6,
+            "cue_to_observed_hit_ms": 630.333,
+            "hit_type": 133,
+            "amount": 771,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 8,
+            "hit_event": 7,
+            "cue_to_observed_hit_ms": 569.766,
+            "hit_type": 133,
+            "amount": 687,
+            "prayer_near_hit_observation": "melee"
+          }
+        ],
+        "cue_to_observed_damage_delay": {
+          "count": 6,
+          "min_ms": 529.956,
+          "median_ms": 570.254,
+          "max_ms": 630.333
+        },
+        "cue_to_observed_miss_delay": {
+          "count": 1,
+          "min_ms": -0.007,
+          "median_ms": -0.007,
+          "max_ms": -0.007
+        },
+        "manual_key_events": 7,
+        "matched_keyboard_changes": [
+          {
+            "prayer": "melee",
+            "virtual_key": 115,
+            "modifiers": 1,
+            "sampled_key_to_overhead_ms": 696.85,
+            "key_poll_interval_ms": 14.943
+          },
+          {
+            "prayer": "soul_split",
+            "virtual_key": 114,
+            "modifiers": 1,
+            "sampled_key_to_overhead_ms": 634.231,
+            "key_poll_interval_ms": 15.519
+          },
+          {
+            "prayer": "melee",
+            "virtual_key": 115,
+            "modifiers": 1,
+            "sampled_key_to_overhead_ms": 321.235,
+            "key_poll_interval_ms": 15.216
+          },
+          {
+            "prayer": "soul_split",
+            "virtual_key": 114,
+            "modifiers": 1,
+            "sampled_key_to_overhead_ms": 490.378,
+            "key_poll_interval_ms": 15.443
+          },
+          {
+            "prayer": "melee",
+            "virtual_key": 115,
+            "modifiers": 1,
+            "sampled_key_to_overhead_ms": 536.107,
+            "key_poll_interval_ms": 15.777
+          },
+          {
+            "prayer": "soul_split",
+            "virtual_key": 114,
+            "modifiers": 1,
+            "sampled_key_to_overhead_ms": 535.604,
+            "key_poll_interval_ms": 14.965
+          },
+          {
+            "prayer": "melee",
+            "virtual_key": 115,
+            "modifiers": 1,
+            "sampled_key_to_overhead_ms": 638.676,
+            "key_poll_interval_ms": 16.249
+          }
+        ],
+        "sampled_key_to_overhead_delay": {
+          "count": 7,
+          "min_ms": 321.235,
+          "median_ms": 536.107,
+          "max_ms": 696.85
+        },
+        "npc_action_events_lost": 0,
+        "player_hit_events_lost": 0
+      },
+      "devotion_opening": {
+        "scope": "first manual Devotion cast and up to three following phase-1 melee autos",
+        "clean_opening_user_confirmed": true,
+        "devotion_struct_id": 25028,
+        "sampled_cast_key_to_native_cooldown_ms": 406.427,
+        "devotion_buff_active_from_memory": null,
+        "trials": [
+          {
+            "cue_event": 2,
+            "hit_event": 1,
+            "cue_to_observed_hit_ms": 529.956,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "melee",
+            "auto_number": 1,
+            "sampled_melee_key_after_cue_ms": null,
+            "key_previous_poll_after_cue_ms": null,
+            "melee_first_observed_after_cue_ms": null,
+            "melee_previous_sample_after_cue_ms": null,
+            "outcome": "one_damage_during_user_confirmed_devotion"
+          },
+          {
+            "cue_event": 3,
+            "hit_event": 2,
+            "cue_to_observed_hit_ms": 549.759,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "melee",
+            "auto_number": 2,
+            "sampled_melee_key_after_cue_ms": 227.746,
+            "key_previous_poll_after_cue_ms": 212.53,
+            "melee_first_observed_after_cue_ms": 548.981,
+            "melee_previous_sample_after_cue_ms": 529.004,
+            "outcome": "one_damage_during_user_confirmed_devotion"
+          },
+          {
+            "cue_event": 4,
+            "hit_event": 3,
+            "cue_to_observed_hit_ms": 619.546,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "soul_split",
+            "auto_number": 3,
+            "sampled_melee_key_after_cue_ms": 92.929,
+            "key_previous_poll_after_cue_ms": 77.152,
+            "melee_first_observed_after_cue_ms": 629.036,
+            "melee_previous_sample_after_cue_ms": 618.747,
+            "outcome": "one_damage_during_user_confirmed_devotion"
+          }
+        ],
+        "prayer_check_deadline_validated": false,
+        "interpretation": "Successful switch observations do not establish the latest reliable switch time. Client overhead flags and hitmarks are sampled separately."
+      },
+      "controlled_trial": null
+    },
+    {
+      "capture_sha256": "72cbd31d5944852d6b74c1c9a3b045dfd8e2aea86b0f7aa1df642fd00fc7fb7b",
+      "enrage_user_label": 300,
+      "summary": {
+        "retained_rows": 79,
+        "player_hit_data_present": true,
+        "executable_sha256_values": [
+          "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45"
+        ],
+        "observed_curse_raw_values": [
+          0,
+          512,
+          262144
+        ],
+        "action_sequence_counts": {
+          "28962": 1,
+          "28929": 2
+        },
+        "player_hit_events": 2,
+        "hit_type_counts": {
+          "133": 2
+        },
+        "cue_hit_pairs": [
+          {
+            "cue_event": 2,
+            "hit_event": 1,
+            "cue_to_observed_hit_ms": 549.903,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 3,
+            "hit_event": 2,
+            "cue_to_observed_hit_ms": 610.142,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "soul_split"
+          }
+        ],
+        "cue_to_observed_damage_delay": {
+          "count": 2,
+          "min_ms": 549.903,
+          "median_ms": 580.022,
+          "max_ms": 610.142
+        },
+        "cue_to_observed_miss_delay": {
+          "count": 0
+        },
+        "manual_key_events": 0,
+        "matched_keyboard_changes": [],
+        "sampled_key_to_overhead_delay": {
+          "count": 0
+        },
+        "npc_action_events_lost": 0,
+        "player_hit_events_lost": 0
+      },
+      "devotion_opening": null,
+      "controlled_trial": {
+        "final_state": "completed",
+        "input_sent_by_calibration": true,
+        "accepted_command_counts": {
+          "melee": 2,
+          "soul_split": 1
+        },
+        "planned_test_delay_ms": 350,
+        "requested_test_delay_ms": 350.0,
+        "accepted_test_delay_ms": 359.036,
+        "control_hit": {
+          "amount": 1,
+          "type_id": 133
+        },
+        "test_hit": {
+          "amount": 1,
+          "type_id": 133
+        },
+        "pre_dispatch_hit": null,
+        "clean_opening_user_confirmed": true,
+        "observed_control_age_at_test_hit_ms": 3640,
+        "outcome": "protected",
+        "melee_acknowledged_after_test_command": true,
+        "accepted_test_key_to_melee_ack_ms": 260.268,
+        "devotion_buff_active_from_memory": null,
+        "abort_reasons": [],
+        "interpretation": "One-damage control and result support a protected case; damage above one needs active-Devotion context. Neither establishes an exact server deadline.",
+        "prayer_check_deadline_validated": false
+      }
+    },
+    {
+      "capture_sha256": "8c465f85b23da0ca4e5c7a74145642a3a5849aed3e115dc63803fc6f56a240e7",
+      "enrage_user_label": 300,
+      "summary": {
+        "retained_rows": 36,
+        "player_hit_data_present": true,
+        "executable_sha256_values": [
+          "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45"
+        ],
+        "observed_curse_raw_values": [
+          0,
+          512,
+          262144
+        ],
+        "action_sequence_counts": {
+          "28962": 1,
+          "28929": 2
+        },
+        "player_hit_events": 2,
+        "hit_type_counts": {
+          "133": 2
+        },
+        "cue_hit_pairs": [
+          {
+            "cue_event": 2,
+            "hit_event": 1,
+            "cue_to_observed_hit_ms": 549.799,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 3,
+            "hit_event": 2,
+            "cue_to_observed_hit_ms": 600.47,
+            "hit_type": 133,
+            "amount": 691,
+            "prayer_near_hit_observation": "soul_split"
+          }
+        ],
+        "cue_to_observed_damage_delay": {
+          "count": 2,
+          "min_ms": 549.799,
+          "median_ms": 575.135,
+          "max_ms": 600.47
+        },
+        "cue_to_observed_miss_delay": {
+          "count": 0
+        },
+        "manual_key_events": 0,
+        "matched_keyboard_changes": [],
+        "sampled_key_to_overhead_delay": {
+          "count": 0
+        },
+        "npc_action_events_lost": 0,
+        "player_hit_events_lost": 0
+      },
+      "devotion_opening": null,
+      "controlled_trial": {
+        "final_state": "completed",
+        "input_sent_by_calibration": true,
+        "accepted_command_counts": {
+          "melee": 3,
+          "soul_split": 1
+        },
+        "planned_test_delay_ms": 500,
+        "requested_test_delay_ms": 500.0,
+        "accepted_test_delay_ms": 515.533,
+        "control_hit": {
+          "amount": 1,
+          "type_id": 133
+        },
+        "test_hit": {
+          "amount": 691,
+          "type_id": 133
+        },
+        "pre_dispatch_hit": null,
+        "clean_opening_user_confirmed": true,
+        "observed_control_age_at_test_hit_ms": 4820,
+        "outcome": "late_protection",
+        "melee_acknowledged_after_test_command": true,
+        "accepted_test_key_to_melee_ack_ms": 674.171,
+        "devotion_buff_active_from_memory": null,
+        "abort_reasons": [],
+        "interpretation": "One-damage control and result support a protected case; damage above one needs active-Devotion context. Neither establishes an exact server deadline.",
+        "prayer_check_deadline_validated": false
+      }
+    },
+    {
+      "capture_sha256": "18c7cf6c2bc91bfc860c0c05f90adabdd0024fff0b0ca4523df404b9d86e28c6",
+      "enrage_user_label": 300,
+      "summary": {
+        "retained_rows": 111,
+        "player_hit_data_present": true,
+        "executable_sha256_values": [
+          "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45"
+        ],
+        "observed_curse_raw_values": [
+          0,
+          512,
+          262144
+        ],
+        "action_sequence_counts": {
+          "28962": 1,
+          "28929": 2
+        },
+        "player_hit_events": 2,
+        "hit_type_counts": {
+          "133": 1,
+          "482": 1
+        },
+        "cue_hit_pairs": [
+          {
+            "cue_event": 6,
+            "hit_event": 1,
+            "cue_to_observed_hit_ms": 549.836,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 7,
+            "hit_event": 2,
+            "cue_to_observed_hit_ms": -0.005,
+            "hit_type": 482,
+            "amount": 0,
+            "prayer_near_hit_observation": "soul_split"
+          }
+        ],
+        "cue_to_observed_damage_delay": {
+          "count": 1,
+          "min_ms": 549.836,
+          "median_ms": 549.836,
+          "max_ms": 549.836
+        },
+        "cue_to_observed_miss_delay": {
+          "count": 1,
+          "min_ms": -0.005,
+          "median_ms": -0.005,
+          "max_ms": -0.005
+        },
+        "manual_key_events": 0,
+        "matched_keyboard_changes": [],
+        "sampled_key_to_overhead_delay": {
+          "count": 0
+        },
+        "npc_action_events_lost": 0,
+        "player_hit_events_lost": 0
+      },
+      "devotion_opening": null,
+      "controlled_trial": {
+        "final_state": "aborted",
+        "input_sent_by_calibration": true,
+        "accepted_command_counts": {
+          "melee": 2,
+          "soul_split": 1
+        },
+        "planned_test_delay_ms": 450,
+        "requested_test_delay_ms": null,
+        "accepted_test_delay_ms": null,
+        "control_hit": {
+          "amount": 1,
+          "type_id": 133
+        },
+        "test_hit": null,
+        "pre_dispatch_hit": {
+          "amount": 0,
+          "type_id": 482
+        },
+        "clean_opening_user_confirmed": true,
+        "observed_control_age_at_test_hit_ms": null,
+        "outcome": "miss_before_dispatch_inconclusive",
+        "melee_acknowledged_after_test_command": false,
+        "accepted_test_key_to_melee_ack_ms": null,
+        "devotion_buff_active_from_memory": null,
+        "abort_reasons": [
+          "test dispatch was late or outside control"
+        ],
+        "interpretation": "One-damage control and result support a protected case; damage above one needs active-Devotion context. Neither establishes an exact server deadline.",
+        "prayer_check_deadline_validated": false
+      }
+    },
+    {
+      "capture_sha256": "7a5383f34641f56633d4b16989abe12d8f2c1fb16804f0682f425f5b2db6f608",
+      "enrage_user_label": 2000,
+      "summary": {
+        "retained_rows": 69,
+        "player_hit_data_present": true,
+        "executable_sha256_values": [
+          "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45"
+        ],
+        "observed_curse_raw_values": [
+          0,
+          512,
+          262144
+        ],
+        "action_sequence_counts": {
+          "28962": 1,
+          "28929": 2
+        },
+        "player_hit_events": 2,
+        "hit_type_counts": {
+          "133": 2
+        },
+        "cue_hit_pairs": [
+          {
+            "cue_event": 2,
+            "hit_event": 1,
+            "cue_to_observed_hit_ms": 569.941,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 3,
+            "hit_event": 2,
+            "cue_to_observed_hit_ms": 589.988,
+            "hit_type": 133,
+            "amount": 8003,
+            "prayer_near_hit_observation": "soul_split"
+          }
+        ],
+        "cue_to_observed_damage_delay": {
+          "count": 2,
+          "min_ms": 569.941,
+          "median_ms": 579.965,
+          "max_ms": 589.988
+        },
+        "cue_to_observed_miss_delay": {
+          "count": 0
+        },
+        "manual_key_events": 0,
+        "matched_keyboard_changes": [],
+        "sampled_key_to_overhead_delay": {
+          "count": 0
+        },
+        "npc_action_events_lost": 0,
+        "player_hit_events_lost": 0
+      },
+      "devotion_opening": null,
+      "controlled_trial": {
+        "final_state": "completed",
+        "input_sent_by_calibration": true,
+        "accepted_command_counts": {
+          "melee": 2,
+          "soul_split": 1
+        },
+        "planned_test_delay_ms": 450,
+        "requested_test_delay_ms": 450.0,
+        "accepted_test_delay_ms": 451.795,
+        "control_hit": {
+          "amount": 1,
+          "type_id": 133
+        },
+        "test_hit": {
+          "amount": 8003,
+          "type_id": 133
+        },
+        "pre_dispatch_hit": null,
+        "clean_opening_user_confirmed": true,
+        "observed_control_age_at_test_hit_ms": 4220,
+        "outcome": "late_protection",
+        "melee_acknowledged_after_test_command": true,
+        "accepted_test_key_to_melee_ack_ms": 757.199,
+        "devotion_buff_active_from_memory": null,
+        "abort_reasons": [],
+        "interpretation": "One-damage control and result support a protected case; damage above one needs active-Devotion context. Neither establishes an exact server deadline.",
+        "prayer_check_deadline_validated": false
+      }
+    },
+    {
+      "capture_sha256": "51679c48134beca544fc77e9c9c3510988621dec1e92d831941dc53826d93a62",
+      "enrage_user_label": 2000,
+      "summary": {
+        "retained_rows": 32,
+        "player_hit_data_present": true,
+        "executable_sha256_values": [
+          "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45"
+        ],
+        "observed_curse_raw_values": [
+          0
+        ],
+        "action_sequence_counts": {},
+        "player_hit_events": 0,
+        "hit_type_counts": {},
+        "cue_hit_pairs": [],
+        "cue_to_observed_damage_delay": {
+          "count": 0
+        },
+        "cue_to_observed_miss_delay": {
+          "count": 0
+        },
+        "manual_key_events": 0,
+        "matched_keyboard_changes": [],
+        "sampled_key_to_overhead_delay": {
+          "count": 0
+        },
+        "npc_action_events_lost": 0,
+        "player_hit_events_lost": 0
+      },
+      "devotion_opening": null,
+      "controlled_trial": {
+        "final_state": "aborted",
+        "input_sent_by_calibration": true,
+        "accepted_command_counts": {
+          "melee": 1
+        },
+        "planned_test_delay_ms": 400,
+        "requested_test_delay_ms": null,
+        "accepted_test_delay_ms": null,
+        "control_hit": null,
+        "test_hit": null,
+        "pre_dispatch_hit": null,
+        "clean_opening_user_confirmed": null,
+        "observed_control_age_at_test_hit_ms": null,
+        "outcome": "unlabelled",
+        "melee_acknowledged_after_test_command": false,
+        "accepted_test_key_to_melee_ack_ms": null,
+        "devotion_buff_active_from_memory": null,
+        "abort_reasons": [
+          "prayer acknowledgement timed out"
+        ],
+        "interpretation": "One-damage control and result support a protected case; damage above one needs active-Devotion context. Neither establishes an exact server deadline.",
+        "prayer_check_deadline_validated": false
+      }
+    },
+    {
+      "capture_sha256": "a8e94d61702450d1c91926aa8cf75e80c3aedbfc865ebd69b0dc0d817d2103e9",
+      "enrage_user_label": 2000,
+      "summary": {
+        "retained_rows": 48,
+        "player_hit_data_present": true,
+        "executable_sha256_values": [
+          "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45"
+        ],
+        "observed_curse_raw_values": [
+          0,
+          512,
+          262144
+        ],
+        "action_sequence_counts": {
+          "28962": 1,
+          "28929": 2
+        },
+        "player_hit_events": 2,
+        "hit_type_counts": {
+          "133": 2
+        },
+        "cue_hit_pairs": [
+          {
+            "cue_event": 2,
+            "hit_event": 1,
+            "cue_to_observed_hit_ms": 539.692,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 3,
+            "hit_event": 2,
+            "cue_to_observed_hit_ms": 570.365,
+            "hit_type": 133,
+            "amount": 5402,
+            "prayer_near_hit_observation": "soul_split"
+          }
+        ],
+        "cue_to_observed_damage_delay": {
+          "count": 2,
+          "min_ms": 539.692,
+          "median_ms": 555.029,
+          "max_ms": 570.365
+        },
+        "cue_to_observed_miss_delay": {
+          "count": 0
+        },
+        "manual_key_events": 0,
+        "matched_keyboard_changes": [],
+        "sampled_key_to_overhead_delay": {
+          "count": 0
+        },
+        "npc_action_events_lost": 0,
+        "player_hit_events_lost": 0
+      },
+      "devotion_opening": null,
+      "controlled_trial": {
+        "final_state": "completed",
+        "input_sent_by_calibration": true,
+        "accepted_command_counts": {
+          "soul_split": 1,
+          "melee": 1
+        },
+        "planned_test_delay_ms": 400,
+        "requested_test_delay_ms": 400.0,
+        "accepted_test_delay_ms": 408.287,
+        "control_hit": {
+          "amount": 1,
+          "type_id": 133
+        },
+        "test_hit": {
+          "amount": 5402,
+          "type_id": 133
+        },
+        "pre_dispatch_hit": null,
+        "clean_opening_user_confirmed": true,
+        "observed_control_age_at_test_hit_ms": 3600,
+        "outcome": "late_protection",
+        "melee_acknowledged_after_test_command": true,
+        "accepted_test_key_to_melee_ack_ms": 761.199,
+        "devotion_buff_active_from_memory": null,
+        "abort_reasons": [],
+        "interpretation": "One-damage control and result support a protected case; damage above one needs active-Devotion context. Neither establishes an exact server deadline.",
+        "prayer_check_deadline_validated": false
+      }
+    }
+  ],
+  "user_labelled_cues": {
+    "28929": "ordinary melee auto in the isolated phase-1 melee context",
+    "28931": "tendrils",
+    "28938": "uppercut",
+    "28935": "Hold Still"
+  },
+  "observed_npc_forms": {
+    "22891": "Telos active",
+    "22892": "Telos dormant"
+  },
+  "hitmark_symbol_leads": {
+    "133": "melee_damage_parent",
+    "143": "heal_splat_parent",
+    "144": "damage_parent",
+    "482": "miss_parent"
+  },
+  "automatic_flick_ready": false,
+  "prayer_check_deadline_validated": false,
+  "limitations": [
+    "Only isolated phase-1 melee autos have been checked; other phases/styles and complete attack coverage remain unvalidated. Per-capture enrage labels are retained.",
+    "Cue-to-hit observation is not the server prayer-check deadline.",
+    "Overhead flags are observed client state, not proof of server-side activation timing.",
+    "Manual key times are sampled down edges; scripted times record Windows input acceptance.",
+    "Player hitmarks do not identify the attacker; pairing uses the isolated phase-1 context.",
+    "No early/late protection outcome is inferred from a random damage amount alone.",
+    "Complete incoming-attack coverage and safe Soul Split windows are not established.",
+    "Observed success/failure delays are not a universal threshold over network and tick jitter."
+  ],
+  "controlled_input_observations": {
+    "successful_accepted_delays_ms": [
+      359.036
+    ],
+    "late_accepted_delays_ms": [
+      408.287,
+      451.795,
+      515.533
+    ],
+    "latest_observed_success_ms": 359.036,
+    "earliest_observed_late_ms": 408.287,
+    "universal_cutoff_established": false,
+    "prayer_check_deadline_validated": false
+  }
+}

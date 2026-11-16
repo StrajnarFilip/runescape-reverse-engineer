@@ -149,13 +149,51 @@ typedef struct rs3_prayer_decision
     uint32_t flags;             /**< enum rs3_prayer_decision_flags. */
 } rs3_prayer_decision;
 
+/** Input to the cadence calculator. It does not establish attack coverage or check timing. */
+typedef struct rs3_prayer_cycle_frame
+{
+    uint64_t now_ns;
+    uint64_t last_cue_ns;
+    uint64_t last_outcome_ns;    /**< Associated resolved hit/miss; never an unresolved attack. */
+    uint32_t period_ms;          /**< Caller-supplied observed/assumed cadence. */
+    uint32_t lead_before_cue_ms; /**< Request protection before the next estimated cue. */
+    uint32_t acknowledgement_budget_ms;
+    uint32_t minimum_soul_split_ms;
+    uint32_t cue_tolerance_ms; /**< Stop extrapolating when the expected cue is missing. */
+    uint32_t active_prayer;
+    uint32_t protection_prayer; /**< Explicit style; never inferred from the cadence. */
+    uint32_t reserved;
+} rs3_prayer_cycle_frame;
+
+enum rs3_prayer_cycle_reason
+{
+    RS3_PRAYER_CYCLE_READY = 0,
+    RS3_PRAYER_CYCLE_NEEDS_ANCHOR = 1,
+    RS3_PRAYER_CYCLE_EXPIRED = 2,
+    RS3_PRAYER_CYCLE_SHORT_WINDOW = 3
+};
+
+/** An estimate only. Invalidate it on style, phase, actor or rhythm changes. */
+typedef struct rs3_prayer_cycle_prediction
+{
+    uint64_t next_cue_ns;
+    uint64_t protection_send_ns;
+    uint64_t cue_deadline_ns;
+    uint64_t latest_soul_split_send_ns;
+    uint32_t desired_prayer;
+    uint32_t reason;
+    uint32_t reserved[2];
+} rs3_prayer_cycle_prediction;
+
 /** Structure identifiers accepted by rs3_prayer_sizeof(). */
 enum rs3_prayer_structure
 {
     RS3_PRAYER_SIZE_CONFIG = 1,
     RS3_PRAYER_SIZE_FRAME,
     RS3_PRAYER_SIZE_THREAT,
-    RS3_PRAYER_SIZE_DECISION
+    RS3_PRAYER_SIZE_DECISION,
+    RS3_PRAYER_SIZE_CYCLE_FRAME,
+    RS3_PRAYER_SIZE_CYCLE_PREDICTION
 };
 
 /** Returns the size of the structure identified by enum rs3_prayer_structure, or 0. */
@@ -180,6 +218,14 @@ RS3_API int32_t rs3_prayer_reset(rs3_prayer_planner *planner);
 RS3_API int32_t rs3_prayer_step(rs3_prayer_planner *planner, const rs3_prayer_frame *frame,
                                 const rs3_prayer_threat *threats, uint32_t threat_count,
                                 rs3_prayer_decision *out, uint32_t out_size);
+
+/**
+ * Computes one next-cue estimate without accessing the game or sending input.
+ * This never marks a threat RS3_PRAYER_TIMING_VALIDATED. Production consumers
+ * still need independently validated style, phase, coverage and check windows.
+ */
+RS3_API int32_t rs3_prayer_predict_cycle(const rs3_prayer_cycle_frame *frame,
+                                         rs3_prayer_cycle_prediction *out, uint32_t out_size);
 
 /**
  * Records that the input layer accepted the proposed key chord.

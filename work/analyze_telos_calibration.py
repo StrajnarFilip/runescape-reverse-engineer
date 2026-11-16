@@ -28,6 +28,11 @@ KEY_BEFORE_CHANGE_TOLERANCE_NS = 20 * NANOSECONDS_PER_MILLISECOND
 KEY_TO_CHANGE_LIMIT_NS = 1_500 * NANOSECONDS_PER_MILLISECOND
 CURSES_VARIABLE_ID = "3275"
 TELOS_NAME = "telos"
+DEVOTION_STRUCT_ID = 25028
+OPENING_AUTO_COUNT = 3
+OPENING_OBSERVATION_LIMIT_NS = 8_000 * NANOSECONDS_PER_MILLISECOND
+CLIENT_LOGIC_TICK_MS = 20
+MAX_DEVOTION_CONTROL_AGE_MS = 8000
 
 USER_LABELLED_CUES = {
     "28929": "ordinary melee auto in the isolated phase-1 melee context",
@@ -283,6 +288,386 @@ def pair_keys_with_changes(keys, changes):
             }
         )
     return key_pairs
+
+
+def devotion_opening_summary(rows, *, clean_opening_confirmed=False):
+    """Describe the first manual Devotion opening without deriving a server deadline.
+
+    Cooldown evidence is paired with a manual cast, not treated as an active
+    buff. The clean-opening label must come from controlled player validation.
+    """
+    changes, keys, cues, hits = collect_observations(rows)
+    casts = [
+        dict(press, session=row_session(row))
+        for row in rows
+        for press in row.get("manual_ability_keys", [])
+        if press.get("ability") == "devotion"
+    ]
+    timer_changes, previous_timers = [], {}
+    for row in rows:
+        timer = row.get("devotion_cooldown", {})
+        session = row_session(row)
+        identity = (timer.get("start_tick"), timer.get("end_tick"))
+        if (
+            timer.get("struct_id") == DEVOTION_STRUCT_ID
+            and timer.get("timer_valid")
+            and identity != previous_timers.get(session)
+        ):
+            timer_changes.append(dict(row, session=session))
+        if timer.get("timer_valid"):
+            previous_timers[session] = identity
+    matched_cast = next(
+        (
+            (cast, row)
+            for cast in casts
+            for row in timer_changes
+            if row["session"] == cast["session"]
+            and -KEY_BEFORE_CHANGE_TOLERANCE_NS
+            <= row["observed_ns"] - cast["observed_ns"]
+            <= KEY_TO_CHANGE_LIMIT_NS
+        ),
+        None,
+    )
+    if matched_cast is None:
+        return None
+    cast, timer_row = matched_cast
+    session = cast["session"]
+    opening = [
+        cue
+        for cue in cues
+        if event_session(cue) == session
+        and cue["action_sequence"] == MELEE_AUTO_SEQUENCE
+        and 0 <= cue["observed_ns"] - timer_row["observed_ns"] <= OPENING_OBSERVATION_LIMIT_NS
+    ][:OPENING_AUTO_COUNT]
+    pairs, _ = pair_cues_with_hits(opening, hits, changes)
+    pairs_by_cue = {pair["cue_event"]: pair for pair in pairs}
+    trials = []
+    previous_hit_ns = timer_row["observed_ns"]
+    for index, cue in enumerate(opening):
+        pair = pairs_by_cue.get(cue["sequence"])
+        if pair is None:
+            continue
+        hit = next(
+            hit
+            for hit in hits
+            if hit["sequence"] == pair["hit_event"] and event_session(hit) == session
+        )
+        presses = [
+            key
+            for key in keys
+            if key["session"] == session
+            and key["prayer"] == "melee"
+            and previous_hit_ns <= key["observed_ns"] <= hit["observed_ns"]
+        ]
+        press = presses[-1] if presses else None
+        acknowledgements = [
+            change
+            for change in changes
+            if press is not None
+            and change["session"] == session
+            and change["prayer"] == "melee"
+            and press["observed_ns"]
+            <= change["observed_ns"]
+            <= press["observed_ns"] + KEY_TO_CHANGE_LIMIT_NS
+        ]
+        acknowledgement = acknowledgements[0] if acknowledgements else None
+
+        def relative_ms(timestamp, cue_observed_ns=cue["observed_ns"]):
+            return round(to_milliseconds(timestamp - cue_observed_ns), 3)
+
+        trials.append(
+            dict(
+                pair,
+                auto_number=index + 1,
+                sampled_melee_key_after_cue_ms=(
+                    relative_ms(press["observed_ns"]) if press else None
+                ),
+                key_previous_poll_after_cue_ms=(
+                    relative_ms(press["previous_poll_ns"]) if press else None
+                ),
+                melee_first_observed_after_cue_ms=(
+                    relative_ms(acknowledgement["observed_ns"]) if acknowledgement else None
+                ),
+                melee_previous_sample_after_cue_ms=(
+                    relative_ms(acknowledgement["previous_observation_ns"])
+                    if acknowledgement
+                    else None
+                ),
+                outcome=(
+                    "one_damage_during_user_confirmed_devotion"
+                    if clean_opening_confirmed
+                    and pair["hit_type"] == MELEE_DAMAGE_HIT_TYPE
+                    and pair["amount"] == 1
+                    else "not_classified"
+                ),
+            )
+        )
+        previous_hit_ns = hit["observed_ns"]
+    return {
+        "scope": "first manual Devotion cast and up to three following phase-1 melee autos",
+        "clean_opening_user_confirmed": clean_opening_confirmed,
+        "devotion_struct_id": DEVOTION_STRUCT_ID,
+        "sampled_cast_key_to_native_cooldown_ms": round(
+            to_milliseconds(timer_row["observed_ns"] - cast["observed_ns"]), 3
+        ),
+        "devotion_buff_active_from_memory": None,
+        "trials": trials,
+        "prayer_check_deadline_validated": False,
+        "interpretation": (
+            "Successful switch observations do not establish the latest reliable switch time. "
+            "Client overhead flags and hitmarks are sampled separately."
+        ),
+    }
+
+
+def controlled_trial_summary(rows, *, clean_opening_confirmed=False):
+    """Summarize accepted experiment inputs separately from manual key observations."""
+    if not any(row.get("input_mode") == "controlled_calibration" for row in rows):
+        return None
+    updates = [update for row in rows for update in row.get("calibration_updates", [])]
+    accepted = [update for update in updates if update["event"] == "input_accepted"]
+    test_commands = [
+        update for update in accepted if update.get("requested_after_cue_ms") is not None
+    ]
+    paired_hits = [update for update in updates if update["event"] == "paired_hit"]
+
+    def hit_for_stage(stage):
+        candidate = next((hit for hit in paired_hits if hit["stage"] == stage), None)
+        return (
+            {
+                "amount": candidate["hit"]["hit"]["amount"],
+                "type_id": candidate["hit"]["hit"]["type_id"],
+            }
+            if candidate
+            else None
+        )
+
+    test = test_commands[-1] if test_commands else None
+    acknowledgement = (
+        next(
+            (
+                update
+                for update in updates
+                if update["event"] == "acknowledged"
+                and update["prayer"] == "melee"
+                and update["observed_ns"] > test["accepted_ns"]
+            ),
+            None,
+        )
+        if test
+        else None
+    )
+    acknowledged = acknowledgement is not None
+    result = hit_for_stage("result")
+    pre_dispatch_hit = hit_for_stage("delay")
+    control = hit_for_stage("control")
+    result_age_ms = None
+    for row in rows:
+        if any(
+            update["event"] == "paired_hit" and update["stage"] == "result"
+            for update in row.get("calibration_updates", [])
+        ):
+            timer = row.get("devotion_cooldown", {})
+            if timer.get("timer_valid"):
+                result_age_ms = (
+                    (row["client_logic_tick"] - timer["start_tick"]) & 0xFFFFFFFF
+                ) * CLIENT_LOGIC_TICK_MS
+    outcome = "unlabelled"
+    if (
+        clean_opening_confirmed
+        and control == {"amount": 1, "type_id": MELEE_DAMAGE_HIT_TYPE}
+        and result_age_ms is not None
+        and 0 <= result_age_ms <= MAX_DEVOTION_CONTROL_AGE_MS
+        and result
+    ):
+        if result["type_id"] == MISS_HIT_TYPE:
+            outcome = "miss_inconclusive"
+        elif result["type_id"] == MELEE_DAMAGE_HIT_TYPE:
+            if result["amount"] == 1:
+                outcome = "protected"
+            elif result["amount"] > 1:
+                outcome = "late_protection"
+            else:
+                outcome = "zero_damage_inconclusive"
+    if pre_dispatch_hit and pre_dispatch_hit["type_id"] == MISS_HIT_TYPE and not test:
+        outcome = "miss_before_dispatch_inconclusive"
+    return {
+        "final_state": rows[-1]["trial_state"],
+        "input_sent_by_calibration": bool(accepted),
+        "accepted_command_counts": dict(collections.Counter(key["prayer"] for key in accepted)),
+        "planned_test_delay_ms": rows[-1].get("requested_delay_ms"),
+        "requested_test_delay_ms": test["requested_after_cue_ms"] if test else None,
+        "accepted_test_delay_ms": round(test["accepted_after_cue_ms"], 3) if test else None,
+        "control_hit": control,
+        "test_hit": result,
+        "pre_dispatch_hit": pre_dispatch_hit,
+        "clean_opening_user_confirmed": clean_opening_confirmed if control else None,
+        "observed_control_age_at_test_hit_ms": result_age_ms,
+        "outcome": outcome,
+        "melee_acknowledged_after_test_command": acknowledged,
+        "accepted_test_key_to_melee_ack_ms": (
+            round(to_milliseconds(acknowledgement["observed_ns"] - test["accepted_ns"]), 3)
+            if acknowledgement
+            else None
+        ),
+        "devotion_buff_active_from_memory": None,
+        "abort_reasons": [update["reason"] for update in updates if update["event"] == "aborted"],
+        "interpretation": (
+            "One-damage control and result support a protected case; damage above one "
+            "needs active-Devotion context. Neither establishes an exact server deadline."
+        ),
+        "prayer_check_deadline_validated": False,
+    }
+
+
+def anticipatory_trial_summary(rows, *, clean_opening_confirmed=False):
+    """Keep forecasts, actual early commands and observed curses distinct."""
+    if not any(row.get("anticipatory_mode") for row in rows):
+        return None
+    updates = [update for row in rows for update in row.get("calibration_updates", [])]
+    schedules = [update for update in updates if update["event"] == "prediction_scheduled"]
+    cues = [update for update in updates if update["event"] == "auto_cue"]
+    hits = [update for update in updates if update["event"] == "paired_hit"]
+    accepted = [update for update in updates if update["event"] == "input_accepted"]
+    acknowledgements = [update for update in updates if update["event"] == "acknowledged"]
+    cycles = []
+    for schedule in schedules:
+        matching_cues = [
+            cue
+            for cue in cues
+            if cue["stage"] == "result"
+            and abs(cue["cue_ns"] - schedule["next_cue_ns"]) <= 200 * NANOSECONDS_PER_MILLISECOND
+        ]
+        if not matching_cues:
+            continue
+        cue = matching_cues[0]
+        hit = next((entry for entry in hits if entry["cue_sequence"] == cue["cue_sequence"]), None)
+        protection = next(
+            (
+                key
+                for key in accepted
+                if key["prayer"] == "melee"
+                and key.get("predicted_cue_ns") == schedule["next_cue_ns"]
+            ),
+            None,
+        )
+        protection_ack = next(
+            (
+                ack
+                for ack in acknowledgements
+                if protection
+                and ack["prayer"] == "melee"
+                and ack["observed_ns"] > protection["accepted_ns"]
+            ),
+            None,
+        )
+        anchor = next(
+            (entry for entry in hits if entry["cue_sequence"] == schedule["anchor_cue_sequence"]),
+            None,
+        )
+        soul_split = next(
+            (
+                key
+                for key in accepted
+                if anchor
+                and key["prayer"] == "soul_split"
+                and anchor["hit"]["observed_ns"]
+                <= key["accepted_ns"]
+                < schedule["protection_send_ns"]
+            ),
+            None,
+        )
+        soul_split_ack = next(
+            (
+                ack
+                for ack in acknowledgements
+                if soul_split
+                and ack["prayer"] == "soul_split"
+                and soul_split["accepted_ns"] < ack["observed_ns"] < cue["cue_ns"]
+            ),
+            None,
+        )
+        observed_soul_split_ms = (
+            to_milliseconds(protection_ack["observed_ns"] - soul_split_ack["observed_ns"])
+            if protection_ack and soul_split_ack
+            else None
+        )
+        next_soul_split_ack = next(
+            (
+                ack
+                for ack in acknowledgements
+                if protection_ack
+                and ack["prayer"] == "soul_split"
+                and ack["observed_ns"] > protection_ack["observed_ns"]
+            ),
+            None,
+        )
+        cycles.append(
+            {
+                "anchor_cue": schedule["anchor_cue_sequence"],
+                "actual_cue": cue["cue_sequence"],
+                "period_ms": schedule["period_ms"],
+                "lead_before_predicted_cue_ms": schedule["lead_before_cue_ms"],
+                "prediction_error_ms": round(
+                    to_milliseconds(cue["cue_ns"] - schedule["next_cue_ns"]), 3
+                ),
+                "command_before_actual_cue_ms": (
+                    round(to_milliseconds(cue["cue_ns"] - protection["accepted_ns"]), 3)
+                    if protection
+                    else None
+                ),
+                "melee_observed_before_actual_cue_ms": (
+                    round(to_milliseconds(cue["cue_ns"] - protection_ack["observed_ns"]), 3)
+                    if protection_ack
+                    else None
+                ),
+                "melee_observed_before_hit_ms": (
+                    round(
+                        to_milliseconds(hit["hit"]["observed_ns"] - protection_ack["observed_ns"]),
+                        3,
+                    )
+                    if hit and protection_ack
+                    else None
+                ),
+                "soul_split_observed_ms": (
+                    round(observed_soul_split_ms, 3) if observed_soul_split_ms is not None else None
+                ),
+                "melee_observed_ms_until_next_soul_split": (
+                    round(
+                        to_milliseconds(
+                            next_soul_split_ack["observed_ns"] - protection_ack["observed_ns"]
+                        ),
+                        3,
+                    )
+                    if next_soul_split_ack
+                    else None
+                ),
+                "hit": (
+                    {"amount": hit["hit"]["hit"]["amount"], "type_id": hit["hit"]["hit"]["type_id"]}
+                    if hit
+                    else None
+                ),
+            }
+        )
+    return {
+        "final_state": rows[-1]["trial_state"],
+        "clean_opening_user_confirmed": clean_opening_confirmed,
+        "input_sent_by_calibration": bool(accepted),
+        "cycles": cycles,
+        "control_hit": next(
+            (
+                {"amount": entry["hit"]["hit"]["amount"], "type_id": entry["hit"]["hit"]["type_id"]}
+                for entry in hits
+                if entry["stage"] == "control"
+            ),
+            None,
+        ),
+        "devotion_buff_active_from_memory": None,
+        "abort_reasons": [update["reason"] for update in updates if update["event"] == "aborted"],
+        "completed_cycles": sum(update["event"] == "cycle_completed" for update in updates),
+        "prayer_check_deadline_validated": False,
+        "scope": "bounded isolated phase-1 melee opening, not other phases or Magic cue classification",
+    }
 
 
 def summarize(rows, *, isolated_phase_1_melee=False):
@@ -544,6 +929,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--capture", type=Path, nargs="+", required=True)
     parser.add_argument("--enrage", type=int)
+    parser.add_argument(
+        "--capture-enrages",
+        type=int,
+        nargs="+",
+        help="One user enrage label per capture, in source order",
+    )
     parser.add_argument("--phase", type=int, choices=range(1, 6))
     parser.add_argument(
         "--annotations",
@@ -558,6 +949,11 @@ def main():
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
+        "--confirmed-devotion-opening",
+        action="store_true",
+        help="User confirmed Devotion active, without other defensives or stuns",
+    )
+    parser.add_argument(
         "--catalogue-output",
         type=Path,
         help="Also write conservative P6 metadata for the explicitly labelled isolated phase",
@@ -569,6 +965,13 @@ def main():
         parser.error("Supply --phase and --enrage for an isolated capture, or --annotations")
     if arguments.isolated_melee and (arguments.phase != 1 or arguments.annotations):
         parser.error("--isolated-melee requires a single labelled phase-1 context")
+    enrages = arguments.capture_enrages or [arguments.enrage] * len(arguments.capture)
+    if len(enrages) != len(arguments.capture) or any(
+        value is not None and not 0 <= value <= 4000 for value in enrages
+    ):
+        parser.error("Provide one enrage in 0..4000 per capture")
+    if arguments.annotations and arguments.capture_enrages:
+        parser.error("Use annotation intervals for captures with annotated enrage")
     try:
         validate_output_paths(
             [*arguments.capture, *([arguments.annotations] if arguments.annotations else [])],
@@ -579,15 +982,26 @@ def main():
     sources = [
         {
             "capture_sha256": hashlib.sha256(capture.read_bytes()).hexdigest(),
+            "enrage_user_label": enrage,
             "summary": summarize(
                 read_rows(capture), isolated_phase_1_melee=arguments.isolated_melee
             ),
+            "devotion_opening": devotion_opening_summary(
+                read_rows(capture), clean_opening_confirmed=arguments.confirmed_devotion_opening
+            ),
+            "controlled_trial": controlled_trial_summary(
+                read_rows(capture), clean_opening_confirmed=arguments.confirmed_devotion_opening
+            ),
+            "anticipatory_trial": anticipatory_trial_summary(
+                read_rows(capture), clean_opening_confirmed=arguments.confirmed_devotion_opening
+            ),
         }
-        for capture in arguments.capture
+        for capture, enrage in zip(arguments.capture, enrages)
     ]
     report = {
         "client_session_date": arguments.session_date,
-        "enrage_user_label": arguments.enrage,
+        "enrage_user_label": enrages[0] if len(set(enrages)) == 1 else None,
+        "enrage_user_labels": sorted({value for value in enrages if value is not None}),
         "phase_user_label": arguments.phase,
         "input_sent_by_calibration": input_history([source["summary"] for source in sources]),
         "sources": sources,
@@ -607,7 +1021,7 @@ def main():
             else {}
         )
         catalogue_sources = []
-        for capture in arguments.capture:
+        for capture, enrage in zip(arguments.capture, enrages):
             rows = [normalize_row(row) for row in read_rows(capture)]
             digest = hashlib.sha256(capture.read_bytes()).hexdigest()
             if arguments.annotations:
@@ -636,7 +1050,7 @@ def main():
                         "start_ns": min(times),
                         "end_ns": max(times) + 1,
                         "phase": arguments.phase,
-                        "enrage": arguments.enrage,
+                        "enrage": enrage,
                         "source": "user",
                     }
                 )

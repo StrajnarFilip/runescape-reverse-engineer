@@ -1,0 +1,286 @@
+{
+  "client_session_date": "2026-11-11",
+  "enrage_user_label": 2000,
+  "enrage_user_labels": [
+    2000
+  ],
+  "phase_user_label": 1,
+  "input_sent_by_calibration": true,
+  "sources": [
+    {
+      "capture_sha256": "95538b5954891f9d6e3ad51acc6c6da82a037a2b20f088273cac303159858141",
+      "enrage_user_label": 2000,
+      "summary": {
+        "retained_rows": 257,
+        "player_hit_data_present": true,
+        "executable_sha256_values": [
+          "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45"
+        ],
+        "observed_curse_raw_values": [
+          0,
+          512,
+          262144
+        ],
+        "action_sequence_counts": {
+          "28962": 1,
+          "28929": 3
+        },
+        "player_hit_events": 3,
+        "hit_type_counts": {
+          "133": 3
+        },
+        "cue_hit_pairs": [
+          {
+            "cue_event": 5,
+            "hit_event": 1,
+            "cue_to_observed_hit_ms": 570.177,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 6,
+            "hit_event": 2,
+            "cue_to_observed_hit_ms": 592.047,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 7,
+            "hit_event": 3,
+            "cue_to_observed_hit_ms": 620.253,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "melee"
+          }
+        ],
+        "cue_to_observed_damage_delay": {
+          "count": 3,
+          "min_ms": 570.177,
+          "median_ms": 592.047,
+          "max_ms": 620.253
+        },
+        "cue_to_observed_miss_delay": {
+          "count": 0
+        },
+        "manual_key_events": 0,
+        "matched_keyboard_changes": [],
+        "sampled_key_to_overhead_delay": {
+          "count": 0
+        },
+        "npc_action_events_lost": 0,
+        "player_hit_events_lost": 0
+      },
+      "devotion_opening": null,
+      "controlled_trial": null,
+      "anticipatory_trial": {
+        "final_state": "completed",
+        "clean_opening_user_confirmed": false,
+        "input_sent_by_calibration": true,
+        "cycles": [
+          {
+            "anchor_cue": 5,
+            "actual_cue": 6,
+            "period_ms": 2400,
+            "lead_before_predicted_cue_ms": 900,
+            "prediction_error_ms": -30.023,
+            "command_before_actual_cue_ms": 867.295,
+            "melee_observed_before_actual_cue_ms": 610.984,
+            "melee_observed_before_hit_ms": 1203.031,
+            "soul_split_observed_ms": 609.658,
+            "melee_observed_ms_until_next_soul_split": 1790.215,
+            "hit": {
+              "amount": 1,
+              "type_id": 133
+            }
+          },
+          {
+            "anchor_cue": 6,
+            "actual_cue": 7,
+            "period_ms": 2400,
+            "lead_before_predicted_cue_ms": 900,
+            "prediction_error_ms": -30.017,
+            "command_before_actual_cue_ms": 856.791,
+            "melee_observed_before_actual_cue_ms": 580.74,
+            "melee_observed_before_hit_ms": 1200.993,
+            "soul_split_observed_ms": 610.012,
+            "melee_observed_ms_until_next_soul_split": null,
+            "hit": {
+              "amount": 1,
+              "type_id": 133
+            }
+          }
+        ],
+        "control_hit": {
+          "amount": 1,
+          "type_id": 133
+        },
+        "devotion_buff_active_from_memory": null,
+        "abort_reasons": [],
+        "completed_cycles": 2,
+        "prayer_check_deadline_validated": false,
+        "scope": "bounded isolated phase-1 melee opening, not other phases or Magic cue classification"
+      }
+    },
+    {
+      "capture_sha256": "742fa5d96952610b3e93f9d4bc122609422bd02b91213f58c1101d4e5743a50d",
+      "enrage_user_label": 2000,
+      "summary": {
+        "retained_rows": 175,
+        "player_hit_data_present": true,
+        "executable_sha256_values": [
+          "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45"
+        ],
+        "observed_curse_raw_values": [
+          0,
+          512,
+          262144
+        ],
+        "action_sequence_counts": {
+          "28962": 1,
+          "28929": 3
+        },
+        "player_hit_events": 3,
+        "hit_type_counts": {
+          "133": 3
+        },
+        "cue_hit_pairs": [
+          {
+            "cue_event": 2,
+            "hit_event": 1,
+            "cue_to_observed_hit_ms": 540.137,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 3,
+            "hit_event": 2,
+            "cue_to_observed_hit_ms": 590.266,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "melee"
+          },
+          {
+            "cue_event": 4,
+            "hit_event": 3,
+            "cue_to_observed_hit_ms": 610.319,
+            "hit_type": 133,
+            "amount": 1,
+            "prayer_near_hit_observation": "soul_split"
+          }
+        ],
+        "cue_to_observed_damage_delay": {
+          "count": 3,
+          "min_ms": 540.137,
+          "median_ms": 590.266,
+          "max_ms": 610.319
+        },
+        "cue_to_observed_miss_delay": {
+          "count": 0
+        },
+        "manual_key_events": 0,
+        "matched_keyboard_changes": [],
+        "sampled_key_to_overhead_delay": {
+          "count": 0
+        },
+        "npc_action_events_lost": 0,
+        "player_hit_events_lost": 0
+      },
+      "devotion_opening": null,
+      "controlled_trial": null,
+      "anticipatory_trial": {
+        "final_state": "completed",
+        "clean_opening_user_confirmed": false,
+        "input_sent_by_calibration": true,
+        "cycles": [
+          {
+            "anchor_cue": 2,
+            "actual_cue": 3,
+            "period_ms": 2400,
+            "lead_before_predicted_cue_ms": 100,
+            "prediction_error_ms": -60.074,
+            "command_before_actual_cue_ms": 31.039,
+            "melee_observed_before_actual_cue_ms": -589.293,
+            "melee_observed_before_hit_ms": 0.972,
+            "soul_split_observed_ms": 1800.367,
+            "melee_observed_ms_until_next_soul_split": 609.619,
+            "hit": {
+              "amount": 1,
+              "type_id": 133
+            }
+          },
+          {
+            "anchor_cue": 3,
+            "actual_cue": 4,
+            "period_ms": 2400,
+            "lead_before_predicted_cue_ms": 100,
+            "prediction_error_ms": -10.297,
+            "command_before_actual_cue_ms": 78.858,
+            "melee_observed_before_actual_cue_ms": -619.367,
+            "melee_observed_before_hit_ms": -9.049,
+            "soul_split_observed_ms": 1810.157,
+            "melee_observed_ms_until_next_soul_split": null,
+            "hit": {
+              "amount": 1,
+              "type_id": 133
+            }
+          }
+        ],
+        "control_hit": {
+          "amount": 1,
+          "type_id": 133
+        },
+        "devotion_buff_active_from_memory": null,
+        "abort_reasons": [],
+        "completed_cycles": 2,
+        "prayer_check_deadline_validated": false,
+        "scope": "bounded isolated phase-1 melee opening, not other phases or Magic cue classification"
+      }
+    }
+  ],
+  "user_labelled_cues": {
+    "28929": "ordinary melee auto in the isolated phase-1 melee context",
+    "28931": "tendrils",
+    "28938": "uppercut",
+    "28935": "Hold Still"
+  },
+  "observed_npc_forms": {
+    "22891": "Telos active",
+    "22892": "Telos dormant"
+  },
+  "hitmark_symbol_leads": {
+    "133": "melee_damage_parent",
+    "143": "heal_splat_parent",
+    "144": "damage_parent",
+    "482": "miss_parent"
+  },
+  "automatic_flick_ready": false,
+  "prayer_check_deadline_validated": false,
+  "limitations": [
+    "Only isolated phase-1 melee autos have been checked; other phases/styles and complete attack coverage remain unvalidated. Per-capture enrage labels are retained.",
+    "Cue-to-hit observation is not the server prayer-check deadline.",
+    "Overhead flags are observed client state, not proof of server-side activation timing.",
+    "Manual key times are sampled down edges; scripted times record Windows input acceptance.",
+    "Player hitmarks do not identify the attacker; pairing uses the isolated phase-1 context.",
+    "No early/late protection outcome is inferred from a random damage amount alone.",
+    "Complete incoming-attack coverage and safe Soul Split windows are not established.",
+    "Observed success/failure delays are not a universal threshold over network and tick jitter."
+  ],
+  "controlled_input_observations": {
+    "successful_accepted_delays_ms": [],
+    "late_accepted_delays_ms": [],
+    "latest_observed_success_ms": null,
+    "earliest_observed_late_ms": null,
+    "universal_cutoff_established": false,
+    "prayer_check_deadline_validated": false
+  },
+  "operator_notes": {
+    "enrage_label_source": "Last user-reported setting; not read independently from the client.",
+    "initial_feedback": "User said the prayer flicks felt too fast and requested one-tick protection.",
+    "retuned_feedback": "User completed the repeat and reported much better timing.",
+    "final_handoff": "The bounded test stopped with Melee active; its last hold interval has no Soul Split endpoint.",
+    "active_buff": "Native cooldown and a one-damage control were observed; Devotion buff state remains unmapped."
+  }
+}

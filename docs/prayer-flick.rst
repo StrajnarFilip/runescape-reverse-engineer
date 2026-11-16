@@ -6,8 +6,9 @@ Status
 
 The C timing planner, native prayer/animation/player-hit observations, Python
 observer and C/Python/Java consumers are implemented. The first two live Telos
-captures cover 300% enrage, phase 1. Automatic flicking remains disabled until
-prayer-check windows and incoming-attack coverage have been measured.
+captures cover 300% enrage, phase 1. Later controlled keyboard experiments
+cover opening autos at 300% and 2000%. Production flicking remains disabled;
+the explicitly authorized, bounded calibration runner is described below.
 
 The intended account has Soul Split. ``profiles/prayer_flick.json`` enables it
 and records the user's bindings: Ctrl+F1 Magic, Ctrl+F2 Ranged, Ctrl+F3 Soul Split,
@@ -100,7 +101,7 @@ The CLI rejects ``--trial`` before opening the reader while either
 Both are false in the shipped profile. Changing those flags alone would not
 calibrate the prototype. The 600ms delay describes neither a verified protection
 window nor a safe Soul Split return deadline. No automatic input was sent during
-the captures below.
+the 2026-11-10 captures.
 
 First live calibration: 2026-11-10
 ----------------------------------
@@ -143,6 +144,175 @@ Anticipation, acknowledgement and protection deadlines need further measurement.
 To reproduce the compact report from the local recordings::
 
     python work/analyze_telos_calibration.py --capture work/prayer_research/telos-session-2026-11-10.jsonl work/prayer_research/telos-session-native-hits-2026-11-10.jsonl --enrage 300 --phase 1 --session-date 2026-11-10 --output docs/validation/telos-prayer-calibration-2026-11-10.json
+
+Manual Devotion timing experiment
+----------------------------------
+
+For the intended account, Devotion is bound to Alt+G. This optional capture
+mode records that explicit chord alongside the configured prayer chords::
+
+    python work/capture_prayer.py --pid 12345 --duration 1200 --record-devotion-alt-g --output work/prayer_research/prayer-check.jsonl
+
+The additional key observer reads only G and modifier states in the attached
+game's foreground window. It sends no input. ``manual_ability_keys`` retains
+the sampled down edge separately from the native ``devotion_cooldown`` timer
+(struct 25028). A key press does not prove a successful cast; an observed
+cooldown does not establish the buff's active interval. ``buff_active`` stays
+null. ``previous_sample_ns`` bounds the preceding native observation, avoiding
+an assumption that the last retained heartbeat was the previous poll. New
+capture files use exclusive creation to protect earlier recordings.
+
+The controlled opening compares three ordinary phase-1 melee autos at 300%:
+hold Melee and cast Devotion at the first swing, switch early before the second
+auto, then switch at the third swing. Return to normal play afterward. The
+player must confirm the visible Devotion activation and identify any stuns,
+other defensives or special interruptions. Guard against expiry and overlapping
+hits before treating any outcome as a protection check. A miss alone is
+inconclusive. The test records evidence; it does not arm the automatic trial.
+
+The current `Wiki Devotion article <https://runescape.wiki/w/Devotion>`_ lists
+9.6 seconds of duration and matching protected damage reduced to 1. These are
+guide-derived expectations until checked in the attached executable.
+
+The 2026-11-11 capture recorded Alt+G followed 406ms later by a native cooldown
+start. The player confirmed visible Devotion activation and no other defensives
+or stuns during the first three ordinary autos. Their hitmarks were:
+
+====  ===================  ===================  ======
+Auto  Melee key after cue  Hitmark after cue    Damage
+====  ===================  ===================  ======
+1     Already active       529.956ms            1
+2     227.746ms            549.759ms            1
+3     92.929ms             619.546ms            1
+====  ===================  ===================  ======
+
+These are successful cases, not a latest-safe-switch boundary. For auto 3,
+the first sampled Melee flag appeared about 9.5ms after the hitmark; flags and
+hitmarks are read separately. That observation cannot place the server's check
+on either side of the client flag transition. A later miss is inconclusive;
+later ordinary damage after Devotion's expected expiry is outside this control.
+The report is ``validation/telos-prayer-check-2026-11-11.json``. Reproduce it
+with ``work/analyze_telos_calibration.py`` and ``--confirmed-devotion-opening``
+only when the player supplied that clean-opening label. Automatic coverage and
+deadline flags remain false.
+
+Controlled keyboard experiments
+--------------------------------
+
+The user authorized scripted calibration on 2026-11-11 after manual subsecond
+switching proved impractical. ``work/calibrate_prayer_check.py`` uses the existing
+foreground C input API, independently of the gated production trial::
+
+    python work/calibrate_prayer_check.py --controlled-input --pid 12345 --delay-ms 350 --enrage-label 300 --output work/prayer_research/controlled.jsonl
+
+The player selects Melee, starts a fresh practice encounter and casts Devotion.
+The runner observes a dormant-to-active Telos opening and requires a fresh
+native Devotion cooldown plus a one-damage ordinary-auto control. It then sends
+Ctrl+F3, waits for Soul Split acknowledgement, and schedules one Ctrl+F4 at the
+requested delay after the next ordinary auto cue. It records the hit, confirms
+Melee and stops. It does not continue fighting or repeat switch cycles.
+
+Input requires fresh frames and cues, the same process/scene/NPC, and the game
+in the foreground. Requested delays are bounded to 0..600ms; command lateness,
+unconfirmed prayers, event gaps, special actions and expired control windows
+stop the experiment. Restoration uses only fresh, known state; loss of a
+trustworthy target is reported as requiring manual protection. Setup waits for
+observed Melee rather than sending baseline toggles through possible menus.
+A baseline acknowledgement timeout from the earlier setup is retained in the
+report, alongside an inconclusive miss that cancelled one 450ms attempt.
+
+Enrage is a user label, not an input to the switch calculation. Completed
+clean trials produced the following observations:
+
+========  ===============  ===============  ============  ==========
+Enrage    Requested delay  Accepted delay   Control hit   Test hit
+========  ===============  ===============  ============  ==========
+300%      350ms            359.036ms        1             1
+300%      500ms            515.533ms        1             691
+2000%     450ms            451.795ms        1             8003
+2000%     400ms            408.287ms        1             5402
+========  ===============  ===============  ============  ==========
+
+The player confirmed active Devotion and clean openings. Native cooldown ages
+at the test hits were 3.6..4.82 seconds; the active buff itself remains unmapped.
+The Melee command-to-observed-flag delays ranged from 260ms to 761ms. These
+observations support a successful case at 359ms and late cases from 408ms,
+not a universal cutoff or an exact server prayer-check timestamp. Anticipation
+using the ordinary four-tick rhythm and acknowledgement margins needs separate
+validation before production use. Other phases, stuns, Freedom, beams and
+complete incoming-attack coverage remain outside these opening experiments.
+
+The compact report retains each capture hash and enrage label. Its input flag
+distinguishes actual scripted commands from manual key observations; misses
+and aborted runs do not become successful trials. Use ``--capture-enrages``
+when reproducing a report that combines different user-reported enrages.
+
+Anticipatory opening test
+-------------------------
+
+``rs3_prayer_predict_cycle`` is an additive, stateless C calculator. Its
+56-byte ``rs3_prayer_cycle_frame`` and 48-byte ``rs3_prayer_cycle_prediction``
+are caller-owned; verify them with ``rs3_prayer_sizeof(5)`` and
+``rs3_prayer_sizeof(6)``. It accepts
+an explicit protection style, so a consumer can request Melee, Magic or another
+known protection. An unknown style is rejected. It does not classify attacks,
+establish incoming-attack coverage or mark a threat's timing validated.
+Python uses the same calculation through ``CyclePredictor`` in ``prayer.py``.
+Existing ABI layouts and exports are unchanged.
+
+The bounded test is selected explicitly::
+
+    python work/calibrate_prayer_check.py --controlled-input --anticipate --cycles 2 --pid 12345 --enrage-label 2000 --output work/prayer_research/anticipated.jsonl
+
+The player selects Melee before starting, stays in melee range without stuns,
+and casts Devotion. After the one-damage control, the next cue is estimated as
+the last observed cue plus 2400ms. Melee input is scheduled 100ms before that
+estimate. Soul Split is requested after a resolved hit and only when the
+acknowledgement budget and minimum window fit. Pending inputs must be confirmed
+before another is issued. Each observed cue re-anchors the model, so timing does
+not drift across successive predictions.
+
+The test ends after at most two predicted autos. Missing/shifted cues, special
+or unknown actions, unclassified incoming damage, changed scene/NPC, changed raw
+stage signature, stale samples and lost focus invalidate the cycle. The raw
+signature only detects changes; it is not a verified phase decoder. Manual
+protection-style changes stop the melee test without replacing the selected
+style. The final handoff leaves Melee active; it is not a continuous boss script.
+
+Live observations on 2026-11-11:
+
+=================  ========================  ========================  =============
+Lead before cue    Observed Soul Split       Observed Melee interval   Predicted hits
+=================  ========================  ========================  =============
+900ms initial      609.658ms / 610.012ms      1790.215ms                1 / 1
+100ms retuned      1800.367ms / 1810.157ms    609.619ms                 1 / 1
+=================  ========================  ========================  =============
+
+The measured Melee interval ends at the following Soul Split acknowledgement;
+the final Melee handoff has no such endpoint. The first pass was deliberately
+early and left roughly one tick for Soul Split. The user requested protection
+for the check tick instead. The retuned pass observed roughly three ticks of
+Soul Split and one of Melee, and the user reported much better timing. Both
+passes had a one-damage control and two one-damage predicted hits.
+
+The retuned requests were 31.039ms and 78.858ms before the actual observed cues;
+prediction errors were -60.074ms and -10.297ms. One Melee flag was sampled about
+9ms after its protected hitmark, consistent with separately sampled fields;
+these client observations do not establish the exact server check timestamp.
+Evidence is in ``validation/telos-prayer-anticipatory-2026-11-11.json``.
+
+Magic and phase scope
+~~~~~~~~~~~~~~~~~~~~~
+
+The `PVME mechanics reference <https://pvme.io/pvme-guides/basic-guides/telos-basic/>`_
+describes Magic autos outside melee distance and Magic-only autos in phases 3
+and 5. Phase 4 can also switch style with distance. The generic C calculator
+supports Magic, but the live opening controller recognizes only the calibrated
+phase-1 melee cue. Unknown actions stop it; it does not infer Magic from an
+unmapped animation or apply a Melee cycle across phases. Style/target mapping,
+projectile/check timing, golems, beams and stun/Freedom rhythm changes require
+their own live validation. The general observer and production validation
+flags remain unchanged.
 
 Directly available data
 -----------------------
