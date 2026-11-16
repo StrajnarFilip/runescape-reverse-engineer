@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-16",
+  "status": "outside_cast_incident_fixed_offline_live_retry_pending",
+  "failure": {
+    "sent_actions": [
+      "devotion",
+      "berserk",
+      "renewal"
+    ],
+    "native_confirmations": [
+      "devotion",
+      "berserk",
+      "renewal"
+    ],
+    "location": "outside encounter, user confirmed",
+    "player_tile": [
+      3814,
+      7053,
+      0
+    ],
+    "dormant_npc_config_id": 22892,
+    "dormant_npc_tile": [
+      3795,
+      7059,
+      0
+    ],
+    "native_varp_6359": 1498611712,
+    "native_instance_bit_29": false,
+    "root_cause": "Dormant NPC presence was incorrectly treated as encounter entry; existing instance evidence was omitted.",
+    "stop_reason": "window_focus_lost_or_unknown",
+    "no_automatic_retry": true
+  },
+  "regression": {
+    "local_capture_sha256": "007c2391311c994a15e87af7bfc71b508f0ac264086001285e28747101cd3d60",
+    "frames_replayed": 173,
+    "corrected_fake_device_calls": 0,
+    "corrected_arming_count": 0,
+    "raw_capture_published": false
+  },
+  "changes": [
+    "C API reads current action-bar names/chords against exact process/sample/preset.",
+    "All 12 P1 role bindings persist next to the rotation profile; red EoF equip=7 and EoF special=6.",
+    "D4 ordered P1 coordinator is connected through the D6 native batch writer.",
+    "Both arming and every dispatch require native instance flag and 300% enrage with matching source identity/age.",
+    "Starting the process cannot start the fight: Ctrl+Shift+F11 press/release is needed after entry checks; Ctrl+Shift+F12 stops.",
+    "Outside start requests are refused and not retained; no fault automatically rearms.",
+    "Manual input recorder captures foreground-only Windows key/mouse hook events beside C frames, physical projection and native poses."
+  ],
+  "limits": [
+    "No demonstrated automated P1 clear or complete kill.",
+    "Server prayer-check deadlines remain unvalidated; automatic Soul Split flicking stays disabled.",
+    "Physical/EoF special-specific acknowledgement mapping remains incomplete; an unconfirmed cast stops the pilot.",
+    "User owns entry and movement for the initial P1 trial; instance-creation UI automation is not connected.",
+    "The manual recorder records screen click points and observed tile arrivals; intended ground destination is not decoded.",
+    "Input-hook installation and cleanup were smoke-tested; no new manual key/mouse sequence was requested during the smoke test."
+  ],
+  "current_runtime": {
+    "automatic_controller_running": false,
+    "automatic_input_armed": false,
+    "ladder_rung_passed": false
+  },
+  "manual_recorder_smoke": {
+    "frames": 84,
+    "duration_seconds": 2,
+    "input_events": 0,
+    "hook_errors": 0,
+    "input_queue_losses": 0,
+    "automatic_inputs": 0,
+    "stopped": true
+  },
+  "checks": {
+    "ctest_targets_passed": 15,
+    "native_interface_fixture_groups": 27,
+    "native_input_fixture_groups": 12,
+    "D6_tests_including_local_skip": 29,
+    "D8_tests_including_local_skip": 41,
+    "new_manual_recorder_tests": 2,
+    "final_full_run": "passed",
+    "python_tests_run": 367,
+    "python_tests_skipped": 1,
+    "python_skip_reason": "Optional unchanged firmware host compiler was not selected for this run"
+  }
+}

@@ -66,6 +66,28 @@ Present for every rung, with the kill switch within reach.
 Requests
 --------
 
+* Current handoff, 2026-11-16: the first connected P1 pilot incorrectly cast
+  Devotion, Berserk and renewal outside combat. Dormant config 22892 is also
+  present outside. The native instance flag was clear and the arming guard
+  omitted it. The runner stopped on focus loss and was not restarted.
+  D6/D8 now require same-frame native instance evidence and 300% enrage,
+  plus explicit start-key release. All 173 incident frames replay with zero
+  arming/input. No rung passed and no automated P1 clear is claimed. See
+  ``docs/validation/telos-ladder-p1-incident-2026-11-16.json``.
+* The user requested remembering all inputs, click points and movement for
+  one prebuild/P1 demonstration. L operator research now includes
+  ``work/record_manual_opening.py`` and its queue/layout tests. It records
+  foreground-only Windows input-hook events, full C frames, camera projection
+  and actual native tiles into ignored gzip JSONL; raw captures stay local.
+  It sends no inputs and has no replay-actuation feature. No manual capture
+  is currently running. A compact annotated report should follow a labelled
+  full example if the user chooses that route.
+* P1 bindings are persisted beside the sequence profile, including exact
+  preset/slot/name/chord evidence. Do not ask the user for these keys again.
+  D8 re-reads their live native labels before dispatch. Input acceptance is
+  distinct from each native acknowledgement; specials still have a mapping
+  gap. Automatic prayer flicking remains gated by unvalidated deadlines.
+
 * End-of-session handoff, 2026-11-15: the user is offline and asked to continue
   tomorrow. All game work is stopped; no controller is armed and no kill was
   attempted. New ordered P1 policy, native 1..3-action key batches and A1
