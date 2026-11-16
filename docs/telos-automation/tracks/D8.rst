@@ -169,3 +169,17 @@ Requests
 * Six new synthetic groups exercise ordered batches and independent readback,
   no GCD-only confirmation, no retry, scene arming, live role changes, EoF role
   bindings and stop paths. Existing shadow/assist/full behavior is preserved.
+
+* Outside-cast incident correction, 2026-11-16: presence of dormant config
+  22892 is insufficient. D8 and the D6 writer now both require the native
+  instance flag, matching source identity/age and 300% enrage. Starting the
+  process sends nothing. Ctrl+Shift+F11 must be pressed and released after
+  all entry checks pass; Ctrl+Shift+F12 stays the stop key. An outside start
+  request is refused and is not retained for a later encounter.
+* The 173 frames from the failed outside-cast session were replayed through
+  the corrected controller with a fake writer: zero arming and zero device
+  calls. Compact fixtures cover that exact outside state, native instance
+  gating, explicit start, start-key release and preservation of queued stops.
+  The positive synthetic route reaches EZK; its unmapped spec acknowledgement
+  causes a stop rather than a fabricated confirmation or another cast.
+  No further live input was sent and no controller was restarted.

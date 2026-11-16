@@ -1,9 +1,11 @@
-"""D8 shadow supervisor, bounded replay/live observation and explicit stop paths.
+"""D8 shadow supervisor and an opt-in, bounded supervised P1 experiment.
 
 Shadow mode owns only a RecordingActuator. Assist/full are recognized but remain
 blocked until track L supplies reviewed enablement. Missing producer modules
 are absent, never replaced with guessed decisions. All clocks for game data
-remain in the native domain; wall-clock limits are separate.
+remain in the native domain; wall-clock limits are separate. The P1 experiment
+requires native in-instance evidence and an explicit start-key release, and
+does not enable prayer flicking, movement or unattended kills.
 """
 
 from __future__ import annotations
@@ -48,19 +50,21 @@ class P1Attempt:
     """Bounded supervised experiment using C observations and the D6 batch writer.
 
     The user owns movement and encounter entry. The coordinator is created only
-    after a dormant Telos is observed, so an outside-to-instance scene change
-    cannot pin the wrong encounter. Unknown first-use cooldowns are logged as
+    after native in-instance evidence, dormant Telos and an explicit start
+    request, so an outside-to-instance scene change cannot pin the wrong
+    encounter. Unknown first-use cooldowns are logged as
     unknown and may be attempted; they never become castable=True or GCD zero.
     Native acknowledgements, not OS acceptance, advance the ordered rotation.
     No prayer timing policy, movement backend or unattended kill mode is enabled.
     """
 
-    def __init__(self, writer, read_label, clock, kill_switch, focus_checker):
+    def __init__(self, writer, read_label, clock, kill_switch, focus_checker, start_switch=None):
         from .rotation import OrderedP1Rotation
 
         self.template = OrderedP1Rotation()
         self.writer, self.read_label, self.clock = writer, read_label, clock
         self.kill_switch, self.focus_checker = kill_switch, focus_checker
+        self.start_switch = start_switch or (lambda: False)
         self.engine = None
         self.locations, self.pending = {}, None
         self.identity, self.previous = None, None
@@ -315,6 +319,8 @@ class P1Attempt:
             ):
                 return "event_queue_loss_or_unknown:" + name
         if self.engine is not None:
+            if not self.writer.encounter_ready(world):
+                return "native_instance_or_enrage_lost_or_unknown"
             if world.session != self.engine.session:
                 return "encounter_session_changed"
             if self.focus_checker(world) is not True:
@@ -359,15 +365,23 @@ class P1Attempt:
                 and self._equipped(world, 3, 52061)
                 and self._equipped(world, 5, 52063)
                 and self._fresh(world.game_tick)
+                and self.writer.encounter_ready(world)
             )
-            if ready:
+            requested = self.start_switch()
+            if ready and requested:
                 from .rotation import OrderedP1Rotation
 
                 self.engine, self.armed_ns = OrderedP1Rotation(), self.clock()
                 self.engine.session = world.session
                 events.append({"event": "armed", "prayer_policy": "hold_melee_no_flicks"})
             else:
-                self.reason = "waiting_for_dormant_telos_melee_dual_lengs_115_adrenaline_and_tick"
+                self.reason = (
+                    "instance_ready_waiting_for_explicit_start"
+                    if ready
+                    else "waiting_for_confirmed_300_instance_and_preparation"
+                )
+                if requested:
+                    events.append({"event": "start_refused", "reason": self.reason})
         if self.engine is not None and not self.stopped:
             if self.pending:
                 batch, before, sent_ns = self.pending
@@ -510,7 +524,7 @@ def hotkey_codes(label):
 class GlobalKillSwitch:
     """Thread-owned Windows hotkey. Construct only for an explicit live observer."""
 
-    def __init__(self, label=DEFAULT_KILL_KEY):
+    def __init__(self, label=DEFAULT_KILL_KEY, start_label=None):
         from ctypes import wintypes
 
         self.user = ctypes.WinDLL("user32", use_last_error=True)
@@ -531,19 +545,57 @@ class GlobalKillSwitch:
             wintypes.UINT,
         ]
         self.user.PeekMessageW.restype = wintypes.BOOL
+        self.user.GetAsyncKeyState.argtypes = [ctypes.c_int]
+        self.user.GetAsyncKeyState.restype = ctypes.c_short
         self.message, self.identifier, self.registered = wintypes.MSG(), 0x5253, False
         modifiers, virtual_key = hotkey_codes(label)
         if not self.user.RegisterHotKey(None, self.identifier, modifiers, virtual_key):
             raise OSError(ctypes.get_last_error(), "Global kill-switch registration failed")
         self.registered = True
+        self.start_identifier, self.start_registered = self.identifier + 1, False
+        self.kill_pending, self.start_pending = False, False
+        if start_label is not None:
+            try:
+                modifiers, virtual_key = hotkey_codes(start_label)
+                if not self.user.RegisterHotKey(
+                    None, self.start_identifier, modifiers, virtual_key
+                ):
+                    raise OSError(ctypes.get_last_error(), "Global start-key registration failed")
+                self.start_registered = True
+            except BaseException:
+                self.close()
+                raise
 
-    def __call__(self):
+    def _poll(self):
         while self.user.PeekMessageW(ctypes.byref(self.message), None, 0x312, 0x312, 1):
             if self.message.wParam == self.identifier:
-                return True
-        return False
+                self.kill_pending = True
+            elif self.start_registered and self.message.wParam == self.start_identifier:
+                self.start_pending = True
+
+    def __call__(self):
+        self._poll()
+        return self.kill_pending
+
+    def start_requested(self):
+        """Consume one start request without losing a queued stop-key message."""
+        self._poll()
+        if self.kill_pending:
+            self.start_pending = False
+            return False
+        # RegisterHotKey fires on key-down. Wait for the user's chord to be
+        # released before handing control to the native input guard.
+        if self.start_pending and any(
+            self.user.GetAsyncKeyState(key) & 0x8000 for key in (0x10, 0x11, 0x7A)
+        ):
+            return False
+        requested, self.start_pending = self.start_pending, False
+        return requested
 
     def close(self):
+        if getattr(self, "start_registered", False):
+            self.user.UnregisterHotKey(None, self.start_identifier)
+            self.start_registered = False
         if self.registered:
             self.user.UnregisterHotKey(None, self.identifier)
             self.registered = False
@@ -1133,7 +1185,7 @@ def _run_p1_attempt(arguments, output):
 
     started = time.monotonic()
     try:
-        hotkey = GlobalKillSwitch(arguments.kill_key)
+        hotkey = GlobalKillSwitch(arguments.kill_key, start_label="Ctrl+Shift+F11")
         telemetry = NativeTelemetry(arguments.pid, 0)
         device = NativeSnapshotDevice(telemetry.reader)
         writer = P1BatchArbiter(
@@ -1145,6 +1197,7 @@ def _run_p1_attempt(arguments, output):
             telemetry.reader.monotonic_ns,
             hotkey,
             foreground_matches,
+            start_switch=hotkey.start_requested,
         )
         telemetry.sample(False)
         bindings = attempt.discover_bindings()
@@ -1157,6 +1210,7 @@ def _run_p1_attempt(arguments, output):
                 "prayer_policy": "hold_melee_no_flicks",
                 "mode": "supervised_p1_experiment",
                 "ladder_pass": False,
+                "start_key": "Ctrl+Shift+F11",
             }
         )
         while not attempt.stopped:

@@ -627,7 +627,7 @@ class P1AttemptTests(unittest.TestCase):
     def setUp(self):
         from rs3_reader.bot.arbiter import P1BatchArbiter
 
-        self.now, self.focus, self.kill = 10000 * MS, True, False
+        self.now, self.focus, self.kill, self.start = 10000 * MS, True, False, True
         self.calls, self.releases, self.labels = [], [], {}
         self.device = SimpleNamespace(
             dispatch_key_batch=lambda actions, current: self.calls.append(tuple(actions)),
@@ -641,7 +641,12 @@ class P1AttemptTests(unittest.TestCase):
             enabled=True,
         )
         self.attempt = P1Attempt(
-            self.writer, self.label, lambda: self.now, lambda: self.kill, lambda current: self.focus
+            self.writer,
+            self.label,
+            lambda: self.now,
+            lambda: self.kill,
+            lambda current: self.focus,
+            start_switch=lambda: self.start,
         )
         actions = [
             a
@@ -780,6 +785,24 @@ class P1AttemptTests(unittest.TestCase):
             }
         )
         record.update(changes)
+        record.setdefault(
+            "encounter",
+            {
+                "pid": 1,
+                "process_creation_time": 2,
+                "scene_epoch": record["combat"]["scene_epoch"],
+                "sample_sequence": self.sample,
+                "status": "partial",
+                "raw_candidates": {
+                    "6359": {
+                        "value": (1 << 29) | 300,
+                        "source": "native_encounter",
+                        "age_ms": 0,
+                        "reason": None,
+                    }
+                },
+            },
+        )
         self.current = WorldState.from_telemetry(record)
         return record
 
@@ -859,6 +882,108 @@ class P1AttemptTests(unittest.TestCase):
     def test_current_eof_roles_override_stale_plan_keys(self):
         self.assertEqual(self.attempt.locations["equip_red_eof"][2], "7")
         self.assertEqual(self.attempt.locations["dragon_scimitar_special"][2], "6")
+
+    def test_rotation_continues_through_ezk_and_stops_on_unmapped_spec_ack(self):
+        self.opening()
+        self.step(self.frame(dormant=False))
+        record = self.frame(dormant=False, selected=True)
+        record["inventory"]["slots"][1]["quantity"] = 9
+        self.cooldown(record, 14678)
+        self.step(record)
+        self.assertEqual(self.attempt.sent[-1], "meteor_strike")
+        for ability_id, expected in (
+            (14688, "assault"),
+            (14704, "overpower"),
+            (14686, "equip_ezk"),
+        ):
+            record = self.frame(dormant=False, selected=True)
+            self.cooldown(record, ability_id)
+            self.step(record)
+            self.assertEqual(self.attempt.sent[-1], expected)
+        record = self.frame(dormant=False, selected=True)
+        record["equipment"]["slots"][0]["item_id"] = 52543
+        for ability in record["abilities"]["entries"]:
+            if ability["struct_id"] == 28430:
+                ability["cooldown"]["reason"] = "timer_mapping_pending"
+        self.step(record)
+        self.assertEqual(self.attempt.sent[-1], "ezk_special")
+        self.assertNotIn("ezk_special", self.attempt.confirmed)
+        # Neither input acceptance nor a generic GCD/adrenaline transition
+        # invents the missing special-specific acknowledgement channel.
+        record = self.frame(dormant=False, selected=True, time_ms=self.now / MS + 2600)
+        record["equipment"]["slots"][0]["item_id"] = 52543
+        record["gcd"] = dict(remaining_ms=1800, reason=None)
+        self.step(record)
+        self.assertEqual(self.attempt.reason, "acknowledgement_timeout")
+        self.assertNotIn("equip_red_eof", self.attempt.sent)
+
+    def test_start_waits_for_user_to_release_the_chord(self):
+        import ctypes
+        from rs3_reader.bot.supervisor import GlobalKillSwitch
+
+        class Message(ctypes.Structure):
+            _fields_ = [("wParam", ctypes.c_size_t)]
+
+        switch = GlobalKillSwitch.__new__(GlobalKillSwitch)
+        switch.message = Message()
+        switch.identifier, switch.start_identifier = 1, 2
+        switch.start_registered = True
+        switch.kill_pending, switch.start_pending = False, True
+        held = {0x11}
+        switch.user = SimpleNamespace(
+            PeekMessageW=lambda *args: False,
+            GetAsyncKeyState=lambda key: 0x8000 if key in held else 0,
+        )
+        self.assertFalse(switch.start_requested())
+        self.assertTrue(switch.start_pending)
+        held.clear()
+        self.assertTrue(switch.start_requested())
+        self.assertFalse(switch.start_requested())
+
+    def test_outside_dormant_telos_never_arms_even_with_start_key(self):
+        record = self.frame()
+        record["position"] = dict(x=3814, y=7053, plane=0)
+        record["npcs"]["entities"][0].update(
+            tile=dict(x=3795, y=7059, plane=0), health=dict(current=1, max=1)
+        )
+        record["encounter"]["raw_candidates"]["6359"]["value"] = 1498611712
+        self.step(record)
+        self.assertIsNone(self.attempt.engine)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.attempt.last_log["events"][0]["event"], "start_refused")
+
+    def test_confirmed_instance_still_needs_explicit_start(self):
+        self.start = False
+        self.step(self.frame())
+        self.assertIsNone(self.attempt.engine)
+        self.assertEqual(self.calls, [])
+        self.start = True
+        self.step(self.frame())
+        self.assertEqual(self.attempt.sent, ["devotion"])
+
+    def test_start_poll_cannot_consume_or_drop_stop_key(self):
+        import ctypes
+        from rs3_reader.bot.supervisor import GlobalKillSwitch
+
+        class Message(ctypes.Structure):
+            _fields_ = [("wParam", ctypes.c_size_t)]
+
+        switch = GlobalKillSwitch.__new__(GlobalKillSwitch)
+        switch.message = Message()
+        switch.identifier, switch.start_identifier = 1, 2
+        switch.start_registered = True
+        switch.kill_pending = switch.start_pending = False
+        queue = [2, 1]
+
+        def peek(pointer, *args):
+            if not queue:
+                return False
+            pointer._obj.wParam = queue.pop(0)
+            return True
+
+        switch.user = SimpleNamespace(PeekMessageW=peek)
+        self.assertFalse(switch.start_requested())
+        self.assertTrue(switch())
 
     def test_stop_focus_health_scene_and_event_loss_latch(self):
         cases = ["kill", "focus", "health", "scene", *range(4)]
