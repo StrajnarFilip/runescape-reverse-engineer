@@ -13,7 +13,7 @@
   "acknowledgement_timeout_ms": 2500,
   "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
   "starting_equipment": {"main_hand": 52061, "off_hand": 52063},
-  "binding_source": "Native UI labels read on 2026-11-15; user confirmed EZK PgUp, EoF 7, red EoF contents and starting weapons",
+  "binding_source": "Saved native UI labels in observed_bindings; re-read by role before every dispatch",
   "stored_special_identity_source": "User declaration, not decoded from item ID or colour",
   "preparation_reference": ["At least two Bloodlust stacks", "Natural Instinct", "Dragon battleaxe special"],
   "steps": [
@@ -74,14 +74,147 @@
     {
       "id": "equip_red_eof",
       "same_tick": false,
-      "actions": [{"id": "equip_red_eof", "kind": "equip", "item_id": 51065, "equipment_slot": "neck", "key": "6"}]
+      "actions": [{"id": "equip_red_eof", "kind": "equip", "item_id": 51065, "equipment_slot": "neck", "key": "7"}]
     },
     {
       "id": "eof_dragon_scimitar_special",
       "same_tick": false,
-      "actions": [{"id": "dragon_scimitar_special", "kind": "eof_special", "ability_id": 11748, "name": "Essence of Finality", "required_amulet_id": 51065, "stored_weapon": "Dragon scimitar", "stored_weapon_source": "user", "key": "7"}]
+      "actions": [{"id": "dragon_scimitar_special", "kind": "eof_special", "ability_id": 11748, "name": "Essence of Finality", "required_amulet_id": 51065, "stored_weapon": "Dragon scimitar", "stored_weapon_source": "user", "key": "6"}]
     }
   ],
+  "observed_bindings": {
+    "observed_utc": "2026-11-16T15:43:58.174945+00:00",
+    "source": "C native UI labels; live role/name/preset checks",
+    "executable_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+    "bindings": {
+      "devotion": {
+        "display_bar": 3,
+        "preset_bar": 7,
+        "slot": 9,
+        "key_label": "a-G",
+        "virtual_key": 71,
+        "modifiers": 4,
+        "native_name": "Devotion",
+        "item_id": null
+      },
+      "berserk": {
+        "display_bar": 1,
+        "preset_bar": 1,
+        "slot": 12,
+        "key_label": "F",
+        "virtual_key": 70,
+        "modifiers": 0,
+        "native_name": "Berserk",
+        "item_id": null
+      },
+      "renewal": {
+        "display_bar": 2,
+        "preset_bar": 6,
+        "slot": 8,
+        "key_label": "PgDn",
+        "virtual_key": 34,
+        "modifiers": 0,
+        "native_name": "Adrenaline renewal",
+        "item_id": 49079
+      },
+      "vulnerability": {
+        "display_bar": 5,
+        "preset_bar": 9,
+        "slot": 6,
+        "key_label": "S",
+        "virtual_key": 83,
+        "modifiers": 0,
+        "native_name": "Vulnerability bomb",
+        "item_id": 48951
+      },
+      "greater_barge": {
+        "display_bar": 1,
+        "preset_bar": 1,
+        "slot": 13,
+        "key_label": "G",
+        "virtual_key": 71,
+        "modifiers": 0,
+        "native_name": "Greater Barge",
+        "item_id": null
+      },
+      "meteor_strike": {
+        "display_bar": 1,
+        "preset_bar": 1,
+        "slot": 11,
+        "key_label": "D",
+        "virtual_key": 68,
+        "modifiers": 0,
+        "native_name": "Meteor Strike",
+        "item_id": null
+      },
+      "assault": {
+        "display_bar": 1,
+        "preset_bar": 1,
+        "slot": 9,
+        "key_label": "R",
+        "virtual_key": 82,
+        "modifiers": 0,
+        "native_name": "Assault",
+        "item_id": null
+      },
+      "overpower": {
+        "display_bar": 1,
+        "preset_bar": 1,
+        "slot": 10,
+        "key_label": "T",
+        "virtual_key": 84,
+        "modifiers": 0,
+        "native_name": "Overpower",
+        "item_id": null
+      },
+      "equip_ezk": {
+        "display_bar": 3,
+        "preset_bar": 7,
+        "slot": 13,
+        "key_label": "PgUp",
+        "virtual_key": 33,
+        "modifiers": 0,
+        "native_name": "Augmented Ek-ZekKil",
+        "item_id": 52543
+      },
+      "ezk_special": {
+        "display_bar": 4,
+        "preset_bar": 8,
+        "slot": 3,
+        "key_label": "=",
+        "virtual_key": 187,
+        "modifiers": 0,
+        "native_name": "Weapon Special Attack",
+        "item_id": null
+      },
+      "equip_red_eof": {
+        "display_bar": 4,
+        "preset_bar": 8,
+        "slot": 9,
+        "key_label": "7",
+        "virtual_key": 55,
+        "modifiers": 0,
+        "native_name": "Essence of Finality amulet (or)(red)",
+        "item_id": 51065
+      },
+      "dragon_scimitar_special": {
+        "display_bar": 4,
+        "preset_bar": 8,
+        "slot": 10,
+        "key_label": "6",
+        "virtual_key": 54,
+        "modifiers": 0,
+        "native_name": "Essence of Finality",
+        "item_id": null
+      }
+    },
+    "target_cycle": {
+      "key_label": "A",
+      "virtual_key": 65,
+      "source": "user declaration; target-cycle key is not an action-bar slot"
+    },
+    "recheck_before_dispatch": true
+  },
   "limitations": [
     "This is an ordered plan, not a validated kill or server-timing claim.",
     "Native UI label bindings must be pinned and checked by the actuator before dispatch.",

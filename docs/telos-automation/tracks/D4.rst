@@ -170,3 +170,9 @@ Requests
   reproduced the old target-switch/config/staleness failures before the fix.
   Eighteen D4 scenario/replay tests pass with no native input code loaded.
   Account setup, complete castability and rung-4 validation remain pending.
+
+* Persisted P1 bindings, 2026-11-16: the sequence profile now stores all 12
+  live native bar/preset/slot/key/name/ID associations. Current red EoF equip
+  is 7 and its special is 6. A stays separately user-declared. These are saved
+  observations; D8 still rechecks the live role before dispatch and does not
+  ask the user to remap them each session.
