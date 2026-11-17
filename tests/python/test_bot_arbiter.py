@@ -189,7 +189,7 @@ class P1BatchWriterTests(unittest.TestCase):
                 if change == "outside":
                     field["value"] = 1498611712
                 elif change == "enrage":
-                    field["value"] = (1 << 29) | 2000
+                    field["value"] = (1 << 29) | 4095
                 elif change == "stale":
                     field["age_ms"] = 151
                 elif change == "sequence":
@@ -202,6 +202,17 @@ class P1BatchWriterTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "instance_or_enrage"):
                     writer.send(batch, self.world, self.prepare)
                 self.assertEqual(self.calls, ["released"])
+
+    def test_supported_enrage_does_not_gate_the_same_opening_trial(self):
+        from rs3_reader.bot.world_state import to_jsonable
+
+        for enrage in (300, 1000, 2000, 4000):
+            writer, batch = self.writer_and_batch()
+            record = to_jsonable(self.world.raw)
+            record["encounter"]["raw_candidates"]["6359"]["value"] = (1 << 29) | enrage
+            self.world = WorldState.from_telemetry(record)
+            accepted, _ = writer.send(batch, self.world, self.prepare)
+            self.assertEqual(accepted, ("target_cycle",))
 
     def test_opening_prayer_is_opt_in_and_uses_current_ctrl_binding(self):
         from types import SimpleNamespace

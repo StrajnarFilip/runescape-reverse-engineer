@@ -152,3 +152,9 @@ Requests
   two-cycle controller owns timing and acknowledgement state. This method
   cannot promote production validation flags. Synthetic Ctrl+F3 dispatch and
   default refusal are covered without a game process.
+* User-directed correction, 2026-11-17: remove the fixed 300% start gate.
+  Enrage stays observed metadata within the supported 0..4000 range and does
+  not drive the isolated ordinary-auto predictor. Native instance, source,
+  phase, freshness and stop checks remain mandatory. A synthetic test covers
+  identical opening dispatch at 300, 1000, 2000 and 4000; it establishes no
+  full-mechanic or protection-deadline validation in those bands.

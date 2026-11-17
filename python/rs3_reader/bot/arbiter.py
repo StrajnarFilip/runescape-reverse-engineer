@@ -61,12 +61,14 @@ class P1BatchArbiter:
         self.opening_trial_enabled = opening_trial_enabled is True
 
     def encounter_ready(self, world):
-        """Require the same-frame native instance bit at 300% before any P1 input.
+        """Require the same-frame native instance bit before any P1 input.
 
         Dormant config 22892 also exists outside the encounter. It is never an
         entry guard. VARP 6359 bit 29 distinguishes the captured in-instance
         intervals, including dormant intervals; low 12 bits carry enrage.
         Raw data must retain the C sampler's process/scene/sequence and age.
+        Enrage is retained as metadata within the supported 0..4000 range;
+        it neither selects the ordinary-auto cadence nor must equal 300.
         This is an experiment entry check, not a successful fight/result claim.
         """
         instance_variable, instance_bit, enrage_mask = "6359", 1 << 29, 4095
@@ -87,7 +89,7 @@ class P1BatchArbiter:
             and 0 <= age <= 150
             and 0 <= self.clock() - world.observed_ns <= (150 - age) * NS_PER_MS
             and value & instance_bit != 0
-            and value & enrage_mask == 300
+            and 0 <= value & enrage_mask <= 4000
         )
 
     def _guard(self, batch, world):
