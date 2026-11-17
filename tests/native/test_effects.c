@@ -57,6 +57,33 @@ static void torn_values_invalidate_the_observation(void)
     fixture_destroy(test_fixture);
 }
 
+static void special_effect_candidates_are_not_fictitious_ability_cooldowns(void)
+{
+    fixture *test_fixture = fixture_create();
+    const uint64_t second_node = EFFECT_NODES + 0x100;
+    fixture_add_block(test_fixture, EFFECT_NODES, FIXTURE_VARIABLE_NODE_BYTES);
+    fixture_add_block(test_fixture, second_node, FIXTURE_VARIABLE_NODE_BYTES);
+    fixture_put_variable(test_fixture, FIXTURE_CLIENT_TABLE, EFFECT_NODES, 8301, 1500);
+    fixture_put_variable(test_fixture, FIXTURE_CLIENT_TABLE, second_node, 7092, 1600);
+    assert(fixture_decode(test_fixture));
+    const rs3_effect *weapon =
+        &test_fixture->snapshot->effects[RS3_EFFECT_IGNEOUS_SHOWDOWN_COOLDOWN - 1];
+    const rs3_effect *stored = &test_fixture->snapshot->effects[RS3_EFFECT_DRAGON_SCIMITAR - 1];
+    assert(weapon->expiry_var == 8301 && weapon->raw_expiry == 1500);
+    assert(stored->expiry_var == 7092 && stored->raw_expiry == 1600);
+    assert(weapon->raw_valid_mask == 1 && stored->raw_valid_mask == 1);
+    assert(weapon->reason == RS3_EFFECT_UNVALIDATED && stored->reason == RS3_EFFECT_UNVALIDATED);
+    assert(!weapon->flags && !stored->flags);
+    assert(weapon->remaining_ms == -1 && stored->active == -1);
+    /* Existing IDs and ABI record sizes remain stable; old small buffers negotiate capacity. */
+    rs3_effect output[14];
+    memset(output, 0x5a, sizeof output);
+    uint32_t required = 0;
+    assert(rs3_snapshot_effects(test_fixture->snapshot, output, 14, &required) == RS3_E_BUFFER);
+    assert(required == 16 && output[0].effect_id == 0x5a5a5a5a);
+    fixture_destroy(test_fixture);
+}
+
 static void profile_and_frame_invalidation(void)
 {
     fixture *test_fixture = fixture_create_for_profile(&profile_compatibility);
@@ -121,6 +148,7 @@ int main(void)
     RUN_TEST(unknown_is_not_absent);
     RUN_TEST(raw_changes_are_not_buff_proof);
     RUN_TEST(torn_values_invalidate_the_observation);
+    RUN_TEST(special_effect_candidates_are_not_fictitious_ability_cooldowns);
     RUN_TEST(profile_and_frame_invalidation);
     RUN_TEST(expiry_does_not_prove_presence);
     RUN_TEST(caller_owned_accessors);

@@ -38,7 +38,9 @@ static const effect_candidate candidates[RS3_EFFECT_COUNT] = {
     {RS3_EFFECT_SOURCE_VARCLIENT, 3901, 0, 0},      /* Devotion. */
     {RS3_EFFECT_SOURCE_VARCLIENT, 3735, 0, 0},      /* Barricade. */
     {RS3_EFFECT_SOURCE_VARCLIENT, 3734, 0, 0},      /* Heroism: Immortality candidate. */
-    {RS3_EFFECT_SOURCE_VARPLAYER, 0, 0, 4}          /* Varbit 9, bit 13: shield lead. */
+    {RS3_EFFECT_SOURCE_VARPLAYER, 0, 0, 4},         /* Varbit 9, bit 13: shield lead. */
+    {RS3_EFFECT_SOURCE_VARCLIENT, 8301, 0, 0},      /* Igneous Showdown cooldown end. */
+    {RS3_EFFECT_SOURCE_VARCLIENT, 7092, 0, 0}       /* Dragon scimitar effect end. */
 };
 
 uint32_t rs3_effects_sizeof(uint32_t structure)

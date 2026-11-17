@@ -31,6 +31,7 @@ MAX_HITS = 65536
 NAME_CAPACITY = 520
 MAX_ITEMS = 47
 MAX_ABILITIES = 2048
+EFFECT_COUNT = 16
 BACKPACK_SLOT_COUNT = 28
 EQUIPMENT_SLOT_COUNT = 19
 HIT_EVENT_QUEUE_CAPACITY = 4096
@@ -1165,7 +1166,7 @@ class Reader:
         # Reusable output buffers sized for the ABI limits.
         self.info = Info()
         self.effects_info = EffectsInfo()
-        self.effects = (Effect * 14)()
+        self.effects = (Effect * EFFECT_COUNT)()
         self.encounter = EncounterState()
         self.telos_cleanse = TelosCleanse()
         self.hazard_info = HazardInfo()

@@ -152,8 +152,12 @@ def item_change_record(event):
     }
 
 
-def extend_record(record, reader):
-    """Add the inventory, equipment, ability and item-change sections to a record."""
+def extend_record(record, reader, *, item_events=None):
+    """Add inventory fields, reusing an owned event batch when supplied.
+
+    The default drains the inventory queue for standalone telemetry consumers.
+    A combined controller supplies its single drain as ``(events, lost)``.
+    """
     info = reader.inventory_info
     item_count = info.backpack_count + info.equipment_count
     items = [item_record(reader.items[index]) for index in range(item_count)]
@@ -197,7 +201,7 @@ def extend_record(record, reader):
         "message": None if catalog_available else catalog_message,
     }
 
-    events, lost = reader.drain_item_events()
+    events, lost = reader.drain_item_events() if item_events is None else item_events
     record["inventory_changes"] = {
         "events_lost": lost,
         "sequence": reader.item_event_cursor,

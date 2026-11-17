@@ -18,11 +18,13 @@ from pathlib import Path
 
 from rs3_reader.action_bar_keys import displayed_bindings, refresh_binding
 from rs3_reader.bot.attempt_log import CLEANSE_MAX_AGE_CLIENT_TICKS, AttemptLog
+from rs3_reader.bot.arbiter import P1BatchArbiter
 from rs3_reader.bot.consumables import (
     PRAYER_RESTORATION_ROLE,
     PotionUseMonitor,
     resolve_prayer_potion,
 )
+from rs3_reader.bot.p1_rotation import IntegratedP1Rotation
 from rs3_reader.native import (
     LOGIC_TICK_MS,
     PRAYER_POINTS_MASK,
@@ -44,11 +46,12 @@ from rs3_reader.prayer import Prayer
 from rs3_reader.rotation_keys import (
     ArduinoBackend,
     SendInputBackend,
+    SharedKeyBatchDevice,
     parse_chord,
     resolve_layout_chord,
     window_keyboard_layout,
 )
-from rs3_reader.telemetry import npc_health_record, player_hit_splats_record
+from rs3_reader.telemetry import NativeTelemetry, npc_health_record, player_hit_splats_record
 from rs3_reader.telos_prayer import MELEE_AUTO_SEQUENCE, ManualPrayerKeys, telos_actions
 
 ACTIVE_TELOS = 22891
@@ -3796,6 +3799,104 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                     consumption_confirmed=False,
                 )
 
+    opening = None
+    opening_record = None
+    opening_telemetry = None
+
+    def opening_events(records):
+        """Persist rotation decisions and outcomes in the mechanic attempt's sequence."""
+        for record in records:
+            record = dict(record)
+            emit(record.pop("event"), **record)
+        if opening is not None and not opening.writer.enabled:
+            camera["pressed"] = False
+
+    if getattr(args, "ordered_p1", False):
+        if attempt is None:
+            raise RuntimeError("Ordered P1 needs the shared native event and attempt log owner")
+
+        def opening_snapshot_guard(world):
+            return (
+                input_allowed
+                and (reader.info.pid, reader.info.process_creation_time, reader.combat.scene_epoch)
+                == (
+                    world.session.pid,
+                    world.session.process_creation_time,
+                    world.session.scene_epoch,
+                )
+                and reader.info.sequence == world.sample_sequence
+                and 0 <= reader.monotonic_ns() - world.observed_ns <= MAX_SAMPLE_AGE_NS
+                and (layout is None or window_keyboard_layout(window)[0] == layout)
+                and not any(keys.get_async_key_state(key) < 0 for key in (0x10, 0x11, 0x12))
+            )
+
+        def opening_key_observed(index, descriptor, accepted, started_ns, ended_ns):
+            camera["pressed"] = False
+            emit(
+                "p1_key_input",
+                batch_index=index,
+                kind=descriptor.kind,
+                ability_id=descriptor.ability_id,
+                inventory_slot=descriptor.slot,
+                expected_item_id=descriptor.expected_item_id,
+                virtual_key=descriptor.virtual_key,
+                modifiers=descriptor.modifiers,
+                started_native_ns=started_ns,
+                ended_native_ns=ended_ns,
+                input_outcome="balanced_input_accepted" if accepted else "delivery_uncertain",
+                cast_confirmed=False,
+            )
+
+        shared_device = SharedKeyBatchDevice(
+            board,
+            check_focus,
+            opening_snapshot_guard,
+            reader.monotonic_ns,
+            scan_for_key=scan_for_key if layout is not None else None,
+            hold_seconds=KEY_HOLD_SECONDS,
+            on_input=opening_key_observed,
+            on_batch=lambda descriptors: emit(
+                "p1_key_batch_requested",
+                actions=[
+                    dict(
+                        kind=action.kind,
+                        ability_id=action.ability_id,
+                        slot=action.slot,
+                        expected_item_id=action.expected_item_id,
+                        virtual_key=action.virtual_key,
+                        modifiers=action.modifiers,
+                    )
+                    for action in descriptors
+                ],
+                sample_sequence=reader.info.sequence,
+            ),
+        )
+        writer = P1BatchArbiter(
+            shared_device,
+            reader.monotonic_ns,
+            lambda: keys.get_async_key_state(F12) < 0,
+            lambda world: input_allowed and keys.game_window(identity) == window,
+            enabled=True,
+        )
+        opening = IntegratedP1Rotation(writer, reader.read_action_label, reader.monotonic_ns)
+        opening.discover_bindings()
+        opening_telemetry = NativeTelemetry(reader=reader)
+        emit(
+            "p1_rotation_configured",
+            bindings=opening.locations,
+            movement_source="native_practice_mechanics",
+            live_validated=False,
+            production_prayer_timing_validated=False,
+        )
+        if cleanup is not None:
+            cleanup.callback(lambda: opening_events(opening.finish("attempt_ended")))
+
+    def dispatch_opening(*, deferred=False):
+        """Yield the GCD to urgent responses while retaining the observed wake edge."""
+        if opening is not None and not opening.stopped and opening_record is not None:
+            world = opening.world(opening_record, now_ns=reader.monotonic_ns())
+            opening_events(opening.dispatch(world, deferred=deferred))
+
     # The received tick last seen and when it was first seen (monotonic ns).
     tick_clock = {"tick": None, "since_ns": None}
 
@@ -4047,6 +4148,11 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                     sequence: prayer for sequence, (_, _, prayer) in walk_samples.items()
                 },
             )
+        if opening is not None and not opening.stopped:
+            opening_record = opening_telemetry.record_current(attempt.snapshot_events)
+            opening_events(
+                opening.observe(opening.world(opening_record, now_ns=reader.monotonic_ns()))
+            )
         walk_samples.clear()
         if (info.pid, info.process_creation_time) != identity[:2]:
             # A restarted client has nothing left to control.
@@ -4168,6 +4274,7 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                 emit("approach_retry")
                 initiated = False
                 next_approach = 0
+            dispatch_opening()
             time.sleep(POLL_SECONDS)
             continue
 
@@ -4555,6 +4662,7 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                         **(dodge_choice or {"ability": None}),
                     )
             log("ability_sent", ability=action.ability, reason=action.reason, sent_ns=sent_ns)
+        dispatch_opening(deferred=action is not None or phase_one.pending is not None)
         restore_prayer(prayer_tenths)
         remember_floor(phase, boss)
         movement_busy = phase_one.owns_movement(reader.monotonic_ns(), received_tick)
@@ -4718,6 +4826,11 @@ def main(argv=None, *, attempt_directory=None):
         help="Enable input through Win32 or Arduino; omit both this and --port to observe",
     )
     parser.add_argument(
+        "--ordered-p1",
+        action="store_true",
+        help="Compose the ordered native-acknowledged P1 opening with mechanics and prayers",
+    )
+    parser.add_argument(
         "--legacy-unmodified-bar-keys",
         action="store_true",
         help="Use the older Compatibility Mode account's unmodified-key calibration and defaults",
@@ -4824,6 +4937,8 @@ def main(argv=None, *, attempt_directory=None):
         parser.error("Live input requires --pid to pin the intended client")
     if args.replay and live_input:
         parser.error("Replay never opens an input backend")
+    if args.ordered_p1 and (not live_input or args.legacy_unmodified_bar_keys or args.reacquire):
+        parser.error("--ordered-p1 needs live native bindings and cannot use --reacquire")
     if args.replay and args.record_attempt:
         parser.error("An attempt log requires a live session")
     # Input continues through every handled phase (to the P4 checkpoint) unless the one-shot

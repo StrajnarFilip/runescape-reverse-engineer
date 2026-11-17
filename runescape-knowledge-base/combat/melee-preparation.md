@@ -58,8 +58,31 @@ frame; do not subtract their wall timestamp from a monotonic input timestamp.
 an explicit Win32 keyboard/mouse backend as well as Arduino. Both require a
 pinned PID for live input. Win32 packet acceptance and release-on-failure tests
 are transport checks. In-game mouse movement and ability acceptance still need
-live evidence. Ordered P1 rotation integration, complete P5 combat, and full
-prayer/healing verification remain open.
+live evidence. The ordered P1 rotation is now composed with this path and
+offline-tested. Complete P5 combat and full prayer/healing verification remain open.
+
+## Special acknowledgement correction (2026-11-17)
+
+**User-confirmed:** physical weapon-special cooldowns appear on the debuff bar.
+EoF specials have no separate personal cooldown beyond the ordinary ability
+delay. Do not wait for a nonexistent EoF cooldown or acknowledge its stored
+special from a generic button timer or GCD change.
+
+**Research leads, now acquired in C:** revision-951 VarClient 8301 is named
+`combatv2_cooldown_weapon_igneous_showdown_end_client`; 7092 is named
+`combatv2_buff_dragon_scimitar_effect_end_client`. Both were readable on the
+pinned original client. A sample at logic tick 457747 retained endpoints
+445632 and 445843, so positive raw values alone do not establish active effects.
+C effect IDs 15 and 16 keep units, presence and semantic expiry unknown until
+labelled transitions establish them. The Dragon scimitar effect is a cast lead,
+not an EoF cooldown.
+
+**Integration rule:** the ordered opening and mechanics share one backend and
+four event drains. Protection and defensives precede rotation dispatch. A
+delayed wake response is reported rather than rebased to a later sample. Win32
+submits each balanced ordered batch without per-key sleeps. Readiness and
+outcome verification remain separate. See the
+[combined controller](../../docs/telos-combined-controller.rst).
 
 ## Earlier account setup and research history
 

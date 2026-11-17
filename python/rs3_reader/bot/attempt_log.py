@@ -17,7 +17,7 @@ from ..native import (
     Variable,
 )
 from ..prayer import Prayer
-from ..telemetry import effects_record, hit_record, spatial_actor_record
+from ..telemetry import SnapshotEvents, effects_record, hit_record, spatial_actor_record
 
 SCHEMA_VERSION = 1
 CLEANSE_MAX_AGE_CLIENT_TICKS = 50
@@ -53,6 +53,7 @@ class AttemptLog:
         self.end_reason = None
         self.inventory_events = ()
         self.inventory_lost = None
+        self.snapshot_events = None
         self.write("attempt_started", mode=mode, enrage_label=enrage)
 
     def relative_ns(self, value):
@@ -128,6 +129,16 @@ class AttemptLog:
         player = reader.player
         npc_hits, npc_hit_loss = reader.drain_events()
         self.inventory_events, self.inventory_lost = reader.drain_item_events()
+        self.snapshot_events = SnapshotEvents(
+            tuple(npc_hits),
+            npc_hit_loss,
+            tuple(actions),
+            action_loss,
+            tuple(hits),
+            hit_loss,
+            tuple(self.inventory_events),
+            self.inventory_lost,
+        )
         session = (info.pid, info.process_creation_time, reader.combat.scene_epoch)
         if session != self.session:
             self.session = session

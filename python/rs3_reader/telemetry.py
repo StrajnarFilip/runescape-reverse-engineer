@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 import ctypes
 import math
+from dataclasses import dataclass
 
 from .inventory_records import extend_record
 from .native import (
@@ -282,6 +283,8 @@ EFFECT_NAMES = (
     "barricade",
     "immortality",
     "disruption_shield",
+    "igneous_showdown_cooldown",
+    "dragon_scimitar",
 )
 EFFECT_REASONS = (
     None,
@@ -750,14 +753,36 @@ def hazards_record(reader):
     }
 
 
+@dataclass(frozen=True)
+class SnapshotEvents:
+    """The controller's one drain per native queue for a sampled frame.
+
+    Queue records retain their original identity and clock domain. Supplying
+    empty tuples with zero losses asserts a successful empty drain; unavailable
+    loss counts must remain None. Serialization never drains them again.
+    """
+
+    npc_hits: tuple
+    npc_hits_lost: int
+    npc_actions: tuple
+    npc_actions_lost: int
+    player_hits: tuple
+    player_hits_lost: int
+    inventory_changes: tuple
+    inventory_changes_lost: int
+
+
 class NativeTelemetry:
     """Samples a native Reader and returns schema-version-1 records."""
 
-    def __init__(self, pid=None, worker_hz=100, library=None):
-        self.reader = Reader(pid, worker_hz, library)
+    def __init__(self, pid=None, worker_hz=100, library=None, *, reader=None):
+        self._owns_reader = reader is None
+        self.reader = Reader(pid, worker_hz, library) if reader is None else reader
 
     def close(self):
-        self.reader.close()
+        """Close only a Reader created by this telemetry owner."""
+        if self._owns_reader:
+            self.reader.close()
 
     @staticmethod
     def unavailable(message):
@@ -796,13 +821,22 @@ class NativeTelemetry:
         }
 
     def _without_player(
-        self, info, native, position, new_events, events_lost, player_hit_splats, available
+        self,
+        info,
+        native,
+        position,
+        new_events,
+        events_lost,
+        player_hit_splats,
+        available,
+        item_events,
     ):
         """Return a record for a frame without player fields, such as a tile-only frame."""
         reason = decode_text(info.message) or (None if available else "Waiting for a native sample")
         record = self.unavailable(reason)
         record.update(
             timestamp_ms=info.timestamp_ns // 1_000_000,
+            observed_ns=info.monotonic_ns or None,
             pid=info.pid or None,
             native=native,
             process_creation_time=info.process_creation_time,
@@ -826,21 +860,53 @@ class NativeTelemetry:
             "newly_observed": new_events,
             "events_lost": events_lost,
         }
-        return extend_encounter_record(extend_record(record, self.reader), self.reader)
+        return extend_encounter_record(
+            extend_record(record, self.reader, item_events=item_events), self.reader
+        )
 
     def sample(self, include_raw=False):
         """Return one telemetry record. include_raw adds the raw variable values."""
         reader = self.reader
-        info, player, npcs, hits = reader.sample()
+        reader.sample()
         # Drain independently of frame availability so earlier observations survive.
         events, events_lost = reader.drain_events()
-        new_events = [event_record(event) for event in events]
         npc_actions, npc_actions_lost = reader.drain_npc_action_events()
-        npc_action_records = [npc_action_event_record(event) for event in npc_actions]
         player_hit_events, player_hit_events_lost = reader.drain_player_hit_events()
-        player_hit_splats = player_hit_splats_record(
-            reader, player_hit_events, player_hit_events_lost
+        items, item_loss = reader.drain_item_events()
+        return self.record_current(
+            SnapshotEvents(
+                tuple(events),
+                events_lost,
+                tuple(npc_actions),
+                npc_actions_lost,
+                tuple(player_hit_events),
+                player_hit_events_lost,
+                tuple(items),
+                item_loss,
+            ),
+            include_raw=include_raw,
         )
+
+    def record_current(self, events, *, include_raw=False):
+        """Serialize the current C snapshot with no acquisition or queue drain.
+
+        The caller supplies its four owned event batches. This lets the ordered
+        rotation, mechanics and attempt logger consume exactly the same frame.
+        The returned record owns JSON values and survives the next sample.
+        """
+        if not isinstance(events, SnapshotEvents):
+            raise TypeError("Current telemetry requires the controller's SnapshotEvents")
+        reader = self.reader
+        info, player = reader.info, reader.player
+        npcs, hits = reader.npcs[: info.npc_count], reader.hits[: info.hit_count]
+        events_lost = events.npc_hits_lost
+        new_events = [event_record(event) for event in events.npc_hits]
+        npc_actions_lost = events.npc_actions_lost
+        npc_action_records = [npc_action_event_record(event) for event in events.npc_actions]
+        player_hit_splats = player_hit_splats_record(
+            reader, events.player_hits, events.player_hits_lost
+        )
+        item_events = events.inventory_changes, events.inventory_changes_lost
         native = self._native_diagnostics(info, events_lost)
         tile = reader.position
         position = {"x": tile.x, "y": tile.y, "plane": tile.plane} if tile.valid else None
@@ -848,7 +914,14 @@ class NativeTelemetry:
         available = info.status in (Status.AVAILABLE, Status.PARTIAL)
         if not available or not player.prayer_base_level:
             record = self._without_player(
-                info, native, position, new_events, events_lost, player_hit_splats, available
+                info,
+                native,
+                position,
+                new_events,
+                events_lost,
+                player_hit_splats,
+                available,
+                item_events,
             )
             record["npc_action_events"] = npc_action_records
             record["npc_action_events_lost"] = npc_actions_lost
@@ -878,6 +951,7 @@ class NativeTelemetry:
             "schema_version": SCHEMA_VERSION,
             "backend": "c",
             "timestamp_ms": info.timestamp_ns // 1_000_000,
+            "observed_ns": info.monotonic_ns or None,
             "monotonic_ms": nanoseconds_to_milliseconds(info.monotonic_ns, 3),
             "pid": info.pid,
             "process_creation_time": info.process_creation_time,
@@ -964,7 +1038,9 @@ class NativeTelemetry:
         record["hazards"] = hazards_record(reader)
         record["npc_action_events"] = npc_action_records
         record["npc_action_events_lost"] = npc_actions_lost
-        return extend_encounter_record(extend_record(record, reader), reader)
+        return extend_encounter_record(
+            extend_record(record, reader, item_events=item_events), reader
+        )
 
 
 def extend_encounter_record(record, reader):

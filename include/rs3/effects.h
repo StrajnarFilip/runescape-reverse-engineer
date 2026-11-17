@@ -9,7 +9,7 @@ extern "C"
 {
 #endif
 
-#define RS3_EFFECT_COUNT 14u
+#define RS3_EFFECT_COUNT 16u
 
 /** Stable identities; these are reader IDs, not game cache IDs. */
 enum rs3_effect_id
@@ -27,7 +27,9 @@ enum rs3_effect_id
     RS3_EFFECT_DEVOTION,
     RS3_EFFECT_BARRICADE,
     RS3_EFFECT_IMMORTALITY,
-    RS3_EFFECT_DISRUPTION_SHIELD
+    RS3_EFFECT_DISRUPTION_SHIELD,
+    RS3_EFFECT_IGNEOUS_SHOWDOWN_COOLDOWN,
+    RS3_EFFECT_DRAGON_SCIMITAR
 };
 
 enum rs3_effect_source

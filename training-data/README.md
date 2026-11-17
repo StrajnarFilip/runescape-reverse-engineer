@@ -54,8 +54,11 @@ client; `--port` also selects Arduino. Omitting both transport options observes
 only. F12 stops the practice controller; its stop key is separate from the
 supervised pilot's Ctrl+Shift+F12. Focus loss pauses input and the native process
 lifetime remains pinned. The current machine has no detected Leonardo, so
-Win32 support removes that transport dependency. Ordered opening integration
-and P5 combat remain incomplete.
+Win32 support removes that transport dependency. `--ordered-p1` now composes
+the ordered opening with the mechanic/prayer path and uses one balanced Win32
+call per batch. See the [combined controller](../docs/telos-combined-controller.rst)
+for preparation, event names and special-effect gaps. P5 combat and full live
+verification remain incomplete.
 
 For example, after replacing `CURRENT_PID` with the intended process:
 

@@ -24,7 +24,7 @@ from rs3_reader.native import (
     library_path,
     load_library,
 )
-from rs3_reader.telemetry import NativeTelemetry
+from rs3_reader.telemetry import NativeTelemetry, SnapshotEvents
 
 # A PID that never belongs to a running client.
 ABSENT_PID = 0xFFFFFFFF
@@ -32,6 +32,43 @@ ABSENT_PID = 0xFFFFFFFF
 
 @unittest.skipUnless(library_path().is_file(), "Build rs3_native to run ABI tests")
 class NativeLibraryTests(unittest.TestCase):
+    def test_current_snapshot_serialization_never_samples_drains_or_closes_borrowed_reader(self):
+        from contextlib import ExitStack
+
+        with Reader(pid=ABSENT_PID, worker_hz=0) as reader:
+            reader.sample()
+            telemetry = NativeTelemetry(reader=reader)
+            events = SnapshotEvents((), 1, (), 2, (), 3, (), 4)
+            with ExitStack() as stack:
+                calls = [
+                    stack.enter_context(
+                        patch.object(
+                            reader,
+                            name,
+                            side_effect=AssertionError("Unexpected acquisition: " + name),
+                        )
+                    )
+                    for name in (
+                        "sample",
+                        "drain_events",
+                        "drain_npc_action_events",
+                        "drain_player_hit_events",
+                        "drain_item_events",
+                        "close",
+                    )
+                ]
+                record = telemetry.record_current(events)
+                telemetry.close()
+                for call in calls:
+                    call.assert_not_called()
+            self.assertEqual(record["observed_ns"], reader.info.monotonic_ns)
+            self.assertEqual(record["native"]["sample_sequence"], reader.info.sequence)
+            self.assertEqual(record["npc_action_events_lost"], 2)
+            self.assertEqual(record["hit_splats"]["events_lost"], 1)
+            self.assertEqual(record["player_hit_splats"]["events_lost"], 3)
+            self.assertEqual(record["inventory_changes"]["events_lost"], 4)
+            self.assertIsNone(record["inventory"]["slots"])
+
     def test_metadata_lookup_has_no_live_inventory_identity_and_does_not_sample(self):
         with Reader(pid=ABSENT_PID, worker_hz=0) as reader:
             sequence = reader.info.sequence

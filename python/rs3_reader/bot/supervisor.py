@@ -23,6 +23,7 @@ from typing import Mapping
 
 from .actuator import RecordingActuator
 from .intents import Intent
+from .p1_rotation import P1ActionEvidence
 from .replay import read_capture
 from .world_state import Observation, WorldState
 
@@ -47,7 +48,7 @@ def _integer(value, minimum=0):
     return type(value) is int and value >= minimum
 
 
-class P1Attempt:
+class P1Attempt(P1ActionEvidence):
     """Bounded supervised experiment using C observations and the D6 batch writer.
 
     The user owns movement and encounter entry. The coordinator is created only
@@ -77,49 +78,6 @@ class P1Attempt:
         self.prayer_trial = None
         self.prayer_locations = {}
         self._current_world = None
-
-    @staticmethod
-    def _text(value):
-        return value.decode("utf-8", "strict") if isinstance(value, bytes) else value
-
-    def _matches(self, action, label):
-        name = self._text(label.name)
-        if action["kind"] == "equip":
-            return label.item_id == action["item_id"]
-        if action.get("role") == "adrenaline_renewal":
-            return name == "Adrenaline renewal"
-        if action.get("role") == "vulnerability_bomb":
-            return label.item_id == action["item_id"] and name == "Vulnerability bomb"
-        return name == action.get("name") and label.item_id == -1
-
-    def discover_bindings(self):
-        """Find unique current action roles; no input and no raw memory reads in Python."""
-        actions = [
-            action
-            for step in self.template.document["steps"]
-            for action in step["actions"]
-            if action["kind"] != "target_cycle"
-        ]
-        found = {action["id"]: [] for action in actions}
-        for bar in range(1, 6):
-            for slot in range(1, 15):
-                try:
-                    label = self.read_label(bar, slot)
-                except RuntimeError:
-                    continue
-                if label.flags == 15 and label.name in (b"Deflect Melee", b"Soul Split"):
-                    role = "melee" if label.name == b"Deflect Melee" else "soul_split"
-                    if role in self.prayer_locations:
-                        raise ValueError("p1_prayer_binding_ambiguous:" + role)
-                    self.prayer_locations[role] = bar, slot
-                for action in actions:
-                    if label.flags == 15 and self._matches(action, label):
-                        found[action["id"]].append((bar, slot, self._text(label.key_label)))
-        missing = [name for name, matches in found.items() if len(matches) != 1]
-        if missing:
-            raise ValueError("p1_binding_missing_or_ambiguous:" + ",".join(missing))
-        self.locations = {name: matches[0] for name, matches in found.items()}
-        return dict(self.locations)
 
     def send_opening_prayer(self, prayer):
         """Callback for the restored bounded controller; D6 remains the sole writer."""
@@ -200,172 +158,6 @@ class P1Attempt:
         if self.prayer_trial.finished and self.prayer_trial.state != "completed":
             self.stop("bounded_prayer_trial_aborted")
         return [dict(update, component="bounded_opening_prayer") for update in updates]
-
-    def _fresh(self, observation):
-        return observation.is_fresh(150) and observation.reason is None and bool(observation.source)
-
-    def _ability(self, action, world):
-        if not self._fresh(world.abilities):
-            return None
-        entries = [
-            entry
-            for entry in world.abilities.value
-            if entry.get("struct_id") == action.get("ability_id")
-        ]
-        return entries[0] if len(entries) == 1 else None
-
-    def _item(self, action, world):
-        if not self._fresh(world.inventory):
-            return None
-        matches = []
-        for item in world.inventory.value:
-            expected = action.get("item_id")
-            match = (
-                item.get("item_id") == expected
-                if expected is not None
-                else (
-                    isinstance(item.get("name"), str)
-                    and item["name"].startswith("Adrenaline renewal potion (")
-                )
-            )
-            if (
-                match
-                and _integer(item.get("quantity"), 1)
-                and _integer(item.get("tracking_token"), 1)
-                and item.get("identity_ambiguous") is False
-            ):
-                matches.append(item)
-        return matches[0] if len(matches) == 1 else None
-
-    def _equipped(self, world, slot, item_id):
-        return self._fresh(world.equipment) and any(
-            item.get("slot") == slot
-            and item.get("item_id") == item_id
-            and item.get("quantity") == 1
-            and item.get("identity_ambiguous") is False
-            for item in world.equipment.value.get("slots", ())
-        )
-
-    def _ready(self, action, world):
-        kind = action["kind"]
-        if kind == "target_cycle":
-            return True
-        if kind in ("item", "equip"):
-            return self._item(action, world) is not None
-        entry = self._ability(action, world)
-        if (
-            entry is None
-            or entry.get("in_ability_book") is not True
-            or entry.get("castable") is False
-            or entry.get("equipment_match") != "allowed"
-        ):
-            return False
-        cooldown = entry.get("cooldown") or {}
-        remaining, reason = cooldown.get("remaining_ms"), cooldown.get("reason")
-        # A missing first-use timer permits an experimental attempt, not a ready claim.
-        if reason == "not_set":
-            if remaining is not None:
-                return False
-        elif kind in ("weapon_special", "eof_special") and reason == "timer_mapping_pending":
-            pass
-        elif reason is not None or not _integer(remaining) or remaining != 0:
-            return False
-        if not self._fresh(world.player.adrenaline_percent):
-            return False
-        cost = (entry.get("requirements") or {}).get("adrenaline_raw")
-        if not _integer(cost) or world.player.adrenaline_percent.value < cost / 10:
-            return False
-        if action.get("required_weapon_id") and not self._equipped(
-            world, 3, action["required_weapon_id"]
-        ):
-            return False
-        if action.get("required_amulet_id") and not self._equipped(
-            world, 2, action["required_amulet_id"]
-        ):
-            return False
-        gcd = world.player.gcd
-        return self._fresh(gcd) and (
-            (gcd.value.get("reason") is None and gcd.value.get("remaining_ms") == 0)
-            or (self.engine.index < 2 and gcd.value.get("reason") == "not_set")
-        )
-
-    def prepare(self, action, world):
-        """Re-read the C label and exact slot identity immediately before D6 sends."""
-        from .actuator_sendinput import NativeKeyAction
-
-        descriptor = NativeKeyAction()
-        kind = action["kind"]
-        if kind == "target_cycle":
-            target = self.engine._encounter_npc(world)
-            if target is None:
-                raise ValueError("p1_cycle_target_disappeared")
-            descriptor.kind, descriptor.virtual_key = 3, ord("A")
-            descriptor.expected_instance_id = target.instance_id
-            descriptor.expected_config_id = target.config_id
-            return descriptor, None
-        bar, slot, _ = self.locations[action["id"]]
-        label = self.read_label(bar, slot)
-        if not self._matches(action, label) or not self._ready(action, world):
-            raise ValueError("p1_role_or_readiness_changed:" + action["id"])
-        descriptor.virtual_key, descriptor.modifiers = label.virtual_key, label.modifiers
-        if kind in ("item", "equip"):
-            item = self._item(action, world)
-            descriptor.kind, descriptor.slot = 2, item["slot"]
-            descriptor.expected_item_id = item["item_id"]
-            descriptor.expected_token = item["tracking_token"]
-        else:
-            descriptor.kind, descriptor.ability_id = 1, action["ability_id"]
-        return descriptor, label
-
-    def _acknowledged(self, action, before, world):
-        kind = action["kind"]
-        if kind == "target_cycle":
-            return self._fresh(world.player.target) and (
-                world.player.target.value == self.engine._encounter_npc(world)
-            )
-        if kind == "equip":
-            return self._equipped(
-                world, {"main_hand": 3, "neck": 2}[action["equipment_slot"]], action["item_id"]
-            )
-        if kind == "item":
-            previous = self._item(action, before)
-            if previous is None or not self._fresh(world.inventory):
-                return False
-            current = [
-                item for item in world.inventory.value if item.get("slot") == previous["slot"]
-            ]
-            if len(current) != 1 or current[0].get("identity_ambiguous") is not False:
-                return False
-            current = current[0]
-            if action["id"] == "vulnerability":
-                return (
-                    current.get("item_id") == previous["item_id"]
-                    and current.get("tracking_token") == previous["tracking_token"]
-                    and current.get("quantity") == previous["quantity"] - 1
-                )
-            # Explicit decoded potion names/IDs are evidence, not inferred family metadata.
-            prefix = "Adrenaline renewal potion ("
-            old_name, new_name = previous.get("name", ""), current.get("name", "")
-            return (
-                isinstance(new_name, str)
-                and new_name.startswith(prefix)
-                and old_name.endswith(")")
-                and new_name.endswith(")")
-                and old_name[len(prefix) : -1].isdigit()
-                and new_name[len(prefix) : -1].isdigit()
-                and int(old_name[len(prefix) : -1]) - 1 == int(new_name[len(prefix) : -1])
-                and current.get("item_id") != previous["item_id"]
-                and current.get("quantity") == previous["quantity"]
-            )
-        entry, old = self._ability(action, world), self._ability(action, before)
-        if entry is None or old is None:
-            return False
-        cooldown, old_timer = entry.get("cooldown") or {}, old.get("cooldown") or {}
-        return (
-            cooldown.get("reason") is None
-            and _integer(cooldown.get("remaining_ms"), 1)
-            and cooldown.get("start_tick") != old_timer.get("start_tick")
-        )
 
     def stop(self, reason):
         """Latch a stop; another encounter requires a new explicitly started process."""

@@ -38,8 +38,12 @@ It supports explicit Win32 or Arduino input with a pinned PID. See
 ``training-data/README.md`` for transport selection, recording and current gaps.
 ``bot/consumables.py`` resolves carried prayer potions by C metadata family and
 matches accepted inputs to the single inventory-event drain in ``bot/attempt_log.py``.
-It does not sample memory or issue input. Ordered P1 opening integration and
-complete P5 responses remain pending.
+It does not sample memory or issue input. The
+`combined practice controller <telos-combined-controller.rst>`_ joins the ordered
+P1 opening to mechanics and prayers through a shared backend and event owner.
+``bot/p1_rotation.py`` also supplies the bounded pilot's native action checks.
+Special-effect acknowledgement, P5 responses and full live verification remain
+pending.
 `Action cooldowns <telos-automation/action-cooldowns.rst>`_ lists which
 actions have their own timer, which share one, and what may go out in one tick.
 

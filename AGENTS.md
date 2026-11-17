@@ -76,6 +76,11 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
   abilities or conflicting timings; do not import those as verified constants.
 - EoF stored-special identity, Telos action/phase recognition and complete
   castability are not established merely by inventory IDs or published guides.
+- The user clarified that physical weapon-special cooldowns are on the debuff
+  bar; EoF specials have no separate cooldown beyond the ordinary ability delay.
+  Do not require a personal EoF cooldown. C effect IDs 15/16 acquire VarClient
+  8301 (Igneous Showdown cooldown) and 7092 (Dragon scimitar effect) as unvalidated
+  candidates. Cached endpoints do not establish active buffs or successful casts.
 - Prayer timing code is in `src/prayer.c`, with additive APIs in
   `include/rs3/prayer.h` and `include/rs3/combat.h`; see `docs/prayer-flick.rst`.
   The intended account now has Soul Split; all four configured curses and six

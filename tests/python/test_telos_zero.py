@@ -46,6 +46,15 @@ class InputBackendSelectionTests(unittest.TestCase):
             {"Reader": Mock(), "SendInputBackend": Mock(), "ArduinoBackend": Mock()},
         ):
             for arguments in (
+                ["--ordered-p1"],
+                [
+                    "--ordered-p1",
+                    "--input-backend",
+                    "win32",
+                    "--pid",
+                    "123",
+                    "--legacy-unmodified-bar-keys",
+                ],
                 ["--input-backend", "win32"],
                 ["--input-backend", "arduino", "--pid", "123"],
                 ["--input-backend", "win32", "--port", "COM8", "--pid", "123"],

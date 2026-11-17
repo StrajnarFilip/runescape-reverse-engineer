@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-17",
+  "branch": "telos/integration",
+  "baseline_commit": "9f75255",
+  "result": "combined_path_offline_verified_with_read_only_native_observations",
+  "integration": {
+    "entry_option": "work/telos_zero.py --ordered-p1",
+    "mechanics_and_rotation_share_backend": true,
+    "event_queue_drains_per_sample": 1,
+    "urgent_prayer_and_defensives_precede_rotation": true,
+    "first_wake_observation_preserved_during_deferral": true,
+    "win32_ordered_batch_calls_per_batch": 1,
+    "per_key_sleep_in_win32_batch": false,
+    "partial_delivery_replayed": false,
+    "renewal_consumption_required": false,
+    "outside_instance_dormant_npc_can_arm": false,
+    "generic_eof_cooldown_required": false,
+    "generic_gcd_confirms_special": false
+  },
+  "checks": {
+    "release_build": "passed",
+    "ctest_targets_passed": 16,
+    "ctest_targets_failed": 0,
+    "python_tests_passed": 575,
+    "python_tests_skipped": 0,
+    "new_integrated_p1_tests": 14,
+    "bounded_pilot_tests_unchanged_and_passing": true,
+    "native_effect_fixture_groups": 7,
+    "firmware_host_test": "passed_with_zig_cpp"
+  },
+  "read_only_original_profile_observations": {
+    "opening_native_roles_resolved": 12,
+    "equip_red_eof_key": "7",
+    "eof_special_key": "6",
+    "metadata_note": "Roles were resolved by identity; raw key labels such as a-G retain decoded native modifier masks",
+    "scoped_idle_serialization_and_world_samples_ms": [8.238, 8.432, 8.100, 8.255, 7.211],
+    "performance_scope": "five idle client samples, not a combat throughput or deadline guarantee",
+    "effect_count": 16,
+    "special_effect_candidates": [
+      {"effect_id": 15, "varclient": 8301, "raw_expiry": 445632},
+      {"effect_id": 16, "varclient": 7092, "raw_expiry": 445843}
+    ],
+    "later_sample_logic_tick": 457747,
+    "candidate_presence_or_units_validated": false,
+    "automatic_game_inputs_sent": 0
+  },
+  "special_model": {
+    "user_confirmed_weapon_cooldown_channel": "debuff_bar",
+    "user_confirmed_eof_cooldown": "ordinary_ability_delay_only",
+    "gameval_revision": 951,
+    "gameval_source": "content.runescape.com cache index 67 archive 57",
+    "local_reference_sha256": "6a893f4867842a77625c93abde71ad44f751dc87e7c49c6a3f28410b7cecfa78",
+    "candidate_8301": "combatv2_cooldown_weapon_igneous_showdown_end_client",
+    "candidate_7092": "combatv2_buff_dragon_scimitar_effect_end_client",
+    "effect_structure_bytes_unchanged": 72,
+    "ids_1_through_14_unchanged": true,
+    "small_buffer_returns_required_count_without_modifying_output": true
+  },
+  "remaining": [
+    "Label native effect transitions for the physical EZK and stored Dragon scimitar specials",
+    "Validate Greater Barge channel-conversion signal and precise wake targetability",
+    "Run the combined opening and mechanic/prayer path in an actual encounter",
+    "Complete P5 responses and all remaining native mechanic signals",
+    "Verify protection deadlines and Soul Split healing in final zero-miss encounters"
+  ],
+  "p1_clear_verified_by_this_change": false,
+  "full_goal_complete": false
+}

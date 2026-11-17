@@ -164,6 +164,111 @@ def resolve_layout_chord(value, scan_for_virtual_key):
     return (*chord[:-1], physical)
 
 
+def native_chord(virtual_key, modifiers, scan_for_virtual_key=None):
+    """Translate a decoded C chord, including page/OEM keys and native modifiers."""
+    if type(modifiers) is not int or modifiers < 0 or modifiers & ~7:
+        raise ValueError("Invalid native Ctrl/Shift/Alt mask")
+    base = next((key for key in KEYS.values() if key.virtual_key == virtual_key), None)
+    if type(virtual_key) is not int or base is None or base.name in MODIFIER_NAMES:
+        raise ValueError("Unsupported native base key")
+    if scan_for_virtual_key is not None:
+        scan = scan_for_virtual_key(virtual_key)
+        base = next(
+            (
+                key
+                for key in KEYS.values()
+                if scan == (key.scan_code | (0xE000 if key.extended else 0))
+            ),
+            None,
+        )
+        if base is None or base.name in MODIFIER_NAMES:
+            raise ValueError("Unsupported native key in the client layout")
+    return tuple(
+        KEYS[name] for bit, name in ((1, "CTRL"), (2, "SHIFT"), (4, "ALT")) if modifiers & bit
+    ) + (base,)
+
+
+class BatchInputError(OSError):
+    """An uncertain ordered submission with per-chord True/False/not-inserted outcomes."""
+
+    def __init__(self, message, chord_outcomes):
+        super().__init__(message)
+        self.chord_outcomes = chord_outcomes
+
+
+class SharedKeyBatchDevice:
+    """Run ordered P1 descriptors on the mechanic controller's existing backend.
+
+    D6 prepares all descriptors first. This adapter translates all keys before
+    the first press, checks the same snapshot/focus before each key, and never
+    opens another device. Accepted reports do not establish casts or server
+    tick placement. The input callback preserves partial submissions on failure.
+    """
+
+    def __init__(
+        self,
+        backend,
+        check,
+        snapshot_guard,
+        clock,
+        *,
+        scan_for_key=None,
+        hold_seconds=0.05,
+        wait=time.sleep,
+        on_input=None,
+        on_batch=None,
+    ):
+        self.backend, self.check, self.snapshot_guard = backend, check, snapshot_guard
+        self.clock = clock
+        self.scan_for_key, self.hold_seconds, self.wait = scan_for_key, hold_seconds, wait
+        self.on_input = on_input or (lambda index, action, accepted, start, end: None)
+        self.on_batch = on_batch or (lambda actions: None)
+
+    def dispatch_key_batch(self, actions, world):
+        """Issue one prepared sequence, logging every attempted constituent input."""
+        if not 1 <= len(actions) <= 3:
+            raise ValueError("Invalid shared-key batch size")
+        chords = [
+            native_chord(action.virtual_key, action.modifiers, self.scan_for_key)
+            for action in actions
+        ]
+
+        def check():
+            self.check()
+            if self.snapshot_guard(world) is not True:
+                raise RuntimeError("Ordered batch snapshot changed or expired")
+
+        check()
+        self.on_batch(actions)
+        if getattr(self.backend, "supports_ordered_batch", False) is True:
+            started_ns = self.clock()
+            outcomes = [False] * len(actions)
+            try:
+                self.backend.tap_batch(chords, check)
+                outcomes = [True] * len(actions)
+            except BatchInputError as error:
+                outcomes = error.chord_outcomes
+                raise
+            finally:
+                ended_ns = self.clock()
+                for index, (action, accepted) in enumerate(zip(actions, outcomes)):
+                    if accepted is not None:
+                        self.on_input(index, action, accepted, started_ns, ended_ns)
+            return
+        for index, (action, chord) in enumerate(zip(actions, chords)):
+            accepted = False
+            started_ns = self.clock()
+            try:
+                self.backend.tap(chord, self.hold_seconds, check, self.wait)
+                accepted = True
+            finally:
+                self.on_input(index, action, accepted, started_ns, self.clock())
+
+    def release_all(self):
+        """Release the shared backend while retaining it for mechanic responses."""
+        self.backend.release_all()
+
+
 def window_keyboard_layout(window_handle):
     """Return the target window's input layout and its virtual-key translator."""
     user = windows_library("user32")
@@ -264,6 +369,8 @@ class SendInputBackend(KeyboardBackend):
     screenshot package is required.
     """
 
+    supports_ordered_batch = True
+
     def __init__(self, sender=None):
         super().__init__()
         self.possible_keys = []
@@ -297,6 +404,64 @@ class SendInputBackend(KeyboardBackend):
             raise OSError("SendInput rejected an event (check focus and process integrity levels)")
         if not down and key in self.possible_keys:
             self.possible_keys.remove(key)
+
+    def tap_batch(self, chords, check):
+        """Submit up to three balanced chords in one ordered Win32 call.
+
+        There is no per-key sleep and no server-tick success claim. Partial
+        insertion is reported per chord, held keys are released, and the fault
+        latch prevents replaying an uncertain batch.
+        """
+        if self.closed or self.failed or self.held or not 1 <= len(chords) <= 3:
+            raise RuntimeError("Win32 batch backend is closed, faulted or busy")
+        self.release_all()  # Release any camera hold on this same transport.
+        staged, transitions, boundaries = [], [], []
+        for chord in chords:
+            if not 1 <= len(chord) <= 4:
+                raise ValueError("Invalid ordered chord size")
+            start = len(staged)
+            for key, down in [(key, True) for key in chord] + [
+                (key, False) for key in reversed(chord)
+            ]:
+                flags = KEYEVENTF_SCANCODE | (KEYEVENTF_EXTENDEDKEY if key.extended else 0)
+                if not down:
+                    flags |= KEYEVENTF_KEYUP
+                staged.append(
+                    Input(
+                        INPUT_KEYBOARD, InputData(keyboard=KeyboardInput(0, key.scan_code, flags))
+                    )
+                )
+                transitions.append((key, down))
+            boundaries.append((start, len(staged)))
+        packets = (Input * len(staged))(*staged)
+        check()
+        sent = None
+        try:
+            sent = self.sender(len(staged), packets, ctypes.sizeof(Input))
+        except BaseException:
+            self.failed = True
+            self.possible_keys = list(dict.fromkeys(key for key, _ in transitions))
+            self.release_all()
+            raise
+        if sent == len(staged):
+            return
+        self.failed = True
+        valid_prefix = type(sent) is int and 0 <= sent < len(staged)
+        inserted = transitions[:sent] if valid_prefix else transitions
+        for key, down in inserted:
+            if down and key not in self.possible_keys:
+                self.possible_keys.append(key)
+            elif not down and key in self.possible_keys:
+                self.possible_keys.remove(key)
+        outcomes = (
+            [True if end <= sent else None if sent <= start else False for start, end in boundaries]
+            if valid_prefix
+            else [False] * len(chords)
+        )
+        try:
+            self.release_all()
+        finally:
+            raise BatchInputError("SendInput rejected all or part of the ordered batch", outcomes)
 
     def _mouse(self, flags, check, *, x=0, y=0, data=0):
         check()
