@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from rs3_reader.bot.attempt_log import AttemptLog
+from rs3_reader.action_bar_keys import SlotBinding
 from rs3_reader.native import (
     EncounterState,
     HazardFlags,
@@ -36,6 +37,63 @@ HOLD_STILL = controller["HOLD_STILL"]
 SECOND_NS = 1_000_000_000
 
 
+class CurrentAccountBindingTests(unittest.TestCase):
+    def arguments(self, **changes):
+        values = {name: None for name in controller["ACTION_BAR_KEY_ARGUMENTS"]}
+        values.update(legacy_unmodified_bar_keys=False, displayed_keys=False)
+        values.update(changes)
+        return SimpleNamespace(**values)
+
+    def native_bindings(self):
+        return {
+            name: SlotBinding(name, chord, 2, 6, index, None, None, source="native_ui_label")
+            for index, (name, chord) in enumerate(
+                (
+                    ("Freedom", "Z"),
+                    ("Anticipation", "T"),
+                    ("Deflect Magic", "Ctrl+F1"),
+                    ("Soul Split", "Ctrl+F3"),
+                    ("Deflect Melee", "Ctrl+F4"),
+                ),
+                1,
+            )
+        }
+
+    def test_current_account_keeps_ctrl_chords_and_never_inherits_old_fallback_keys(self):
+        resolve = controller["resolve_action_bar_keys"]
+        args = self.arguments()
+        with patch.dict(
+            resolve.__globals__,
+            {"displayed_bindings": Mock(return_value=self.native_bindings()), "log": Mock()},
+        ):
+            resolve(SimpleNamespace(sample=Mock()), args)
+        self.assertEqual(args.flick_soul_split_key, "Ctrl+F3")
+        self.assertEqual(args.flick_melee_key, "Ctrl+F4")
+        self.assertEqual(args.flick_magic_key, "Ctrl+F1")
+        self.assertEqual(args.native_bindings["Soul Split"].source, "native_ui_label")
+        for argument in (
+            "surge",
+            "devotion",
+            "dive",
+            "super_restore",
+            "spellbook_swap",
+            "disruption_shield",
+        ):
+            self.assertIsNone(getattr(args, argument))
+
+    def test_missing_soul_split_is_reported_instead_of_substituting_plain_f4(self):
+        resolve = controller["resolve_action_bar_keys"]
+        bindings = self.native_bindings()
+        del bindings["Soul Split"]
+        args = self.arguments()
+        with patch.dict(
+            resolve.__globals__, {"displayed_bindings": Mock(return_value=bindings), "log": Mock()}
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Soul Split"):
+                resolve(SimpleNamespace(sample=Mock()), args)
+        self.assertIsNone(args.flick_soul_split_key)
+
+
 def event(ordinal, animation):
     return dict(event_sequence=ordinal, action_sequence=animation, observed_ns=ordinal * SECOND_NS)
 
@@ -55,9 +113,7 @@ class PhaseOneTests(unittest.TestCase):
         )
         session = (1, 2, 3)
         self.assertEqual(telos_actions([marker], session, 4963, {1}), [])
-        actions = telos_actions(
-            [marker], session, 4963, {1}, additional_samples={4962: None}
-        )
+        actions = telos_actions([marker], session, 4963, {1}, additional_samples={4962: None})
         phase = PhaseOne(phase=3)
         phase.observe(actions)
         self.assertEqual(phase.expected, HOLD_STILL)
@@ -131,8 +187,9 @@ class PhaseOneTests(unittest.TestCase):
             phase = PhaseOne(phase=3)
             phase.observe([dict(event(1, UPPERCUT), received_tick=15150)])
             self.assertIsNone(
-                phase.next_action(SECOND_NS, timers, 0, Prayer.MELEE, received_tick=15153,
-                                  uppercut_choice=choice)
+                phase.next_action(
+                    SECOND_NS, timers, 0, Prayer.MELEE, received_tick=15153, uppercut_choice=choice
+                )
             )
             action = phase.next_action(
                 SECOND_NS, timers, 0, Prayer.MELEE, received_tick=15154, uppercut_choice=choice
@@ -142,14 +199,24 @@ class PhaseOneTests(unittest.TestCase):
             # Never the other jump as well.
             cooling = {expected: 20_000, ({"Escape", "Surge"} - {expected}).pop(): 0}
             self.assertIsNone(
-                phase.next_action(SECOND_NS + 1, cooling, 0, Prayer.MELEE, received_tick=15155,
-                                  uppercut_choice="Surge" if expected == "Escape" else "Escape")
+                phase.next_action(
+                    SECOND_NS + 1,
+                    cooling,
+                    0,
+                    Prayer.MELEE,
+                    received_tick=15155,
+                    uppercut_choice="Surge" if expected == "Escape" else "Escape",
+                )
             )
         # The chosen jump cooling: the other one goes instead.
         phase = PhaseOne()
         phase.observe([dict(event(2, UPPERCUT), received_tick=200)])
         action = phase.next_action(
-            SECOND_NS, {"Escape": 9_000, "Surge": 0}, 0, Prayer.MELEE, received_tick=204,
+            SECOND_NS,
+            {"Escape": 9_000, "Surge": 0},
+            0,
+            Prayer.MELEE,
+            received_tick=204,
             uppercut_choice="Escape",
         )
         self.assertEqual(action, controller["Action"]("Surge", "Uppercut Surge"))
@@ -257,9 +324,7 @@ class PhaseOneTests(unittest.TestCase):
         # 2026-11-15: presses with 1,760-1,780 ms left never cast, 360-600 ms always did.
         lead = controller["GCD_PRESS_LEAD_MS"]
         for gcd in (1780, 600, lead + 1, None):
-            self.assertIsNone(
-                phase.next_action(now, timers, gcd, Prayer.SOUL_SPLIT, flicking=True)
-            )
+            self.assertIsNone(phase.next_action(now, timers, gcd, Prayer.SOUL_SPLIT, flicking=True))
         action = phase.next_action(now, timers, lead, Prayer.SOUL_SPLIT, flicking=True)
         self.assertEqual(action.ability, "Anticipation")
         phase.sent(action, now)
@@ -404,8 +469,13 @@ class PhaseOneTests(unittest.TestCase):
         phase.sent(action, SECOND_NS)
         self.assertTrue(phase.soul_split_for_heavy_hit({"Resonance": 30_000}, 10546, 1700))
         # A press that produced no cooldown keeps Deflect Melee for the heavy hit.
-        phase.next_action(SECOND_NS + controller["ACK_TIMEOUT_NS"], timers, 1700, Prayer.MELEE,
-                          received_tick=10546)
+        phase.next_action(
+            SECOND_NS + controller["ACK_TIMEOUT_NS"],
+            timers,
+            1700,
+            Prayer.MELEE,
+            received_tick=10546,
+        )
         self.assertEqual(phase.cast_result, ("Resonance", False))
         self.assertFalse(phase.soul_split_for_heavy_hit(timers, 10546, 1700))
 
@@ -416,11 +486,18 @@ class PhaseOneTests(unittest.TestCase):
         phase.observe([dict(event(1, HOLD_STILL), received_tick=100)])
         cooling = {"Resonance": 12_000, "Devotion": 0}
         self.assertIsNone(
-            phase.next_action(SECOND_NS, cooling, 0, Prayer.MELEE, received_tick=100,
-                              adrenaline_tenths=enough - 10)
+            phase.next_action(
+                SECOND_NS,
+                cooling,
+                0,
+                Prayer.MELEE,
+                received_tick=100,
+                adrenaline_tenths=enough - 10,
+            )
         )
-        action = phase.next_action(SECOND_NS, cooling, 0, Prayer.MELEE, received_tick=100,
-                                   adrenaline_tenths=enough)
+        action = phase.next_action(
+            SECOND_NS, cooling, 0, Prayer.MELEE, received_tick=100, adrenaline_tenths=enough
+        )
         self.assertEqual(action.ability, "Devotion")
         phase.sent(action, SECOND_NS)
         self.assertFalse(phase.devotion_press_possible(cooling, 101, enough))
@@ -430,12 +507,14 @@ class PhaseOneTests(unittest.TestCase):
         second = PhaseOne()
         second.observe([dict(event(2, HOLD_STILL), received_tick=200)])
         self.assertIsNone(
-            second.next_action(SECOND_NS, ready, 0, Prayer.MELEE, received_tick=200,
-                               adrenaline_tenths=enough)
+            second.next_action(
+                SECOND_NS, ready, 0, Prayer.MELEE, received_tick=200, adrenaline_tenths=enough
+            )
         )
         self.assertEqual(
-            second.next_action(SECOND_NS, ready, 0, Prayer.MELEE, received_tick=201,
-                               adrenaline_tenths=enough).ability,
+            second.next_action(
+                SECOND_NS, ready, 0, Prayer.MELEE, received_tick=201, adrenaline_tenths=enough
+            ).ability,
             "Devotion",
         )
         # Too late after +3, and never on top of a pressed Resonance.
@@ -450,7 +529,10 @@ class PhaseOneTests(unittest.TestCase):
 
         def ability(name, match, reason, flags=0, remaining=0):
             return SimpleNamespace(
-                name=name.encode(), equipment_match=match, reason=reason, flags=flags,
+                name=name.encode(),
+                equipment_match=match,
+                reason=reason,
+                flags=flags,
                 remaining_ms=remaining,
             )
 
@@ -572,19 +654,26 @@ class PhaseOneTests(unittest.TestCase):
         phase.observe([dict(event(1, HOLD_STILL), received_tick=100)])
         cooling = {"Resonance": 12_000, shield: 0, "Devotion": 0}
         self.assertIsNone(
-            phase.next_action(SECOND_NS, cooling, 1500, Prayer.MELEE, received_tick=101,
-                              adrenaline_tenths=1000)
+            phase.next_action(
+                SECOND_NS, cooling, 1500, Prayer.MELEE, received_tick=101, adrenaline_tenths=1000
+            )
         )
         phase.observe_hits([self.hit(133)], 102)
-        action = phase.next_action(SECOND_NS, cooling, 1500, Prayer.MELEE, received_tick=102,
-                                   adrenaline_tenths=1000)
+        action = phase.next_action(
+            SECOND_NS, cooling, 1500, Prayer.MELEE, received_tick=102, adrenaline_tenths=1000
+        )
         self.assertEqual(
             action, controller["Action"](shield, "Hold Still heavy hit without Resonance")
         )
         phase.sent(action, SECOND_NS)
         self.assertIsNone(
-            phase.next_action(SECOND_NS, {"Resonance": 12_000, shield: 60_000}, 1500,
-                              Prayer.MELEE, received_tick=103)
+            phase.next_action(
+                SECOND_NS,
+                {"Resonance": 12_000, shield: 60_000},
+                1500,
+                Prayer.MELEE,
+                received_tick=103,
+            )
         )
         # Resonance ready but its GCD slot ends at +5: the shield waits for +3.
         late = PhaseOne()
@@ -592,20 +681,23 @@ class PhaseOneTests(unittest.TestCase):
         late.observe_hits([self.hit(133)], 202)
         ready = {"Resonance": 0, shield: 0}
         self.assertIsNone(
-            late.next_action(SECOND_NS, ready, 1700, Prayer.MELEE, received_tick=202,
-                             tick_elapsed_ms=50)
+            late.next_action(
+                SECOND_NS, ready, 1700, Prayer.MELEE, received_tick=202, tick_elapsed_ms=50
+            )
         )
         self.assertEqual(
-            late.next_action(SECOND_NS, ready, 1100, Prayer.MELEE, received_tick=203,
-                             tick_elapsed_ms=50).ability,
+            late.next_action(
+                SECOND_NS, ready, 1100, Prayer.MELEE, received_tick=203, tick_elapsed_ms=50
+            ).ability,
             shield,
         )
         # Resonance due at +3: never both.
         both = PhaseOne()
         both.observe([dict(event(3, HOLD_STILL), received_tick=300)])
         self.assertEqual(
-            both.next_action(SECOND_NS, ready, 150, Prayer.MELEE, received_tick=303,
-                             tick_elapsed_ms=450).ability,
+            both.next_action(
+                SECOND_NS, ready, 150, Prayer.MELEE, received_tick=303, tick_elapsed_ms=450
+            ).ability,
             "Resonance",
         )
         self.assertFalse(both.hold_still_shield_due(ready, 303, 500, 50))
@@ -764,8 +856,7 @@ class PhaseOneTests(unittest.TestCase):
         self.assertEqual(phase.expected, HOLD_STILL)
         for ordinal in (4, 5, 6):
             self.assertIsNone(
-                phase.next_action(ordinal * SECOND_NS, timers, 0, Prayer.SOUL_SPLIT,
-                                  flicking=True)
+                phase.next_action(ordinal * SECOND_NS, timers, 0, Prayer.SOUL_SPLIT, flicking=True)
             )
             phase.observe([event(ordinal + 1, magic)])
         action = phase.next_action(7 * SECOND_NS, timers, 0, Prayer.SOUL_SPLIT, flicking=True)
@@ -794,15 +885,25 @@ class PhaseOneTests(unittest.TestCase):
         phase.observe([dict(event(1, UPPERCUT), received_tick=10)])
         now = 4 * SECOND_NS
         timers = {"Escape": 0, "Surge": 0}
-        action = phase.next_action(now, timers, 0, Prayer.MELEE, received_tick=14,
-                                   uppercut_choice="Surge")
+        action = phase.next_action(
+            now, timers, 0, Prayer.MELEE, received_tick=14, uppercut_choice="Surge"
+        )
         self.assertEqual(action.ability, "Surge")
         phase.sent(action, now)
-        self.assertIsNone(phase.next_action(now + 1, timers, 0, Prayer.MELEE, received_tick=14,
-                                            uppercut_choice="Surge"))
+        self.assertIsNone(
+            phase.next_action(
+                now + 1, timers, 0, Prayer.MELEE, received_tick=14, uppercut_choice="Surge"
+            )
+        )
         self.assertIsNone(phase.cast_result)
-        phase.next_action(now + 2, {"Escape": 0, "Surge": 10000}, 0, Prayer.MELEE,
-                          received_tick=15, uppercut_choice="Surge")
+        phase.next_action(
+            now + 2,
+            {"Escape": 0, "Surge": 10000},
+            0,
+            Prayer.MELEE,
+            received_tick=15,
+            uppercut_choice="Surge",
+        )
         self.assertEqual(phase.cast_result, ("Surge", True))
 
 
@@ -941,9 +1042,7 @@ class FontDutyTests(unittest.TestCase):
             hit.hit.type_id = 144
             hit.hit.start_tick = 749245
             hit.hit.amount = amount
-        self.assertIsNone(
-            duty.observe_pulse(fonts(22896, 6400), 749249, two_hits, hits_lost=0)
-        )
+        self.assertIsNone(duty.observe_pulse(fonts(22896, 6400), 749249, two_hits, hits_lost=0))
         self.assertIsNone(duty.resonance_due(749311, {"Resonance": 0}, 0))
 
 
@@ -1138,9 +1237,7 @@ class BeamTests(unittest.TestCase):
         self.assertEqual(response.observe(2, 3840, 42, 1001, old), ((42, 1001), None))
         self.assertEqual(response.observe(2, 0, 44, 1061, old), (None, None))
         message = TelosCleanse(2, 1061, 1, 0)
-        self.assertEqual(
-            response.observe(2, 0, 44, 1061, message), (None, "cleanse_confirmed")
-        )
+        self.assertEqual(response.observe(2, 0, 44, 1061, message), (None, "cleanse_confirmed"))
 
     def test_virus_phase_change_and_unacknowledged_clear(self):
         response = controller["VirusResponse"]()
@@ -1239,9 +1336,7 @@ PrayerFlicker = controller["PrayerFlicker"]
 class PrayerFlickerTests(unittest.TestCase):
     def test_stamped_golem_swings_keep_melee_through_shared_impact(self):
         flicker = PrayerFlicker()
-        pure = dict(
-            event(442, 28998), config_id=22905, application_stamp=868245, instance_id=47
-        )
+        pure = dict(event(442, 28998), config_id=22905, application_stamp=868245, instance_id=47)
         volcanic = dict(pure, event_sequence=443, config_id=22907, instance_id=48)
         self.assertEqual(
             flicker.observe_golems((pure, volcanic), 868246),
@@ -1278,7 +1373,10 @@ class PrayerFlickerTests(unittest.TestCase):
         stream = io.StringIO()
         now = 100
         attempt = AttemptLog(
-            stream, mode="practice", enrage=250, monotonic_ns=lambda: now,
+            stream,
+            mode="practice",
+            enrage=250,
+            monotonic_ns=lambda: now,
             prayer_ack_timeout_ns=20,
         )
         attempt.game_tick = 61
@@ -1294,12 +1392,18 @@ class PrayerFlickerTests(unittest.TestCase):
         attempt.write("prayer_flick_sent", prayer="soul_split")
         attempt.write("attempt_ended", result="incomplete", reason="interrupted")
         outcomes = [
-            row for row in map(json.loads, stream.getvalue().splitlines())
+            row
+            for row in map(json.loads, stream.getvalue().splitlines())
             if row["event"] == "prayer_flick_outcome"
         ]
-        self.assertEqual([row["outcome"] for row in outcomes], [
-            "acknowledged", "timeout", "attempt_ended",
-        ])
+        self.assertEqual(
+            [row["outcome"] for row in outcomes],
+            [
+                "acknowledged",
+                "timeout",
+                "attempt_ended",
+            ],
+        )
         self.assertEqual(
             (outcomes[0]["request_sequence"], outcomes[0]["sent_tick"], outcomes[0]["game_tick"]),
             (2, 61, 62),
@@ -1384,8 +1488,10 @@ class PrayerFlickerTests(unittest.TestCase):
 
     def test_magic_flick_windows_by_distance(self):
         windows = controller["magic_flick_ticks"]
-        self.assertEqual([windows(d) for d in (0, 4, 5, 6, 7, 9, 12)],
-                         [(0, 0), (0, 0), (0, 1), (0, 1), (1, 2), (1, 2), (1, 3)])
+        self.assertEqual(
+            [windows(d) for d in (0, 4, 5, 6, 7, 9, 12)],
+            [(0, 0), (0, 0), (0, 1), (0, 1), (1, 2), (1, 2), (1, 3)],
+        )
         self.assertEqual(windows(None), (0, 2))
 
     def test_magic_attack_selects_deflect_magic(self):
@@ -1628,7 +1734,9 @@ class PracticeRunTests(unittest.TestCase):
             approach=None,
             observe_transition=False,
             manual_engage=True,
-            flick_melee_key="F3",
+            flick_melee_key="Ctrl+F4",
+            flick_magic_key="Ctrl+F1",
+            flick_soul_split_key="Ctrl+F3",
         )
         console = SimpleNamespace(GameWindow=Mock(), frame_target=Mock(), move_pointer=Mock())
         mock_globals = {
@@ -1644,10 +1752,24 @@ class PracticeRunTests(unittest.TestCase):
         console.frame_target.assert_not_called()
         board.command.assert_not_called()
         self.assertEqual(
-            [[key.name for key in call.args[0]] for call in board.tap.call_args_list], [["F3"]]
+            [[key.name for key in call.args[0]] for call in board.tap.call_args_list],
+            [["CTRL", "F4"]],
         )
         logged = [call.args[0] for call in mock_globals["log"].call_args_list]
         self.assertIn("waiting_for_engage", logged)
+
+        board.reset_mock()
+        args.native_bindings = {"Deflect Melee": object()}
+        reader.active_prayer.side_effect = [Prayer.NONE] + [Prayer.MELEE] * 5
+        mock_globals["boss_sample"].side_effect = samples
+        mock_globals["refresh_binding"] = Mock(return_value=None)
+        with patch.dict(sys.modules, {"game_console": console}), patch("time.sleep"):
+            with patch.dict(run.__globals__, mock_globals):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Native action-bar role or chord changed"
+                ):
+                    run(reader, args, board)
+        board.tap.assert_not_called()
 
     def test_focus_loss_pauses_input_instead_of_stopping(self):
         run = controller["run"]
@@ -1698,7 +1820,9 @@ class PracticeRunTests(unittest.TestCase):
             approach=None,
             observe_transition=False,
             manual_engage=True,
-            flick_melee_key="F3",
+            flick_melee_key="Ctrl+F4",
+            flick_magic_key="Ctrl+F1",
+            flick_soul_split_key="Ctrl+F3",
         )
         console = SimpleNamespace(GameWindow=Mock(), frame_target=Mock(), move_pointer=Mock())
         mock_globals = {
@@ -1767,6 +1891,9 @@ class PracticeRunTests(unittest.TestCase):
             melee=(10, 20),
             approach=(30, 40),
             observe_transition=False,
+            flick_melee_key="Ctrl+F4",
+            flick_magic_key="Ctrl+F1",
+            flick_soul_split_key="Ctrl+F3",
         )
         game = Mock()
         game.cursor.return_value = (10, 20)
@@ -1876,7 +2003,7 @@ class PracticeRunTests(unittest.TestCase):
                 self.assertEqual(run(reader, args, board), 2)
         self.assertEqual(
             [[key.name for key in call.args[0]] for call in board.tap.call_args_list],
-            [["F3"]],
+            [["CTRL", "F4"]],
         )
         flick_events = [
             call.args[0]

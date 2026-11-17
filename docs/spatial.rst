@@ -18,8 +18,9 @@ player and NPC vtable entries at ``+0xb0`` both resolve to the guarded getter at
 ``0x6ee110``. The base constructor stores the world owner at ``+0x60`` (guarded
 instruction at ``0x38523``). Actor poses require the matching vtable, runtime
 ID and two consistent reads. The local-player NPC target resolver has matching
-instruction guards at ``0x3ffe86`` and ``0x3ffeb0``. Compatibility Mode camera
-and facing remain unmapped.
+instruction guards at ``0x3ffe86`` and ``0x3ffeb0``. Compatibility Mode has
+separately guarded matrix/viewport projection and physical viewport scaling.
+Its facing remains unmapped.
 
 The 2026-11-13 P1 update also publishes the original profile's guarded player
 tile through ``rs3_snapshot_position``. It copies the committed P1 pose after
@@ -91,6 +92,28 @@ establish visibility through occluding geometry or UI overlays.
 
 Public C interface
 ------------------
+
+``rs3_snapshot_pointer_walk`` supplies a 32-byte caller-owned default-action
+record on both profiles. The original profile uses the guarded cached record
+at menu+0x1400, the mode-selected legacy/modern open byte, cycle+0x21d0 and
+the exact Walk descriptor at RVA 0x1721920. A loaded cycle-increment instruction
+at RVA 0x39032b and the manager vtable at RVA 0x15364c8 supplement P5's five
+instruction guards and consistent owner/record/backend reads. The exact
+descriptor's action ID must be 23; its +0x48 discriminator must be zero for a
+scene tile. Coordinates come from +0x4c/+0x50, with the current same-world
+player's plane. Minimap actions never become scene coordinates.
+
+The Compatibility Mode source remains separately guarded. Changing cycles,
+open menus, invalid coordinates, missing worlds or mismatched code/vtables
+leave the affected fields unavailable. ``ui.scene_walk`` in native telemetry
+preserves the action, cycle, tile or unknown reason. It explicitly supplies no
+click permission. A caller must still verify pointer position, a fresh menu
+update, view/overlay state, destination eligibility and actual movement.
+Four new original-profile fixture groups cover these cases. A read-only live
+sample decoded action 1007 on an action-bar preset and correctly left the
+ground tile unknown. A later read-only sample decoded Walk action 23 with
+tile (3299, 10130, 0). Independent pointer-to-ground projection and an actual
+movement outcome remain unverified.
 
 Include ``rs3/spatial.h``. The additional sizes are actor 88, camera 136,
 spatial-info 272 and screen-point 24 bytes, verified with

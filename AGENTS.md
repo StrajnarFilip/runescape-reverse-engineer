@@ -20,6 +20,11 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
   This exception does not authorize memory dumps, chat, credentials or game files.
 - No scheduled/background uploader is required; synchronize as part of completing
   authorized project work.
+- The user authorized rejoining the pinned account from its 15-minute lobby
+  timeout by pressing Play. Verify the same process lifetime and window; do not
+  control the other open RS3 account. This permits resuming an already-authenticated
+  lobby, not handling credential or authentication dialogs. Combat state remains
+  native-memory driven.
 
 ## Telos automation roadmap
 

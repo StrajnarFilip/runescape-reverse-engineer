@@ -312,3 +312,22 @@ Requests
   twice. Four November 16–17 failed/stopped sessions were imported, including
   the outside-cast incident. Their original records can be reconstructed for
   offline replay; source event timestamps are not replaced with import time.
+* Current-account binding/ground integration, 2026-11-17: the standalone
+  controller now uses C UI labels with exact process/sample/preset identity,
+  decoded modifiers and revalidation before a press. It no longer inherits
+  another account's unmodified F-keys or fallback keys. The old calibration
+  requires an explicit flag and the matching Compatibility Mode hash. A fresh
+  read resolved 55 current roles, including Ctrl+F1/F2/F3/F4, Alt+A Freedom,
+  Alt+S Anticipation, Alt+Q Resonance and Shift+V Dive. These observations are
+  stored separately from executable rotation profiles.
+* The 32-byte default-action API now supports the original client. It reuses
+  P5's five code guards and owner/record/backend checks, adds the original
+  manager vtable/cycle guard, and rejects non-scene Walk coordinates. The C
+  fixtures, current non-Walk/Walk reads and null-preserving telemetry tests
+  pass. No movement or prayer timing validation was added. Release build and
+  all 16 suites pass, including 541 Python tests and the firmware host test.
+* Next runtime work: only COM1 was enumerated on this host, so the older
+  controller's COM8 requirement must be replaced with the existing Win32
+  backend. Connect the current spiritual prayer potion through C metadata
+  and dose-family tracking, compose rotation with mechanics, and replace the
+  observe-only P5 handoff. The goal remains active; these are not live clears.

@@ -205,6 +205,15 @@ The controller uses these orders to forecast Hold Still for Anticipation. `pytho
 
 ## Native channels
 
+- **2026-11-17 integration:** `rs3_snapshot_pointer_walk` now has a separately
+  guarded original-profile decoder for the closed-menu default action and scene
+  Walk tile. The existing Compatibility Mode decoder is preserved. The C
+  snapshot is serialized as `ui.scene_walk`; it gives no click or path
+  permission. Original-profile fixtures pass and a live action-bar hover
+  correctly publishes an action without a ground tile. A later read-only sample
+  observed scene Walk at (3299, 10130, 0). Independent ground projection and
+  movement-outcome checks remain pending. This closes a missing acquisition
+  path for font walks and stomp movement; it does not validate those responses.
 - `rs3_snapshot_encounter` provides scoped phase and enrage plus raw variables. At 0% on Compatibility Mode it requires a single active Telos, an instance guard and matching HP to publish phases 1–3. The raw lower bits of VARP 6363 vary within phases and reset at transitions. They are a meter lead. Both clients expose the received server-tick counter. Server phase and prayer-check deadlines remain unknown.
 - `rs3_snapshot_combat`, `rs3_npc_action_events_since`, `rs3_player_hit_events_since`, and `rs3_events_since` expose overhead state, animation applications and recipient hitmarks through `Reader`. They provide no server protection deadline or attacker ID.
 - `rs3_snapshot_position`, `rs3_snapshot_spatial`, `rs3_snapshot_npc_spatial` and `rs3_snapshot_hazards` provide tiles and candidate arena actors. Compatibility Mode also exposes the guarded local-player NPC target reference and explicit clear state. Recent attempts recorded the reference but could not resolve it to a same-world NPC tile. The Compatibility Mode camera and beam terrain heights support tile projection. Facing remains unmapped.

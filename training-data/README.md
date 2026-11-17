@@ -48,6 +48,11 @@ python work/import_p1_attempt.py LOCAL_CAPTURE.jsonl training-data/telos-p1-ATTE
 
 ## Earlier standalone controller and schema 1
 
+The fallback-key descriptions in this section apply only to the explicit
+`--legacy-unmodified-bar-keys` option on the calibrated Compatibility Mode
+executable. They are not current-account defaults. Native UI labels now retain
+the Ctrl+F prayer chords and Alt/Shift ability chords on the original profile.
+
 Run the Practice Mode controller from the repository root. Stage the character across the gap
 with Telos dormant, the melee action bar selected and auto-retaliate active. The controller
 uses Telos's animations and phase for prayer flicks, special responses and P4 font and golem
@@ -82,7 +87,7 @@ terrain height and screen projection.
 
 ```powershell
 $env:PYTHONPATH = 'python'
-python work/telos_zero.py --port COM8
+python work/telos_zero.py --port COM8 --legacy-unmodified-bar-keys
 ```
 
 The enrage is read from memory (low 12 bits of VARP 6359) and logged as `enrage_resolved`;

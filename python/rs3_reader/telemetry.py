@@ -235,6 +235,9 @@ def interface_records(reader):
                 else None
             ),
         }
+    walk = getattr(reader, "pointer_walk", None)
+    if walk is not None:
+        ui["scene_walk"] = scene_walk_record(reader)
     bars = {
         "status": PLAYER_HIT_STATUS_NAMES.get(info.status, "unavailable"),
         "entries": entries if info.action_bar_count else None,
@@ -243,6 +246,27 @@ def interface_records(reader):
         "source": "native_memory",
     }
     return ui, bars
+
+
+def scene_walk_record(reader):
+    """Serialize the C default ground action; it is not click or path permission.
+
+    Identity belongs to the accompanying parent snapshot. No cursor sampling,
+    menu parsing or second game read takes place in this serializer.
+    """
+    walk = reader.pointer_walk
+    tile = walk.tile
+    valid = bool(walk.valid and walk.action == 23 and tile.valid)
+    return {
+        "value": {"x": tile.x, "y": tile.y, "plane": tile.plane} if valid else None,
+        "action_id": walk.action if walk.valid else None,
+        "menu_cycle": walk.menu_cycle if walk.valid else None,
+        "source": "native_closed_menu_default_action",
+        "reason": None if valid else "default_scene_walk_unavailable",
+        "click_permission": False,
+    }
+
+
 EFFECT_NAMES = (
     "berserk",
     "bloodlust",
@@ -674,7 +698,9 @@ def hazards_record(reader):
                 "identity_validated": bool(flags & HazardFlags.IDENTITY),
                 "validated": bool(flags & HazardFlags.MECHANICS_VALIDATED),
                 "present": True,
-                "presence_scope": "loaded_scene_locations" if is_location else "loaded_npc_registry",
+                "presence_scope": (
+                    "loaded_scene_locations" if is_location else "loaded_npc_registry"
+                ),
                 "same_world": True if flags & HazardFlags.TILE else None,
                 "active": None,
                 "dangerous": None,

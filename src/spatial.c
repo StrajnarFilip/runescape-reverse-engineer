@@ -7,6 +7,7 @@
 
 #include "clock.h"
 #include "decode_utils.h"
+#include "interface.h"
 #include "memory.h"
 #include "position.h"
 
@@ -59,6 +60,9 @@
 #define MENU_WALK_ACTION_RVA        0x16be960u
 #define MENU_WALK_ACTION            23
 #define MENU_MAX_ENTRIES            512u
+#define PRIMARY_MENU_VTABLE_RVA     0x15364c8u
+#define PRIMARY_MENU_GUARD_RVA      0x39032bu
+#define PRIMARY_WALK_ACTION_RVA     0x1721920u
 
 _Static_assert(sizeof(rs3_actor_spatial) == 88, "ABI spatial actor");
 _Static_assert(sizeof(rs3_camera) == 136, "ABI camera");
@@ -447,10 +451,68 @@ static void read_camera(rs3_context *context, uint64_t world_state, uint64_t act
     camera->observed_ns = clock_monotonic_ns();
 }
 
+/** Read the primary client's guarded cached default action and scene Walk arguments. */
+static void stage_primary_pointer_walk(rs3_context *context, uint64_t world_state,
+                                       const rs3_actor_spatial *player, rs3_pointer_walk *out)
+{
+    static const unsigned char cycle_increment[] = {0xff, 0x81, 0xd0, 0x21, 0, 0};
+    const uint32_t required_flags =
+        RS3_POINTER_RAW_MENU | RS3_POINTER_RAW_RECORD | RS3_POINTER_RAW_TEXT | RS3_POINTER_RAW_TYPE;
+    unsigned char instruction[sizeof cycle_increment];
+    uint64_t module = context->target.module_base, menu, vtable, cycle, cycle_after, menu_after;
+    uint64_t vtable_after;
+    if (context->target.profile != &profile_primary ||
+        !memory_read(context, module + PRIMARY_MENU_GUARD_RVA, instruction, sizeof instruction) ||
+        memcmp(instruction, cycle_increment, sizeof cycle_increment) ||
+        !memory_read_pointer(context, world_state + MENU_OWNER_OFFSET, &menu) || !menu ||
+        !memory_read_pointer(context, menu, &vtable) ||
+        vtable != module + PRIMARY_MENU_VTABLE_RVA ||
+        !memory_read(context, menu + MENU_CYCLE_OFFSET, &cycle, sizeof cycle))
+    {
+        return;
+    }
+    /* P5 pins and double-reads the owner, selected menu backend and full cached record. */
+    rs3_pointer_candidate candidate;
+    interface_pointer_stage(context, world_state, &candidate);
+    int32_t action;
+    if ((candidate.flags & required_flags) != required_flags || candidate.raw_menu_state != 0 ||
+        !memory_read(context, module + candidate.raw_type_rva + MENU_ACTION_ID_OFFSET, &action,
+                     sizeof action) ||
+        !memory_read(context, menu + MENU_CYCLE_OFFSET, &cycle_after, sizeof cycle_after) ||
+        cycle_after != cycle ||
+        !memory_read_pointer(context, world_state + MENU_OWNER_OFFSET, &menu_after) ||
+        menu_after != menu || !memory_read_pointer(context, menu, &vtable_after) ||
+        vtable_after != vtable)
+    {
+        return;
+    }
+    int walk = candidate.raw_type_rva == PRIMARY_WALK_ACTION_RVA;
+    if (walk && action != MENU_WALK_ACTION)
+    {
+        return;
+    }
+    out->menu_cycle = cycle;
+    out->action = action;
+    out->valid = 1;
+    /* +0x48 is the scene/minimap discriminator only for this exact Walk descriptor. */
+    if (walk && candidate.raw_reference == 0 && player->tile.valid &&
+        (player->valid_mask & RS3_SPATIAL_SAME_WORLD) && candidate.raw_arg1 >= 0 &&
+        candidate.raw_arg1 < MAX_TILE_COORDINATE && candidate.raw_arg2 >= 0 &&
+        candidate.raw_arg2 < MAX_TILE_COORDINATE)
+    {
+        out->tile = (rs3_position){1, candidate.raw_arg1, candidate.raw_arg2, player->tile.plane};
+    }
+}
+
 /** Read the top closed-menu action and only decode the ground fields of Walk. */
 static void stage_pointer_walk(rs3_context *context, uint64_t world_state,
                                const rs3_actor_spatial *player, rs3_pointer_walk *out)
 {
+    if (context->target.profile == &profile_primary)
+    {
+        stage_primary_pointer_walk(context, world_state, player, out);
+        return;
+    }
     static const unsigned char cycle_increment[] = {0xff, 0x81, 0xd0, 0x21, 0, 0};
     unsigned char instruction[sizeof cycle_increment];
     uint64_t module = context->target.module_base, menu, vtable, cycle, cycle_after;

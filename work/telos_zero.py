@@ -12,11 +12,11 @@ import json
 import math
 import time
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from rs3_reader.action_bar_keys import displayed_bindings
+from rs3_reader.action_bar_keys import displayed_bindings, refresh_binding
 from rs3_reader.bot.attempt_log import CLEANSE_MAX_AGE_CLIENT_TICKS, AttemptLog
 from rs3_reader.native import (
     LOGIC_TICK_MS,
@@ -933,9 +933,15 @@ P2_OPENING_MAGIC_ATTACK_TICKS = 12
 P2_OPENING_ATTACK = 28930
 P1_TO_P2_TRANSITION = 28963
 FLICK_EXCLUDED_ANIMATIONS = frozenset({UPPERCUT, P1_TO_P2_TRANSITION, P2_OPENING_ATTACK})
-TRANSITION_ATTACK_CUES = frozenset({
-    MELEE_AUTO_SEQUENCE, MAGIC_ATTACK, TENDRILS, HOLD_STILL, UPPERCUT,
-})
+TRANSITION_ATTACK_CUES = frozenset(
+    {
+        MELEE_AUTO_SEQUENCE,
+        MAGIC_ATTACK,
+        TENDRILS,
+        HOLD_STILL,
+        UPPERCUT,
+    }
+)
 DEFAULT_FLICK_HOLD_TICKS = 1
 # The unanimated Tendrils follow-up can land at +2, and so can the melee hit before the bomb.
 FLICK_HOLD_TICKS = {TENDRILS_RELEASE: 3, ANIMA_BOMB: 2}
@@ -1559,9 +1565,7 @@ class PhaseOne:
     def resonance_committed(self):
         """Whether this Hold Still's Resonance press went out and has not been refuted."""
         return (
-            self.special == HOLD_STILL
-            and "Resonance" in self.handled
-            and not self.resonance_failed
+            self.special == HOLD_STILL and "Resonance" in self.handled and not self.resonance_failed
         )
 
     def soul_split_for_heavy_hit(
@@ -2640,8 +2644,7 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                 (
                     candidate
                     for candidate in reader.npc_spatial[: reader.spatial.npc_count]
-                    if candidate.instance_id == boss_id
-                    and candidate.valid_mask & SpatialFlags.TILE
+                    if candidate.instance_id == boss_id and candidate.valid_mask & SpatialFlags.TILE
                 ),
                 None,
             )
@@ -3166,8 +3169,12 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
             ),
             default=None,
         )
-        if virus.started and virus.arrival is None and (
-            beam_distance == 0 or (player_tile is not None and player_tile == virus.walk_target)
+        if (
+            virus.started
+            and virus.arrival is None
+            and (
+                beam_distance == 0 or (player_tile is not None and player_tile == virus.walk_target)
+            )
         ):
             virus.arrival = received_tick
             emit(
@@ -3353,9 +3360,7 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
             return
         if not beam_blocker.move_due(received_tick):
             return
-        route = virus_beam_destination(
-            reader, phase, player, boss, rejected=beam_blocker.rejected
-        )
+        route = virus_beam_destination(reader, phase, player, boss, rejected=beam_blocker.rejected)
         if route is None:
             beam_blocker.rejected.clear()
             return
@@ -3378,7 +3383,8 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                 and hover.get("tile") is not None
                 and virus_beam_destination(
                     reader, phase, reader.spatial.player, current_boss, use_tile=hover["tile"]
-                ) is not None
+                )
+                is not None
             )
 
         sent = click_point(
@@ -3491,6 +3497,24 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
         """Press a chord; return False when RuneScape is unfocused or focus was lost mid-press."""
         if not input_allowed:
             return False
+        if layout is not None and window_keyboard_layout(window)[0] != layout:
+            emit("binding_invalidated", reason="client_keyboard_layout_changed")
+            raise RuntimeError("RuneScape keyboard layout changed")
+        evidence = getattr(args, "native_bindings", {})
+        role = next(
+            (name for name, binding in bindings.items() if binding == chord),
+            None,
+        )
+        if role is None:
+            role = {
+                Prayer.MELEE: "Deflect Melee",
+                Prayer.MAGIC: "Deflect Magic",
+                Prayer.SOUL_SPLIT: "Soul Split",
+            }.get(next((prayer for prayer, value in prayer_chords.items() if value == chord), None))
+        expected = evidence.get(role)
+        if expected is not None and refresh_binding(reader, expected) is None:
+            emit("binding_invalidated", ability=role, source="native_ui_label")
+            raise RuntimeError(f"Native action-bar role or chord changed: {role}")
         try:
             board.tap(chord, KEY_HOLD_SECONDS, check_focus, time.sleep)
         except FocusLostError:
@@ -3659,7 +3683,8 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
         labels["Reflect"] = args.reflect
     if getattr(args, "devotion", None):
         labels["Devotion"] = args.devotion
-    labels["Super Restore"] = getattr(args, "super_restore", None) or DEFAULT_SUPER_RESTORE_KEY
+    if getattr(args, "super_restore", None):
+        labels["Super Restore"] = args.super_restore
     if getattr(args, "disruption_shield", None) and getattr(args, "spellbook_swap", None):
         labels[DISRUPTION_SHIELD] = args.disruption_shield
         labels[SPELLBOOK_SWAP] = args.spellbook_swap
@@ -3683,15 +3708,9 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
         raise ValueError("Combat bindings must exclude prayer chords and F12")
     flicker = PrayerFlicker() if getattr(args, "flick_melee", False) else None
     prayer_chords = {
-        Prayer.MELEE: parse_chord(
-            getattr(args, "flick_melee_key", None) or DEFAULT_FLICK_MELEE_KEY
-        ),
-        Prayer.MAGIC: parse_chord(
-            getattr(args, "flick_magic_key", None) or DEFAULT_FLICK_MAGIC_KEY
-        ),
-        Prayer.SOUL_SPLIT: parse_chord(
-            getattr(args, "flick_soul_split_key", None) or DEFAULT_FLICK_SOUL_SPLIT_KEY
-        ),
+        Prayer.MELEE: parse_chord(args.flick_melee_key),
+        Prayer.MAGIC: parse_chord(args.flick_magic_key),
+        Prayer.SOUL_SPLIT: parse_chord(args.flick_soul_split_key),
     }
     if flicker is not None and (
         len(set(prayer_chords.values())) != len(prayer_chords)
@@ -3770,8 +3789,7 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
         boss_tile = (pose.tile.x, pose.tile.y)
         player_tile = (player.tile.x, player.tile.y)
         attacking = bool(
-            player.valid_mask & SpatialFlags.TARGET
-            and player.target_kind == SpatialTargetKind.NPC
+            player.valid_mask & SpatialFlags.TARGET and player.target_kind == SpatialTargetKind.NPC
         )
         if attacking:
             offset = (size - 1) / 2
@@ -4077,7 +4095,10 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
             return ENCOUNTER_RESET
 
         actions = telos_actions(
-            events, identity, info.sequence, {active_instance},
+            events,
+            identity,
+            info.sequence,
+            {active_instance},
             additional_samples=intervening_samples,
         )
         if phase in (1, 2) and phase_two_at is None:
@@ -4136,7 +4157,7 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                 golems=golems,
             )
         prayer_tenths = None if prayer_raw is None else prayer_raw & PRAYER_POINTS_MASK
-        if input_allowed and restorer.due(prayer_tenths, now):
+        if input_allowed and "Super Restore" in bindings and restorer.due(prayer_tenths, now):
             if send_chord(bindings["Super Restore"]):
                 restorer.sent(prayer_tenths, reader.monotonic_ns())
                 emit(
@@ -4368,7 +4389,7 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                 and not any(
                     npc.config_id in MINION_CONFIGS
                     and (not npc.flags & NPCFlags.HEALTH or npc.health_current > 0)
-                    for npc in reader.npcs[:info.npc_count]
+                    for npc in reader.npcs[: info.npc_count]
                 )
             ),
         )
@@ -4511,10 +4532,12 @@ ACTION_BAR_KEY_ARGUMENTS = {
     "flick_melee_key": "Deflect Melee",
     "flick_magic_key": "Deflect Magic",
     "flick_soul_split_key": "Soul Split",
+    "hurricane": "Hurricane",
+    "super_restore": "Super Restore",
 }
 # Keys used when a bar scan does not find the ability. Devotion on F7 and Surge on K were set up
 # by the account owner on 2026-11-15; the 07:01 scan did not find Devotion on a displayed bar.
-KEY_FALLBACKS = {
+LEGACY_KEY_FALLBACKS = {
     "flick_melee_key": DEFAULT_FLICK_MELEE_KEY,
     "flick_magic_key": DEFAULT_FLICK_MAGIC_KEY,
     "flick_soul_split_key": DEFAULT_FLICK_SOUL_SPLIT_KEY,
@@ -4525,6 +4548,7 @@ KEY_FALLBACKS = {
     "dive": "P",
     "disruption_shield": DEFAULT_DISRUPTION_SHIELD_KEY,
     "spellbook_swap": DEFAULT_SPELLBOOK_SWAP_KEY,
+    "super_restore": DEFAULT_SUPER_RESTORE_KEY,
 }
 
 
@@ -4547,27 +4571,38 @@ def resolve_action_bar_keys(reader, args, attempt=None):
     through the RuneScape window's keyboard layout. Freedom and Anticipation are required.
     """
     reader.sample()
-    bindings = displayed_bindings(reader)
-    sources = {}
+    legacy = getattr(args, "legacy_unmodified_bar_keys", False)
+    bindings = displayed_bindings(reader, legacy_unmodified=legacy)
+    sources, evidence = {}, {}
     for argument, name in ACTION_BAR_KEY_ARGUMENTS.items():
         if getattr(args, argument, None):
             sources[argument] = "command_line"
         elif name in bindings:
             setattr(args, argument, bindings[name].key_label)
             sources[argument] = f"action_bar {bindings[name].display_bar}:{bindings[name].slot}"
+            if bindings[name].source == "native_ui_label":
+                evidence[name] = bindings[name]
             args.displayed_keys = True
-        elif argument in KEY_FALLBACKS:
-            setattr(args, argument, KEY_FALLBACKS[argument])
-            sources[argument] = "default"
+        elif legacy and argument in LEGACY_KEY_FALLBACKS:
+            setattr(args, argument, LEGACY_KEY_FALLBACKS[argument])
+            sources[argument] = "legacy_account_default"
     missing = [
         ACTION_BAR_KEY_ARGUMENTS[argument]
-        for argument in ("freedom", "anticipation")
+        for argument in (
+            "freedom",
+            "anticipation",
+            "flick_melee_key",
+            "flick_magic_key",
+            "flick_soul_split_key",
+        )
         if not getattr(args, argument, None)
     ]
     resolved = {argument: getattr(args, argument, None) for argument in ACTION_BAR_KEY_ARGUMENTS}
-    log("keys_resolved", keys=resolved, sources=sources)
+    args.native_bindings = evidence
+    details = {name: asdict(binding) for name, binding in evidence.items()}
+    log("keys_resolved", keys=resolved, sources=sources, native_evidence=details)
     if attempt:
-        attempt.write("keys_resolved", keys=resolved, sources=sources)
+        attempt.write("keys_resolved", keys=resolved, sources=sources, native_evidence=details)
     if missing:
         raise RuntimeError(f"Put {', '.join(missing)} on a displayed action bar or pass its key")
 
@@ -4582,6 +4617,11 @@ def main():
         help="Optional session limit in seconds; by default only death or F12 ends the run",
     )
     parser.add_argument("--port", help="Arduino COM port. Omit for observation only.")
+    parser.add_argument(
+        "--legacy-unmodified-bar-keys",
+        action="store_true",
+        help="Use the older Compatibility Mode account's unmodified-key calibration and defaults",
+    )
     parser.add_argument("--replay", type=Path, help="Read a local Telos observation JSONL capture")
     parser.add_argument(
         "--record-attempt",
@@ -4623,8 +4663,9 @@ def main():
     parser.add_argument("--hurricane", help="Current Hurricane binding, if equipped on the bar")
     parser.add_argument("--timed-freedom", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
-        "--surge", help="Surge key (default: from action bar, else K), used for Uppercut instead "
-        "of Escape when Escape lacks room"
+        "--surge",
+        help="Surge key (from native action bar), used for Uppercut instead "
+        "of Escape when Escape lacks room",
     )
     parser.add_argument(
         "--escape", help="Optional Escape binding, sent 4-5 received ticks after Uppercut"
@@ -4646,18 +4687,15 @@ def main():
     )
     parser.add_argument(
         "--disruption-shield",
-        help=f"Disruption Shield key (default: from action bar, else "
-        f"{DEFAULT_DISRUPTION_SHIELD_KEY}), for Hold Still and the P4 anima bomb",
+        help="Disruption Shield key (from native action bar), for Hold Still and the P4 anima bomb",
     )
     parser.add_argument(
         "--spellbook-swap",
-        help=f"Spellbook Swap key pressed just before Disruption Shield (default: from action "
-        f"bar, else {DEFAULT_SPELLBOOK_SWAP_KEY})",
+        help="Spellbook Swap key pressed just before Disruption Shield (from native action bar)",
     )
     parser.add_argument(
         "--super-restore",
-        help=f"Super restore key, drunk at 50 prayer points or fewer "
-        f"(default {DEFAULT_SUPER_RESTORE_KEY})",
+        help="Super restore key (from native action bar), drunk at 50 prayer points or fewer",
     )
     parser.add_argument(
         "--auto-retaliate",

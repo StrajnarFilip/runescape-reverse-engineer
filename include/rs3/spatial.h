@@ -138,7 +138,13 @@ RS3_API int32_t rs3_snapshot_spatial(const rs3_snapshot *snapshot, rs3_spatial_i
 /** Copies NPC poses in the same order as rs3_snapshot_npcs; reports required capacity. */
 RS3_API int32_t rs3_snapshot_npc_spatial(const rs3_snapshot *snapshot, rs3_actor_spatial *out,
                                          uint32_t capacity, uint32_t *required);
-/** Copy the pointer's default action. Scene Walk uses the observed local player's plane. */
+/**
+ * Copy the guarded closed-menu default action on either supported profile.
+ * A scene Walk tile requires the exact profile's Walk descriptor and a current
+ * same-world player pose; its plane comes from that pose. Minimap Walk has no
+ * scene tile. This is not click permission, path reachability or a server receipt.
+ * Use the parent spatial-info process, scene, sample and time for provenance.
+ */
 RS3_API int32_t rs3_snapshot_pointer_walk(const rs3_snapshot *snapshot, rs3_pointer_walk *out,
                                           uint32_t out_size);
 /**

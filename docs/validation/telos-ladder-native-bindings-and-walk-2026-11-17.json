@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-17",
+  "status": "native_binding_and_ground_action_integration_verified_partial_live_evidence",
+  "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+  "native_bindings": {
+    "observed_roles": 55,
+    "observations": "profiles/rotations/observations/current_ui_bindings_951_3.json",
+    "modifier_source": "guarded_C_UI_label_mask",
+    "refresh_before_dispatch": true,
+    "raw_modifier_fallback_on_primary": false,
+    "legacy_calibration_requires_explicit_option_and_matching_profile": true
+  },
+  "primary_ground_action": {
+    "public_api": "rs3_snapshot_pointer_walk",
+    "structure_bytes": 32,
+    "manager_vtable_rva": "0x15364c8",
+    "cycle_guard_rva": "0x39032b",
+    "walk_descriptor_rva": "0x1721920",
+    "walk_action_id": 23,
+    "cached_record_offset": "0x1400",
+    "menu_cycle_offset": "0x21d0",
+    "ground_discriminator_offset": "0x48",
+    "scene_x_offset": "0x4c",
+    "scene_y_offset": "0x50",
+    "uses_observed_player_plane": true,
+    "guarded_P5_owner_record_backend_reused": true,
+    "telemetry_field": "ui.scene_walk",
+    "live_read_only_observation": {
+      "value": {
+        "x": 3299,
+        "y": 10130,
+        "plane": 0
+      },
+      "action_id": 23,
+      "menu_cycle": 255020,
+      "source": "native_closed_menu_default_action",
+      "reason": null,
+      "click_permission": false
+    },
+    "click_permission": false,
+    "live_scene_walk_observed": true,
+    "live_projected_ground_target_verified": false,
+    "live_movement_verified": false
+  },
+  "checks": {
+    "release_build": "passed",
+    "ctest_targets_passed": 16,
+    "python_tests_run": 541,
+    "python_tests_skipped": 0,
+    "native_spatial_fixture_groups": 23,
+    "binding_tests_passed": 7,
+    "standalone_controller_tests_passed": 96,
+    "new_scene_walk_serialization_tests_passed": 2,
+    "game_inputs_sent": 0
+  },
+  "read_only_timing": {
+    "samples": 20,
+    "mean_sample_ms": 2.321,
+    "maximum_sample_ms": 4.679,
+    "scope": "idle hub, current source only; not a combat performance guarantee"
+  },
+  "remaining_integration": [
+    "Standalone controller still requires Arduino hardware; only COM1 was enumerated locally. Reuse the existing native Win32 transport for this host.",
+    "Current account carries a native prayer-restoring spiritual potion on C, not the older account's default Super Restore on L. Connect metadata and dose-family tracking.",
+    "Ordered PVME rotation is not yet composed with the full standalone mechanic loop.",
+    "The standalone P5 path currently observes after the handoff rather than responding to every mechanic.",
+    "Complete zero-miss mechanic/prayer/healing verification remains outstanding."
+  ],
+  "lobby_recovery": {
+    "user_authorized_Play": true,
+    "pinned_window_verified_in_world": true,
+    "Play_clicked": false,
+    "later_window_recovery_error": "window id 395176 was not found",
+    "native_process_still_available": true,
+    "scope": "UI recovery only; no screenshot-based fight decisions"
+  }
+}

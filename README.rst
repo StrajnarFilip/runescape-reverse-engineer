@@ -114,7 +114,7 @@ On client build **6ada3f59-1a86000**, the desktop tracker shows **Player Tile**
 alongside life points, prayer, adrenaline, cooldowns, nearby NPCs and inventory.
 
 JSONL records carry ``position`` with integer ``x`` (east), ``y`` (north), and
-``plane`` (0â€“3). The tile is ``null`` when unavailable. For repeatable boss
+``plane`` (0Ã¢â‚¬â€œ3). The tile is ``null`` when unavailable. For repeatable boss
 markers, record tile offsets relative to a recognizable arena landmark and
 locate that landmark each run.
 
@@ -127,14 +127,20 @@ stand on the staging platform with Telos dormant, Revolution on bar 18 and
 auto-retaliate on. Start the script, click into RuneScape and wake Telos yourself::
 
     $env:PYTHONPATH = "python"
-    python work/telos_zero.py --port COM8
+    python work/telos_zero.py --port COM8 --legacy-unmodified-bar-keys
 
 The enrage comes from memory (VARP 6359). Ability and prayer keys come from the
 displayed action bars: Freedom and Anticipation are required. Escape, Resonance,
 Dive, Deflect Magic, Deflect Melee and Soul Split are used when present, and
-Reflect is optional. Devotion falls back to ``F7``, Surge to ``K``, Spellbook Swap
-to ``I`` and Disruption Shield to ``O`` when no bar shows them. Disruption Shield is
-cast as Spellbook Swap followed by the spell. Super restore is drunk with ``L`` at 50 prayer points or fewer. At the
+Reflect is optional. The command above describes the older Compatibility Mode
+account. Its fallback keys are enabled only by the explicit legacy flag and
+the matching executable. The current original-profile account uses guarded C
+UI labels, preserving Ctrl/Shift/Alt and rechecking each role before input.
+It never borrows those fallback keys when a native label is unavailable.
+Current bindings are saved in ``profiles/rotations/observations/current_ui_bindings_951_3.json``
+as observations, not input permission. Disruption Shield is cast as Spellbook
+Swap followed by the spell. A configured prayer-restoring potion is pressed
+at 50 prayer points or fewer. At the
 first Telos attack of each phase the up arrow is held for 3 seconds to raise the camera. The script runs until the player dies or F12 is pressed. Losing
 foreground focus pauses input. Each attempt is logged to ``training-data/telos-*.jsonl``.
 

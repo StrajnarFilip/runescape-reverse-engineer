@@ -5,29 +5,48 @@
 #include <math.h>
 #include <string.h>
 
-#define POSE_PLANE_OFFSET         0x50u
-#define POSE_SIZE_OFFSET          0x18cu
-#define POSE_QUATERNION_OFFSET    0x1ccu
-#define POSE_FINE_OFFSET          0x280u
-#define POSE_WORLD_OFFSET         0x60u
-#define LOCAL_PLAYER_ACTOR        0x900000ull
-#define LOCAL_PLAYER_CONTEXT      0x910000ull
-#define LOCAL_PLAYER_INDEX        7u
-#define POSITION_GETTER_RVA       0x6ee1f0u
-#define FACING_GETTER_RVA         0x44b690u
-#define PROJECTION_GUARD_RVA      0x5a34eu
-#define ACTOR_TARGET_UID_OFFSET   0x1c4u
-#define ACTOR_TARGET_KIND_OFFSET  0x238u
-#define TARGET_KIND_GUARD_RVA     0x3fff66u
-#define TARGET_UID_GUARD_RVA      0x3fff90u
-#define EXPLICIT_NO_TARGET_KIND   127u
-#define ACTOR_TARGET_UID_OFFSET   0x1c4u
-#define ACTOR_TARGET_KIND_OFFSET  0x238u
-#define FIXTURE_VIEWPORT_MANAGER  0x920000ull
-#define FIXTURE_ACTOR_WORLD       0x930000ull
-#define COMPAT_MATRIX_GUARD_RVA   0x5a31eu
-#define COMPAT_VIEWPORT_GUARD_RVA 0x5a371u
-#define COMPAT_MANAGER_GUARD_RVA  0x4042e0u
+#define POSE_PLANE_OFFSET           0x50u
+#define POSE_SIZE_OFFSET            0x18cu
+#define POSE_QUATERNION_OFFSET      0x1ccu
+#define POSE_FINE_OFFSET            0x280u
+#define POSE_WORLD_OFFSET           0x60u
+#define LOCAL_PLAYER_ACTOR          0x900000ull
+#define LOCAL_PLAYER_CONTEXT        0x910000ull
+#define LOCAL_PLAYER_INDEX          7u
+#define POSITION_GETTER_RVA         0x6ee1f0u
+#define FACING_GETTER_RVA           0x44b690u
+#define PROJECTION_GUARD_RVA        0x5a34eu
+#define ACTOR_TARGET_UID_OFFSET     0x1c4u
+#define ACTOR_TARGET_KIND_OFFSET    0x238u
+#define TARGET_KIND_GUARD_RVA       0x3fff66u
+#define TARGET_UID_GUARD_RVA        0x3fff90u
+#define EXPLICIT_NO_TARGET_KIND     127u
+#define FIXTURE_VIEWPORT_MANAGER    0x920000ull
+#define FIXTURE_ACTOR_WORLD         0x930000ull
+#define COMPAT_MATRIX_GUARD_RVA     0x5a31eu
+#define COMPAT_VIEWPORT_GUARD_RVA   0x5a371u
+#define COMPAT_MANAGER_GUARD_RVA    0x4042e0u
+#define FIXTURE_MENU                0x940000ull
+#define FIXTURE_MENU_RECORD         0x960000ull
+#define MENU_CYCLE_OFFSET           0x21d0u
+#define MENU_MODE_OFFSET            0x1428u
+#define MENU_MODERN_OPEN_OFFSET     0x17b0u
+#define MENU_WALK_DISCRIMINATOR     0x48u
+#define MENU_WALK_X_OFFSET          0x4cu
+#define MENU_WALK_Y_OFFSET          0x50u
+#define PRIMARY_WALK_ACTION_RVA     0x1721920u
+#define FIXTURE_PRIMARY_MODULE_SIZE 0x1800000u
+#define MENU_WORLD_MANAGER_OFFSET   0x19938u
+#define MENU_OWNER_BACKLINK_OFFSET  8u
+#define MENU_CACHED_RECORD_OFFSET   0x1400u
+#define MENU_RECORD_TYPE_OFFSET     0x38u
+#define MENU_RECORD_ITEM_OFFSET     0x44u
+#define MENU_ACTION_ID_OFFSET       0x40u
+#define MENU_RECORD_BYTES           0x60u
+#define MENU_VERB_OFFSET            0x18u
+#define MENU_STRING_TAG_OFFSET      23u
+#define PRIMARY_MENU_VTABLE_RVA     0x15364c8u
+#define PRIMARY_MENU_GUARD_RVA      0x39032bu
 
 static fixture *pose_fixture(void)
 {
@@ -392,6 +411,121 @@ static void scene_walk_uses_the_local_plane(void)
     fixture_destroy(test_fixture);
 }
 
+/** Construct the original client's guarded closed-menu scene Walk source. */
+static fixture *primary_walk_fixture(void)
+{
+    fixture *test_fixture = player_pose_fixture();
+    test_fixture->context->target.module_size = FIXTURE_PRIMARY_MODULE_SIZE;
+    static const struct
+    {
+        uint32_t rva;
+        size_t size;
+        unsigned char bytes[7];
+    } guards[] = {
+        {0x39032b, 6, {0xff, 0x81, 0xd0, 0x21, 0, 0}},
+        {0x320c2f, 7, {0x48, 0x8b, 0x81, 0x38, 0x99, 1, 0}},
+        {0x391305, 7, {0x48, 0x8b, 0x86, 0, 0x14, 0, 0}},
+        {0x391d3f, 7, {0x80, 0xb9, 0x28, 0x14, 0, 0, 0}},
+        {0x391d52, 7, {0xc6, 0x81, 0xb0, 0x17, 0, 0, 1}},
+        {0x392689, 7, {0x44, 0x88, 0xb3, 0xb0, 0x17, 0, 0}},
+    };
+    for (unsigned index = 0; index < sizeof guards / sizeof *guards; index++)
+    {
+        uint64_t address = FIXTURE_MODULE_BASE + guards[index].rva;
+        fixture_add_block(test_fixture, address, guards[index].size);
+        memcpy(fixture_bytes(test_fixture, address, guards[index].size), guards[index].bytes,
+               guards[index].size);
+    }
+    fixture_add_block(test_fixture, FIXTURE_MENU, MENU_CYCLE_OFFSET + sizeof(uint64_t));
+    fixture_add_block(test_fixture, FIXTURE_MENU_RECORD, MENU_RECORD_BYTES);
+    fixture_add_block(test_fixture,
+                      FIXTURE_MODULE_BASE + PRIMARY_WALK_ACTION_RVA + MENU_ACTION_ID_OFFSET, 4);
+    fixture_put_u64(test_fixture, FIXTURE_WORLD + MENU_WORLD_MANAGER_OFFSET, FIXTURE_MENU);
+    fixture_put_u64(test_fixture, FIXTURE_MENU, FIXTURE_MODULE_BASE + PRIMARY_MENU_VTABLE_RVA);
+    fixture_put_u64(test_fixture, FIXTURE_MENU + MENU_OWNER_BACKLINK_OFFSET, FIXTURE_WORLD);
+    fixture_put_u64(test_fixture, FIXTURE_MENU + MENU_CACHED_RECORD_OFFSET, FIXTURE_MENU_RECORD);
+    fixture_put_u64(test_fixture, FIXTURE_MENU + MENU_CYCLE_OFFSET, 44);
+    fixture_put_u64(test_fixture, FIXTURE_MENU_RECORD + MENU_RECORD_TYPE_OFFSET,
+                    FIXTURE_MODULE_BASE + PRIMARY_WALK_ACTION_RVA);
+    fixture_put_u32(test_fixture,
+                    FIXTURE_MODULE_BASE + PRIMARY_WALK_ACTION_RVA + MENU_ACTION_ID_OFFSET, 23);
+    /* Two valid inline strings: empty target name and the nine-byte verb. */
+    fixture_bytes(test_fixture, FIXTURE_MENU_RECORD + MENU_STRING_TAG_OFFSET, 1)[0] = 23;
+    memcpy(fixture_bytes(test_fixture, FIXTURE_MENU_RECORD + MENU_VERB_OFFSET, 9), "Walk here", 9);
+    fixture_bytes(test_fixture, FIXTURE_MENU_RECORD + MENU_VERB_OFFSET + MENU_STRING_TAG_OFFSET,
+                  1)[0] = 14;
+    fixture_put_u32(test_fixture, FIXTURE_MENU_RECORD + MENU_RECORD_ITEM_OFFSET, UINT32_MAX);
+    fixture_put_u32(test_fixture, FIXTURE_MENU_RECORD + MENU_WALK_X_OFFSET, 3005);
+    fixture_put_u32(test_fixture, FIXTURE_MENU_RECORD + MENU_WALK_Y_OFFSET, 3006);
+    return test_fixture;
+}
+
+static void primary_scene_walk_decodes_ground_and_selected_menu_backend(void)
+{
+    fixture *test_fixture = primary_walk_fixture();
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    const rs3_pointer_walk *walk = &test_fixture->snapshot->pointer_walk;
+    assert(walk->valid && walk->action == 23 && walk->menu_cycle == 44);
+    assert(walk->tile.valid && walk->tile.x == 3005 && walk->tile.y == 3006 &&
+           walk->tile.plane == 1);
+    fixture_bytes(test_fixture, FIXTURE_MENU + MENU_MODE_OFFSET, 1)[0] = 1;
+    fixture_bytes(test_fixture, FIXTURE_MENU + MENU_MODERN_OPEN_OFFSET, 1)[0] = 1;
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    assert(!walk->valid && !walk->tile.valid);
+    fixture_bytes(test_fixture, FIXTURE_MENU + MENU_MODERN_OPEN_OFFSET, 1)[0] = 0;
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    assert(walk->valid && walk->tile.valid);
+    fixture_destroy(test_fixture);
+}
+
+static void primary_scene_walk_rejects_minimap_invalid_coordinates_and_missing_world(void)
+{
+    fixture *test_fixture = primary_walk_fixture();
+    const rs3_pointer_walk *walk = &test_fixture->snapshot->pointer_walk;
+    fixture_put_u32(test_fixture, FIXTURE_MENU_RECORD + MENU_WALK_DISCRIMINATOR, 1);
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    assert(walk->valid && !walk->tile.valid);
+    fixture_put_u32(test_fixture, FIXTURE_MENU_RECORD + MENU_WALK_DISCRIMINATOR, 0);
+    fixture_put_u32(test_fixture, FIXTURE_MENU_RECORD + MENU_WALK_X_OFFSET, UINT32_MAX);
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    assert(walk->valid && !walk->tile.valid);
+    fixture_put_u32(test_fixture, FIXTURE_MENU_RECORD + MENU_WALK_X_OFFSET, 3005);
+    fixture_put_u64(test_fixture, LOCAL_PLAYER_ACTOR + POSE_WORLD_OFFSET, 0);
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    assert(walk->valid && !walk->tile.valid);
+    fixture_destroy(test_fixture);
+}
+
+static void primary_scene_walk_rejects_changed_cycle_vtable_and_descriptor(void)
+{
+    fixture *test_fixture = primary_walk_fixture();
+    const rs3_pointer_walk *walk = &test_fixture->snapshot->pointer_walk;
+    fixture_mutate_on_read(test_fixture, FIXTURE_MENU + MENU_CYCLE_OFFSET, 2,
+                           FIXTURE_MENU + MENU_CYCLE_OFFSET, 45);
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    assert(!walk->valid && !walk->tile.valid);
+    fixture_clear_mutation(test_fixture);
+    fixture_put_u32(test_fixture,
+                    FIXTURE_MODULE_BASE + PRIMARY_WALK_ACTION_RVA + MENU_ACTION_ID_OFFSET, 3);
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    assert(!walk->valid && !walk->tile.valid);
+    fixture_put_u32(test_fixture,
+                    FIXTURE_MODULE_BASE + PRIMARY_WALK_ACTION_RVA + MENU_ACTION_ID_OFFSET, 23);
+    fixture_put_u64(test_fixture, FIXTURE_MENU, FIXTURE_MODULE_BASE + 0x150d5b0);
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    assert(!walk->valid && !walk->tile.valid);
+    fixture_destroy(test_fixture);
+}
+
+static void primary_scene_walk_rejects_failed_instruction_guard(void)
+{
+    fixture *test_fixture = primary_walk_fixture();
+    fixture_bytes(test_fixture, FIXTURE_MODULE_BASE + PRIMARY_MENU_GUARD_RVA, 1)[0] = 0;
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    assert(!test_fixture->snapshot->pointer_walk.valid);
+    fixture_destroy(test_fixture);
+}
+
 static void original_position_and_hit_channel_share_committed_player(void)
 {
     fixture *test_fixture = player_pose_fixture();
@@ -648,6 +782,10 @@ int main(void)
     RUN_TEST(snapshot_accessors_enforce_capacity_and_preserve_identity);
     RUN_TEST(compatibility_camera_requires_the_pinned_layout);
     RUN_TEST(scene_walk_uses_the_local_plane);
+    RUN_TEST(primary_scene_walk_decodes_ground_and_selected_menu_backend);
+    RUN_TEST(primary_scene_walk_rejects_minimap_invalid_coordinates_and_missing_world);
+    RUN_TEST(primary_scene_walk_rejects_changed_cycle_vtable_and_descriptor);
+    RUN_TEST(primary_scene_walk_rejects_failed_instruction_guard);
     RUN_TEST(original_position_and_hit_channel_share_committed_player);
     RUN_TEST(rejects_pose_from_actor_different_from_hit_channel);
     RUN_TEST(spatial_commit_preserves_compatibility_position_decoder);

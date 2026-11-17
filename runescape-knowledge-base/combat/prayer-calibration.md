@@ -1,5 +1,21 @@
 # Soul Split and protection calibration
 
+## Current binding source (2026-11-17)
+
+**Observed:** the original-profile native UI accessor resolved the current
+account's Ctrl+F1/F2/F3/F4 chords for Magic/Ranged/Soul Split/Melee. It also
+resolved Alt+G for Devotion and the P1 rotation's letter and Page Up/Down keys.
+These decoded modifier masks differ from opaque VarClient modifier codes.
+
+**Controller integration rule:** use the guarded C UI role/chord label, exact
+consumer sample, process lifetime and selected preset. Re-read the role before
+input. A failed native label must not fall back to the older Compatibility
+Mode account's plain F1/F3/F4 or its guessed defensive and potion keys.
+The old unmodified-key calibration remains a separately named opt-in research
+source. It does not establish the current account's key or a prayer deadline.
+
+## Earlier timing captures
+
 The existing `rs3_reader.telos_prayer` prototype evaluates a melee-protection switch on sequence `28929` and an experimental return to Soul Split. The 600 ms hold is a replay parameter. The confirmed association for `28929` comes from 300% P1. Validate it at 0% and measure the intervening hits before trusting either transition.
 
 Run a shadow capture before crossing onto the arena in Practice Mode. Keep Deflect Melee active as the P1 baseline. Manually use `Ctrl+F4` and `Ctrl+F3` for controlled switch observations when there is time to confirm the overhead. The shadow trial records hypothetical decisions, manual key edges, actual overheads, raw NPC action applications, and native player hitmarks in one clock domain.

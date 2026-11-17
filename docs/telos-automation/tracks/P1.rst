@@ -96,6 +96,16 @@ targets pass (271 Python tests, no skips). NPC target research remains open.
 Requests
 --------
 
+* Whole-project integration, 2026-11-17: the original executable now exposes
+  its guarded closed-menu default action through the existing 32-byte
+  ``rs3_snapshot_pointer_walk`` API. The implementation reuses P5's pinned
+  owner/record/backend reader, adds the original manager vtable and cycle
+  instruction, and decodes scene coordinates only for the exact Walk
+  descriptor and discriminator. Four fixture groups cover valid ground,
+  open backend, minimap/unknown-world cases, invalid coordinates, tearing,
+  descriptor mismatch and failed guards. A live non-Walk action remains a
+  known action with an unknown ground tile. Movement success is not claimed.
+
 The user authorized P1/P2 include and snapshot-storage registration in
 ``src/context.h`` on 2026-11-11. Those registration lines are included here.
 
