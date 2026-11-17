@@ -5,22 +5,29 @@
 #include <math.h>
 #include <string.h>
 
-#define POSE_PLANE_OFFSET        0x50u
-#define POSE_SIZE_OFFSET         0x18cu
-#define POSE_QUATERNION_OFFSET   0x1ccu
-#define POSE_FINE_OFFSET         0x280u
-#define POSE_WORLD_OFFSET        0x60u
-#define LOCAL_PLAYER_ACTOR       0x900000ull
-#define LOCAL_PLAYER_CONTEXT     0x910000ull
-#define LOCAL_PLAYER_INDEX       7u
-#define POSITION_GETTER_RVA      0x6ee1f0u
-#define FACING_GETTER_RVA        0x44b690u
-#define PROJECTION_GUARD_RVA     0x5a34eu
-#define ACTOR_TARGET_UID_OFFSET  0x1c4u
-#define ACTOR_TARGET_KIND_OFFSET 0x238u
-#define TARGET_KIND_GUARD_RVA    0x3fff66u
-#define TARGET_UID_GUARD_RVA     0x3fff90u
-#define EXPLICIT_NO_TARGET_KIND  127u
+#define POSE_PLANE_OFFSET         0x50u
+#define POSE_SIZE_OFFSET          0x18cu
+#define POSE_QUATERNION_OFFSET    0x1ccu
+#define POSE_FINE_OFFSET          0x280u
+#define POSE_WORLD_OFFSET         0x60u
+#define LOCAL_PLAYER_ACTOR        0x900000ull
+#define LOCAL_PLAYER_CONTEXT      0x910000ull
+#define LOCAL_PLAYER_INDEX        7u
+#define POSITION_GETTER_RVA       0x6ee1f0u
+#define FACING_GETTER_RVA         0x44b690u
+#define PROJECTION_GUARD_RVA      0x5a34eu
+#define ACTOR_TARGET_UID_OFFSET   0x1c4u
+#define ACTOR_TARGET_KIND_OFFSET  0x238u
+#define TARGET_KIND_GUARD_RVA     0x3fff66u
+#define TARGET_UID_GUARD_RVA      0x3fff90u
+#define EXPLICIT_NO_TARGET_KIND   127u
+#define ACTOR_TARGET_UID_OFFSET   0x1c4u
+#define ACTOR_TARGET_KIND_OFFSET  0x238u
+#define FIXTURE_VIEWPORT_MANAGER  0x920000ull
+#define FIXTURE_ACTOR_WORLD       0x930000ull
+#define COMPAT_MATRIX_GUARD_RVA   0x5a31eu
+#define COMPAT_VIEWPORT_GUARD_RVA 0x5a371u
+#define COMPAT_MANAGER_GUARD_RVA  0x4042e0u
 
 static fixture *pose_fixture(void)
 {
@@ -72,6 +79,53 @@ static void rejects_torn_and_nonfinite_poses(void)
                                 &pose));
     assert(!pose.tile.valid && !(pose.valid_mask & RS3_SPATIAL_FINE_POSITION));
     assert(pose.valid_mask & RS3_SPATIAL_FACING);
+    fixture_destroy(test_fixture);
+}
+
+static void compatibility_npc_tiles_require_the_shared_position_getter(void)
+{
+    const uint64_t getter = FIXTURE_MODULE_BASE + 0x6ee110u;
+    const uint64_t owner_instruction = FIXTURE_MODULE_BASE + 0x38523u;
+    const uint64_t player_slot =
+        FIXTURE_MODULE_BASE + profile_compatibility.player_actor_vtable_rva + 0xb0u;
+    const uint64_t npc_slot =
+        FIXTURE_MODULE_BASE + profile_compatibility.npc_entity_vtable_rva + 0xb0u;
+    const unsigned char getter_bytes[] = {0x48, 0x8d, 0x81, 0x80, 0x02, 0, 0, 0xc3};
+    const unsigned char owner_bytes[] = {0x49, 0x8b, 0x40, 0x08, 0x48, 0x89, 0x41, 0x60};
+    fixture *test_fixture = fixture_create_for_profile(&profile_compatibility);
+    fixture_add_block(test_fixture, getter, sizeof getter_bytes);
+    fixture_add_block(test_fixture, owner_instruction, sizeof owner_bytes);
+    fixture_add_block(test_fixture, player_slot, sizeof getter);
+    fixture_add_block(test_fixture, npc_slot, sizeof getter);
+    memcpy(fixture_bytes(test_fixture, getter, sizeof getter_bytes), getter_bytes,
+           sizeof getter_bytes);
+    memcpy(fixture_bytes(test_fixture, owner_instruction, sizeof owner_bytes), owner_bytes,
+           sizeof owner_bytes);
+    fixture_put_u64(test_fixture, player_slot, getter);
+    fixture_put_u64(test_fixture, npc_slot, getter);
+    fixture_put_u32(test_fixture, FIXTURE_ACTOR + POSE_PLANE_OFFSET, 1);
+    fixture_put_u32(test_fixture, FIXTURE_ACTOR + POSE_SIZE_OFFSET, 2);
+    const float fine[] = {512.0f * 15713.5f, 100.0f, 512.0f * 2830.5f};
+    memcpy(fixture_bytes(test_fixture, FIXTURE_ACTOR + POSE_FINE_OFFSET, sizeof fine), fine,
+           sizeof fine);
+    rs3_snapshot *snapshot = test_fixture->snapshot;
+    snapshot->info.npc_count = 1;
+    snapshot->npcs[0].runtime_id = FIXTURE_NPC_RUNTIME_ID;
+    test_fixture->context->npcs.staged_actor_addresses[0] = FIXTURE_ACTOR;
+    spatial_stage(test_fixture->context, snapshot, FIXTURE_WORLD);
+    assert(snapshot->spatial.npc_count == 1);
+    const rs3_actor_spatial *pose = &snapshot->npc_spatial[0];
+    assert(pose->tile.valid && pose->tile.x == 15712 && pose->tile.y == 2829 &&
+           pose->tile.plane == 1);
+    assert(pose->facing_reason == RS3_SPATIAL_UNMAPPED && !snapshot->spatial.camera.valid_mask);
+    const float outside = 512.0f * (MAX_TILE_COORDINATE + 1.5f);
+    memcpy(fixture_bytes(test_fixture, FIXTURE_ACTOR + POSE_FINE_OFFSET, sizeof outside), &outside,
+           sizeof outside);
+    spatial_stage(test_fixture->context, snapshot, FIXTURE_WORLD);
+    assert(!pose->tile.valid);
+    fixture_put_u64(test_fixture, npc_slot, getter + 1);
+    spatial_stage(test_fixture->context, snapshot, FIXTURE_WORLD);
+    assert(snapshot->spatial.status == RS3_UNAVAILABLE && snapshot->spatial.npc_count == 0);
     fixture_destroy(test_fixture);
 }
 
@@ -130,6 +184,24 @@ static void rejects_unknown_height_plane_and_abi(void)
     assert(rs3_spatial_sizeof(RS3_SPATIAL_SIZE_ACTOR) == sizeof(rs3_actor_spatial));
 }
 
+static void projects_compatibility_viewport_at_physical_size(void)
+{
+    rs3_camera camera = test_camera();
+    camera.valid_mask |= RS3_CAMERA_SCALED_VIEWPORT;
+    camera.reserved[0] = 1200;
+    camera.reserved[1] = 900;
+    rs3_actor_spatial actor = {.valid_mask = RS3_SPATIAL_FINE_POSITION | RS3_SPATIAL_SAME_WORLD,
+                               .tile = {1, 0, 0, 1},
+                               .fine_x = 0.5f,
+                               .fine_height = 0.5f};
+    rs3_screen_point point;
+    assert(rs3_project_actor(&camera, &actor, 0, &point, sizeof point) == RS3_OK);
+    assert(point.valid && point.x == 1000 && point.y == 425);
+    camera.reserved[1] = 0;
+    assert(rs3_project_actor(&camera, &actor, 0, &point, sizeof point) == RS3_OK);
+    assert(!point.valid && point.reason == RS3_SPATIAL_WINDOW_UNKNOWN);
+}
+
 static void snapshot_accessors_enforce_capacity_and_preserve_identity(void)
 {
     fixture *test_fixture = pose_fixture();
@@ -150,9 +222,9 @@ static void snapshot_accessors_enforce_capacity_and_preserve_identity(void)
 }
 
 /** Build a complete frame with separate player/NPC actors and pinned spatial instructions. */
-static fixture *player_pose_fixture(void)
+static fixture *player_pose_fixture_for(const client_profile *profile)
 {
-    fixture *test_fixture = pose_fixture();
+    fixture *test_fixture = fixture_create_for_profile(profile);
     fixture_add_block(test_fixture, LOCAL_PLAYER_ACTOR, LAYOUT_LOCAL_ACTOR_HITMARKS_OFFSET + 8);
     fixture_add_block(test_fixture, LOCAL_PLAYER_CONTEXT, LAYOUT_LOCAL_ACTOR_OVERRIDE_OFFSET + 8);
     fixture_put_u64(test_fixture, FIXTURE_WORLD + LAYOUT_LOCAL_ACTOR_CONTEXT_OFFSET,
@@ -163,19 +235,25 @@ static fixture *player_pose_fixture(void)
     fixture_put_u64(test_fixture, LOCAL_PLAYER_CONTEXT + LAYOUT_LOCAL_ACTOR_OVERRIDE_OFFSET,
                     LOCAL_PLAYER_ACTOR);
     fixture_put_u64(test_fixture, LOCAL_PLAYER_ACTOR,
-                    FIXTURE_MODULE_BASE + profile_primary.player_actor_vtable_rva);
+                    FIXTURE_MODULE_BASE + profile->player_actor_vtable_rva);
     fixture_put_u32(test_fixture, LOCAL_PLAYER_ACTOR + LAYOUT_LOCAL_ACTOR_RUNTIME_ID_OFFSET,
                     LOCAL_PLAYER_INDEX);
     fixture_put_u64(test_fixture, LOCAL_PLAYER_ACTOR + POSE_WORLD_OFFSET, FIXTURE_WORLD);
     fixture_put_u32(test_fixture, LOCAL_PLAYER_ACTOR + POSE_PLANE_OFFSET, 1);
     fixture_put_u32(test_fixture, LOCAL_PLAYER_ACTOR + POSE_SIZE_OFFSET, 1);
-    memcpy(fixture_bytes(test_fixture, LOCAL_PLAYER_ACTOR + POSE_FINE_OFFSET, 3 * sizeof(float)),
-           fixture_bytes(test_fixture, FIXTURE_ACTOR + POSE_FINE_OFFSET, 3 * sizeof(float)),
-           3 * sizeof(float));
-    memcpy(
-        fixture_bytes(test_fixture, LOCAL_PLAYER_ACTOR + POSE_QUATERNION_OFFSET, 4 * sizeof(float)),
-        fixture_bytes(test_fixture, FIXTURE_ACTOR + POSE_QUATERNION_OFFSET, 4 * sizeof(float)),
-        4 * sizeof(float));
+    const float fine[] = {512.0f * 3000.5f, 100.0f, 512.0f * 3001.5f};
+    const float quaternion[] = {0, 0, 0, 1};
+    const uint64_t actors[] = {LOCAL_PLAYER_ACTOR, FIXTURE_ACTOR};
+    for (unsigned index = 0; index < sizeof actors / sizeof *actors; index++)
+    {
+        memcpy(fixture_bytes(test_fixture, actors[index] + POSE_FINE_OFFSET, sizeof fine), fine,
+               sizeof fine);
+        memcpy(
+            fixture_bytes(test_fixture, actors[index] + POSE_QUATERNION_OFFSET, sizeof quaternion),
+            quaternion, sizeof quaternion);
+    }
+    fixture_put_u32(test_fixture, FIXTURE_ACTOR + POSE_PLANE_OFFSET, 1);
+    fixture_put_u32(test_fixture, FIXTURE_ACTOR + POSE_SIZE_OFFSET, 1);
     const unsigned char position_guard[] = {0x48, 0x8d, 0x81, 0x80, 2, 0, 0, 0xc3};
     const unsigned char facing_guard[] = {0x48, 0x83, 0xec, 0x68, 0xf3, 0x0f, 0x10, 0x69, 0x1c};
     const unsigned char projection_guard[] = {0x0f, 0x59, 0x81, 0, 0x39, 1, 0};
@@ -191,6 +269,127 @@ static fixture *player_pose_fixture(void)
                guard_sizes[guard]);
     }
     return test_fixture;
+}
+
+static fixture *player_pose_fixture(void)
+{
+    return player_pose_fixture_for(&profile_primary);
+}
+
+static fixture *compatibility_pose_fixture(void)
+{
+    fixture *test_fixture = player_pose_fixture_for(&profile_compatibility);
+    const unsigned char position[] = {0x48, 0x8d, 0x81, 0x80, 2, 0, 0, 0xc3};
+    const unsigned char owner[] = {0x49, 0x8b, 0x40, 8, 0x48, 0x89, 0x41, 0x60};
+    const uint64_t getter = FIXTURE_MODULE_BASE + 0x6ee110u;
+    const uint64_t owner_guard = FIXTURE_MODULE_BASE + 0x38523u;
+    fixture_add_block(test_fixture, getter, sizeof position);
+    fixture_add_block(test_fixture, owner_guard, sizeof owner);
+    memcpy(fixture_bytes(test_fixture, getter, sizeof position), position, sizeof position);
+    memcpy(fixture_bytes(test_fixture, owner_guard, sizeof owner), owner, sizeof owner);
+    const uint32_t vtables[] = {profile_compatibility.player_actor_vtable_rva,
+                                profile_compatibility.npc_entity_vtable_rva};
+    for (unsigned index = 0; index < sizeof vtables / sizeof *vtables; index++)
+    {
+        uint64_t slot = FIXTURE_MODULE_BASE + vtables[index] + 0xb0;
+        fixture_add_block(test_fixture, slot, sizeof(uint64_t));
+        fixture_put_u64(test_fixture, slot, getter);
+    }
+    return test_fixture;
+}
+
+static void compatibility_camera_requires_the_pinned_layout(void)
+{
+    fixture *test_fixture = compatibility_pose_fixture();
+    const unsigned char matrix[] = {0x0f, 0x59, 0x81, 0, 0x39, 1, 0};
+    const unsigned char manager[] = {0x48, 0x8b, 0x90, 0xe8, 0x99, 1, 0};
+    const unsigned char viewport[] = {
+        0xf3, 0x41, 0x0f, 0x2a, 0x80, 0x8c, 0,    0,    0,    0xf3, 0x0f, 0x59, 0x15,
+        0x6e, 0x92, 0x58, 1,    0xf3, 0x41, 0x0f, 0x2a, 0x88, 0x84, 0,    0,    0,
+    };
+    const uint32_t rvas[] = {COMPAT_MATRIX_GUARD_RVA, COMPAT_MANAGER_GUARD_RVA,
+                             COMPAT_VIEWPORT_GUARD_RVA};
+    const unsigned char *guards[] = {matrix, manager, viewport};
+    const size_t sizes[] = {sizeof matrix, sizeof manager, sizeof viewport};
+    for (unsigned index = 0; index < sizeof guards / sizeof *guards; index++)
+    {
+        uint64_t address = FIXTURE_MODULE_BASE + rvas[index];
+        fixture_add_block(test_fixture, address, sizes[index]);
+        memcpy(fixture_bytes(test_fixture, address, sizes[index]), guards[index], sizes[index]);
+    }
+    const uint32_t world_matrix_offset = 0x13900;
+    const uint32_t scene_manager_offset = 0x199e8;
+    const uint32_t viewport_offset = 0x84;
+    rs3_camera sample = test_camera();
+    fixture_add_block(test_fixture, FIXTURE_ACTOR_WORLD + world_matrix_offset,
+                      sizeof sample.world_to_clip);
+    memcpy(fixture_bytes(test_fixture, FIXTURE_ACTOR_WORLD + world_matrix_offset,
+                         sizeof sample.world_to_clip),
+           sample.world_to_clip, sizeof sample.world_to_clip);
+    fixture_put_u64(test_fixture, LOCAL_PLAYER_ACTOR + POSE_WORLD_OFFSET, FIXTURE_ACTOR_WORLD);
+    fixture_add_block(test_fixture, FIXTURE_WORLD + scene_manager_offset, sizeof(uint64_t));
+    fixture_put_u64(test_fixture, FIXTURE_WORLD + scene_manager_offset, FIXTURE_VIEWPORT_MANAGER);
+    const int32_t viewport_bounds[] = {0, 0, 2560, 1377};
+    fixture_add_block(test_fixture, FIXTURE_VIEWPORT_MANAGER + viewport_offset,
+                      sizeof viewport_bounds);
+    memcpy(fixture_bytes(test_fixture, FIXTURE_VIEWPORT_MANAGER + viewport_offset,
+                         sizeof viewport_bounds),
+           viewport_bounds, sizeof viewport_bounds);
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    const rs3_spatial_info *spatial = &test_fixture->snapshot->spatial;
+    assert(spatial->player.tile.valid && !(spatial->player.valid_mask & RS3_SPATIAL_FACING));
+    assert(spatial->camera.valid_mask & RS3_CAMERA_MATRIX);
+    assert(spatial->camera.valid_mask & RS3_CAMERA_VIEWPORT);
+    assert(spatial->camera.viewport_width == 2560 && spatial->camera.viewport_height == 1377);
+    fixture_bytes(test_fixture, FIXTURE_MODULE_BASE + COMPAT_MANAGER_GUARD_RVA, 1)[0] = 0;
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    assert(spatial->player.tile.valid && !spatial->camera.valid_mask);
+    fixture_destroy(test_fixture);
+}
+
+static void scene_walk_uses_the_local_plane(void)
+{
+    fixture *test_fixture = compatibility_pose_fixture();
+    const uint64_t menu = 0x940000, entries = 0x950000, entry = 0x960000;
+    const uint64_t guard = FIXTURE_MODULE_BASE + 0x39024b;
+    const uint64_t walk_action = FIXTURE_MODULE_BASE + 0x16be960;
+    const uint32_t data_offset = 0x48;
+    const unsigned char cycle_increment[] = {0xff, 0x81, 0xd0, 0x21, 0, 0};
+    fixture_add_block(test_fixture, guard, sizeof cycle_increment);
+    memcpy(fixture_bytes(test_fixture, guard, sizeof cycle_increment), cycle_increment,
+           sizeof cycle_increment);
+    fixture_add_block(test_fixture, menu, 0x21d8);
+    fixture_add_block(test_fixture, entries, 16);
+    fixture_add_block(test_fixture, entry, 0x54);
+    fixture_add_block(test_fixture, walk_action + 0x40, sizeof(uint32_t));
+    fixture_put_u64(test_fixture, FIXTURE_WORLD + 0x19938, menu);
+    fixture_put_u64(test_fixture, menu, FIXTURE_MODULE_BASE + 0x150d5b0);
+    fixture_put_u64(test_fixture, menu + 8, FIXTURE_WORLD);
+    fixture_put_u64(test_fixture, menu + 0x90, entries);
+    fixture_put_u64(test_fixture, menu + 0x98, entries + 16);
+    fixture_put_u64(test_fixture, menu + 0x21d0, 24);
+    fixture_put_u64(test_fixture, entries + 8, entry);
+    fixture_put_u64(test_fixture, entry + 0x38, walk_action);
+    fixture_put_u32(test_fixture, walk_action + 0x40, 23);
+    fixture_put_u32(test_fixture, entry + data_offset + 4, 13266);
+    fixture_put_u32(test_fixture, entry + data_offset + 8, 5095);
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    rs3_pointer_walk walk;
+    assert(rs3_snapshot_pointer_walk(test_fixture->snapshot, &walk, sizeof walk) == RS3_OK);
+    assert(walk.valid && walk.menu_cycle == 24 && walk.action == 23);
+    assert(walk.tile.valid && walk.tile.x == 13266 && walk.tile.y == 5095 && walk.tile.plane == 1);
+
+    fixture_put_u32(test_fixture, entry + data_offset, 1);
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    assert(rs3_snapshot_pointer_walk(test_fixture->snapshot, &walk, sizeof walk) == RS3_OK);
+    assert(walk.valid && walk.action == 23 && !walk.tile.valid);
+
+    fixture_put_u32(test_fixture, entry + data_offset, 0);
+    fixture_put_u64(test_fixture, LOCAL_PLAYER_ACTOR + POSE_WORLD_OFFSET, 0);
+    spatial_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_WORLD);
+    assert(rs3_snapshot_pointer_walk(test_fixture->snapshot, &walk, sizeof walk) == RS3_OK);
+    assert(walk.valid && walk.action == 23 && !walk.tile.valid);
+    fixture_destroy(test_fixture);
 }
 
 static void original_position_and_hit_channel_share_committed_player(void)
@@ -442,9 +641,13 @@ int main(void)
 {
     RUN_TEST(decodes_pose_but_does_not_fabricate_target);
     RUN_TEST(rejects_torn_and_nonfinite_poses);
+    RUN_TEST(compatibility_npc_tiles_require_the_shared_position_getter);
     RUN_TEST(projects_with_physical_origin_and_y_inversion);
+    RUN_TEST(projects_compatibility_viewport_at_physical_size);
     RUN_TEST(rejects_unknown_height_plane_and_abi);
     RUN_TEST(snapshot_accessors_enforce_capacity_and_preserve_identity);
+    RUN_TEST(compatibility_camera_requires_the_pinned_layout);
+    RUN_TEST(scene_walk_uses_the_local_plane);
     RUN_TEST(original_position_and_hit_channel_share_committed_player);
     RUN_TEST(rejects_pose_from_actor_different_from_hit_channel);
     RUN_TEST(spatial_commit_preserves_compatibility_position_decoder);

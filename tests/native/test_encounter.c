@@ -6,12 +6,35 @@
 #include <string.h>
 
 #define PACKED_VARP            6363u
+#define RETALIATE_VARP         462u
 #define RAW_NODE               0x880000ull
 #define TICK_OWNER             0x990000ull
 #define TICK_OWNER_GLOBAL_RVA  0x17345a8u
 #define TICK_HANDLER_GUARD_RVA 0x36960du
 #define TICK_COUNTER_OFFSET    0xdbf0u
 #define STALE_TICK_AGE_NS      2000000000ull
+
+static void auto_retaliate_requires_the_pinned_profile_and_stable_boolean(void)
+{
+    fixture *sample = fixture_create_for_profile(&profile_compatibility);
+    sample->snapshot->info.status = RS3_AVAILABLE;
+    fixture_add_block(sample, RAW_NODE, FIXTURE_VARIABLE_NODE_BYTES);
+    fixture_put_variable(sample, FIXTURE_PLAYER_TABLE, RAW_NODE, RETALIATE_VARP, 0);
+    const int32_t states[] = {1, 0, -1};
+    int32_t observed;
+    for (uint32_t raw = 0; raw < sizeof states / sizeof states[0]; raw++)
+    {
+        fixture_put_u64(sample, RAW_NODE + LAYOUT_VARIABLE_NODE_VALUE_OFFSET, raw);
+        encounter_stage(sample->context, sample->snapshot, FIXTURE_PLAYER, FIXTURE_WORLD);
+        assert(rs3_snapshot_auto_retaliate(sample->snapshot, &observed) == RS3_OK);
+        assert(observed == states[raw]);
+    }
+    sample->context->target.profile = &profile_primary;
+    fixture_put_u64(sample, RAW_NODE + LAYOUT_VARIABLE_NODE_VALUE_OFFSET, 0);
+    encounter_stage(sample->context, sample->snapshot, FIXTURE_PLAYER, FIXTURE_WORLD);
+    assert(rs3_snapshot_auto_retaliate(sample->snapshot, &observed) == RS3_OK && observed == -1);
+    fixture_destroy(sample);
+}
 
 static void present_stage_is_not_a_phase_or_game_tick(void)
 {
@@ -127,8 +150,43 @@ static void labelled_phases_and_enrage_require_active_telos(void)
                     0x795301f4u);
     test_fixture->context->target.profile = &profile_compatibility;
     encounter_stage(test_fixture->context, snapshot, FIXTURE_PLAYER, FIXTURE_WORLD);
-    assert(!snapshot->encounter.phase.valid && !snapshot->encounter.enrage.valid);
-    assert(snapshot->encounter.enrage.reason == RS3_ENCOUNTER_UNMAPPED);
+    /* Compatibility Mode publishes the enrage varbit (live-matched at 0-500%); phases stay
+     * limited to the calibrated 0% case. */
+    assert(!snapshot->encounter.phase.valid);
+    assert(snapshot->encounter.enrage.valid && snapshot->encounter.enrage.value == 500);
+    fixture_destroy(test_fixture);
+}
+
+static void compatibility_phase_requires_zero_enrage_and_matching_hp(void)
+{
+    fixture *test_fixture = fixture_create_for_profile(&profile_compatibility);
+    const uint64_t enrage_node = RAW_NODE + FIXTURE_VARIABLE_NODE_BYTES;
+    fixture_add_block(test_fixture, RAW_NODE, FIXTURE_VARIABLE_NODE_BYTES * 2);
+    fixture_put_variable(test_fixture, FIXTURE_PLAYER_TABLE, RAW_NODE, PACKED_VARP, 2u << 21);
+    fixture_put_variable(test_fixture, FIXTURE_PLAYER_TABLE, enrage_node, 6359, 0x78360000u);
+    rs3_snapshot *snapshot = test_fixture->snapshot;
+    snapshot->info.npc_count = 1;
+    snapshot->npcs[0] = (rs3_npc){.flags = RS3_NPC_CONFIG | RS3_NPC_HEALTH,
+                                  .config_id = 22891,
+                                  .health_current = 200000,
+                                  .health_max = 400000};
+    encounter_stage(test_fixture->context, snapshot, FIXTURE_PLAYER, FIXTURE_WORLD);
+    assert(snapshot->encounter.phase.valid && snapshot->encounter.phase.value == 3);
+    assert(snapshot->encounter.enrage.valid && snapshot->encounter.enrage.value == 0);
+    assert(!snapshot->encounter.game_tick.valid);
+    snapshot->npcs[0].health_current++;
+    encounter_stage(test_fixture->context, snapshot, FIXTURE_PLAYER, FIXTURE_WORLD);
+    assert(!snapshot->encounter.phase.valid);
+    snapshot->npcs[0].health_current--;
+    /* 300% enrage: the enrage is published, but the 0%-calibrated phase is withheld. */
+    fixture_put_u64(test_fixture, enrage_node + LAYOUT_VARIABLE_NODE_VALUE_OFFSET, 0x7836012cu);
+    encounter_stage(test_fixture->context, snapshot, FIXTURE_PLAYER, FIXTURE_WORLD);
+    assert(!snapshot->encounter.phase.valid);
+    assert(snapshot->encounter.enrage.valid && snapshot->encounter.enrage.value == 300);
+    /* Out-of-range enrage bits are not published. */
+    fixture_put_u64(test_fixture, enrage_node + LAYOUT_VARIABLE_NODE_VALUE_OFFSET, 0x78360fffu);
+    encounter_stage(test_fixture->context, snapshot, FIXTURE_PLAYER, FIXTURE_WORLD);
+    assert(!snapshot->encounter.enrage.valid);
     fixture_destroy(test_fixture);
 }
 
@@ -183,6 +241,32 @@ static void received_counter_is_independent_of_client_clock_and_telos(void)
     sample_tick(test_fixture, 101);
     assert(tick->valid && tick->counter == 101);
     assert(test_fixture->snapshot->encounter_tick_last_change_ns == changed_ns);
+    fixture_destroy(test_fixture);
+}
+
+static void compatibility_received_counter_requires_its_own_handler(void)
+{
+    fixture *test_fixture = fixture_create_for_profile(&profile_compatibility);
+    const uint64_t handler = FIXTURE_MODULE_BASE + 0x36952du;
+    const uint64_t owner_global = FIXTURE_MODULE_BASE + 0x16d15e8u;
+    const unsigned char guard[] = {0x48, 0x8b, 0x0d, 0xb4, 0x80, 0x36, 0x01, 0xff, 0x81,
+                                   0xf0, 0xdb, 0x00, 0x00, 0xe8, 0x91, 0x0b, 0x8b, 0x00};
+    fixture_add_block(test_fixture, handler, sizeof guard);
+    fixture_add_block(test_fixture, owner_global, sizeof(uint64_t));
+    fixture_add_block(test_fixture, TICK_OWNER, TICK_COUNTER_OFFSET + sizeof(uint32_t));
+    memcpy(fixture_bytes(test_fixture, handler, sizeof guard), guard, sizeof guard);
+    fixture_put_u64(test_fixture, owner_global, TICK_OWNER);
+    test_fixture->snapshot->combat.scene_state = LAYOUT_IN_GAME_STATE;
+    sample_tick(test_fixture, 100);
+    publish_tick_baseline(test_fixture);
+    sample_tick(test_fixture, 101);
+    assert(test_fixture->snapshot->encounter.game_tick.valid);
+    assert(test_fixture->snapshot->encounter.game_tick.counter == 101);
+    assert(isnan(test_fixture->snapshot->encounter.game_tick.phase_ms));
+    *fixture_bytes(test_fixture, handler, 1) ^= 1;
+    publish_tick_baseline(test_fixture);
+    sample_tick(test_fixture, 102);
+    assert(!test_fixture->snapshot->encounter.game_tick.valid);
     fixture_destroy(test_fixture);
 }
 
@@ -255,16 +339,77 @@ static void tick_wraps_without_regressing_and_clear_removes_baseline(void)
     fixture_destroy(test_fixture);
 }
 
+static void compatibility_cleanse_requires_a_scoped_exact_system_message(void)
+{
+    const uint64_t getter = FIXTURE_MODULE_BASE + 0x350f49u;
+    const uint64_t manager = 0x9a0000, buckets = 0x9a1000, node = 0x9a2000, text = 0x9a3000;
+    const uint32_t message_id = 10, logic_tick = 12345, bucket_count = 16;
+    const unsigned char guard[] = {0x48, 0x8b, 0x98, 0x88, 0x98, 1, 0};
+    const char line[] = "<col=EB2F2F>The anima stream cleanses you.";
+    fixture *sample = fixture_create_for_profile(&profile_compatibility);
+    rs3_snapshot *snapshot = sample->snapshot;
+    fixture_add_block(sample, getter, sizeof guard);
+    fixture_add_block(sample, manager, 0x8cc);
+    fixture_add_block(sample, buckets, (bucket_count + 1) * sizeof(uint64_t));
+    fixture_add_block(sample, node, 0xc0);
+    fixture_add_block(sample, text, sizeof line);
+    memcpy(fixture_bytes(sample, getter, sizeof guard), guard, sizeof guard);
+    memcpy(fixture_bytes(sample, text, sizeof line), line, sizeof line);
+    fixture_put_u64(sample, FIXTURE_WORLD + 0x19888, manager);
+    fixture_put_u64(sample, manager, FIXTURE_MODULE_BASE + 0x150d828);
+    fixture_put_u32(sample, manager + 0x18, message_id + 1);
+    fixture_put_u64(sample, manager + 0x8c0, buckets);
+    fixture_put_u32(sample, manager + 0x8c8, bucket_count);
+    fixture_put_u64(sample, buckets + bucket_count * sizeof(uint64_t), UINT64_MAX);
+    fixture_put_u64(sample, buckets + (message_id + 1) * sizeof(uint64_t), UINT64_MAX);
+    fixture_put_u64(sample, buckets + message_id * sizeof(uint64_t), node);
+    fixture_put_u32(sample, node, message_id);
+    fixture_put_u32(sample, node + 0x10, message_id);
+    fixture_put_u32(sample, node + 0x14, logic_tick);
+    fixture_put_u64(sample, node + 0x90, text);
+    fixture_put_u64(sample, node + 0x98, sizeof line - 1);
+    fixture_bytes(sample, node + 0xa7, 1)[0] = 0x80;
+
+    encounter_clear(snapshot);
+    snapshot->info.npc_count = 1;
+    snapshot->npcs[0].config_id = 22891;
+    snapshot->npcs[0].flags = RS3_NPC_CONFIG;
+    snapshot->encounter.raw_count = 1;
+    snapshot->encounter.raw[0] =
+        (rs3_encounter_raw){.varp_id = 6359, .valid = 1, .value = 1u << 29};
+    snapshot->encounter.stage_raw.valid = 1;
+    encounter_stage_cleanse(sample->context, snapshot, FIXTURE_WORLD);
+    assert(!snapshot->telos_cleanse.valid);
+    snapshot->encounter.stage_raw.value = 1;
+    encounter_stage_cleanse(sample->context, snapshot, FIXTURE_WORLD);
+    rs3_telos_cleanse result;
+    assert(rs3_snapshot_telos_cleanse(snapshot, &result, sizeof result) == RS3_OK);
+    assert(result.valid && result.message_id == message_id &&
+           result.client_logic_tick == logic_tick);
+    assert(rs3_snapshot_telos_cleanse(snapshot, &result, 1) == RS3_E_ABI);
+    assert(rs3_encounter_sizeof(RS3_ENCOUNTER_SIZE_TELOS_CLEANSE) == sizeof result);
+
+    fixture_put_u32(sample, node + 0x20, 1);
+    fixture_put_u32(sample, manager + 0x18, message_id + 2);
+    encounter_stage_cleanse(sample->context, snapshot, FIXTURE_WORLD);
+    assert(!snapshot->telos_cleanse.valid && snapshot->telos_cleanse.reason == RS3_NOT_SET);
+    fixture_destroy(sample);
+}
+
 int main(void)
 {
+    RUN_TEST(auto_retaliate_requires_the_pinned_profile_and_stable_boolean);
     RUN_TEST(present_stage_is_not_a_phase_or_game_tick);
     RUN_TEST(absence_and_zero_are_distinct);
     RUN_TEST(changed_table_invalidates_raw_fields);
     RUN_TEST(snapshot_accessor_and_commit_preserve_provenance);
     RUN_TEST(labelled_phases_and_enrage_require_active_telos);
+    RUN_TEST(compatibility_phase_requires_zero_enrage_and_matching_hp);
     RUN_TEST(received_counter_is_independent_of_client_clock_and_telos);
+    RUN_TEST(compatibility_received_counter_requires_its_own_handler);
     RUN_TEST(tick_rejects_torn_owner_counter_and_instruction_guard);
     RUN_TEST(tick_stall_reset_and_identity_changes_drop_validity);
     RUN_TEST(tick_wraps_without_regressing_and_clear_removes_baseline);
+    RUN_TEST(compatibility_cleanse_requires_a_scoped_exact_system_message);
     return 0;
 }

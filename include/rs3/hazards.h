@@ -60,12 +60,14 @@ enum rs3_hazard_channel
 
 enum rs3_hazard_flags
 {
-    RS3_HAZARD_IDENTITY = 1u, /**< Captured config ID AND exact NPC name match. */
+    RS3_HAZARD_IDENTITY = 1u, /**< Captured identity for this candidate's source. */
     RS3_HAZARD_TILE = 2u,     /**< P1 supplied a consistent tile in the player's world. */
     RS3_HAZARD_FOOTPRINT = 4u,
     RS3_HAZARD_CLIENT_START = 8u,
     RS3_HAZARD_CLIENT_END = 16u,
-    RS3_HAZARD_MECHANICS_VALIDATED = 32u
+    RS3_HAZARD_MECHANICS_VALIDATED = 32u,
+    RS3_HAZARD_SCENE_LOCATION = 64u, /**< Observed location tile with a classified config. */
+    RS3_HAZARD_TERRAIN_HEIGHT = 128u /**< Tile-centre terrain height is available. */
 };
 
 enum rs3_hazard_reason
@@ -79,8 +81,9 @@ enum rs3_hazard_reason
 };
 
 /**
- * One present actor candidate, not a spawn event. instance_id identifies the
- * native NPC lifetime; always qualify it with the info's process and scene.
+ * One present candidate, not a spawn event. For scene locations, instance_id
+ * identifies the config and tile, and runtime_id is zero. For actors,
+ * instance_id identifies the NPC lifetime. Qualify both with process and scene.
  * Invalid numeric fields are zero; their flags/reasons establish availability.
  * Client tick fields, when mapped, will use the client's clock, not server ticks.
  */
@@ -102,7 +105,7 @@ typedef struct rs3_hazard
     uint32_t timing_reason;
     uint32_t role_reason;
     uint32_t role; /**< Reserved: font/meter effects remain unmapped. */
-    uint32_t reserved;
+    uint32_t reserved; /**< Use rs3_hazard_terrain_height when TERRAIN_HEIGHT is set. */
 } rs3_hazard;
 
 /**
@@ -144,12 +147,16 @@ RS3_API int32_t rs3_snapshot_hazard_info(const rs3_snapshot *snapshot, rs3_hazar
                                          uint32_t out_size);
 
 /**
- * Copy entries in snapshot NPC order. Always set required to the stored count.
+ * Copy entries in snapshot NPC order, followed by scene locations.
+ * Always set required to the stored count.
  * Insufficient capacity returns RS3_E_BUFFER without copying a partial prefix.
  * out may be NULL for a zero-entry snapshot; required must never be NULL.
  */
 RS3_API int32_t rs3_snapshot_hazards(const rs3_snapshot *snapshot, rs3_hazard *out,
                                      uint32_t capacity, uint32_t *required);
+
+/** Copy the center height in fine units. Returns RS3_E_STATE when height is unavailable. */
+RS3_API int32_t rs3_hazard_terrain_height(const rs3_hazard *hazard, float *fine_height);
 
 #ifdef __cplusplus
 }

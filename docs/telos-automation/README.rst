@@ -97,7 +97,8 @@ Architecture
 * Perception stays in the C DLL (``src/``, ``include/rs3/``), read-only.
 * Everything from ``WorldState`` onwards is Python in
   ``python/rs3_reader/bot/``, standard library only, Python 3.9 compatible.
-* The existing deterministic prayer planner (``src/prayer.c``) is reused as is.
+* The encounter decision stack uses Python prayer timing rules. The native
+  planner remains available through its public C ABI.
 
 The three contracts
 -------------------

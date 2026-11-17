@@ -61,7 +61,9 @@ static void profile_and_frame_invalidation(void)
 {
     fixture *test_fixture = fixture_create_for_profile(&profile_compatibility);
     effects_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_PLAYER, FIXTURE_CLIENT);
-    assert(test_fixture->snapshot->effects[RS3_EFFECT_DEVOTION - 1].reason ==
+    /* Compatibility Mode reads the same variable candidates; this fixture has no tables. */
+    assert(test_fixture->snapshot->effects_info.reason != RS3_EFFECT_UNSUPPORTED_PROFILE);
+    assert(test_fixture->snapshot->effects[RS3_EFFECT_DEVOTION - 1].reason !=
            RS3_EFFECT_UNSUPPORTED_PROFILE);
     effects_clear(test_fixture->snapshot);
     assert(test_fixture->snapshot->effects_info.count == 0);

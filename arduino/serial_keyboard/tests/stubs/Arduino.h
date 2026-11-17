@@ -14,6 +14,11 @@ inline unsigned long millis()
     return testMillis;
 }
 
+inline void delay(unsigned long milliseconds)
+{
+    testMillis += milliseconds;
+}
+
 struct FakeUSB
 {
     bool connected = true;

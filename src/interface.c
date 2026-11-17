@@ -1461,19 +1461,24 @@ void interface_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t play
             (rs3_interface_observation){index + 1, RS3_UI_UNMAPPED, -1, -1};
     }
     info->reason = RS3_UI_UNSUPPORTED_PROFILE;
-    if (context->target.profile != &profile_primary)
+    int primary_profile = context->target.profile == &profile_primary;
+    if (!primary_profile && context->target.profile != &profile_compatibility)
     {
         return;
     }
     info->status = RS3_PARTIAL;
     info->reason =
         RS3_UI_UNMAPPED; /* Other dialogs, preset visibility and options remain unmapped. */
-    stage_ui_roots(context, snapshot, client_address);
-    uint64_t pointer_world = 0;
-    if (memory_read_pointer(context, client_address + LAYOUT_STATE_POINTER_OFFSET, &pointer_world))
+    if (primary_profile)
     {
-        interface_pointer_stage(context, pointer_world, &snapshot->pointer_candidate);
-        interface_minimap_stage(context, pointer_world, &snapshot->minimap_candidate);
+        stage_ui_roots(context, snapshot, client_address);
+        uint64_t pointer_world = 0;
+        if (memory_read_pointer(context, client_address + LAYOUT_STATE_POINTER_OFFSET,
+                                &pointer_world))
+        {
+            interface_pointer_stage(context, pointer_world, &snapshot->pointer_candidate);
+            interface_minimap_stage(context, pointer_world, &snapshot->minimap_candidate);
+        }
     }
     uint64_t headers[2] = {player_address + LAYOUT_PLAYER_VARIABLE_TABLE_OFFSET,
                            client_address + LAYOUT_CLIENT_VARIABLE_TABLE_OFFSET};

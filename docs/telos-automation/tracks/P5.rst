@@ -218,3 +218,21 @@ sample identity and age remain mandatory for downstream use.
   pointers and the manager vtable. A fixture swaps the graphic entry while
   leaving the old object readable; the read is rejected instead of returning
   a stale role/name. Public layouts and the 27-group test count are unchanged.
+
+* Owner-directed change, 2026-11-14 (S0b session): ``interface_stage`` now
+  decodes action bars on Compatibility Mode, using the same server variable
+  IDs. UI roots (bank, enrage) stay primary-only and unmapped there. Live
+  bars on ``6ada3f59`` decoded all 70 slots. Calibration against the
+  account owner's on-screen labels showed:
+
+  * Game key codes follow keyboard rows. F1-F12 start at 3, digits 1-9 at 16,
+    the Q row at 32, the A row at 48 and the Z row at 64.
+  * The compact ability-name match is wrong for these bars: Anticipation was
+    reported as Runic Charge. ``rs3_reader.action_bar_keys`` therefore
+    identifies slots by their raw (content type, content id) pair.
+  * Modifier bits disagreed with play on that Compatibility Mode account:
+    Soul Split reported modifier 2, but plain F4 worked. Its research resolver
+    ignores modifiers. This does not apply to the current original-profile
+    account, which uses Ctrl+F1/F2/F3/F4; use the native UI labels there.
+
+  The C chord translation is unchanged.

@@ -120,6 +120,7 @@ int frame_decode(rs3_context *context, rs3_snapshot *snapshot)
     interface_stage(context, snapshot, contexts.player_address, contexts.client_address);
     spatial_stage(context, snapshot, contexts.world_state);
     encounter_stage(context, snapshot, contexts.player_address, contexts.world_state);
+    encounter_stage_cleanse(context, snapshot, contexts.world_state);
     effects_stage(context, snapshot, contexts.player_address, contexts.client_address);
 
     if (!contexts_unchanged(context, &contexts))
@@ -137,6 +138,10 @@ int frame_decode(rs3_context *context, rs3_snapshot *snapshot)
     inventory_commit(context, snapshot, contexts.world_state);
     spatial_commit(context, snapshot);
     hazards_commit(context, snapshot, npcs_decoded);
+    if (npcs_decoded)
+    {
+        hazards_read_telos_beams(context, snapshot, contexts.world_state);
+    }
     encounter_commit(context, snapshot);
     player_track_changes(context, snapshot, contexts.world_state);
     return 1;

@@ -701,6 +701,13 @@ class SpatialTargetKind(IntEnum):
     PLAYER = 2
 
 
+class CameraFlags(IntFlag):
+    MATRIX = 1
+    VIEWPORT = 2
+    PHYSICAL_ORIGIN = 4
+    SCALED_VIEWPORT = 8
+
+
 class Camera(ctypes.Structure):
     """rs3_camera; a complete physical projection requires all three validity bits."""
 
@@ -721,6 +728,14 @@ class Camera(ctypes.Structure):
         ("process_creation_time", ctypes.c_uint64),
         ("reserved", ctypes.c_uint32 * 2),
     ]
+
+    @property
+    def physical_viewport_size(self):
+        if not self.valid_mask & CameraFlags.PHYSICAL_ORIGIN:
+            return None
+        if self.valid_mask & CameraFlags.SCALED_VIEWPORT:
+            return tuple(self.reserved)
+        return (self.viewport_width, self.viewport_height)
 
 
 class SpatialInfo(ctypes.Structure):
@@ -749,7 +764,16 @@ class ScreenPoint(ctypes.Structure):
     ]
 
 
-SIZED_SPATIAL_STRUCTURES = {1: ActorSpatial, 2: Camera, 3: SpatialInfo, 4: ScreenPoint}
+class PointerWalk(ctypes.Structure):
+    _fields_ = [
+        ("menu_cycle", ctypes.c_uint64),
+        ("tile", Position),
+        ("action", ctypes.c_int32),
+        ("valid", ctypes.c_uint32),
+    ]
+
+
+SIZED_SPATIAL_STRUCTURES = {1: ActorSpatial, 2: Camera, 3: SpatialInfo, 4: ScreenPoint, 5: PointerWalk}
 
 
 class HazardFlags(IntFlag):
@@ -761,6 +785,8 @@ class HazardFlags(IntFlag):
     CLIENT_START = 8
     CLIENT_END = 16
     MECHANICS_VALIDATED = 32
+    SCENE_LOCATION = 64
+    TERRAIN_HEIGHT = 128
 
 
 class Hazard(ctypes.Structure):
@@ -862,7 +888,20 @@ class EncounterState(ctypes.Structure):
         ("game_tick", GameTick),
     ]
 
-SIZED_ENCOUNTER_STRUCTURES = {1: EncounterValue, 2: EncounterRaw, 3: GameTick, 4: EncounterState}
+class TelosCleanse(ctypes.Structure):
+    _fields_ = [
+        (name, ctypes.c_uint32) for name in ("message_id", "client_logic_tick", "valid", "reason")
+    ]
+
+
+SIZED_ENCOUNTER_STRUCTURES = {
+    1: EncounterValue,
+    2: EncounterRaw,
+    3: GameTick,
+    4: EncounterState,
+    5: TelosCleanse,
+}
+
 
 class EffectsInfo(ctypes.Structure):
     _fields_ = [(name, ctypes.c_uint32) for name in ("status", "reason", "count", "complete")]
@@ -937,6 +976,7 @@ def _function_prototypes():
         "sizeof": (u32, [u32]),
         "spatial_sizeof": (u32, [u32]),
         "snapshot_spatial": (i32, [handle, ctypes.POINTER(SpatialInfo), u32]),
+        "snapshot_pointer_walk": (i32, [handle, ctypes.POINTER(PointerWalk), u32]),
         "snapshot_npc_spatial": (
             i32,
             [handle, ctypes.POINTER(ActorSpatial), u32, ctypes.POINTER(u32)],
@@ -976,6 +1016,7 @@ def _function_prototypes():
         "hazards_sizeof": (u32, [u32]),
         "snapshot_hazard_info": (i32, [handle, ctypes.POINTER(HazardInfo), u32]),
         "snapshot_hazards": (i32, [handle, ctypes.POINTER(Hazard), u32, ctypes.POINTER(u32)]),
+        "hazard_terrain_height": (i32, [ctypes.POINTER(Hazard), ctypes.POINTER(ctypes.c_float)]),
         "snapshot_client_version": (ctypes.c_char_p, [handle]),
         "snapshot_player": (i32, [handle, ctypes.POINTER(Player), u32]),
         "snapshot_position": (i32, [handle, ctypes.POINTER(Position), u32]),
@@ -984,8 +1025,10 @@ def _function_prototypes():
         "snapshot_effects": (i32, [handle, ctypes.POINTER(Effect), u32, ctypes.POINTER(u32)]),
         "encounter_sizeof": (u32, [u32]),
         "snapshot_encounter": (i32, [handle, ctypes.POINTER(EncounterState), u32]),
+        "snapshot_telos_cleanse": (i32, [handle, ctypes.POINTER(TelosCleanse), u32]),
         "combat_sizeof": (u32, [u32]),
         "snapshot_combat": (i32, [handle, ctypes.POINTER(CombatState), u32]),
+        "snapshot_auto_retaliate": (i32, [handle, ctypes.POINTER(i32)]),
         "snapshot_npc_animations": (
             i32,
             [handle, ctypes.POINTER(NPCAnimation), u32, ctypes.POINTER(u32)],
@@ -1110,12 +1153,15 @@ class Reader:
         self.effects_info = EffectsInfo()
         self.effects = (Effect * 14)()
         self.encounter = EncounterState()
+        self.telos_cleanse = TelosCleanse()
         self.hazard_info = HazardInfo()
         self.hazards = (Hazard * MAX_HAZARDS)()
         self.player = Player()
         self.position = Position()
         self.combat = CombatState()
+        self.auto_retaliate = None
         self.spatial = SpatialInfo()
+        self.pointer_walk = PointerWalk()
         self.npc_spatial = (ActorSpatial * MAX_NPCS)()
         self.npcs = (NPC * MAX_NPCS)()
         self.npc_animations = (NPCAnimation * MAX_NPCS)()
@@ -1208,12 +1254,17 @@ class Reader:
         copy_record(library.rs3_snapshot_effects_info, self.effects_info)
         copy_array(library.rs3_snapshot_effects, self.effects)
         copy_record(library.rs3_snapshot_encounter, self.encounter)
+        copy_record(library.rs3_snapshot_telos_cleanse, self.telos_cleanse)
         copy_record(library.rs3_snapshot_hazard_info, self.hazard_info)
         copy_array(library.rs3_snapshot_hazards, self.hazards)
         copy_record(library.rs3_snapshot_player, self.player)
         copy_record(library.rs3_snapshot_position, self.position)
         copy_record(library.rs3_snapshot_combat, self.combat)
+        retaliate = ctypes.c_int32()
+        self.check_result(library.rs3_snapshot_auto_retaliate(snapshot, ctypes.byref(retaliate)))
+        self.auto_retaliate = bool(retaliate.value) if retaliate.value >= 0 else None
         copy_record(library.rs3_snapshot_spatial, self.spatial)
+        copy_record(library.rs3_snapshot_pointer_walk, self.pointer_walk)
         copy_array(library.rs3_snapshot_npc_spatial, self.npc_spatial)
         copy_array(library.rs3_snapshot_npcs, self.npcs)
         copy_array(library.rs3_snapshot_npc_animations, self.npc_animations)
@@ -1229,6 +1280,16 @@ class Reader:
         copy_array(library.rs3_snapshot_items, self.items, Container.ALL)
         copy_array(library.rs3_snapshot_abilities, self.abilities)
         return self.info, self.player, self.npcs, self.hits
+
+    def hazard_terrain_height(self, hazard):
+        """Return the sampled beam tile's ground height in fine coordinates."""
+        if not hazard.flags & HazardFlags.TERRAIN_HEIGHT:
+            return None
+        height = ctypes.c_float()
+        self.check_result(
+            self.library.rs3_hazard_terrain_height(ctypes.byref(hazard), ctypes.byref(height))
+        )
+        return height.value
 
     def _drain(self, read_events, cursor, batch, structure, max_batches):
         """Drain one event queue. Returns (owned events, lost count, next cursor)."""

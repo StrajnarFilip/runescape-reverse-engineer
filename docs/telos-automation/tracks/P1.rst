@@ -72,8 +72,10 @@ on the running original 951-3 executable. Before marking this track done:
    Active-Telos production C/JSON confirmation, attack classification,
    player-versus-player targets and A2's twenty selection/retention trials
    remain pending. The old context+0x98 candidate remains rejected.
-3. Repeat layout/signature verification on the Compatibility Mode executable
-   before enabling P1 there. The running binary currently hashes to the original.
+
+3. Compatibility Mode has separately guarded player pose and camera sources.
+   Its NPC target reference remains unknown; original-profile target offsets
+   must not be applied to that executable.
 
 Update, 2026-11-13: the original profile now publishes its committed P1 player
 tile through the legacy position accessor used by movement. Both views agreed
@@ -117,4 +119,5 @@ L/S0b: the original runtime now has equal legacy/P1 tile views and an available
 player-hit channel. Review the eventual runtime choice against the currently
 installed original build before porting all original-profile encounter and
 attack semantics to Compatibility Mode. P1 does not change that policy or
-enable input. Compatibility Mode pose/projection guards remain unsupported.
+enable input. The integrated S0b branch supplies separate Compatibility Mode
+pose/projection guards; it does not validate original-profile attack timing.

@@ -1,0 +1,4763 @@
+"""Observe Telos, or run the melee practice controller through phases 1-3.
+
+With --port, keys come from the displayed action bars and the enrage from memory. The operator
+wakes Telos unless screenshot points are given for the automatic approach.
+"""
+
+from __future__ import annotations
+
+import argparse
+import ctypes
+import json
+import math
+import time
+from contextlib import ExitStack
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+from rs3_reader.action_bar_keys import displayed_bindings
+from rs3_reader.bot.attempt_log import CLEANSE_MAX_AGE_CLIENT_TICKS, AttemptLog
+from rs3_reader.native import (
+    LOGIC_TICK_MS,
+    PRAYER_POINTS_MASK,
+    AbilityFlags,
+    Camera,
+    EquipmentMatch,
+    HazardFlags,
+    NPCFlags,
+    Position,
+    Reader,
+    Reason,
+    ScreenPoint,
+    SpatialFlags,
+    SpatialTargetKind,
+    Status,
+    Variable,
+)
+from rs3_reader.prayer import Prayer
+from rs3_reader.rotation_keys import (
+    ArduinoBackend,
+    parse_chord,
+    resolve_layout_chord,
+    window_keyboard_layout,
+)
+from rs3_reader.telemetry import npc_health_record, player_hit_splats_record
+from rs3_reader.telos_prayer import MELEE_AUTO_SEQUENCE, ManualPrayerKeys, telos_actions
+
+ACTIVE_TELOS = 22891
+DORMANT_TELOS = 22892
+PHASE_FIVE_TELOS = 22908
+PHASE_FIVE_MIN_ENRAGE = 100
+PHASE_FIVE_HANDOFF_NS = 18_000_000_000
+TENDRILS = 28931
+TENDRILS_RELEASE = 28932
+HOLD_STILL = 28935
+UPPERCUT = 28938
+# P4 weak anima bomb throw (see ANIMA_BOMB_SINGLE_HIT_WINDOW_NS).
+ANIMA_BOMB = 28942
+PHASE_SHIFT = 21
+PHASE_MASK = 7
+OPENING_AUTOS = 7
+LOOP_AUTOS = 3
+HOLD_STILL_FORECAST_WINDOW_NS = 2_400_000_000
+ANTICIPATION_MAX_ATTEMPTS = 2
+PHASE_COUNT = 4
+FONT_SIXTEENTHS = (3, 2, 1)
+SIXTEENTHS = 16
+MAX_SAMPLE_AGE_NS = 100_000_000
+SPECIAL_WINDOW_NS = 3_000_000_000
+ACK_TIMEOUT_NS = 1_200_000_000
+KEY_HOLD_SECONDS = 0.05
+POLL_SECONDS = 0.025
+MAX_PRACTICE_SECONDS = 300
+ZERO_ENRAGE_HP = 400_000
+F12 = 0x7B
+APPROACH_TIMEOUT_NS = 30_000_000_000
+FOREGROUND_WAIT_SECONDS = 60
+ENGAGE_TIMEOUT_NS = 2_000_000_000
+REACQUIRE_TIMEOUT_NS = 3_600_000_000
+REACQUIRE_CUE_TIMEOUT_NS = 10_000_000_000
+# Fallback when the received server tick counter is invalid. One game tick is 0.6 seconds.
+TICK_FALLBACK_NS = 600_000_000
+# An invalid counter is estimated from the last valid tick for at most this long.
+TICK_ESTIMATE_MAX_NS = 3 * TICK_FALLBACK_NS
+# Action bar 9 keys observed on 2026-11-14: F3 Deflect Melee, F4 Soul Split. Ctrl+F3 did not
+# change the overhead in that session.
+DEFAULT_FLICK_MELEE_KEY = "F3"
+DEFAULT_FLICK_SOUL_SPLIT_KEY = "F4"
+DEFAULT_FLICK_MAGIC_KEY = "F1"
+# The account owner identified 28959 as a Telos magic attack. Its type 139 hits rose from 1,139
+# to 3,828 in P2 at 250% while Deflect Melee was flicked (2026-11-14).
+MAGIC_ATTACK = 28959
+# The RuneScape Wiki strategy page names the P2 magic barrage Magical Onslaught: projectiles
+# grow in damage, matching the rising 28959 hits. Each projectile repeats the animation.
+ONSLAUGHT = MAGIC_ATTACK
+# 28929 hits are type 133 melee in every phase, including the nine P3 applications logged so far.
+# Hold Still's prayers follow HOLD_STILL_SMALL_HIT_PRAYER_BY_PHASE and the heavy melee hit.
+FLICK_PRAYER_BY_ANIMATION = {
+    MAGIC_ATTACK: Prayer.MAGIC,
+    MELEE_AUTO_SEQUENCE: Prayer.MELEE,
+    HOLD_STILL: Prayer.MELEE,
+}
+# Next special per phase, from the RuneScape Wiki rotation (guide-derived; P1 matches the live
+# captures). P2: Onslaught, Hold Still, Black Virus, Uppercut, Tendrils, each after 3 autos.
+# The virus has no mapped animation, so Hold Still is followed directly by Uppercut here.
+# 28966 is not Hold Still (account owner). In every logged P4 it came 24-36 ticks after Tendrils,
+# when Telos resumed attacking after the font intermission; the next special followed one to
+# three attacks later and was Hold Still, Uppercut or the anima bomb. Pressing Anticipation on
+# it left it expired 16 ticks before a Hold Still stun (08:47, 250%), so it only restarts the
+# count for a forecast Hold Still after three attacks.
+P4_RETURN_CUE = 28966
+NEXT_SPECIAL_BY_PHASE = {
+    1: {TENDRILS: UPPERCUT, UPPERCUT: HOLD_STILL, HOLD_STILL: TENDRILS},
+    2: {ONSLAUGHT: HOLD_STILL, HOLD_STILL: UPPERCUT, UPPERCUT: TENDRILS, TENDRILS: ONSLAUGHT},
+    # P3: Red Virus, a once-per-phase spec skip, Uppercut, Hold Still. Only the last two have
+    # mapped animations, so Hold Still is forecast after Uppercut.
+    3: {UPPERCUT: HOLD_STILL, HOLD_STILL: UPPERCUT},
+    # P4 (wiki): Uppercut, Weak Anima Bomb, Hold Still. Tendrils (the font intermission) restarts
+    # the count without a forecast; P4_RETURN_CUE forecasts Hold Still after three attacks.
+    4: {UPPERCUT: None, TENDRILS: None, P4_RETURN_CUE: HOLD_STILL, HOLD_STILL: UPPERCUT},
+    # P5 (wiki): golems, viruses and the anima bomb; its specials are not mapped yet.
+    5: {UPPERCUT: None, HOLD_STILL: None},
+}
+HANDLED_PHASES = (1, 2, 3, 4, 5)
+# Deflect used for unmapped animations: P3 and P5 are magic only (wiki, account owner); P4
+# autos are melee within reach and magic otherwise, and 28959 still selects Deflect Magic.
+DEFAULT_FLICK_PRAYER_BY_PHASE = {
+    1: Prayer.MELEE,
+    2: Prayer.MELEE,
+    3: Prayer.MAGIC,
+    4: Prayer.MELEE,
+    5: Prayer.MAGIC,
+}
+# run() result asking main() to start over for a new encounter (scene or Telos changed).
+ENCOUNTER_RESET = 3
+# Hold Still ends with a typeless stomp that only hurts a player inside Telos's footprint
+# (account owner, 2026-11-14; up to 9,900 at 500%). If the player is still underneath during
+# these received ticks after 28935, Dive to a tile this far from Telos's centre.
+# Telos relocated at +3 in the 500% capture of 2026-11-14 and the stomp follows his new position
+# at +8/+9. A Dive sent at +6 casts at +8, which was a tick too late (account owner; 06:51 P3
+# death, 07:01 P1 Dive at +7 after two rejected hovers), so the check starts at +3 and allows a
+# second target in the same tick after a rejected hover. At +3 the dodge yields to a Resonance
+# press due before it could finish (STOMP_DODGE_BUDGET_MS) and runs right after that press.
+STOMP_CHECK_TICKS = (3, 6)
+STOMP_PREFLIGHT_TICK = STOMP_CHECK_TICKS[0] - 1
+STOMP_ATTEMPTS_PER_TICK = 2
+STOMP_DODGE_BUDGET_MS = 400
+# Until this tick an outside position is checked again: Telos can still move next to the player.
+STOMP_RELOCATION_TICK = 3
+# The Dive press and the click are separated so the client is in targeting mode first; a
+# Dive that leaves the tile unchanged after this many ticks falls back to walking there.
+DIVE_SELECT_SECONDS = 0.15
+DIVE_RANGE_TILES = 10
+STOMP_DIVE_CONFIRM_TICKS = 2
+# The stomp reaches beyond the 5x5 body: players 4 tiles (Chebyshev) from Telos's centre took
+# 9,322 at 500% and 5,401 at 500% P3 (2026-11-14), and a Dive landing 5 tiles out took 5,647 at
+# 250% (13944, 07:25 run). Treat 5 tiles from the centre as unsafe and Dive to 6 tiles out.
+STOMP_RADIUS_TILES = 5
+STOMP_ESCAPE_DISTANCE = 6
+# A rejected stomp hover also rules out the tiles this close to it.
+STOMP_REJECT_RADIUS_TILES = 1
+EIGHT_DIRECTIONS = ((1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1))
+
+
+def under_footprint(boss_tile, size, tile):
+    """Whether tile lies in the size x size footprint whose south-west corner is boss_tile."""
+    return (
+        boss_tile[0] <= tile[0] < boss_tile[0] + size
+        and boss_tile[1] <= tile[1] < boss_tile[1] + size
+    )
+
+
+def in_stomp_area(boss_tile, size, tile):
+    """Whether tile is within STOMP_RADIUS_TILES (Chebyshev) of Telos's centre tile."""
+    centre_x = boss_tile[0] + (size - 1) / 2
+    centre_y = boss_tile[1] + (size - 1) / 2
+    return max(abs(tile[0] - centre_x), abs(tile[1] - centre_y)) <= STOMP_RADIUS_TILES
+
+
+def stomp_escape_tiles(boss_tile, size, player_tile):
+    """Candidate Dive targets outside the footprint, best first.
+
+    The first direction continues the player's offset from Telos's centre (the side the
+    character came from is likely open floor); the rest follow by angular closeness.
+    """
+    centre_x = boss_tile[0] + (size - 1) / 2
+    centre_y = boss_tile[1] + (size - 1) / 2
+    offset = (player_tile[0] - centre_x, player_tile[1] - centre_y)
+    angle = math.atan2(offset[1], offset[0]) if offset != (0, 0) else 0.0
+
+    def closeness(direction):
+        difference = math.atan2(direction[1], direction[0]) - angle
+        return abs(math.atan2(math.sin(difference), math.cos(difference)))
+
+    # Grid (Chebyshev) distance: diagonal targets are as far outside the square stomp area
+    # as straight ones, and still within Dive's 10-tile reach from a player near the centre.
+    return [
+        (
+            round(centre_x + direction[0] * STOMP_ESCAPE_DISTANCE),
+            round(centre_y + direction[1] * STOMP_ESCAPE_DISTANCE),
+        )
+        for direction in sorted(EIGHT_DIRECTIONS, key=closeness)
+    ]
+
+
+def known_floor_targets(boss_tile, size, player_tile, floor):
+    """Known-walkable Dive targets outside the stomp area and within Dive reach, nearest first.
+
+    A direction-only target landed off the platform on 2026-11-14 (account owner), so only
+    tiles the player or Telos's body has occupied on the current platform are used.
+    """
+    candidates = [
+        tile
+        for tile in floor
+        if not in_stomp_area(boss_tile, size, tile)
+        and max(abs(tile[0] - player_tile[0]), abs(tile[1] - player_tile[1])) <= DIVE_RANGE_TILES
+    ]
+    return sorted(
+        candidates,
+        key=lambda tile: (
+            max(abs(tile[0] - player_tile[0]), abs(tile[1] - player_tile[1])),
+            tile,
+        ),
+    )
+
+
+def chebyshev(first, second):
+    """Grid distance between two (x, y) tiles."""
+    return max(abs(first[0] - second[0]), abs(first[1] - second[1]))
+
+
+# P4 fonts, from the 250% capture of 2026-11-14 (telos-20261114T171804) and the account owner.
+# Three actors with base animation 28988 appear at fixed tiles when P4 starts, each reporting
+# 1 HP. At 3/4 of P4 health (112,500 of 150,000) the green font switched config 22893 -> 22896
+# and held a 7,500 charge. The charge fell by 1,500 per step, with about 1,400 soft typeless
+# damage to the player standing in it, and the font ended as config 22899 with 1 HP. Telos then
+# rises and sends an instakill that only the charged font prevents. The red font (2/4) and the
+# black font (1/4) work the same way, and the player must also stand inside them for the
+# instakill. Their configs are assumed to be the other two idle ones, again plus 3 and 6.
+FONT_IDLE_CONFIGS = frozenset({22893, 22894, 22895})
+FONT_STAGE_STEP = 3
+FONT_CHARGING_CONFIGS = frozenset(config + FONT_STAGE_STEP for config in FONT_IDLE_CONFIGS)
+FONT_CHARGED_CONFIGS = frozenset(config + FONT_STAGE_STEP for config in FONT_CHARGING_CONFIGS)
+FONT_RELEASED_CONFIGS = frozenset(config + FONT_STAGE_STEP for config in FONT_CHARGED_CONFIGS)
+FONT_CONFIGS = (
+    FONT_IDLE_CONFIGS | FONT_CHARGING_CONFIGS | FONT_CHARGED_CONFIGS | FONT_RELEASED_CONFIGS
+)
+# Idle and charged fonts report this health; a charging font reports its remaining charge.
+FONT_UNCHARGED_HEALTH = 1
+# Fonts are 2x2 (logged footprint). Charges ran with the player inside it (173454) or one tile
+# outside (171804), so the player counts as inside within this distance of the footprint.
+FONT_FOOTPRINT = 2
+FONT_REACH_TILES = 1
+# Stay in the charged font this many received ticks for Telos's instakill (timing unmeasured).
+FONT_HOLD_TICKS = 30
+# The earliest charged-font despawn in the recorded completed holds is at +12.
+FONT_EARLIEST_RELEASE_TICK = 12
+# Move again when the player is still not inside after this many received ticks.
+FONT_MOVE_RETRY_TICKS = 3
+FONT_WAYPOINT_STEPS = (10, 7, 4)
+FONT_WAYPOINT_OFFSETS = (0, 2, -2, 4, -4)
+FONT_WAYPOINT_HOVER_TOLERANCE = 2
+# Font health falls within four client logic ticks of a type 144 pulse. In normal charging
+# the native hitmark starts are 90 logic ticks apart (three game ticks).
+FONT_PULSE_HIT_TYPE = 144
+FONT_PULSE_LOGIC_TICKS = 90
+FONT_PULSE_SAMPLE_DELAY = 4
+FONT_RESONANCE_LEAD = (16, 24)
+# 100% kill of 2026-11-14 (telos-20261114T173454): Pure Anima Font (green) 22893/22896/22899,
+# Volcanic (red) 22894/22897/22900 and Corrupt (black) 22895/22898/22901, charged in that order.
+# Each charged font despawned 12-14 received ticks after charging.
+# Three anima-golems spawn beside each font as it becomes chargeable (10,000 HP at 100%, 13,000
+# at 250%). Account owner: red stuns at random (most dangerous), green hits harder the longer it
+# lives, black strips armour. Names: Pure 22905, Corrupt 22906, Volcanic 22907.
+PURE_GOLEM = 22905
+CORRUPT_GOLEM = 22906
+VOLCANIC_GOLEM = 22907
+MINION_CONFIGS = frozenset({PURE_GOLEM, CORRUPT_GOLEM, VOLCANIC_GOLEM})
+GOLEM_MELEE_ANIMATION = 28998
+# In the P4 replay, associated melee hitmarks start 25 to 35 logic ticks after the stamp.
+GOLEM_MELEE_HIT_OFFSETS = (25, 35)
+GOLEM_MAX_CUE_AGE_TICKS = 15
+# Kill order: the stunning red golem, then the green one before its damage grows, then black.
+MINION_PRIORITY = (VOLCANIC_GOLEM, PURE_GOLEM, CORRUPT_GOLEM)
+
+
+def in_font(player_tile, font_tile):
+    """Whether the player stands where a font's charge reaches them."""
+    return footprint_distance(player_tile, font_tile, FONT_FOOTPRINT) <= FONT_REACH_TILES
+
+
+def font_stand_tiles(font_tile, player_tile, occupied):
+    """Return the free ring in nearest-first order, with a last-resort font tile.
+
+    Golems spawn beside the font: in the 250% run of 182852 eleven clicks on the font's own tile
+    left the player 6-8 tiles away, circling (presumably attacking a golem standing there). Tiles
+    in ``occupied`` (golems, Telos's body) and inside the font itself are never clicked.
+    """
+    ring = [
+        (font_tile[0] + dx, font_tile[1] + dy)
+        for dx in range(-FONT_REACH_TILES, FONT_FOOTPRINT + FONT_REACH_TILES)
+        for dy in range(-FONT_REACH_TILES, FONT_FOOTPRINT + FONT_REACH_TILES)
+    ]
+    free = [
+        tile
+        for tile in ring
+        if footprint_distance(tile, font_tile, FONT_FOOTPRINT) == FONT_REACH_TILES
+        and tile not in occupied
+    ]
+    return sorted(free, key=lambda tile: (chebyshev(tile, player_tile), tile)) or [font_tile]
+
+
+def font_waypoint_tiles(font_tile, player_tile, stand, occupied):
+    """Yield nearby candidate tiles toward an off-screen font, with lateral alternatives."""
+    offset_x, offset_y = (finish - start for start, finish in zip(player_tile, stand))
+    distance = chebyshev(player_tile, stand)
+    if not distance:
+        return
+    current_distance = footprint_distance(player_tile, font_tile, FONT_FOOTPRINT)
+    side_x, side_y = (1, 0) if abs(offset_y) >= abs(offset_x) else (0, 1)
+    seen = set()
+    for step in FONT_WAYPOINT_STEPS:
+        if step >= distance:
+            continue
+        base_x = player_tile[0] + round(offset_x * step / distance)
+        base_y = player_tile[1] + round(offset_y * step / distance)
+        for lateral in FONT_WAYPOINT_OFFSETS:
+            tile = base_x + side_x * lateral, base_y + side_y * lateral
+            if tile in occupied or tile in seen:
+                continue
+            if footprint_distance(tile, font_tile, FONT_FOOTPRINT) < current_distance:
+                yield tile
+                seen.add(tile)
+
+
+def font_walk_destination(hover_tile, player_tile, font_tile, plane, accepted, waypoint, occupied):
+    """Accept a native Walk hover inside the charge ring or at a nearer waypoint."""
+    if hover_tile is None or hover_tile[2] != plane:
+        return False
+    if waypoint is None:
+        return hover_tile in accepted
+    tile = hover_tile[:2]
+    return (
+        tile not in occupied
+        and chebyshev(tile, waypoint) <= FONT_WAYPOINT_HOVER_TOLERANCE
+        and footprint_distance(tile, font_tile, FONT_FOOTPRINT)
+        < footprint_distance(player_tile, font_tile, FONT_FOOTPRINT)
+    )
+
+
+class FontDuty:
+    """Decide when the player must go to, charge and stay in a P4 font.
+
+    ``update`` takes the visible fonts as (instance_id, config_id, health, tile) tuples and
+    returns the tile the player must stand on, or None when no font needs the player.
+    """
+
+    def __init__(self):
+        self.font = None
+        self.tile = None
+        self.state = None
+        self.charge_started_tick = None
+        self.charged_tick = None
+        self.arrived_tick = None
+        self.next_move_tick = None
+        self.move_attempts = 0
+        self.charge_health = None
+        self.last_pulse = None
+        self.pending_resonance = None
+        self.recent_pulse_hits = ()
+        self.finished = set()
+        self.rejected_points = set()
+
+    @property
+    def active(self):
+        """While True the player must not move away (no Escape, Surge or stomp Dive)."""
+        return self.state is not None
+
+    def update(self, fonts, received_tick):
+        """Advance the duty; return (target tile or None, event name or None)."""
+        by_instance = {font[0]: font for font in fonts}
+        if self.state is None:
+            for instance_id, config, health, tile in fonts:
+                if (
+                    config in FONT_CHARGING_CONFIGS
+                    and health is not None
+                    and health > FONT_UNCHARGED_HEALTH
+                    and tile is not None
+                    and instance_id not in self.finished
+                ):
+                    self.font = instance_id
+                    self.tile = tile
+                    self.state = "charging"
+                    self.charge_started_tick = received_tick
+                    self.charged_tick = None
+                    self.arrived_tick = None
+                    self.next_move_tick = received_tick
+                    self.move_attempts = 0
+                    self.rejected_points.clear()
+                    self.charge_health = health
+                    self.last_pulse = None
+                    self.pending_resonance = None
+                    self.recent_pulse_hits = ()
+                    return tile, "font_charge_started"
+            return None, None
+        current = by_instance.get(self.font)
+        if current is None:
+            release_due = (
+                self.state == "holding"
+                and received_tick - self.charged_tick >= FONT_EARLIEST_RELEASE_TICK
+            )
+            return self.finish("font_released" if release_due else "font_lost")
+        _, config, _health, tile = current
+        if self.state == "holding" and config in FONT_RELEASED_CONFIGS:
+            return self.finish("font_released")
+        if tile is not None:
+            self.tile = tile
+        if self.state == "charging" and config in FONT_CHARGED_CONFIGS:
+            self.state = "holding"
+            self.charged_tick = received_tick
+            return self.tile, "font_charged"
+        if self.state == "holding" and received_tick - self.charged_tick >= FONT_HOLD_TICKS:
+            return self.finish("font_hold_ended")
+        return self.tile, None
+
+    def finish(self, event):
+        """End the duty for this font; it is not taken again in this attempt."""
+        self.finished.add(self.font)
+        self.font = None
+        self.tile = None
+        self.state = None
+        return None, event
+
+    def observe_pulse(self, fonts, logic_tick, hits, *, hits_lost):
+        """Pair a native font charge decrement with a single nearby typeless hitmark."""
+        if not self.active or logic_tick is None:
+            return None
+        health = next((font[2] for font in fonts if font[0] == self.font), None)
+        if hits_lost:
+            self.recent_pulse_hits = ()
+            self.last_pulse = None
+            self.charge_health = health
+            return None
+        recent = self.recent_pulse_hits + tuple(
+            (event.hit.start_tick, event.sequence, event.hit.amount)
+            for event in hits
+            if event.hit.type_id == FONT_PULSE_HIT_TYPE
+        )
+        self.recent_pulse_hits = tuple(
+            hit for hit in recent if 0 <= logic_tick - hit[0] <= FONT_PULSE_SAMPLE_DELAY
+        )
+        if health is None or health == self.charge_health:
+            return None
+        before = self.charge_health
+        self.charge_health = health
+        if before is None or health >= before or len(self.recent_pulse_hits) != 1:
+            self.last_pulse = None
+            return None
+        self.last_pulse = self.recent_pulse_hits[0][0]
+        return (before, health, *self.recent_pulse_hits[0])
+
+    def resonance_due(self, logic_tick, timers, gcd_remaining_ms):
+        """Return the next predicted font pulse when the Resonance press window is open."""
+        if (
+            self.state != "charging"
+            or self.last_pulse is None
+            or self.pending_resonance is not None
+            or logic_tick is None
+            or "Resonance" not in timers
+            or timers["Resonance"]
+            or not gcd_press_ready(gcd_remaining_ms)
+        ):
+            return None
+        expected_tick = self.last_pulse + FONT_PULSE_LOGIC_TICKS
+        earliest, latest = FONT_RESONANCE_LEAD
+        if earliest <= expected_tick - logic_tick <= latest:
+            return expected_tick
+        return None
+
+    def move_due(self, player_tile, target, received_tick):
+        """Whether to (re)issue movement to the font this tick.
+
+        A player outside the font (not yet arrived, or pulled out by auto-retaliate) is sent
+        back at most once per FONT_MOVE_RETRY_TICKS for as long as the duty lasts.
+        """
+        if in_font(player_tile, target):
+            return False
+        if received_tick < self.next_move_tick:
+            return False
+        self.move_attempts += 1
+        self.next_move_tick = received_tick + FONT_MOVE_RETRY_TICKS
+        return True
+
+
+# Anima streams. The low 21 bits of VARP 6363 are Telos's anima meter. Replayed 2026-11-14 logs:
+# it rises 3 per received tick (5 at 100%) while a stream feeds Telos, and each P2 Onslaught
+# projectile spends 10 of it; the Onslaught ends at 0. In the 250% death of 174445 the black
+# stream fed Telos through the whole Onslaught, so the meter never fell and twelve projectiles
+# rose to 3,807 damage. The wiki says to block the stream; the account owner adds that the black
+# stream cleanses the virus and that the green one slows Telos and gives adrenaline.
+METER_MASK = (1 << PHASE_SHIFT) - 1
+# enum rs3_hazard_kind: scene-location strips read on Compatibility Mode (commit ca6f117).
+GREEN_BEAM_KIND = 1
+BLACK_BEAM_KIND = 2
+RED_BEAM_KIND = 3
+# The black stream is blocked during P2 Onslaught.
+BEAM_KIND_BY_PHASE = {2: BLACK_BEAM_KIND}
+STOMP_BEAM_BY_PHASE = {1: GREEN_BEAM_KIND, 3: RED_BEAM_KIND}
+# The account owner asks for the player to stand in the green P1 and red P3 strip at all times,
+# moving there with Dive and never landing under Telos (that can move him). Only strip tiles in
+# melee reach of the footprint are used: after a stomp Dive onto the strip (8950, 06:34 run)
+# auto-retaliate re-targeted Telos and the player stayed, but in the 06:51 run every landing out
+# of reach was undone at once as the player walked back to attack (10538-10541, 10717-10745).
+# Dive is kept for the stomp while Hold Still is the forecast special (Dive cooldown 20.4 s).
+BEAM_KEEP_BY_PHASE = STOMP_BEAM_BY_PHASE
+# P3 (account owner): the red strip must be blocked at all times or Telos charges, so the player
+# stands on it even out of melee reach. In the 07:25 run it was mostly 9-12 tiles from Telos.
+BEAM_BLOCK_ALWAYS_PHASES = frozenset({3})
+BEAM_KEEP_RETRY_TICKS = 3
+BEAM_KEEP_ATTEMPTS_PER_TICK = 2
+# The reader lists a moving window of the strip: a hovered tile listed this recently still
+# counts as strip (08:01 P3: a matching hover was rejected after its tile left the list).
+BEAM_RECENT_TICKS = 2
+MELEE_REACH_TILES = 1
+# Leave each Telos attack cue's protection tick alone: a move holds the loop for ~0.35 s.
+BEAM_KEEP_QUIET_TICKS_AFTER_CUE = 1
+# The meter counts as fed after this many rises within the last BEAM_FEED_WINDOW received ticks.
+BEAM_FEED_RISES = 2
+BEAM_FEED_WINDOW = 3
+BEAM_MAX_GAP_TICKS = 4
+BEAM_MOVE_RETRY_TICKS = 3
+# Escape (Uppercut +4/+5) and the stomp Dive (Hold Still +4..+7) own movement for this long.
+BEAM_SPECIAL_HOLD_TICKS = 10
+VIRUS_TIMER_VARP = 6362
+VIRUS_TIMER_START = 3840
+VIRUS_TIMER_STEP = 128
+VIRUS_BEAM_BY_PHASE = {2: BLACK_BEAM_KIND, 3: RED_BEAM_KIND}
+VIRUS_CLEANSE_GRACE_TICKS = 2
+WALK_HOVER_SETTLE_SECONDS = 0.05
+
+
+def footprint_distance(tile, boss_tile, size):
+    """Grid distance from a tile to the nearest tile of a size x size footprint."""
+    dx = max(boss_tile[0] - tile[0], 0, tile[0] - (boss_tile[0] + size - 1))
+    dy = max(boss_tile[1] - tile[1], 0, tile[1] - (boss_tile[1] + size - 1))
+    return max(dx, dy)
+
+
+class BeamBlocker:
+    """Detect a stream feeding Telos from the anima meter and keep the player in its path."""
+
+    def __init__(self):
+        self.last_meter = None
+        self.last_tick = None
+        self.rise_ticks = []
+        self.next_move_tick = None
+        self.feeding = False
+        self.holding = False
+        self.on_strip = False
+        self.rejected = set()
+
+    def observe(self, meter, received_tick):
+        """Record one meter reading; return whether a stream is feeding Telos now."""
+        if meter is None:
+            return False
+        if self.last_tick is None or not 0 <= received_tick - self.last_tick <= BEAM_MAX_GAP_TICKS:
+            self.last_meter = None
+            self.rise_ticks.clear()
+        self.last_tick = received_tick
+        if self.last_meter is not None and meter > self.last_meter:
+            if not self.rise_ticks or self.rise_ticks[-1] != received_tick:
+                self.rise_ticks.append(received_tick)
+        self.last_meter = meter
+        self.rise_ticks = [
+            tick for tick in self.rise_ticks if received_tick - tick < BEAM_FEED_WINDOW
+        ]
+        return len(self.rise_ticks) >= BEAM_FEED_RISES
+
+    def move_due(self, received_tick):
+        """Rate-limit movement into the stream."""
+        if self.next_move_tick is not None and received_tick < self.next_move_tick:
+            return False
+        self.next_move_tick = received_tick + BEAM_MOVE_RETRY_TICKS
+        return True
+
+
+def virus_timer(encounter):
+    """Read the scoped countdown, preserving an absent or unrecognized sample as unknown."""
+    for sample in encounter.raw[: encounter.raw_count]:
+        if sample.varp_id == VIRUS_TIMER_VARP and sample.valid:
+            value = sample.value
+            if 0 <= value <= VIRUS_TIMER_START and value % VIRUS_TIMER_STEP == 0:
+                return value
+    return None
+
+
+class VirusResponse:
+    """Track infection, movement and the independent acknowledgement within one phase."""
+
+    def __init__(self):
+        self.phase = None
+        self.started = None
+        self.zero_tick = None
+        self.move_tick = None
+        self.next_move = None
+        self.arrival = None
+        self.walk_target = None
+        self.rejected = set()
+
+    def observe(self, phase, remaining, tick, client_tick, message):
+        """Return a new onset and any completed outcome from this observation."""
+        if phase != self.phase:
+            outcome = "phase_changed" if self.started is not None else None
+            self.__init__()
+            self.phase = phase
+        else:
+            outcome = None
+        if phase not in VIRUS_BEAM_BY_PHASE or tick is None:
+            return None, outcome
+
+        if self.started is None:
+            if remaining:
+                self.started = (tick, client_tick)
+                return self.started, outcome
+            return None, outcome
+
+        if remaining == 0 and self.zero_tick is None:
+            self.zero_tick = tick
+        if self.zero_tick is not None:
+            message_after_onset = (
+                message.valid
+                and ((message.client_logic_tick - self.started[1]) & 0xFFFFFFFF) < 0x80000000
+                and ((client_tick - message.client_logic_tick) & 0xFFFFFFFF)
+                <= CLEANSE_MAX_AGE_CLIENT_TICKS
+            )
+            if message_after_onset:
+                return None, "cleanse_confirmed"
+            if tick - self.zero_tick >= VIRUS_CLEANSE_GRACE_TICKS:
+                return None, "timer_cleared"
+        return None, outcome
+
+    def finish(self):
+        """Forget the completed infection and report whether a click interrupted combat."""
+        moved = self.move_tick is not None
+        phase = self.phase
+        self.__init__()
+        self.phase = phase
+        return moved
+
+
+def virus_beam_destination(reader, phase, player, boss, *, use_tile=None, rejected=()):
+    """Choose the nearest projected stream tile outside Telos's footprint."""
+    mask = SpatialFlags.TILE | SpatialFlags.SAME_WORLD
+    pose = next(
+        (
+            candidate
+            for candidate in reader.npc_spatial[: reader.spatial.npc_count]
+            if candidate.instance_id == boss.instance_id and candidate.valid_mask & mask == mask
+        ),
+        None,
+    )
+    if pose is None or pose.tile.plane != player.tile.plane:
+        return None
+    return stream_destination(
+        reader, VIRUS_BEAM_BY_PHASE[phase], player, pose, use_tile=use_tile, rejected=rejected
+    )
+
+
+def stream_destination(
+    reader,
+    kind,
+    player,
+    pose,
+    *,
+    use_tile=None,
+    rejected=(),
+    rejected_tiles=(),
+    stomp=False,
+    prefer_reach=False,
+    max_reach=None,
+):
+    """Select a visible strip tile, optionally requiring a safe Dive landing.
+
+    Tiles under Telos's footprint are never chosen. ``prefer_reach`` ranks tiles within melee
+    reach of the footprint first, then by distance from the player. ``max_reach`` drops tiles
+    farther than that from the footprint.
+    """
+    player_tile = (player.tile.x, player.tile.y)
+    boss_tile = (pose.tile.x, pose.tile.y)
+    size = pose.footprint_size or 1
+    required = HazardFlags.TILE | HazardFlags.SCENE_LOCATION | HazardFlags.TERRAIN_HEIGHT
+    routes = []
+    for hazard in reader.hazards[: reader.hazard_info.count]:
+        tile = (hazard.tile.x, hazard.tile.y)
+        identity = (tile, hazard.tile.plane, hazard.config_id)
+        distance = chebyshev(tile, player_tile)
+        if (
+            hazard.flags & required != required
+            or hazard.kind != kind
+            or hazard.tile.plane != player.tile.plane
+            or tile in rejected_tiles
+            or not distance
+            or not footprint_distance(tile, boss_tile, size)
+            or (max_reach is not None and footprint_distance(tile, boss_tile, size) > max_reach)
+            or (stomp and (distance > DIVE_RANGE_TILES or in_stomp_area(boss_tile, size, tile)))
+            or (use_tile is not None and (*tile, hazard.tile.plane) != use_tile)
+        ):
+            continue
+        height = reader.hazard_terrain_height(hazard)
+        point = project_tile(reader, tile, hazard.tile.plane, height)
+        if point is not None and point not in rejected:
+            out_of_reach = footprint_distance(tile, boss_tile, size) > MELEE_REACH_TILES
+            rank = (out_of_reach, distance) if prefer_reach else (distance,)
+            routes.append((rank, identity, point))
+    if not routes:
+        return None
+    _, identity, point = min(routes)
+    return identity, point
+
+
+def on_strip(reader, kind, tile, plane):
+    """Whether the player's tile is one of the visible strip tiles of ``kind``."""
+    return any(
+        hazard.kind == kind
+        and hazard.flags & HazardFlags.SCENE_LOCATION
+        and (hazard.tile.x, hazard.tile.y, hazard.tile.plane) == (*tile, plane)
+        for hazard in reader.hazards[: reader.hazard_info.count]
+    )
+
+
+def wall_end_under_telos(listed, boss_tile, size):
+    """The strip end under Telos when every listed strip tile is under his footprint.
+
+    Account owner: Telos can stand on the red beam at the wall; the player must then stand
+    under him, which displaces him. Of the two line ends, the one farther from Telos's centre is
+    the wall side. Returns None when any listed tile lies outside the footprint.
+    """
+    tiles = list(listed)
+    if not tiles or any(footprint_distance(tile, boss_tile, size) for tile in tiles):
+        return None
+    centre = (boss_tile[0] + (size - 1) / 2, boss_tile[1] + (size - 1) / 2)
+    return max(
+        (min(tiles), max(tiles)),
+        key=lambda tile: max(abs(tile[0] - centre[0]), abs(tile[1] - centre[1])),
+    )
+
+
+def on_strip_line(tile, listed):
+    """Whether ``tile`` lies within a tile of the straight line through the listed strip.
+
+    With fewer than two listed tiles nothing contradicts the player's position.
+    """
+    tiles = list(listed)
+    if len(tiles) < 2:
+        return True
+    start = min(tiles)
+    end = max(tiles)
+    line_x, line_y = end[0] - start[0], end[1] - start[1]
+    length = math.hypot(line_x, line_y)
+    if not length:
+        return True
+    cross = line_x * (tile[1] - start[1]) - line_y * (tile[0] - start[0])
+    return abs(cross) / length <= 1
+
+
+class BeamKeeper:
+    """Rate-limit P1/P3 strip moves and remember tiles whose hover was rejected."""
+
+    def __init__(self):
+        self.next_move_tick = None
+        self.rejected = set()
+        self.on_strip = None
+        # Tile where the player last reached the strip (P3 anchor).
+        self.anchor_tile = None
+        # Strip tiles by the received tick they were last listed, for hover validation.
+        self.recent = {}
+        # Received tick of the latest attempt and the number of attempts in it.
+        self.attempt_tick = None
+        self.attempts = 0
+
+    def remember(self, tiles, received_tick):
+        """Record the listed strip tiles and forget those older than BEAM_RECENT_TICKS."""
+        for tile in tiles:
+            self.recent[tile] = received_tick
+        self.recent = {
+            tile: tick
+            for tile, tick in self.recent.items()
+            if received_tick - tick <= BEAM_RECENT_TICKS
+        }
+
+    def recently_on_strip(self, tile):
+        """Whether ``tile`` was a listed strip tile within the last BEAM_RECENT_TICKS."""
+        return tile in self.recent
+
+    def retry_now(self, received_tick):
+        """After a rejected hover, allow one more attempt in the same received tick.
+
+        In the 08:01 P3 run hovers were one or two tiles off the projected target or covered
+        by an NPC, and each rejection waited BEAM_KEEP_RETRY_TICKS.
+        """
+        if self.attempt_tick != received_tick:
+            self.attempt_tick = received_tick
+            self.attempts = 0
+        self.attempts += 1
+        if self.attempts < BEAM_KEEP_ATTEMPTS_PER_TICK:
+            self.next_move_tick = received_tick
+
+    def holding(self, tile, on_strip_now, listed):
+        """Whether the player still stands in the strip at ``tile``; the player then stays put.
+
+        The reader lists a moving window of strip tiles, so the player's tile can drop out of
+        it while the player is still in the beam (07:54, 17074-17090). The anchor holds until
+        the player moves (a mechanic) or the listed strip runs along another line that does
+        not pass the player's tile (the beam moved away). Telos's meter is not used: in the
+        08:01 run it rose while the player stood in the beam (account owner).
+        """
+        if on_strip_now:
+            self.anchor_tile = tile
+            return True
+        if self.anchor_tile != tile or not on_strip_line(tile, listed):
+            self.anchor_tile = None
+            return False
+        return True
+
+    def move_due(self, received_tick):
+        """Allow one move attempt, then wait BEAM_KEEP_RETRY_TICKS for it to land."""
+        if self.next_move_tick is not None and received_tick < self.next_move_tick:
+            return False
+        self.next_move_tick = received_tick + BEAM_KEEP_RETRY_TICKS
+        return True
+
+
+class TargetPicker:
+    """Choose what to attack in P4: golems by MINION_PRIORITY, then Telos again.
+
+    ``choose`` takes the golems as (instance_id, config_id, health, tile) tuples and the font
+    duty state. It returns a golem tuple to click, "telos", or None (nothing new to click).
+    Nothing is clicked while a font is charging, since a click could leave the font.
+    """
+
+    def __init__(self):
+        self.clicked = None
+        self.telos_due = False
+        self.retry_tick = None
+
+    def choose(self, minions, duty_state, received_tick):
+        """Return the next target to click, at most once per golem."""
+        if duty_state == "charging":
+            return None
+        if self.retry_tick is not None and received_tick < self.retry_tick:
+            return None
+        alive = [minion for minion in minions if minion[2] > 0]
+        if alive:
+            best = min(alive, key=lambda minion: (MINION_PRIORITY.index(minion[1]), minion[0]))
+            if best[0] == self.clicked:
+                return None
+            self.clicked = best[0]
+            self.telos_due = True
+            return best
+        if self.telos_due and duty_state is None:
+            self.telos_due = False
+            self.clicked = None
+            return "telos"
+        return None
+
+    def moved(self):
+        """The player was moved (Dive, font walk): click the current golem again.
+
+        In the 250% run of 180906 one click at 9377 was followed by a stomp Dive, and the
+        golems then hit the player until death without being attacked.
+        """
+        self.clicked = None
+
+    def failed(self, received_tick):
+        """A click was not delivered: allow the same choice again after a short wait."""
+        if self.clicked is None:
+            self.telos_due = True
+        self.clicked = None
+        self.retry_tick = received_tick + FONT_MOVE_RETRY_TICKS
+
+
+def project_tile(reader, tile, plane, fine_height):
+    """Physical screen pixel of a tile at the given ground height, or None.
+
+    Matches rs3_project_actor for the player's own tile (2026-11-14, Compatibility Mode).
+    """
+    library = reader.library
+    library.rs3_project_tile.argtypes = [
+        ctypes.POINTER(Camera),
+        ctypes.POINTER(Position),
+        ctypes.c_float,
+        ctypes.POINTER(ScreenPoint),
+        ctypes.c_uint32,
+    ]
+    library.rs3_project_tile.restype = ctypes.c_int32
+    position = Position(1, tile[0], tile[1], plane)
+    point = ScreenPoint()
+    result = library.rs3_project_tile(
+        ctypes.byref(reader.spatial.camera),
+        ctypes.byref(position),
+        ctypes.c_float(fine_height),
+        ctypes.byref(point),
+        ctypes.sizeof(point),
+    )
+    return (point.x, point.y) if result == 0 and point.valid else None
+
+
+# P3 attacks are magic only (wiki; confirmed by the account owner). 28959 repeated every
+# 4 received ticks in the 250% P3 capture, so it is counted as the P3 auto there.
+PHASE_THREE_AUTOS = frozenset({MAGIC_ATTACK})
+# enum rs3_effect_id RS3_EFFECT_STUN and raw_valid_mask bit 0 (include/rs3/effects.h).
+STUN_EFFECT_ID = 6
+EFFECT_RAW_EXPIRY_VALID = 1
+# Stuns last a few seconds; a longer expiry in 20 ms logic ticks is not treated as a stun.
+MAX_STUN_TICKS = 1_500
+P3_OPENING_AUTOS = 7
+P3_LONG_OPENING_AUTOS = 10
+# P3 opening by the P2 special that would have come next (wiki). Live at 500% on 2026-11-14:
+# P2 ended on Tendrils, and P3 opened with 28930, seven 28959 magic autos, then Hold Still.
+# The other rows are guide-derived. After Onslaught the Red Virus has no mapped animation.
+P3_CARRY_OVER = {
+    ONSLAUGHT: (HOLD_STILL, P3_OPENING_AUTOS),
+    HOLD_STILL: (None, P3_OPENING_AUTOS),
+    UPPERCUT: (UPPERCUT, P3_LONG_OPENING_AUTOS),
+    TENDRILS: (UPPERCUT, P3_LONG_OPENING_AUTOS),
+}
+# Four 2026-11-14 captures: a P1 ending on Uppercut opened P2 with Hold Still, on Tendrils with
+# Onslaught, on Hold Still with Tendrils. 28930 opens P2 and is counted as an auto: one capture
+# had only one animated melee auto between it and Hold Still.
+P2_CARRY_OVER = {UPPERCUT: ONSLAUGHT}
+# A 28959 within this many received ticks of the first P2 animation is a plain magic attack.
+P2_OPENING_MAGIC_ATTACK_TICKS = 12
+P2_OPENING_ATTACK = 28930
+P1_TO_P2_TRANSITION = 28963
+FLICK_EXCLUDED_ANIMATIONS = frozenset({UPPERCUT, P1_TO_P2_TRANSITION, P2_OPENING_ATTACK})
+TRANSITION_ATTACK_CUES = frozenset({
+    MELEE_AUTO_SEQUENCE, MAGIC_ATTACK, TENDRILS, HOLD_STILL, UPPERCUT,
+})
+DEFAULT_FLICK_HOLD_TICKS = 1
+# The unanimated Tendrils follow-up can land at +2, and so can the melee hit before the bomb.
+FLICK_HOLD_TICKS = {TENDRILS_RELEASE: 3, ANIMA_BOMB: 2}
+# Window ticks name the received tick of the press; the overhead is then up on the next tick.
+# Hold Still: Deflect for the small hit through +3, then Deflect Melee for the heavy +4 hit
+# unless Resonance's cooldown confirms that it will take that hit (PrayerFlicker.release).
+HOLD_STILL_SMALL_PRESS_TICKS = (0, 2)
+HOLD_STILL_HEAVY_PRESS_TICKS = (3, 3)
+# The small hit was type 139 (magic) in all 11 P3 Hold Stills where it dealt damage at +2, and
+# type 133 in P1, P2 and P4 (2026-11-14/15 logs); the heavy hit was type 133 in every phase.
+HOLD_STILL_SMALL_HIT_PRAYER_BY_PHASE = {3: Prayer.MAGIC}
+
+
+def magic_flick_ticks(distance):
+    """Received-tick offsets after a 28959 during which Deflect Magic must be up (inclusive).
+
+    A hit landing at +N was protected when Deflect Magic was up at +(N-1): with the prayer on
+    only at +0, a +1 hit did 1 damage but +2 and +3 hits landed in full (2,255-5,080, the 250%
+    P2 deaths of 174445 and 175845). Hit delay against the player's grid distance to Telos's
+    footprint over all 2026-11-14 logs: up to 4 tiles always +1 (154 hits); 5 tiles +1 (3) or
+    +2 (1); 6 tiles +2 (10) or +1 (3); 7 and 9 tiles +2 or +3. The window covers every delay
+    seen at that distance, so the flick stays one or two ticks long. ``None`` (no positions)
+    covers +1 to +3.
+    """
+    if distance is None:
+        return 0, 2
+    if distance <= 4:
+        return 0, 0
+    if distance <= 6:
+        return 0, 1
+    if distance <= 9:
+        return 1, 2
+    return 1, 3  # Beyond any logged distance: also cover a +4 hit.
+
+
+# Deflect Magic only halves Onslaught hits (account owner); 1-damage hits are misses. Comparing
+# the same projectile index over all logs, the prayer at the hit is what counts: at 250% the
+# fourth and fifth projectiles did 2,277-5,080 with Soul Split at the hit and mostly 352-909 with
+# Deflect Magic at the hit, while Deflect Magic already up at the cast made no visible
+# difference. A pre-flick ahead of the next cast (tried in 94e721b and 8920630) is therefore not
+# used: magic flicks are the one- or two-tick windows of magic_flick_ticks only.
+# Uppercut's 2,634 hitmark appeared 7 received ticks after 28938 on 2026-11-14 at 100%.
+# Escape is sent two to three ticks before that hitmark; the server hit deadline is unmeasured.
+UPPERCUT_ESCAPE_TICKS = (4, 5)
+# Ability queueing is off in the client, so a GCD ability pressed while the GCD runs is dropped.
+# 2026-11-15 250% logs: Anticipation and Resonance pressed with 1,140-1,800 ms left never cast;
+# with 360-620 ms left or an idle GCD they cast on the next tick. A press is therefore sent only
+# in the last GCD_PRESS_LEAD_MS before the GCD ends (or while it is idle) and reaches the server
+# on the tick the GCD ends, ahead of Revolution. Escape, Surge and Dive are off the GCD.
+# A 100 ms lead was too late: Anticipation pressed with 76 ms left did not cast (06:30 run).
+GCD_PRESS_LEAD_MS = 200
+GCD_ABILITIES = frozenset(
+    {"Resonance", "Anticipation", "Freedom", "Hurricane", "Reflect", "Devotion"}
+)
+# P4 weak anima bomb (account owner): once Telos's bar is full the next special is the bomb, a
+# soft typeless hit that a Resonance cast on its tick blocks and Reflect halves. Its typeless hit
+# came 3 received ticks after 28942 at 250% (5,228 at 9370) and 4 after it at 100% (5,904),
+# where a type 133 melee hit of 853 landed at +2. Deflect Melee covers +1 and +2, and the
+# defensive is pressed at +1 or +2 so that it casts on +2 or +3. Resonance and Disruption Shield
+# block only one hit, so they must be up on the typeless hit's tick itself (account owner).
+# Measured on the client clock the hit started 113-116 logic ticks (2.26-2.32 s) after 28942 was
+# observed in all four P4 bombs logged (100% and 250%): the start of cue tick +4 (the +2/+3 tick
+# labels lagged the boundary). A press made during tick +3 is processed with that hit, so the
+# single-hit blocks are pressed 1.75-2.05 s after the cue: after tick +3 begins, and early
+# enough for the press to reach the server (a 76 ms lead was too late for GCD presses).
+# Reflect lasts several ticks and may go from 0.6 s.
+ANIMA_BOMB_SINGLE_HIT_WINDOW_NS = (1_750_000_000, 2_050_000_000)
+ANIMA_BOMB_EARLY_GCD_END_NS = 1_650_000_000
+ANIMA_BOMB_PRECEDING_HIT_TICKS = (50, 60)
+# In nine P4 openings, 28930, three melee autos and 28959 preceded a typeless hit by
+# 146-151 logic ticks after 28959. The other 28959 magic attacks retain their own response.
+P4_OPENING_BOMB_WINDOW_NS = (2_350_000_000, 2_650_000_000)
+ANIMA_BOMB_REFLECT_EARLIEST_NS = 600_000_000
+ANIMA_BOMB_DEFENCES = ("Resonance", "Reflect")
+ANIMA_BOMB_REASON = "Anima bomb"
+# Disruption Shield (account owner: on O, nullifies one attack; wiki: Lunar, off the GCD, 60 s
+# cooldown, blocks one hitsplat including soft typeless, and takes priority over Resonance).
+# The client exposes no timer for it, so the controller times the cooldown from each press.
+# For the bomb it must be up exactly on the typeless hit (+3 at 250%), so it is pressed at +2;
+# golem hits may still consume it first (account owner).
+DISRUPTION_SHIELD = "Disruption Shield"
+DEFAULT_DISRUPTION_SHIELD_KEY = "O"
+# Disruption Shield is cast through Spellbook Swap (account owner: I, then O about 50 ms later;
+# both ignore the GCD). The swap chord's own key hold supplies that gap.
+SPELLBOOK_SWAP = "Spellbook Swap"
+DEFAULT_SPELLBOOK_SWAP_KEY = "I"
+DISRUPTION_SHIELD_COOLDOWN_NS = 60_000_000_000
+# Hold Still: one small hit lands at +1 (a 0 under Deflect, type 482) or +2 (type 133 in P1/P2,
+# 139 in P3), rarely +3, and the heavy type 133 hit at +4 (45 P1, 24 P2 and 20 P3 cues). A press
+# sent during received tick T casts on T+1, so Resonance must be pressed in the tick after the
+# small hit is seen and no later than +3: its cast on +2..+4 then absorbs only the heavy hit.
+HOLD_STILL_SMALL_HIT_TYPES = frozenset({133, 139, 482})
+HOLD_STILL_SMALL_HIT_TICKS = (1, 3)
+HOLD_STILL_HEAVY_HIT_TICK = 4
+RESONANCE_LATEST_PRESS_TICK = HOLD_STILL_HEAVY_HIT_TICK - 1
+# One GCD is three ticks, so after a press window at +T the next one is at +T+3.
+GCD_TICKS = 3
+TICK_MS = TICK_FALLBACK_NS // 1_000_000
+# A GCD ending at the next tick boundary has at most the rest of this tick left, plus jitter.
+GCD_BOUNDARY_TOLERANCE_MS = 100
+# Devotion, when Resonance cannot take the heavy hit (account owner): with Deflect Melee up it
+# turns the heavy melee hit into 1. It needs 50% adrenaline (tenths in VARP adrenaline) and lasts
+# past +4 from any cast on +1..+4.
+DEVOTION_ADRENALINE_TENTHS = 500
+
+
+def gcd_press_ready(gcd_remaining_ms):
+    """Whether a GCD ability pressed now casts on the tick the global cooldown ends."""
+    return gcd_remaining_ms is not None and gcd_remaining_ms <= GCD_PRESS_LEAD_MS
+
+
+def gcd_window_this_tick(gcd_remaining_ms, tick_elapsed_ms):
+    """Whether the GCD ends at the next tick boundary, so a GCD press comes in this tick.
+
+    ``tick_elapsed_ms`` is the time since this received tick was first seen. In the 07:01 run,
+    780 ms left late in a tick ended two ticks later. Without it, only a press due now counts.
+    """
+    if gcd_remaining_ms is None:
+        return False
+    if tick_elapsed_ms is None:
+        return gcd_remaining_ms <= GCD_PRESS_LEAD_MS
+    limit = max(0, TICK_MS - tick_elapsed_ms) + GCD_BOUNDARY_TOLERANCE_MS
+    return gcd_remaining_ms <= limit
+
+
+def gcd_remaining_now(player, sample_ns, now_ns):
+    """GCD milliseconds left at ``now_ns``: 0 while idle, None if unknown or ended since sampling.
+
+    A GCD that ended after the sample has probably restarted with Revolution's next ability, so
+    the next fresh sample decides instead.
+    """
+    if player.gcd_reason != Reason.NONE:
+        return None
+    remaining = player.gcd_remaining_ms
+    if remaining <= 0:
+        return 0
+    remaining -= (now_ns - sample_ns) // 1_000_000
+    return remaining if remaining > 0 else None
+
+
+UPPERCUT_ESCAPE_FALLBACK_NS = (2_400_000_000, 3_000_000_000)
+MOVEMENT_ABILITIES = frozenset({"Surge", "Escape"})
+# Uppercut misses a player at least 3 tiles from Telos (wiki). Escape jumps 7 tiles back from the
+# facing direction, but in the 07:35 P3 Uppercut the player stood near the arena edge: Escape
+# moved two tiles and the hit dealt 7,750 at +7. Surge jumps 10 tiles forward (account owner).
+# Only one is used: the controller projects both landings on the known floor and picks the one
+# that clears Uppercut (uppercut_dodge_choice).
+UPPERCUT_CLEAR_TILES = 3
+ESCAPE_DISTANCE_TILES = 7
+SURGE_DISTANCE_TILES = 10
+
+
+def eight_way(vector):
+    """Snap a tile vector to the nearest of the eight grid directions, or None for zero."""
+    if not vector[0] and not vector[1]:
+        return None
+    octant = round(math.atan2(vector[1], vector[0]) / (math.pi / 4)) % 8
+    return EIGHT_DIRECTIONS[octant]
+
+
+def ray_landing(origin, direction, distance, bounds):
+    """Last tile within ``bounds`` along ``distance`` grid steps from ``origin``.
+
+    The step is ``direction`` snapped to eight directions: the 07:35 Escape went (-2,-2), a
+    straight diagonal, and stopped at the floor edge. ``bounds`` is (min_x, min_y, max_x, max_y)
+    of the known floor. Returns None for a zero direction.
+    """
+    step = eight_way(direction)
+    if step is None:
+        return None
+    min_x, min_y, max_x, max_y = bounds
+    landing = origin
+    for count in range(1, distance + 1):
+        tile = (origin[0] + step[0] * count, origin[1] + step[1] * count)
+        if not (min_x <= tile[0] <= max_x and min_y <= tile[1] <= max_y):
+            break
+        landing = tile
+    return landing
+
+
+def uppercut_dodge_choice(player_tile, boss_tile, size, facing, bounds):
+    """Choose Escape or Surge for Uppercut from their projected landings.
+
+    ``facing`` is the player's heading as a tile vector. Escape lands up to 7 tiles behind and
+    Surge up to 10 ahead (possibly past Telos). Uppercut is avoided by moving at least
+    UPPERCUT_CLEAR_TILES: Telos charged two tiles after the player in the 07:35 run, so distance
+    from his old body does not count. A landing under the footprint never counts. Escape is
+    preferred when both clear; otherwise the longer jump. Returns (ability, escape_landing,
+    surge_landing), or None without a heading or floor.
+    """
+    if facing is None or bounds is None:
+        return None
+    backward = (-facing[0], -facing[1])
+    escape = ray_landing(player_tile, backward, ESCAPE_DISTANCE_TILES, bounds)
+    surge = ray_landing(player_tile, facing, SURGE_DISTANCE_TILES, bounds)
+    if escape is None or surge is None:
+        return None
+
+    def travel(landing):
+        if not footprint_distance(landing, boss_tile, size):
+            return 0
+        return chebyshev(landing, player_tile)
+
+    if travel(escape) >= UPPERCUT_CLEAR_TILES:
+        ability = "Escape"
+    elif travel(surge) >= UPPERCUT_CLEAR_TILES:
+        ability = "Surge"
+    else:
+        ability = "Surge" if travel(surge) > travel(escape) else "Escape"
+    return ability, escape, surge
+
+
+# Super restore (account owner, 2026-11-15): one dose on the L keybind whenever prayer points
+# are 50 or fewer (500 in the tenths of PRAYER_POINTS_MASK). After a dose the next waits until
+# the points have risen or SUPER_RESTORE_RETRY_NS has passed.
+DEFAULT_SUPER_RESTORE_KEY = "L"
+# Camera (account owner, 2026-11-15): at the start of each phase, once Telos attacks, hold the up
+# arrow for 3 s so the camera pitch is fully raised and tiles are easier to click. Every chord
+# ends with RELEASE_ALL, which also lifts the arrow, so it is pressed again until the time is up.
+CAMERA_LIFT_KEY = "UP"
+CAMERA_LIFT_NS = 3_000_000_000
+SUPER_RESTORE_PRAYER_TENTHS = 500
+SUPER_RESTORE_RETRY_NS = 4 * TICK_FALLBACK_NS
+
+
+class PrayerRestorer:
+    """Decide when to drink a super restore dose from the sampled prayer points."""
+
+    def __init__(self):
+        self.sent_ns = None
+        self.sent_points = None
+
+    def due(self, points_tenths, now):
+        """Whether a dose should be drunk now, given prayer points in tenths."""
+        if points_tenths is None or points_tenths > SUPER_RESTORE_PRAYER_TENTHS:
+            self.sent_ns = None
+            return False
+        if self.sent_ns is None:
+            return True
+        landed = points_tenths > self.sent_points
+        return landed or now - self.sent_ns >= SUPER_RESTORE_RETRY_NS
+
+    def sent(self, points_tenths, now):
+        """Remember the dose so the next one waits for it to land."""
+        self.sent_ns = now
+        self.sent_points = points_tenths
+
+
+class FocusLostError(RuntimeError):
+    """RuneScape lost foreground focus during a key press; input pauses, the run continues."""
+
+
+@dataclass(frozen=True)
+class Action:
+    """A single ability chosen using the current special and sampled readiness."""
+
+    ability: str
+    reason: str
+
+
+class PhaseOne:
+    """Track confirmed animation applications and prepare for the next special."""
+
+    def __init__(self, phase=1, carried_expected=None):
+        self.phase = phase
+        self.next_special = NEXT_SPECIAL_BY_PHASE[phase]
+        self.auto_sequences = {MELEE_AUTO_SEQUENCE}
+        if phase == 2:
+            self.auto_sequences.add(P2_OPENING_ATTACK)
+        elif phase >= 3:
+            self.auto_sequences |= PHASE_THREE_AUTOS
+        self.autos = 0
+        self.last_auto_ns = None
+        self.last_auto_event = None
+        # P1 opens with 7 autos then Tendrils. P2 opens with the special P1 would have used
+        # next, except that a P1 ending on Tendrils leads to Onslaught instead of Uppercut.
+        self.opening = phase == 1
+        self.opening_autos = OPENING_AUTOS
+        if phase == 1:
+            self.expected = TENDRILS
+        elif phase == 2:
+            self.expected = P2_CARRY_OVER.get(carried_expected, carried_expected)
+        elif phase == 4:
+            # At 500% on 2026-11-14 one P4 opened 28930, three autos, Hold Still; another
+            # opened with longer autos then Tendrils. A press on the second auto costs at most
+            # one early Anticipation, which is ready again for the 28966 cue in the second case.
+            self.expected = HOLD_STILL
+        elif phase >= 5:
+            # Unmapped opening: forecasts resume once a special has been observed.
+            self.expected = None
+        else:
+            # P3 opens with magic autos, then the special carried over from P2.
+            self.opening = True
+            self.expected, self.opening_autos = P3_CARRY_OVER.get(
+                carried_expected, (None, OPENING_AUTOS)
+            )
+        self.last_freedom_stun = None
+        self.stomp_checked = False
+        self.stomp_pending = None
+        self.stomp_prepared = None
+        self.stomp_rejected = set()
+        self.stomp_attempt_tick = None
+        self.stomp_tick_attempts = 0
+        # Set while a P4 font needs the player: Escape and Surge would leave the font.
+        self.hold_position = False
+        self.opening_tick = None
+        self.special = None
+        self.special_ns = 0
+        self.special_event = None
+        self.special_tick = None
+        self.last_event = 0
+        self.pending = None
+        self.handled = set()
+        self.forecast_handled = False
+        self.forecast_attempts = 0
+        self.small_hit_tick = None
+        # Set when this Hold Still's Resonance press produced no cooldown.
+        self.resonance_failed = False
+        self.cast_result = None
+        # P4 anima bomb: observation time, native event and whether a defensive was sent.
+        self.bomb_ns = None
+        self.bomb_event = None
+        self.bomb_handled = False
+        self.bomb_window_ns = ANIMA_BOMB_SINGLE_HIT_WINDOW_NS
+        self.bomb_logic_tick = None
+        self.bomb_preceding_hit = None
+        self.p4_opening_melee_left = None
+
+    @property
+    def expected_after(self):
+        """Number of ordinary attacks that precede the expected special."""
+        return self.opening_autos if self.opening else LOOP_AUTOS
+
+    @property
+    def anticipation_auto(self):
+        """Auto count at which Anticipation is pressed for a forecast Hold Still.
+
+        Normally one auto before the stun (the second of three, the sixth of the P3 opening).
+        In P2, 28959 is both a lone magic attack and each Onslaught projectile: at 500% a lone
+        28959 and two autos were followed by a five-projectile Onslaught, so pressing on the
+        second auto spent Anticipation 40 ticks early. P2 therefore waits for the last auto.
+        P4 does too: there Hold Still followed the third attack after the opener or 28966 by
+        four or five ticks, and an earlier press had expired by the stun (08:47, 250%).
+        """
+        # The carried-over P2 opening keeps the earlier press: there Hold Still followed 28930
+        # and only one animated auto in one 500% capture.
+        if self.phase == 4 or (self.phase == 2 and self.special is not None):
+            return self.expected_after
+        return self.expected_after - 1
+
+    def is_p2_opening_magic_attack(self, sequence, tick):
+        """Whether a 28959 is the plain magic attack early in P2 rather than Onslaught.
+
+        Replayed logs: a 28959 11 ticks after the P2 opener was followed by ordinary autos
+        (then Hold Still or a later multi-projectile Onslaught); one at +15 was the Onslaught.
+        """
+        return (
+            self.phase == 2
+            and sequence == ONSLAUGHT
+            and self.special is None
+            and isinstance(tick, int)
+            and self.opening_tick is not None
+            and tick - self.opening_tick <= P2_OPENING_MAGIC_ATTACK_TICKS
+        )
+
+    def observe(self, actions):
+        """Apply each new animation once. Treat the Tendrils release as a count offset."""
+        for action in actions:
+            if action["event_sequence"] <= self.last_event:
+                continue
+            self.last_event = action["event_sequence"]
+            sequence = action["action_sequence"]
+            tick = action.get("received_tick")
+            if self.opening_tick is None and isinstance(tick, int):
+                self.opening_tick = tick
+            if self.is_p2_opening_magic_attack(sequence, tick):
+                sequence = MELEE_AUTO_SEQUENCE  # Counted as an ordinary attack.
+            opening_bomb = False
+            if self.phase == 4:
+                if sequence == P2_OPENING_ATTACK:
+                    self.p4_opening_melee_left = LOOP_AUTOS
+                elif self.p4_opening_melee_left is not None:
+                    if sequence == MELEE_AUTO_SEQUENCE and self.p4_opening_melee_left > 0:
+                        self.p4_opening_melee_left -= 1
+                    else:
+                        opening_bomb = sequence == MAGIC_ATTACK and self.p4_opening_melee_left == 0
+                        self.p4_opening_melee_left = None
+            if self.phase == 4 and (sequence == ANIMA_BOMB or opening_bomb):
+                # Tracked beside the rotation: the forecast and special state stay unchanged.
+                self.bomb_ns = action["observed_ns"]
+                self.bomb_event = action["event_sequence"]
+                self.bomb_handled = False
+                self.bomb_logic_tick = None if opening_bomb else action.get("client_logic_tick")
+                self.bomb_preceding_hit = None
+                self.bomb_window_ns = (
+                    P4_OPENING_BOMB_WINDOW_NS if opening_bomb else ANIMA_BOMB_SINGLE_HIT_WINDOW_NS
+                )
+                continue
+            if sequence in self.auto_sequences:
+                self.autos += 1
+                self.last_auto_ns = action["observed_ns"]
+                self.last_auto_event = action["event_sequence"]
+            elif sequence == TENDRILS_RELEASE and self.special == TENDRILS:
+                self.autos += 1
+                self.special = None
+            elif sequence in self.next_special:
+                self.opening = False
+                self.autos = 0
+                self.special = sequence
+                self.special_ns = action["observed_ns"]
+                self.special_event = action["event_sequence"]
+                self.special_tick = action.get("received_tick")
+                self.handled.clear()
+                self.forecast_handled = False
+                self.forecast_attempts = 0
+                self.small_hit_tick = None
+                self.resonance_failed = False
+                self.stomp_checked = False
+                self.stomp_pending = None
+                self.stomp_prepared = None
+                self.stomp_rejected.clear()
+                self.stomp_attempt_tick = None
+                self.stomp_tick_attempts = 0
+                self.expected = self.next_special[sequence]
+
+    def next_action(
+        self,
+        now,
+        cooldowns,
+        gcd_remaining_ms,
+        prayer,
+        *,
+        received_tick=None,
+        timed_freedom=False,
+        flicking=False,
+        stun_expiry=None,
+        adrenaline_tenths=None,
+        uppercut_choice=None,
+        tick_elapsed_ms=None,
+        earlier_bomb_slot_clear=False,
+    ):
+        """Use cooldown acknowledgement and bound the number of attempts for each mechanic.
+
+        With ``flicking``, the melee flicker owns protection, so Anticipation no longer
+        requires Deflect Melee to be the current overhead. ``stun_expiry`` is the player's
+        active stun timer (None when not stunned); Freedom is used only then, once per stun.
+        GCD abilities wait for gcd_press_ready(``gcd_remaining_ms``) because the client drops
+        presses made during the GCD. ``timed_freedom`` is accepted for older callers and no
+        longer changes behavior.
+        """
+        gcd_ready = gcd_press_ready(gcd_remaining_ms)
+        # Freedom is reactive: only an observed stun justifies it. Resonance keeps the GCD slot
+        # while its press is still possible: at the 06:30 P3 Hold Still both were pressed at +3
+        # and Resonance did not cast. Freedom takes the next slot.
+        if (
+            stun_expiry is not None
+            and stun_expiry != self.last_freedom_stun
+            and gcd_ready
+            and "Freedom" in cooldowns
+            and not cooldowns["Freedom"]
+            and not self.resonance_press_possible(cooldowns, received_tick)
+            and not self.devotion_press_possible(cooldowns, received_tick, adrenaline_tenths)
+        ):
+            self.last_freedom_stun = stun_expiry
+            return Action("Freedom", "Player stunned")
+        # Resonance is tick-critical, so it precedes any acknowledgement still pending.
+        if self.resonance_due(cooldowns, received_tick, gcd_remaining_ms):
+            if self.pending:
+                self.cast_result = self.acknowledge(cooldowns, now, ending=True)
+            return Action("Resonance", "Hold Still second melee hit")
+        if self.hold_still_shield_due(cooldowns, received_tick, gcd_remaining_ms, tick_elapsed_ms):
+            if self.pending:
+                self.cast_result = self.acknowledge(cooldowns, now, ending=True)
+            return Action(DISRUPTION_SHIELD, "Hold Still heavy hit without Resonance")
+        if self.devotion_due(cooldowns, received_tick, gcd_remaining_ms, adrenaline_tenths):
+            if self.pending:
+                self.cast_result = self.acknowledge(cooldowns, now, ending=True)
+            return Action("Devotion", "Hold Still heavy hit without Resonance")
+        bomb_defence = self.bomb_defence(
+            cooldowns, now, gcd_remaining_ms, earlier_slot_clear=earlier_bomb_slot_clear
+        )
+        if bomb_defence is not None:
+            if self.pending:
+                self.cast_result = self.acknowledge(cooldowns, now, ending=True)
+            return Action(bomb_defence, ANIMA_BOMB_REASON)
+        if self.bomb_shield_due(cooldowns, now, gcd_remaining_ms):
+            if self.pending:
+                self.cast_result = self.acknowledge(cooldowns, now, ending=True)
+            return Action(DISRUPTION_SHIELD, ANIMA_BOMB_REASON)
+        if self.pending:
+            self.cast_result = self.acknowledge(
+                cooldowns,
+                now,
+                ending=self.special == HOLD_STILL and self.pending[0] == "Anticipation",
+            )
+            if self.cast_result is None:
+                return None
+
+        elapsed_ns = now - self.special_ns
+        active_special = 0 <= elapsed_ns < SPECIAL_WINDOW_NS
+        if (
+            self.special == UPPERCUT
+            and not self.hold_position
+            and self.autos == 0
+            and "Escape" not in self.handled
+            and "Surge" not in self.handled
+            and self.uppercut_escape_due(elapsed_ns, received_tick)
+        ):
+            # One jump only: the one with room to clear Uppercut, else the other if it is ready.
+            order = ("Surge", "Escape") if uppercut_choice == "Surge" else ("Escape", "Surge")
+            for ability in order:
+                if ability in cooldowns and not cooldowns[ability]:
+                    reason = "Uppercut escape" if ability == "Escape" else "Uppercut Surge"
+                    return Action(ability, reason)
+        if not gcd_ready:
+            return None
+        if (
+            self.expected == HOLD_STILL
+            and self.autos == self.anticipation_auto
+            and self.last_auto_ns is not None
+            and 0 <= now - self.last_auto_ns < HOLD_STILL_FORECAST_WINDOW_NS
+            and (prayer == Prayer.MELEE or flicking)
+            and "Anticipation" in cooldowns
+            and not cooldowns["Anticipation"]
+            and not self.forecast_handled
+        ):
+            return Action("Anticipation", "Hold Still forecast after Uppercut")
+        if (
+            active_special
+            and self.special == TENDRILS
+            and "Hurricane" not in self.handled
+            and "Hurricane" in cooldowns
+            and not cooldowns["Hurricane"]
+        ):
+            return Action("Hurricane", "Tendrils damage check")
+        return None
+
+    def uppercut_escape_due(self, elapsed_ns, received_tick):
+        """Use received ticks after Uppercut when both are valid, else the elapsed-time fallback."""
+        if isinstance(received_tick, int) and isinstance(self.special_tick, int):
+            earliest, latest = UPPERCUT_ESCAPE_TICKS
+            return earliest <= received_tick - self.special_tick <= latest
+        earliest_ns, latest_ns = UPPERCUT_ESCAPE_FALLBACK_NS
+        return earliest_ns <= elapsed_ns <= latest_ns
+
+    def owns_movement(self, now, received_tick):
+        """Reserve movement during a dodge even if pointer sampling interrupted the tick clock."""
+        if self.special not in (UPPERCUT, HOLD_STILL):
+            return False
+        if isinstance(received_tick, int) and isinstance(self.special_tick, int):
+            return 0 <= received_tick - self.special_tick <= BEAM_SPECIAL_HOLD_TICKS
+        return 0 <= now - self.special_ns <= BEAM_SPECIAL_HOLD_TICKS * TICK_FALLBACK_NS
+
+    def observe_hits(self, hits, received_tick):
+        """Record preceding hits that distinguish a safe single-hit defensive window."""
+        if (
+            not self.bomb_handled
+            and self.bomb_logic_tick is not None
+            and self.bomb_preceding_hit is None
+        ):
+            earliest, latest = ANIMA_BOMB_PRECEDING_HIT_TICKS
+            for event in hits:
+                if event.hit.type_id not in HOLD_STILL_SMALL_HIT_TYPES:
+                    continue
+                delta = (event.hit.start_tick - self.bomb_logic_tick) & 0xFFFFFFFF
+                if earliest <= delta <= latest:
+                    self.bomb_preceding_hit = event.sequence
+                    break
+        earliest, latest = HOLD_STILL_SMALL_HIT_TICKS
+        if (
+            self.special == HOLD_STILL
+            and self.small_hit_tick is None
+            and isinstance(received_tick, int)
+            and isinstance(self.special_tick, int)
+            and earliest <= received_tick - self.special_tick <= latest
+            and any(event.hit.type_id in HOLD_STILL_SMALL_HIT_TYPES for event in hits)
+        ):
+            self.small_hit_tick = received_tick
+
+    def resonance_tick_ok(self, cooldowns, received_tick):
+        """Whether a ready Resonance pressed in this received tick would take the heavy hit.
+
+        Before +3 the small hit must have been seen; at +3 the cast lands on the heavy hit's
+        tick whether or not the small hit was seen.
+        """
+        if (
+            self.special != HOLD_STILL
+            or "Resonance" in self.handled
+            or "Resonance" not in cooldowns
+            or cooldowns["Resonance"]
+            or not isinstance(received_tick, int)
+            or not isinstance(self.special_tick, int)
+        ):
+            return False
+        tick_delta = received_tick - self.special_tick
+        if tick_delta == RESONANCE_LATEST_PRESS_TICK:
+            return True
+        return 0 < tick_delta < RESONANCE_LATEST_PRESS_TICK and self.small_hit_tick is not None
+
+    def resonance_due(self, cooldowns, received_tick, gcd_remaining_ms=None):
+        """Press once per Hold Still so that the cast lands after the small hit, by the heavy hit.
+
+        The press goes out in the GCD's last moments, so it casts on the next received tick.
+        """
+        return gcd_press_ready(gcd_remaining_ms) and self.resonance_tick_ok(
+            cooldowns, received_tick
+        )
+
+    def resonance_planned(self, cooldowns, received_tick, gcd_remaining_ms, tick_elapsed_ms=None):
+        """Whether Resonance will be pressed before this received tick ends.
+
+        True from the start of the tick when the GCD ends at the next tick boundary, so Soul
+        Split can be requested early in the tick rather than after the late Resonance press.
+        ``tick_elapsed_ms`` is the time since this received tick was first seen. In the 07:01
+        run, 780 ms left late in +3 ended two ticks later, and Soul Split took the heavy hit.
+        """
+        return gcd_window_this_tick(gcd_remaining_ms, tick_elapsed_ms) and self.resonance_tick_ok(
+            cooldowns, received_tick
+        )
+
+    def resonance_committed(self):
+        """Whether this Hold Still's Resonance press went out and has not been refuted."""
+        return (
+            self.special == HOLD_STILL
+            and "Resonance" in self.handled
+            and not self.resonance_failed
+        )
+
+    def soul_split_for_heavy_hit(
+        self, cooldowns, received_tick, gcd_remaining_ms, tick_elapsed_ms=None
+    ):
+        """Whether Resonance takes Hold Still's heavy hit, so Soul Split can replace Deflect."""
+        return self.resonance_committed() or self.resonance_planned(
+            cooldowns, received_tick, gcd_remaining_ms, tick_elapsed_ms
+        )
+
+    def devotion_press_possible(self, cooldowns, received_tick, adrenaline_tenths):
+        """Whether Devotion is ready, affordable and still in time for this heavy hit."""
+        return (
+            self.special == HOLD_STILL
+            and "Devotion" not in self.handled
+            and "Devotion" in cooldowns
+            and not cooldowns["Devotion"]
+            and isinstance(adrenaline_tenths, int)
+            and adrenaline_tenths >= DEVOTION_ADRENALINE_TENTHS
+            and not self.resonance_committed()
+            # A ready Disruption Shield covers the heavy hit without adrenaline.
+            and not self.shield_ready(cooldowns)
+            and isinstance(received_tick, int)
+            and isinstance(self.special_tick, int)
+            and 0 <= received_tick - self.special_tick <= RESONANCE_LATEST_PRESS_TICK
+        )
+
+    def devotion_due(self, cooldowns, received_tick, gcd_remaining_ms, adrenaline_tenths):
+        """Press Devotion in a GCD slot that Resonance cannot use for the heavy hit.
+
+        That is any slot through +3 when Resonance is unbound, cooling or refuted, or a slot
+        after +0 that Resonance cannot take: the next slot, three ticks later, is too late.
+        """
+        if not gcd_press_ready(gcd_remaining_ms) or not self.devotion_press_possible(
+            cooldowns, received_tick, adrenaline_tenths
+        ):
+            return False
+        resonance_usable = (
+            "Resonance" in cooldowns
+            and not cooldowns["Resonance"]
+            and "Resonance" not in self.handled
+        )
+        if not resonance_usable:
+            return True
+        next_slot = received_tick - self.special_tick + GCD_TICKS
+        return next_slot > RESONANCE_LATEST_PRESS_TICK
+
+    def bomb_elapsed(self, now):
+        """Nanoseconds since this phase's anima bomb cue, or None without an open bomb."""
+        if self.bomb_handled or self.bomb_ns is None:
+            return None
+        return now - self.bomb_ns
+
+    def bomb_defence(self, cooldowns, now, gcd_remaining_ms, *, earlier_slot_clear=False):
+        """The GCD defensive to press for the P4 anima bomb now, or None.
+
+        Resonance only inside this cue's window, so it is up on the typeless hit
+        and not spent on a golem hit first; Reflect from ANIMA_BOMB_REFLECT_EARLIEST_NS. Both
+        need the GCD's last moments, and only one defensive is pressed per bomb.
+        """
+        elapsed = self.bomb_elapsed(now)
+        if elapsed is None or not gcd_press_ready(gcd_remaining_ms):
+            return None
+        earliest, latest = self.bomb_window_ns
+        if elapsed > latest:
+            return None
+        gcd_end = elapsed + gcd_remaining_ms * 1_000_000
+        earlier_slot = (
+            earlier_slot_clear
+            and self.bomb_preceding_hit is not None
+            and not self.shield_ready(cooldowns)
+            and gcd_remaining_ms > 0
+            and ANIMA_BOMB_EARLY_GCD_END_NS <= gcd_end < earliest
+        )
+        resonance_ready = "Resonance" in cooldowns and not cooldowns["Resonance"]
+        if resonance_ready and (earliest <= elapsed or earlier_slot):
+            return "Resonance"
+        if (
+            elapsed >= ANIMA_BOMB_REFLECT_EARLIEST_NS
+            and "Reflect" in cooldowns
+            and not cooldowns["Reflect"]
+            and not self.shield_ready(cooldowns)
+        ):
+            return "Reflect"
+        return None
+
+    def shield_ready(self, cooldowns):
+        """Whether Disruption Shield is bound, off its timer and unused for this special."""
+        return (
+            DISRUPTION_SHIELD in cooldowns
+            and not cooldowns[DISRUPTION_SHIELD]
+            and DISRUPTION_SHIELD not in self.handled
+        )
+
+    def hold_still_shield_due(self, cooldowns, received_tick, gcd_remaining_ms, tick_elapsed_ms):
+        """Cast Disruption Shield for Hold Still's heavy hit when Resonance will not take it.
+
+        It blocks one hit and ignores the GCD, so it goes after the small hit: at once when
+        Resonance is cooling or unbound, otherwise at +3 unless Resonance is pressed or due in
+        that tick (they must never both be up: the shield takes the hit first).
+        """
+        if (
+            self.special != HOLD_STILL
+            or not self.shield_ready(cooldowns)
+            or self.resonance_committed()
+            or not isinstance(received_tick, int)
+            or not isinstance(self.special_tick, int)
+        ):
+            return False
+        tick_delta = received_tick - self.special_tick
+        if not 0 < tick_delta <= RESONANCE_LATEST_PRESS_TICK:
+            return False
+        if self.resonance_planned(cooldowns, received_tick, gcd_remaining_ms, tick_elapsed_ms):
+            return False
+        if tick_delta == RESONANCE_LATEST_PRESS_TICK:
+            return True
+        resonance_usable = (
+            "Resonance" in cooldowns
+            and not cooldowns["Resonance"]
+            and "Resonance" not in self.handled
+        )
+        return self.small_hit_tick is not None and not resonance_usable
+
+    def bomb_shield_due(self, cooldowns, now, gcd_remaining_ms):
+        """Cast Disruption Shield in this cue's window so it takes the bomb hit.
+
+        It ignores the GCD, so it goes at the window's start unless Resonance is being pressed
+        at that moment (they must not both be up). Golem hits may still use the shield up first
+        (account owner).
+        """
+        elapsed = self.bomb_elapsed(now)
+        earliest, latest = self.bomb_window_ns
+        if (
+            elapsed is None
+            or not earliest <= elapsed <= latest
+            or DISRUPTION_SHIELD not in cooldowns
+            or cooldowns[DISRUPTION_SHIELD]
+        ):
+            return False
+        resonance_now = (
+            "Resonance" in cooldowns
+            and not cooldowns["Resonance"]
+            and gcd_press_ready(gcd_remaining_ms)
+        )
+        return not resonance_now
+
+    def resonance_press_possible(self, cooldowns, received_tick):
+        """Whether this Hold Still's Resonance press can still come in this or a later tick."""
+        return (
+            self.special == HOLD_STILL
+            and "Resonance" not in self.handled
+            and "Resonance" in cooldowns
+            and not cooldowns["Resonance"]
+            and isinstance(received_tick, int)
+            and isinstance(self.special_tick, int)
+            and received_tick - self.special_tick <= RESONANCE_LATEST_PRESS_TICK
+        )
+
+    def sent(self, action, now):
+        """Wait for the sampled cooldown before treating this command as a cast."""
+        self.pending = (action.ability, now + ACK_TIMEOUT_NS)
+        if action.reason == ANIMA_BOMB_REASON:
+            self.bomb_handled = True
+        elif action.ability == "Anticipation":
+            # An unacknowledged press may be retried while the forecast window is still open.
+            self.forecast_attempts += 1
+            self.forecast_handled = self.forecast_attempts >= ANTICIPATION_MAX_ATTEMPTS
+        else:
+            self.handled.add(action.ability)
+
+    def acknowledge(self, timers, now, *, ending=False):
+        """Settle an outstanding cooldown when input ends or the phase changes."""
+        if self.pending is None:
+            return None
+        ability, deadline = self.pending
+        if (timers.get(ability) or 0) > 0:
+            observed = True
+        elif now >= deadline:
+            observed = False
+        elif ending:
+            observed = False if self.special == HOLD_STILL and ability == "Anticipation" else None
+        else:
+            return None
+        self.pending = None
+        if ability == "Resonance" and observed is False:
+            self.resonance_failed = True
+        return ability, observed
+
+
+class PrayerFlicker:
+    """Unvalidated practice trial: deflect on each Telos animation, Soul Split after the hold.
+
+    Most animations select Deflect Melee; FLICK_PRAYER_BY_ANIMATION overrides the style.
+    Prayer keybinds toggle, so a chord is only requested when the overhead differs from the
+    target and no earlier request is still awaiting its overhead acknowledgement.
+    """
+
+    def __init__(self, excluded=FLICK_EXCLUDED_ANIMATIONS, hold_ticks=None, prayers=None):
+        self.excluded = frozenset(excluded)
+        self.hold_ticks = dict(FLICK_HOLD_TICKS if hold_ticks is None else hold_ticks)
+        self.prayers = dict(FLICK_PRAYER_BY_ANIMATION if prayers is None else prayers)
+        self.last_event = 0
+        # Received-tick windows (first tick, end tick exclusive, prayer, cue), one per cue.
+        self.windows = []
+        self.golem_windows = {}
+        # Without a received tick, the latest cue holds from now (nanosecond fallback).
+        self.return_ns = None
+        self.hold_prayer = Prayer.MELEE
+        self.hold_cue = None
+        # Deflect for animations without an override; P3 switches this to Deflect Magic.
+        self.default_prayer = Prayer.MELEE
+        # Selects the phase-specific Hold Still small-hit prayer.
+        self.phase = 1
+        # Received tick of the latest protected attack cue.
+        self.last_cue_tick = None
+        self.cue_event = None
+        self.requested = None
+        self.transition_phase = None
+
+    def update_transition(self, actions, phase):
+        """Suspend toggles until the first attack cue on the new platform."""
+        previous = self.transition_phase
+        changed_by = None
+        for action in actions:
+            animation = action["action_sequence"]
+            if animation == P1_TO_P2_TRANSITION:
+                if self.transition_phase is None:
+                    self.transition_phase = phase
+                    self.windows.clear()
+                    self.golem_windows.clear()
+                    self.return_ns = None
+                    self.hold_cue = None
+                    self.cue_event = None
+                    changed_by = action["event_sequence"]
+            elif (
+                self.transition_phase is not None
+                and phase >= self.transition_phase
+                and animation in TRANSITION_ATTACK_CUES
+            ):
+                self.transition_phase = None
+                changed_by = action["event_sequence"]
+        if (previous is None) != (self.transition_phase is None):
+            return self.transition_phase is not None, changed_by
+        return None
+
+    def observe(self, actions, tick, now, distance=None):
+        """Open each cue's deflect window. Return the latest cue.
+
+        Most cues deflect from their own tick for their hold count. A 28959 magic attack
+        deflects during magic_flick_ticks(distance), later for a player far from Telos. Hold
+        Still opens one window for its small hit and one for its heavy melee hit.
+        """
+        trigger = None
+        for action in actions:
+            if action["event_sequence"] <= self.last_event:
+                continue
+            self.last_event = action["event_sequence"]
+            sequence = action["action_sequence"]
+            if sequence in self.excluded:
+                continue
+            trigger = action
+            prayer = self.prayers.get(sequence, self.default_prayer)
+            if sequence == MAGIC_ATTACK:
+                spans = [(*magic_flick_ticks(distance), prayer)]
+            elif sequence == HOLD_STILL:
+                small_prayer = HOLD_STILL_SMALL_HIT_PRAYER_BY_PHASE.get(self.phase, prayer)
+                spans = [
+                    (*HOLD_STILL_SMALL_PRESS_TICKS, small_prayer),
+                    (*HOLD_STILL_HEAVY_PRESS_TICKS, Prayer.MELEE),
+                ]
+            else:
+                last = self.hold_ticks.get(sequence, DEFAULT_FLICK_HOLD_TICKS) - 1
+                spans = [(0, last, prayer)]
+            cue_tick = action.get("received_tick")
+            if cue_tick is None:
+                cue_tick = tick
+            cue = action["event_sequence"]
+            if cue_tick is not None:
+                self.last_cue_tick = cue_tick
+                for first, last, span_prayer in spans:
+                    self.windows.append((cue_tick + first, cue_tick + last + 1, span_prayer, cue))
+            # Without received ticks the first span's prayer holds until the last span ends.
+            self.hold_prayer = spans[0][2]
+            self.hold_cue = cue
+            return_ns = now + (max(span[1] for span in spans) + 1) * TICK_FALLBACK_NS
+            if self.return_ns is None or return_ns > self.return_ns:
+                self.return_ns = return_ns
+        return trigger
+
+    def observe_golems(self, actions, logic_tick):
+        """Hold melee through each fresh stamped P4 golem swing's possible impact."""
+        if logic_tick is None:
+            return []
+        opened = []
+        first_hit, last_hit = GOLEM_MELEE_HIT_OFFSETS
+        for action in actions:
+            if (
+                action["config_id"] not in MINION_CONFIGS
+                or action["action_sequence"] != GOLEM_MELEE_ANIMATION
+            ):
+                continue
+            stamp = action["application_stamp"]
+            if stamp is None or not 0 <= logic_tick - stamp <= GOLEM_MAX_CUE_AGE_TICKS:
+                continue
+            cue = action["event_sequence"]
+            self.golem_windows[cue] = stamp + last_hit + 1
+            opened.append((action, stamp + first_hit, stamp + last_hit))
+        return opened
+
+    def release(self, cue, tick):
+        """End one cue's windows from received tick ``tick``; return whether any changed."""
+        if self.hold_cue == cue:
+            # Otherwise a sample without a received tick would bring the deflect back (06:51).
+            self.return_ns = None
+        kept = []
+        for first, end, prayer, window_cue in self.windows:
+            if window_cue == cue and end > tick:
+                if first < tick:
+                    kept.append((first, tick, prayer, window_cue))
+                continue
+            kept.append((first, end, prayer, window_cue))
+        changed = kept != self.windows
+        self.windows = kept
+        return changed
+
+    def active_prayer(self, tick, now, logic_tick=None):
+        """Select an active Telos protection window, a golem swing, or Soul Split."""
+        if tick is None:
+            if self.return_ns is not None and now < self.return_ns:
+                self.cue_event = self.hold_cue
+                return self.hold_prayer
+        else:
+            self.windows = [window for window in self.windows if window[1] > tick]
+            active = [window for window in self.windows if window[0] <= tick]
+            if active:
+                _, _, prayer, self.cue_event = max(active, key=lambda window: window[0])
+                return prayer
+        if logic_tick is not None:
+            self.golem_windows = {
+                cue: end for cue, end in self.golem_windows.items() if logic_tick < end
+            }
+            if self.golem_windows:
+                self.cue_event = max(self.golem_windows)
+                return Prayer.MELEE
+        return None
+
+    def holding(self, tick, now):
+        """Whether any deflect window is open."""
+        return self.active_prayer(tick, now) is not None
+
+    def quiet(self, tick, now):
+        """Whether a pointer move now leaves every protection press undisturbed.
+
+        No deflect window may be open or start next tick, and the latest cue's tick has passed.
+        """
+        if tick is None or self.holding(tick, now):
+            return False
+        if any(window[0] <= tick + 1 for window in self.windows):
+            return False
+        return (
+            self.last_cue_tick is None
+            or tick - self.last_cue_tick >= BEAM_KEEP_QUIET_TICKS_AFTER_CUE
+        )
+
+    def next_prayer(self, prayer, tick, now, logic_tick=None):
+        """Return the next prayer if a switch is needed and no acknowledgement is pending."""
+        target = self.active_prayer(tick, now, logic_tick)
+        if target is None:
+            target = Prayer.SOUL_SPLIT
+        if self.requested is not None:
+            requested, deadline = self.requested
+            if prayer != requested and now < deadline:
+                return None
+            self.requested = None
+        return None if prayer == target else target
+
+    def sent(self, target, now):
+        """Wait for the overhead to change before another toggle can be sent."""
+        self.requested = (target, now + ACK_TIMEOUT_NS)
+
+
+def log(event, **fields):
+    """Write decision and outcome records to standard output."""
+    print(json.dumps({"event": event, **fields}), flush=True)
+
+
+def boss_sample(reader, *, phase_five=False):
+    """Read the unique Telos NPC, with independently valid health and phase evidence."""
+    info, player, npcs, _ = reader.sample()
+    phase_raw = player.variable(Variable.TELOS_PACKED)
+    phase = None if phase_raw is None else ((phase_raw >> PHASE_SHIFT) & PHASE_MASK) + 1
+    configs = (PHASE_FIVE_TELOS,) if phase_five and phase == 5 else (ACTIVE_TELOS, DORMANT_TELOS)
+    bosses = [npc for npc in npcs[: info.npc_count] if npc.config_id in configs]
+    boss = bosses[0] if len(bosses) == 1 else None
+    hp = player.variable(Variable.HEALTH)
+    return info, player, boss, phase, hp
+
+
+def active_stun_expiry(reader, logic_tick):
+    """Return the player's stun expiry while it lies ahead of the client logic tick, else None.
+
+    The stun candidate (varc 3748) shares the 20 ms logic clock: on 2026-11-14 the effect
+    expiries of Anticipation, Resonance and Freedom changed with their casts, and an old stun
+    expiry read below the current tick. The effect remains unvalidated in the DLL.
+    """
+    if logic_tick is None:
+        return None
+    try:
+        stun = reader.effects[STUN_EFFECT_ID - 1]
+    except (AttributeError, IndexError, TypeError):
+        return None
+    if stun.effect_id != STUN_EFFECT_ID or not stun.raw_valid_mask & EFFECT_RAW_EXPIRY_VALID:
+        return None
+    remaining = (int(stun.raw_expiry) - int(logic_tick)) & 0xFFFFFFFF
+    return int(stun.raw_expiry) if 0 < remaining <= MAX_STUN_TICKS else None
+
+
+# Dive has no client timer pair (profiles/ability_bindings_951_3.json), but it shares its
+# cooldown with Bladed Dive, whose timer restarted for 20.4 s after each Dive on 2026-11-15
+# (06:51 run, struct 1488). Without this every Dive press counted as ready, and presses during
+# the cooldown only walked.
+SHARED_COOLDOWN_SOURCES = {"Dive": "Bladed Dive"}
+
+
+def cooldowns(reader, operator_bound=()):
+    """Separate valid cooldowns from mapped timers absent in the sparse table.
+
+    An unknown equipment match is accepted for abilities the operator bound explicitly. The
+    cache lists Resonance as shield-only, so the DLL reports it as unknown with a two-handed
+    weapon; the operator's binding and the later cooldown acknowledgement decide instead.
+    """
+    timers = {}
+    shared = {}
+    for ability in reader.abilities:
+        name = ability.name.decode("utf-8", errors="replace")
+        if name in SHARED_COOLDOWN_SOURCES.values() and ability.flags & AbilityFlags.TIMER_VALID:
+            # A shared timer is valid whatever the equipment allows for its own ability.
+            shared[name] = ability.remaining_ms
+        if ability.equipment_match != EquipmentMatch.ALLOWED and not (
+            ability.equipment_match == EquipmentMatch.UNKNOWN and name in operator_bound
+        ):
+            continue
+        if ability.flags & AbilityFlags.TIMER_VALID:
+            timers[name] = ability.remaining_ms
+        elif ability.reason == Reason.NOT_SET:
+            timers[name] = None
+    for name, source in SHARED_COOLDOWN_SOURCES.items():
+        if timers.get(name) is None and source in shared:
+            timers[name] = shared[source]
+    return timers
+
+
+def phase_end_hp(maximum_hp, phase):
+    """Boss HP at which the given phase hands off. Phases split maximum HP into quarters.
+
+    The quarter split is observed at 0% enrage only; other enrages assume the same ratio.
+    """
+    return maximum_hp * (PHASE_COUNT - phase) // PHASE_COUNT
+
+
+def encounter_checkpoint(phase, health, expected_max_hp=ZERO_ENRAGE_HP):
+    """Check the HP band against the phase field and flag possible font progress."""
+    current, maximum = health["current"], health["max"]
+    if maximum != expected_max_hp or current is None or phase not in (1, 2, 3, 4):
+        return None
+    # A shared boundary belongs to either neighboring phase during the handoff.
+    lower = phase_end_hp(maximum, phase)
+    upper = phase_end_hp(maximum, phase - 1)
+    if not lower <= current <= upper:
+        return None
+    font_thresholds = [maximum * part // SIXTEENTHS for part in FONT_SIXTEENTHS]
+    fonts_reached = sum(current <= threshold for threshold in font_thresholds) if phase == 4 else 0
+    return {"phase": phase, "font_thresholds_reached": fonts_reached, "zero_hp": current == 0}
+
+
+def check_active_phase(confirmed_phase, phase, health, expected_max_hp, *, saw_p2_transition=False):
+    """Corroborate a forward stage with HP or the same actor's P1 handoff animation."""
+    if phase not in (confirmed_phase, confirmed_phase + 1):
+        raise RuntimeError(f"Unexpected Telos stage change from phase {confirmed_phase} to {phase}")
+    if phase == confirmed_phase or encounter_checkpoint(phase, health, expected_max_hp):
+        return
+    if phase == 2 and saw_p2_transition:
+        return
+    raise RuntimeError(f"Phase {phase} entry disagrees with the observed boss HP")
+
+
+def phase_two_melee_cue(actions, overhead):
+    """Require a fresh melee animation and protection in the same sample."""
+    return overhead == "melee" and any(
+        action["action_sequence"] == MELEE_AUTO_SEQUENCE for action in actions
+    )
+
+
+def replay(path):
+    """Replay phase 1 counts and retain raw later-phase cues for calibration."""
+    encounter = None
+    previous_phase = None
+    with path.open(encoding="utf-8") as source:
+        for line in source:
+            row = json.loads(line)
+            if "telos" in row:
+                raw = row["telos_raw"]
+                phase = None if raw is None else ((raw >> PHASE_SHIFT) & PHASE_MASK) + 1
+                session = [row["pid"], row["process_creation_time"], row["combat"]["scene_epoch"]]
+                bosses = [npc for npc in row["telos"] if npc["config_id"] == ACTIVE_TELOS]
+                instance = bosses[0]["instance_id"] if len(bosses) == 1 else None
+                events = row["telos_actions"]
+                sample_ns = row["sample_started_ns"]
+                overhead = row["combat"].get("active_prayer")
+            elif row.get("event") == "observation":
+                phase = row["phase_candidate"]
+                session = row["session"]
+                instance = (
+                    row["boss_instance_id"] if row["boss_config_id"] == ACTIVE_TELOS else None
+                )
+                events = row["npc_actions"]
+                sample_ns = row["sample_ns"]
+                overhead = row.get("overhead")
+            elif row.get("event") == "telos_absent":
+                encounter = None
+                continue
+            else:
+                continue
+            if instance is None:
+                encounter = None
+                continue
+            current = (*session, instance)
+            if current != encounter:
+                phase_one = PhaseOne()
+                encounter = current
+                previous_phase = None
+            if row["npc_action_events_lost"]:
+                raise RuntimeError("Replay contains an NPC action queue overflow")
+            actions = [
+                action
+                for action in events
+                if action["instance_id"] == instance and action["config_id"] == ACTIVE_TELOS
+            ]
+            if phase is not None and phase > 1:
+                if phase != previous_phase:
+                    log("phase_candidate", phase=phase, sample_ns=sample_ns, hp=row["hp"])
+                if actions:
+                    log(
+                        "later_phase_cues",
+                        phase=phase,
+                        actions=actions,
+                        hp=row["hp"],
+                        overhead=overhead,
+                        sample_ns=sample_ns,
+                        protected_melee_cue=phase == 2 and phase_two_melee_cue(actions, overhead),
+                    )
+                previous_phase = phase
+            if previous_phase is not None:
+                continue
+            if not actions:
+                continue
+            before = phase_one.autos
+            phase_one.observe(actions)
+            log(
+                "replay",
+                sequences=[action["action_sequence"] for action in actions],
+                autos_before=before,
+                autos=phase_one.autos,
+                expected=phase_one.expected,
+                expected_after=phase_one.expected_after,
+            )
+
+
+def observe(reader, duration, attempt=None, *, phase_five=False, before_sample=None):
+    """Record post-transition cues without foreground focus or Arduino input."""
+    deadline = time.monotonic() + duration
+    last_state = None
+    last_status = None
+    active_seen = attempt is not None and attempt.engaged
+    while time.monotonic() < deadline:
+        if before_sample is not None:
+            before_sample()
+        info, player, boss, phase, hp = boss_sample(reader, phase_five=phase_five)
+        session = (info.pid, info.process_creation_time, reader.combat.scene_epoch)
+        events, lost = reader.drain_npc_action_events()
+        hits, hits_lost = reader.drain_player_hit_events()
+        if attempt:
+            attempt.frame(
+                reader,
+                info,
+                phase=phase,
+                actions=events,
+                action_loss=lost,
+                hits=hits,
+                hit_loss=hits_lost,
+            )
+        if info.status != last_status:
+            log("reader_status", status=info.status, reason=info.message.decode(errors="replace"))
+            last_status = info.status
+        if boss is not None:
+            active_seen |= boss.config_id == ACTIVE_TELOS
+            actions = telos_actions(events, session, info.sequence, {boss.instance_id})
+            tile = reader.position
+            # Later phases add actors. Preserve their provenance until their roles are verified.
+            other_npcs = (
+                [
+                    (npc.instance_id, npc.config_id, npc.name.decode(errors="replace"))
+                    for npc in reader.npcs[: info.npc_count]
+                    if npc.instance_id != boss.instance_id
+                ]
+                if phase is not None and phase >= 2
+                else []
+            )
+            health = npc_health_record(boss)
+            state = dict(
+                session=session,
+                boss_config_id=boss.config_id,
+                boss_instance_id=boss.instance_id,
+                boss_health=health,
+                telos_raw=player.variable(Variable.TELOS_PACKED),
+                phase_candidate=phase,
+                checkpoint_candidate=(
+                    encounter_checkpoint(phase, health, health["max"])
+                    if boss.config_id == ACTIVE_TELOS
+                    else None
+                ),
+                hp=hp,
+                other_npcs=other_npcs,
+                overhead=Prayer(reader.active_prayer()).name.lower(),
+                tile=(tile.x, tile.y, tile.plane) if tile.valid else None,
+            )
+            if state != last_state or actions or hits or lost or hits_lost:
+                log(
+                    "observation",
+                    sample_ns=info.monotonic_ns,
+                    sample_sequence=info.sequence,
+                    sample_status=info.status,
+                    npc_actions=actions,
+                    npc_action_events_lost=lost,
+                    player_hits=player_hit_splats_record(reader, hits, hits_lost),
+                    **state,
+                )
+            last_state = state
+        elif last_state is not None:
+            log("telos_absent", session=session, sample_ns=info.monotonic_ns)
+            last_state = None
+        if attempt and active_seen:
+            if hp == 0:
+                return "player_hp_zero"
+            if (
+                info.status in (Status.AVAILABLE, Status.PARTIAL)
+                and info.reason != Reason.READ_FAILED
+            ):
+                if boss is None or boss.config_id == DORMANT_TELOS:
+                    return "telos_disappeared"
+        time.sleep(POLL_SECONDS)
+    return "time_limit" if attempt else 0
+
+
+def run(reader, args, board, attempt=None, *, cleanup=None):
+    """Track an attached practice encounter and dispatch only from fresh native state."""
+    from game_console import GameWindow, frame_target, move_pointer
+
+    emit = attempt.write if attempt else log
+    keys = ManualPrayerKeys()
+    phase_one = PhaseOne()
+    initial, _, _, _, _ = boss_sample(reader)
+    if initial.status not in (Status.AVAILABLE, Status.PARTIAL):
+        reason = initial.message.decode(errors="replace")
+        raise RuntimeError(f"Cannot start in the current client scene ({reason})")
+    identity = (initial.pid, initial.process_creation_time, reader.combat.scene_epoch)
+    manual_engage = getattr(args, "manual_engage", False)
+    window = keys.game_window(identity)
+    if not window:
+        # Started from a terminal: wait (without input) for the operator to click into RuneScape.
+        log("waiting_for_foreground")
+        while not window:
+            if keys.get_async_key_state(F12) < 0:
+                raise RuntimeError("F12 stop")
+            time.sleep(POLL_SECONDS)
+            window = keys.game_window(identity)
+
+    def check_focus():
+        """Inside a key press: stop the press (tap releases held keys) if focus is gone."""
+        if keys.get_async_key_state(F12) < 0:
+            raise RuntimeError("F12 stop")
+        if keys.game_window(identity) != window:
+            raise FocusLostError("RuneScape lost foreground focus")
+
+    input_allowed = True
+
+    def update_focus():
+        """Allow input only while RuneScape is focused; observation never pauses.
+
+        While unfocused, animations, hits and phases are still tracked so the rotation counts
+        stay correct; send_chord and the stomp dodge simply do nothing. Only F12 stops.
+        """
+        nonlocal input_allowed
+        if keys.get_async_key_state(F12) < 0:
+            raise RuntimeError("F12 stop")
+        focused = keys.game_window(identity) == window
+        if focused != input_allowed:
+            emit(
+                "input_resumed" if focused else "input_paused",
+                **({} if focused else {"reason": "RuneScape lost foreground focus"}),
+            )
+            input_allowed = focused
+
+    pointer_window = None
+    # Tiles known to be floor on the current platform: player tiles and Telos's body.
+    floor_tiles = set()
+    floor_phase = [None]
+
+    def remember_floor(phase, boss):
+        """Collect walkable tiles for the stomp dodge and the Uppercut jump choice.
+
+        Player tiles, Telos's body and the strips (which sweep the platform) all count.
+        """
+        if not {"Dive", "Escape", "Surge"} & bindings.keys():
+            return
+        if phase != floor_phase[0]:
+            floor_tiles.clear()  # Each phase is a different platform.
+            floor_phase[0] = phase
+        player = reader.spatial.player
+        if player.valid_mask & SpatialFlags.TILE:
+            floor_tiles.add((player.tile.x, player.tile.y))
+            for hazard in reader.hazards[: reader.hazard_info.count]:
+                if (
+                    hazard.flags & HazardFlags.SCENE_LOCATION
+                    and hazard.tile.plane == player.tile.plane
+                ):
+                    floor_tiles.add((hazard.tile.x, hazard.tile.y))
+        for pose in reader.npc_spatial[: reader.spatial.npc_count]:
+            if pose.instance_id == boss.instance_id and pose.valid_mask & SpatialFlags.TILE:
+                size = pose.footprint_size or 1
+                for dx in range(size):
+                    for dy in range(size):
+                        floor_tiles.add((pose.tile.x + dx, pose.tile.y + dy))
+
+    def stomp_dodge(phase_one, boss, received_tick, timers, gcd_remaining_ms):
+        """Dive out from under Telos before the Hold Still stomp, once per Hold Still."""
+        if (
+            not input_allowed
+            or font_duty.active
+            or phase_one.special != HOLD_STILL
+            or phase_one.stomp_checked
+            or not isinstance(received_tick, int)
+            or not isinstance(phase_one.special_tick, int)
+        ):
+            return
+        delta = received_tick - phase_one.special_tick
+        if delta < STOMP_PREFLIGHT_TICK:
+            return
+        preflight = delta == STOMP_PREFLIGHT_TICK
+        resonance_pending = phase_one.resonance_press_possible(timers, received_tick)
+        if preflight and resonance_pending:
+            # The Resonance press comes at the end of the GCD; a pointer check now could hold
+            # the loop past it.
+            return
+        if (
+            resonance_pending
+            and gcd_remaining_ms is not None
+            and gcd_remaining_ms <= GCD_PRESS_LEAD_MS + STOMP_DODGE_BUDGET_MS
+            and phase_one.resonance_tick_ok(timers, received_tick)
+        ):
+            # Resonance is pressed before a dodge started now could finish: dodge right after.
+            return
+        pending = phase_one.stomp_pending
+        movement_window_open = delta <= STOMP_CHECK_TICKS[1]
+        if not movement_window_open and pending is None:
+            phase_one.stomp_checked = True
+            return
+        player = reader.spatial.player
+        position_flags = SpatialFlags.TILE | SpatialFlags.FINE_POSITION
+        if player.valid_mask & position_flags != position_flags:
+            return
+        player_tile = (player.tile.x, player.tile.y)
+        plane = player.tile.plane
+        height = player.fine_height
+        boss_id = boss.instance_id
+        pose_flags = SpatialFlags.SAME_WORLD | SpatialFlags.TILE
+        pose = next(
+            (
+                pose
+                for pose in reader.npc_spatial[: reader.spatial.npc_count]
+                if pose.instance_id == boss_id and pose.valid_mask & pose_flags == pose_flags
+            ),
+            None,
+        )
+        if pose is None:
+            return
+        boss_tile = (pose.tile.x, pose.tile.y)
+        size = pose.footprint_size or 1
+        beam_kind = STOMP_BEAM_BY_PHASE.get(phase_one.phase)
+
+        def safe_ground_click(point, *, dive, on_beam, hover):
+            previous_cycle = reader.pointer_walk.menu_cycle
+
+            def validate():
+                fresh, current_boss, current_phase, hp = refresh_for_walk()
+                fill_walk_hover(hover)
+                hover_tick = received_tick_counter()
+                last_tick = STOMP_CHECK_TICKS[1]
+                if not preflight and (
+                    hover_tick - phase_one.special_tick > last_tick
+                    if hover_tick is not None
+                    else reader.monotonic_ns() - phase_one.special_ns
+                    >= (last_tick + 1) * TICK_FALLBACK_NS
+                ):
+                    return False
+                if (
+                    not fresh
+                    or current_phase != phase_one.phase
+                    or current_boss is None
+                    or current_boss.instance_id != boss_id
+                    or hp is None
+                    or hp <= 0
+                    or reader.pointer_walk.menu_cycle == previous_cycle
+                    or hover.get("tile") is None
+                ):
+                    return False
+                landing_x, landing_y, landing_plane = hover["tile"]
+                landing = (landing_x, landing_y)
+                current = reader.spatial.player
+                origin = (current.tile.x, current.tile.y)
+                hazard_pose = next(
+                    (
+                        pose
+                        for pose in reader.npc_spatial[: reader.spatial.npc_count]
+                        if pose.instance_id == boss_id
+                        and pose.valid_mask & pose_flags == pose_flags
+                    ),
+                    None,
+                )
+                if (
+                    hazard_pose is None
+                    or not current.valid_mask & SpatialFlags.TILE
+                    or not landing_plane == plane == current.tile.plane == hazard_pose.tile.plane
+                    or not 0 < chebyshev(landing, origin) <= DIVE_RANGE_TILES
+                ):
+                    return False
+                hazard_tile = (hazard_pose.tile.x, hazard_pose.tile.y)
+                hazard_size = hazard_pose.footprint_size or 1
+                if not footprint_distance(landing, hazard_tile, hazard_size) or in_stomp_area(
+                    hazard_tile, hazard_size, landing
+                ):
+                    return False
+                if not on_beam:
+                    return landing in floor_tiles
+                route = stream_destination(
+                    reader, beam_kind, current, hazard_pose, use_tile=hover["tile"], stomp=True
+                )
+                if route is None:
+                    return False
+                hover["beam_config"] = route[0][2]
+                return True
+
+            return click_point(
+                point,
+                select_dive=dive,
+                validate=validate,
+                hover_only=preflight,
+                failure_event="stomp_preflight_skipped" if preflight else "stomp_dodge_skipped",
+            )
+
+        def attempt_ground_move(*, dive):
+            rejected = phase_one.stomp_rejected
+            # Leave a tick to choose a floor tile if all tested beam hovers were blocked.
+            try_beam = beam_kind is not None and (delta < STOMP_CHECK_TICKS[1] or not rejected)
+            beam = None
+            if try_beam and pose.tile.plane == plane:
+                beam = stream_destination(
+                    reader, beam_kind, player, pose, rejected_tiles=rejected, stomp=True
+                )
+            prepared = phase_one.stomp_prepared
+            phase_one.stomp_prepared = None
+            if prepared is not None and (prepared[2] or beam is None):
+                target, point, on_beam = prepared
+            elif beam is not None:
+                (target, _, _), point = beam
+                on_beam = True
+            else:
+                on_beam = False
+                for target in known_floor_targets(boss_tile, size, player_tile, floor_tiles):
+                    if target in rejected:
+                        continue
+                    point = project_tile(reader, target, plane, height)
+                    if point is not None:
+                        break
+                else:
+                    return None
+            if phase_one.stomp_attempt_tick != received_tick:
+                phase_one.stomp_tick_attempts = 0
+            phase_one.stomp_attempt_tick = received_tick
+            phase_one.stomp_tick_attempts += 1
+            hover = {}
+            sent = safe_ground_click(point, dive=dive, on_beam=on_beam, hover=hover)
+            if preflight and sent:
+                phase_one.stomp_prepared = (target, point, on_beam)
+            if sent is None and hover:
+                # Telos's model covered the neighbouring tiles too: in the 06:51 P3 Hold Still
+                # (13207,459) and then (13207,460) both hovered an NPC action, which delayed the
+                # Dive to +6 and its cast to the +8 stomp.
+                for dx in range(-STOMP_REJECT_RADIUS_TILES, STOMP_REJECT_RADIUS_TILES + 1):
+                    for dy in range(-STOMP_REJECT_RADIUS_TILES, STOMP_REJECT_RADIUS_TILES + 1):
+                        rejected.add((target[0] + dx, target[1] + dy))
+            return target, point, sent, hover
+
+        if pending is not None:
+            pending["moved"] |= player_tile != tuple(pending["player_tile"])
+            if player_tile != tuple(pending["player_tile"]):
+                clear = not in_stomp_area(boss_tile, size, player_tile)
+                if clear:
+                    landed_on_beam = any(
+                        hazard.kind == beam_kind
+                        and hazard.flags & HazardFlags.SCENE_LOCATION
+                        and (hazard.tile.x, hazard.tile.y, hazard.tile.plane)
+                        == (*player_tile, plane)
+                        for hazard in reader.hazards[: reader.hazard_info.count]
+                    )
+                    emit(
+                        "stomp_dodge_result",
+                        clear_of_stomp=True,
+                        landed_on_beam=landed_on_beam,
+                        tile=player_tile,
+                        observed_tick_delta=delta,
+                        **pending,
+                    )
+                    phase_one.stomp_pending = None
+                    phase_one.stomp_checked = True
+                    return
+            if not movement_window_open:
+                emit(
+                    "stomp_dodge_result",
+                    clear_of_stomp=False,
+                    tile=player_tile,
+                    observed_tick_delta=delta,
+                    **pending,
+                )
+                phase_one.stomp_pending = None
+                phase_one.stomp_checked = True
+                return
+            if (
+                (
+                    delta - pending["received_tick_delta"] >= STOMP_DIVE_CONFIRM_TICKS
+                    or delta == STOMP_CHECK_TICKS[1]
+                )
+                and not pending["walked"]
+                and phase_one.stomp_attempt_tick != received_tick
+            ):
+                fallback = attempt_ground_move(dive=False)
+                if fallback is not None:
+                    target, _, walked, hover = fallback
+                    pending["walked"] = bool(walked)
+                    emit(
+                        "stomp_walk_fallback",
+                        sent=walked,
+                        target=target,
+                        hover=hover,
+                        cue_native_sequence=phase_one.special_event,
+                    )
+            return
+        centre_distance = max(
+            abs(player_tile[0] - (boss_tile[0] + (size - 1) / 2)),
+            abs(player_tile[1] - (boss_tile[1] + (size - 1) / 2)),
+        )
+        if not in_stomp_area(boss_tile, size, player_tile):
+            if delta <= STOMP_RELOCATION_TICK:
+                return  # Telos can still reposition: check again next tick.
+            phase_one.stomp_checked = True
+            emit(
+                "stomp_check",
+                in_area=False,
+                player_tile=player_tile,
+                boss_tile=boss_tile,
+                centre_distance=centre_distance,
+                received_tick_delta=delta,
+            )
+            return
+        if (
+            phase_one.stomp_attempt_tick == received_tick
+            and phase_one.stomp_tick_attempts >= STOMP_ATTEMPTS_PER_TICK
+        ):
+            return
+        # Without a Dive key the dodge still walks to the safe tile.
+        use_dive = "Dive" in bindings and not timers.get("Dive")
+        movement = attempt_ground_move(dive=use_dive)
+        if movement is None:
+            return
+        target, point, sent, hover = movement
+        if preflight:
+            emit(
+                "stomp_preflight",
+                confirmed=bool(sent),
+                target=target,
+                hover=hover,
+                cue_native_sequence=phase_one.special_event,
+            )
+            return
+        if sent is None:
+            emit(
+                "stomp_target_rejected",
+                target=target,
+                screen_point=point,
+                hover=hover,
+                cue_native_sequence=phase_one.special_event,
+            )
+            return
+        record = {
+            "player_tile": player_tile,
+            "boss_tile": boss_tile,
+            "footprint": size,
+            "centre_distance": centre_distance,
+            "target": hover["tile"][:2] if sent else target,
+            "hover": hover,
+            "screen_point": point,
+            "received_tick_delta": delta,
+            "movement": "dive" if use_dive else "walk",
+            "cue_native_sequence": phase_one.special_event,
+            "walked": not use_dive,
+            "moved": False,
+        }
+        emit("stomp_dodge", sent=sent, **record)
+        if sent:
+            phase_one.stomp_pending = record
+            target_picker.moved()
+        else:
+            phase_one.stomp_checked = True
+
+    beam_keeper = BeamKeeper()
+    restorer = PrayerRestorer()
+
+    def dive_under_telos(phase, phase_one, boss, pose, tile, player, timers):
+        """Dive onto the strip's wall end under Telos to displace him (P3, account owner).
+
+        A walk click there would attack Telos, so only Dive is used, and the landing is
+        checked against the strip and Telos's footprint instead of the Walk hover.
+        """
+        plane = player.tile.plane
+        player_tile = (player.tile.x, player.tile.y)
+        if (
+            "Dive" not in bindings
+            or timers.get("Dive")
+            or phase_one.expected == HOLD_STILL
+            or not 0 < chebyshev(tile, player_tile) <= DIVE_RANGE_TILES
+        ):
+            emit(
+                "beam_under_telos_waiting",
+                phase=phase,
+                target=(*tile, plane),
+                dive_cooldown_ms=timers.get("Dive"),
+                player_tile=(*player_tile, plane),
+            )
+            return
+        height = next(
+            (
+                reader.hazard_terrain_height(hazard)
+                for hazard in reader.hazards[: reader.hazard_info.count]
+                if (hazard.tile.x, hazard.tile.y, hazard.tile.plane) == (*tile, plane)
+                and hazard.flags & HazardFlags.TERRAIN_HEIGHT
+            ),
+            player.fine_height,
+        )
+        point = project_tile(reader, tile, plane, height)
+        if point is None:
+            return
+        boss_id = boss.instance_id
+
+        def still_under():
+            fresh, current_boss, current_phase, hp = refresh_for_walk()
+            if (
+                not fresh
+                or current_boss is None
+                or current_boss.instance_id != boss_id
+                or current_phase != phase
+                or hp is None
+                or hp <= 0
+            ):
+                return False
+            current = next(
+                (
+                    candidate
+                    for candidate in reader.npc_spatial[: reader.spatial.npc_count]
+                    if candidate.instance_id == boss_id
+                    and candidate.valid_mask & SpatialFlags.TILE
+                ),
+                None,
+            )
+            return (
+                current is not None
+                and not footprint_distance(
+                    tile, (current.tile.x, current.tile.y), current.footprint_size or 1
+                )
+                and beam_keeper.recently_on_strip(tile)
+            )
+
+        sent = click_point(
+            point, select_dive=True, validate=still_under, failure_event="beam_keep_skipped"
+        )
+        if sent is None:
+            beam_keeper.retry_now(received_tick_counter() or 0)
+        emit(
+            "beam_under_telos_dive",
+            sent=sent,
+            phase=phase,
+            target=(*tile, plane),
+            boss_tile=(pose.tile.x, pose.tile.y),
+            player_tile=(*player_tile, plane),
+            dispatch_tick=received_tick_counter() if sent else None,
+        )
+
+    def beam_keep_step(phase, phase_one, boss, received_tick, timers, now, *, movement_busy):
+        """Keep the player on the P1 green or P3 red strip, by Dive when it is ready.
+
+        Escape, the stomp dodge and the P3 virus walk own movement while they run. The landing
+        tile is verified with the native Walk hover: a visible strip tile not under Telos and,
+        for Dive, within its range.
+        """
+        kind = BEAM_KEEP_BY_PHASE.get(phase)
+        if kind is None or not isinstance(received_tick, int):
+            return
+        player = reader.spatial.player
+        position_flags = SpatialFlags.TILE | SpatialFlags.FINE_POSITION
+        if player.valid_mask & position_flags != position_flags:
+            return
+        player_tile = (player.tile.x, player.tile.y)
+        plane = player.tile.plane
+        listed = [
+            (hazard.tile.x, hazard.tile.y)
+            for hazard in reader.hazards[: reader.hazard_info.count]
+            if hazard.kind == kind
+            and hazard.flags & HazardFlags.SCENE_LOCATION
+            and hazard.tile.plane == plane
+        ]
+        beam_keeper.remember(listed, received_tick)
+        # On the strip the player stays put in P1 and P3 alike, until a mechanic moves it.
+        standing = beam_keeper.holding(
+            player_tile, on_strip(reader, kind, player_tile, plane), listed
+        )
+        if standing != beam_keeper.on_strip:
+            beam_keeper.on_strip = standing
+            emit(
+                "beam_keep_arrival" if standing else "beam_keep_departure",
+                phase=phase,
+                tile=(*player_tile, plane),
+                received_tick=received_tick,
+            )
+        if (
+            not input_allowed
+            or movement_busy
+            or phase_one.stomp_pending is not None
+            or virus.started is not None
+            or (flicker is not None and not flicker.quiet(received_tick, now))
+        ):
+            return
+        pose_flags = SpatialFlags.SAME_WORLD | SpatialFlags.TILE
+        pose = next(
+            (
+                candidate
+                for candidate in reader.npc_spatial[: reader.spatial.npc_count]
+                if candidate.instance_id == boss.instance_id
+                and candidate.valid_mask & pose_flags == pose_flags
+            ),
+            None,
+        )
+        if pose is None or pose.tile.plane != plane:
+            return
+        boss_tile = (pose.tile.x, pose.tile.y)
+        size = pose.footprint_size or 1
+        always_block = phase in BEAM_BLOCK_ALWAYS_PHASES
+        # Under Telos (blocking the strip at the wall) the player is not sent back to attack.
+        in_reach_now = 1 <= footprint_distance(player_tile, boss_tile, size) <= MELEE_REACH_TILES
+        if standing and in_reach_now:
+            untargeted = (
+                player.valid_mask & SpatialFlags.TARGET
+                and player.target_kind == SpatialTargetKind.NONE
+            )
+            if untargeted and beam_keeper.move_due(received_tick):
+                # A walk onto the strip dropped the attack; resume it from this tile.
+                reengage_telos(boss, player)
+            return
+        if standing:
+            # On the strip the player only moves for mechanics (account owner).
+            return
+        if not beam_keeper.move_due(received_tick):
+            return
+        # P1 uses strip tiles in melee reach only; P3 blocks the red strip anywhere.
+        route = stream_destination(
+            reader,
+            kind,
+            player,
+            pose,
+            rejected_tiles=beam_keeper.rejected,
+            prefer_reach=True,
+            max_reach=None if always_block else MELEE_REACH_TILES,
+        )
+        if route is None:
+            beam_keeper.rejected.clear()
+            under = wall_end_under_telos(listed, boss_tile, size) if always_block else None
+            if under is not None:
+                dive_under_telos(phase, phase_one, boss, pose, under, player, timers)
+            return
+        (target, _, config), point = route
+        reach = footprint_distance(target, boss_tile, size)
+        # Dive keeps the attack target, so after an out-of-reach Dive the player walks back to
+        # Telos (06:51 run); a walk drops it and the player stays on the strip (P2 block, 07:15).
+        use_dive = (
+            "Dive" in bindings
+            and not timers.get("Dive")
+            and phase_one.expected != HOLD_STILL
+            and reach <= MELEE_REACH_TILES
+            and chebyshev(target, player_tile) <= DIVE_RANGE_TILES
+        )
+        boss_id = boss.instance_id
+        previous_cycle = reader.pointer_walk.menu_cycle
+        hover = {}
+
+        def landing_current():
+            fresh, current_boss, current_phase, hp = refresh_for_walk()
+            fill_walk_hover(hover)
+            if (
+                not fresh
+                or current_boss is None
+                or current_boss.instance_id != boss_id
+                or current_phase != phase
+                or hp is None
+                or hp <= 0
+                or reader.pointer_walk.menu_cycle == previous_cycle
+                or hover.get("tile") is None
+            ):
+                return False
+            current = reader.spatial.player
+            landing = hover["tile"][:2]
+            if use_dive and not 0 < chebyshev(landing, (current.tile.x, current.tile.y)) <= (
+                DIVE_RANGE_TILES
+            ):
+                return False
+            current_pose = next(
+                (
+                    candidate
+                    for candidate in reader.npc_spatial[: reader.spatial.npc_count]
+                    if candidate.instance_id == boss_id
+                    and candidate.valid_mask & pose_flags == pose_flags
+                ),
+                None,
+            )
+            if current_pose is None or hover["tile"][2] != plane:
+                return False
+            if stream_destination(reader, kind, current, current_pose, use_tile=hover["tile"]):
+                return True
+            # A tile that left the listed window moments ago is still on the strip.
+            return beam_keeper.recently_on_strip(landing) and bool(
+                footprint_distance(
+                    landing,
+                    (current_pose.tile.x, current_pose.tile.y),
+                    current_pose.footprint_size or 1,
+                )
+            )
+
+        sent = click_point(
+            point,
+            select_dive=use_dive,
+            validate=landing_current,
+            failure_event="beam_keep_skipped",
+        )
+        if sent is None:
+            if hover:
+                beam_keeper.rejected.add(target)
+            beam_keeper.retry_now(received_tick)
+        elif sent:
+            beam_keeper.rejected.clear()
+        emit(
+            "beam_keep_move",
+            sent=sent,
+            phase=phase,
+            movement="dive" if use_dive else "walk",
+            target=(*target, plane),
+            beam_config=config,
+            in_reach=reach <= MELEE_REACH_TILES,
+            player_tile=(*player_tile, plane),
+            hover=hover,
+            dispatch_tick=received_tick_counter() if sent else None,
+            received_tick=received_tick,
+        )
+
+    font_duty = FontDuty()
+    pending_font_waypoint = None
+    target_picker = TargetPicker()
+    seen_p4_actors = set()
+
+    def p4_actors():
+        """Return (fonts, golems) as (instance_id, config_id, health, tile); log new ones once."""
+        poses = {
+            pose.instance_id: pose
+            for pose in reader.npc_spatial[: reader.spatial.npc_count]
+            if pose.valid_mask & SpatialFlags.TILE
+        }
+        fonts, minions = [], []
+        for npc in reader.npcs[: reader.info.npc_count]:
+            if npc.config_id not in FONT_CONFIGS and npc.config_id not in MINION_CONFIGS:
+                continue
+            is_font = npc.config_id in FONT_CONFIGS
+            health = npc.health_current if npc.flags & NPCFlags.HEALTH else None
+            pose = poses.get(npc.instance_id)
+            tile = (pose.tile.x, pose.tile.y) if pose is not None else None
+            key = (npc.instance_id, npc.config_id)
+            if key not in seen_p4_actors:
+                # Names show which minion is red, green or black.
+                seen_p4_actors.add(key)
+                emit(
+                    "p4_actor_seen",
+                    kind="font" if is_font else "minion",
+                    instance_id=npc.instance_id,
+                    config_id=npc.config_id,
+                    name=npc.name.decode(errors="replace"),
+                    health=health,
+                    tile=tile,
+                    footprint=pose.footprint_size if pose is not None else None,
+                )
+            record = (npc.instance_id, npc.config_id, health, tile)
+            if is_font:
+                fonts.append(record)
+            elif tile is not None and health is not None:
+                minions.append(record)
+        return fonts, minions
+
+    def font_step(phase_one, boss, received_tick, timers, hits, hits_lost, *, action_pending):
+        """Go to the chargeable P4 font, stay through the instakill, then pick targets."""
+        nonlocal pending_font_waypoint
+        if not isinstance(received_tick, int):
+            return
+        fonts, minions = p4_actors()
+        prior_font, prior_tile = font_duty.font, font_duty.tile
+        sample_ns = reader.info.monotonic_ns
+        logic_tick = reader.info.logic_tick
+        pulse = font_duty.observe_pulse(fonts, logic_tick, hits, hits_lost=hits_lost)
+        target, event = font_duty.update(fonts, received_tick)
+        phase_one.hold_position = font_duty.active
+        player = reader.spatial.player
+        located = player.valid_mask & SpatialFlags.TILE and player.valid_mask & (
+            SpatialFlags.FINE_POSITION
+        )
+        player_tile = (
+            (player.tile.x, player.tile.y) if player.valid_mask & SpatialFlags.TILE else None
+        )
+        if pending_font_waypoint is not None and player_tile is not None:
+            font, waypoint_tile, start_distance, sent_tick = pending_font_waypoint
+            remaining = footprint_distance(player_tile, target, FONT_FOOTPRINT) if target else None
+            advanced = (
+                font == font_duty.font and remaining is not None and remaining < start_distance
+            )
+            if advanced or received_tick >= sent_tick + FONT_MOVE_RETRY_TICKS or event:
+                emit(
+                    "font_waypoint_outcome",
+                    font_instance_id=font,
+                    waypoint=waypoint_tile,
+                    sent_tick=sent_tick,
+                    player_tile=player_tile,
+                    distance_before=start_distance,
+                    distance_after=remaining if font == font_duty.font else None,
+                    advanced=advanced,
+                )
+                pending_font_waypoint = None
+        if pulse is not None:
+            before, after, hit_tick, hit_sequence, damage = pulse
+            emit(
+                "font_charge_pulse",
+                font_instance_id=prior_font,
+                charge_before=before,
+                charge_after=after,
+                player_hit_sequence=hit_sequence,
+                hit_client_tick=hit_tick,
+                damage=damage,
+            )
+        expected_tick = font_duty.pending_resonance
+        if expected_tick is not None and logic_tick is not None:
+            matched = pulse is not None and abs(hit_tick - expected_tick) <= FONT_PULSE_SAMPLE_DELAY
+            if (
+                matched
+                or logic_tick > expected_tick + FONT_PULSE_SAMPLE_DELAY
+                or not font_duty.active
+            ):
+                emit(
+                    "font_resonance_outcome",
+                    font_instance_id=prior_font,
+                    expected_hit_client_tick=expected_tick,
+                    cooldown_observed=bool(timers["Resonance"]) if "Resonance" in timers else None,
+                    player_hit_sequence=hit_sequence if matched else None,
+                    damage=damage if matched else None,
+                )
+                font_duty.pending_resonance = None
+        if event:
+            font_tile = target if target is not None else prior_tile
+            emit(
+                event,
+                font_instance_id=font_duty.font if font_duty.active else prior_font,
+                target=font_tile,
+                player_tile=player_tile,
+                player_hp=reader.player.variable(Variable.HEALTH),
+                in_range=in_font(player_tile, font_tile) if player_tile and font_tile else None,
+                received_tick=received_tick,
+                charge_started_tick=font_duty.charge_started_tick,
+                charged_tick=font_duty.charged_tick,
+                arrived_tick=font_duty.arrived_tick,
+            )
+            if event in ("font_hold_ended", "font_lost", "font_released"):
+                # The player left Telos for the font; melee must be restarted by a click.
+                target_picker.telos_due = True
+        if (
+            player_tile is not None
+            and target is not None
+            and font_duty.arrived_tick is None
+            and in_font(player_tile, target)
+        ):
+            font_duty.arrived_tick = received_tick
+            emit(
+                "font_arrival",
+                font_instance_id=font_duty.font,
+                target=target,
+                player_tile=player_tile,
+                received_tick=received_tick,
+            )
+        if sync_font_retaliation(font_duty.state == "charging"):
+            return
+        if located and input_allowed:
+            attack_step(minions, boss, player, received_tick)
+        if target is None or not located or not input_allowed:
+            return
+        if font_duty.move_due(player_tile, target, received_tick):
+            distance = footprint_distance(player_tile, target, FONT_FOOTPRINT)
+            occupied = {minion[3] for minion in minions}
+            for pose in reader.npc_spatial[: reader.spatial.npc_count]:
+                if pose.instance_id == boss.instance_id and pose.valid_mask & SpatialFlags.TILE:
+                    size = pose.footprint_size or 1
+                    occupied |= {
+                        (pose.tile.x + dx, pose.tile.y + dy)
+                        for dx in range(size)
+                        for dy in range(size)
+                    }
+            stand_tiles = font_stand_tiles(target, player_tile, occupied)
+            plane = player.tile.plane
+            accepted = {(x, y, plane) for x, y in stand_tiles if in_font((x, y), target)}
+            hover = {}
+            stand = point = sent = None
+            waypoint = None
+            for candidate in stand_tiles:
+                projected = project_tile(reader, candidate, plane, player.fine_height)
+                if projected is not None and projected not in font_duty.rejected_points:
+                    stand, point = candidate, projected
+                    break
+            if point is None:
+                for candidate in font_waypoint_tiles(target, player_tile, stand_tiles[0], occupied):
+                    projected = project_tile(reader, candidate, plane, player.fine_height)
+                    if projected is not None and projected not in font_duty.rejected_points:
+                        waypoint, point = candidate, projected
+                        break
+            if point is None:
+                font_duty.rejected_points.clear()
+            else:
+                previous_menu_cycle = reader.pointer_walk.menu_cycle
+                boss_id = boss.instance_id
+
+                def font_destination_current():
+                    fresh, current_boss, current_phase, hp = refresh_for_walk()
+                    fill_walk_hover(hover)
+                    return (
+                        fresh
+                        and current_boss is not None
+                        and current_boss.config_id == ACTIVE_TELOS
+                        and current_boss.instance_id == boss_id
+                        and current_phase == 4
+                        and hp is not None
+                        and hp > 0
+                        and reader.pointer_walk.menu_cycle != previous_menu_cycle
+                        and reader.spatial.player.valid_mask & SpatialFlags.TILE
+                        and reader.spatial.player.tile.plane == plane
+                        and font_walk_destination(
+                            hover.get("tile"),
+                            (reader.spatial.player.tile.x, reader.spatial.player.tile.y),
+                            target,
+                            plane,
+                            accepted,
+                            waypoint,
+                            occupied,
+                        )
+                        and any(
+                            font[0] == font_duty.font and font[3] == target
+                            for font in p4_actors()[0]
+                        )
+                    )
+
+                sent = click_point(
+                    point,
+                    select_dive=False,
+                    validate=font_destination_current,
+                    failure_event="font_move_skipped",
+                )
+                if sent is None and hover:
+                    font_duty.rejected_points.add(point)
+                    font_duty.next_move_tick = received_tick + 1
+            if sent:
+                font_duty.rejected_points.clear()
+                target_picker.moved()
+                if waypoint is not None:
+                    pending_font_waypoint = (font_duty.font, waypoint, distance, received_tick)
+            emit(
+                "font_move",
+                sent=sent,
+                font_instance_id=font_duty.font,
+                target=target,
+                stand=stand,
+                waypoint=waypoint,
+                hover=hover,
+                player_tile=player_tile,
+                distance=distance,
+                attempt=font_duty.move_attempts,
+                received_tick=received_tick,
+            )
+        elif not action_pending and in_font(player_tile, target):
+            dispatch_ns = reader.monotonic_ns()
+            sample_age_ns = dispatch_ns - sample_ns
+            if logic_tick is None or not 0 <= sample_age_ns <= MAX_SAMPLE_AGE_NS:
+                return
+            dispatch_tick = logic_tick + sample_age_ns // (LOGIC_TICK_MS * 1_000_000)
+            gcd_ms = gcd_remaining_now(reader.player, sample_ns, dispatch_ns)
+            expected_tick = font_duty.resonance_due(dispatch_tick, timers, gcd_ms)
+            if expected_tick is not None:
+                sent = send_chord(bindings["Resonance"])
+                if sent:
+                    font_duty.pending_resonance = expected_tick
+                emit(
+                    "font_resonance",
+                    sent=sent,
+                    font_instance_id=font_duty.font,
+                    cue_hit_client_tick=font_duty.last_pulse,
+                    press_client_tick=dispatch_tick,
+                    expected_hit_client_tick=expected_tick,
+                    gcd_at_press_ms=gcd_ms,
+                )
+
+    beam_blocker = BeamBlocker()
+    virus = VirusResponse()
+    virus_reengage = None
+    walk_samples = {}
+
+    def refresh_for_walk():
+        """Observe a new client sample once the moved pointer has had time to update."""
+        time.sleep(WALK_HOVER_SETTLE_SECONDS)
+        latest, _, current_boss, current_phase, hp = boss_sample(reader)
+        fresh = (
+            (latest.pid, latest.process_creation_time, reader.combat.scene_epoch) == identity
+            and latest.status in (Status.AVAILABLE, Status.PARTIAL)
+            and 0 <= reader.monotonic_ns() - latest.monotonic_ns <= MAX_SAMPLE_AGE_NS
+        )
+        if fresh:
+            walk_samples[latest.sequence] = (
+                current_phase,
+                received_tick_counter(),
+                Prayer(reader.active_prayer()).name.lower(),
+            )
+        return fresh, current_boss, current_phase, hp
+
+    def fill_walk_hover(hover):
+        pointer = reader.pointer_walk
+        if pointer.valid:
+            hover["action"] = pointer.action
+            hover["menu_cycle"] = pointer.menu_cycle
+            hover["frame_sequence"] = reader.info.sequence
+            hover["client_logic_tick"] = reader.info.logic_tick
+            if pointer.tile.valid:
+                hover["tile"] = (pointer.tile.x, pointer.tile.y, pointer.tile.plane)
+
+    def virus_step(phase, boss, received_tick, *, movement_busy):
+        """Walk to the live strip while the debuff is active and log its resolution."""
+        nonlocal virus_reengage
+        if not isinstance(received_tick, int):
+            return
+        prior_phase = virus.phase
+        prior_onset, prior_move, prior_arrival = virus.started, virus.move_tick, virus.arrival
+        prior_walk_target = virus.walk_target
+        remaining = virus_timer(reader.encounter) if phase in VIRUS_BEAM_BY_PHASE else None
+        if virus_reengage is not None and virus_reengage != (phase, boss.instance_id):
+            virus_reengage = None
+        if prior_onset is None and not remaining:
+            if virus_reengage is not None and not movement_busy and input_allowed:
+                virus_reengage = None
+                reengage_telos(boss, reader.spatial.player)
+            return
+        message = reader.telos_cleanse
+        onset, outcome = virus.observe(
+            phase, remaining, received_tick, reader.info.logic_tick, message
+        )
+        player = reader.spatial.player
+        player_tile = (
+            (player.tile.x, player.tile.y, player.tile.plane)
+            if player.valid_mask & SpatialFlags.TILE
+            else None
+        )
+        beam_distance = min(
+            (
+                chebyshev((hazard.tile.x, hazard.tile.y), player_tile)
+                for hazard in reader.hazards[: reader.hazard_info.count]
+                if player_tile
+                and hazard.kind == VIRUS_BEAM_BY_PHASE.get(phase)
+                and hazard.flags & HazardFlags.SCENE_LOCATION
+                and hazard.tile.plane == player_tile[2]
+            ),
+            default=None,
+        )
+        if virus.started and virus.arrival is None and (
+            beam_distance == 0 or (player_tile is not None and player_tile == virus.walk_target)
+        ):
+            virus.arrival = received_tick
+            emit(
+                "anima_virus_beam_arrival",
+                onset_tick=virus.started[0],
+                tile=player_tile,
+                beam_distance=beam_distance,
+                walk_target=virus.walk_target,
+            )
+        if outcome:
+            emit(
+                "anima_virus_outcome",
+                outcome=outcome,
+                phase=prior_phase,
+                onset_tick=prior_onset[0] if prior_onset else None,
+                move_tick=prior_move,
+                arrival_tick=prior_arrival if outcome == "phase_changed" else virus.arrival,
+                walk_target=prior_walk_target,
+                timer=remaining,
+                tile=player_tile,
+                beam_distance=beam_distance,
+                message_id=message.message_id if outcome == "cleanse_confirmed" else None,
+            )
+            if outcome != "phase_changed":
+                moved = virus.finish()
+                # In P3 the player stays on the red strip; the strip keeper resumes the attack.
+                if moved and phase not in BEAM_BLOCK_ALWAYS_PHASES:
+                    virus_reengage = (phase, boss.instance_id)
+        if onset:
+            emit(
+                "anima_virus_detected",
+                phase=phase,
+                onset_tick=onset[0],
+                observed_client_tick=onset[1],
+                timer=remaining,
+                tile=player_tile,
+                beam_distance=beam_distance,
+            )
+        if virus.started is None or virus.zero_tick is not None or not remaining or not player_tile:
+            return
+        if (
+            movement_busy
+            or not input_allowed
+            or (virus.next_move is not None and received_tick < virus.next_move)
+            or (
+                beam_distance in (0, 1)
+                and received_tick - virus.started[0] < VIRUS_CLEANSE_GRACE_TICKS
+            )
+            or (
+                virus.arrival is not None
+                and received_tick - virus.arrival < VIRUS_CLEANSE_GRACE_TICKS
+            )
+        ):
+            return
+        route = virus_beam_destination(reader, phase, player, boss, rejected=virus.rejected)
+        if route is None:
+            virus.rejected.clear()
+            virus.next_move = received_tick + 1
+            return
+        destination, screen_point = route
+        boss_id = boss.instance_id
+        previous_menu_cycle = reader.pointer_walk.menu_cycle
+        hover = {}
+        actual_destination = None
+
+        def destination_current():
+            nonlocal actual_destination
+            fresh, current_boss, current_phase, hp = refresh_for_walk()
+            if (
+                not fresh
+                or hp is None
+                or hp <= 0
+                or current_phase != phase
+                or current_boss is None
+                or current_boss.config_id != ACTIVE_TELOS
+                or current_boss.instance_id != boss_id
+                or not virus_timer(reader.encounter)
+            ):
+                return False
+            current_player = reader.spatial.player
+            if not current_player.valid_mask & SpatialFlags.TILE:
+                return False
+            pointer = reader.pointer_walk
+            fill_walk_hover(hover)
+            if pointer.menu_cycle == previous_menu_cycle or "tile" not in hover:
+                return False
+            current_route = virus_beam_destination(
+                reader, phase, current_player, current_boss, use_tile=hover["tile"]
+            )
+            if current_route is None:
+                return False
+            actual_destination = current_route[0]
+            return True
+
+        sent = click_point(
+            screen_point,
+            select_dive=False,
+            validate=destination_current,
+            failure_event="anima_virus_move_skipped",
+        )
+        dispatch_tick = received_tick_counter() if sent else None
+        virus.next_move = (dispatch_tick or received_tick) + (BEAM_MOVE_RETRY_TICKS if sent else 1)
+        if sent and virus.move_tick is None:
+            virus.move_tick = dispatch_tick or received_tick
+        if sent:
+            virus.rejected.clear()
+            virus.walk_target = hover["tile"]
+        elif hover:
+            virus.rejected.add(screen_point)
+        target, plane, config = destination
+        emit(
+            "anima_virus_move",
+            sent=sent,
+            phase=phase,
+            onset_tick=virus.started[0],
+            dispatch_tick=dispatch_tick,
+            timer=remaining,
+            tile=player_tile,
+            target=(*target, plane),
+            walk_target=hover.get("tile") if sent else None,
+            walk_target_config=actual_destination[2] if sent else None,
+            beam_config=config,
+            hover=hover,
+            player_fine_height=(
+                player.fine_height if player.valid_mask & SpatialFlags.FINE_POSITION else None
+            ),
+            screen_point=screen_point,
+        )
+
+    def observe_feeding(phase, meter, received_tick):
+        """Log when Telos's anima meter starts or stops rising; return whether it is fed."""
+        feeding = beam_blocker.observe(meter, received_tick)
+        if feeding != beam_blocker.feeding:
+            beam_blocker.feeding = feeding
+            emit(
+                "beam_feeding" if feeding else "beam_feeding_ended",
+                phase=phase,
+                meter=meter,
+                received_tick=received_tick,
+            )
+        return feeding
+
+    def beam_step(phase, phase_one, boss, meter, received_tick, *, movement_busy):
+        """Measure beam feeding and walk into the black stream while it feeds P2 Onslaught."""
+        if not isinstance(received_tick, int):
+            return
+        feeding = observe_feeding(phase, meter, received_tick)
+        if not input_allowed or movement_busy:
+            return
+        player = reader.spatial.player
+        if not player.valid_mask & SpatialFlags.TILE:
+            return
+        player_tile = (player.tile.x, player.tile.y)
+        beam_tiles = [
+            (hazard.tile.x, hazard.tile.y)
+            for hazard in reader.hazards[: reader.hazard_info.count]
+            if hazard.kind == BLACK_BEAM_KIND
+            and hazard.flags & HazardFlags.SCENE_LOCATION
+            and hazard.tile.plane == player.tile.plane
+        ]
+        onslaught = phase_one.special == ONSLAUGHT and meter is not None and meter > 0
+        if virus_timer(reader.encounter):
+            return
+        if beam_blocker.holding and not onslaught and meter is not None:
+            if reengage_telos(boss, player):
+                beam_blocker.holding = False
+                beam_blocker.on_strip = False
+                emit("beam_hold_ended", phase=phase, tile=player_tile, meter=meter)
+            return
+        if not onslaught:
+            return
+        on_strip = player_tile in beam_tiles
+        if on_strip != beam_blocker.on_strip:
+            beam_blocker.on_strip = on_strip
+            emit(
+                "beam_arrival" if on_strip else "beam_departure",
+                phase=phase,
+                tile=player_tile,
+                meter=meter,
+                cue_native_sequence=phase_one.special_event,
+            )
+        if not feeding or on_strip:
+            return
+        if not beam_blocker.move_due(received_tick):
+            return
+        route = virus_beam_destination(
+            reader, phase, player, boss, rejected=beam_blocker.rejected
+        )
+        if route is None:
+            beam_blocker.rejected.clear()
+            return
+        (target, plane, _), point = route
+        hover = {}
+        previous_cycle = reader.pointer_walk.menu_cycle
+        boss_id = boss.instance_id
+
+        def blocking_destination_current():
+            fresh, current_boss, current_phase, hp = refresh_for_walk()
+            fill_walk_hover(hover)
+            return (
+                fresh
+                and current_boss is not None
+                and current_boss.instance_id == boss_id
+                and current_phase == phase
+                and hp is not None
+                and hp > 0
+                and reader.pointer_walk.menu_cycle != previous_cycle
+                and hover.get("tile") is not None
+                and virus_beam_destination(
+                    reader, phase, reader.spatial.player, current_boss, use_tile=hover["tile"]
+                ) is not None
+            )
+
+        sent = click_point(
+            point,
+            select_dive=False,
+            validate=blocking_destination_current,
+            failure_event="beam_move_skipped",
+        )
+        if sent:
+            beam_blocker.holding = True
+            beam_blocker.rejected.clear()
+        elif hover:
+            beam_blocker.rejected.add(point)
+        emit(
+            "beam_move",
+            sent=sent,
+            phase=phase,
+            target=(*target, plane),
+            hover=hover,
+            player_tile=player_tile,
+            meter=meter,
+            cue_native_sequence=phase_one.special_event,
+            dispatch_tick=received_tick_counter() if sent else None,
+            beam_tiles=len(beam_tiles),
+            received_tick=received_tick,
+        )
+
+    def attack_step(minions, boss, player, received_tick):
+        """Click the next golem by priority, or Telos once no golem is left."""
+        choice = target_picker.choose(minions, font_duty.state, received_tick)
+        if choice is None:
+            return
+        if choice == "telos":
+            if not reengage_telos(boss, player):
+                target_picker.failed(received_tick)
+            return
+        instance_id, config_id, health, tile = choice
+        point = project_tile(reader, tile, player.tile.plane, player.fine_height)
+        sent = None if point is None else click_point(point, select_dive=False)
+        emit(
+            "golem_target",
+            sent=sent,
+            instance_id=instance_id,
+            config_id=config_id,
+            health=health,
+            tile=tile,
+        )
+        if not sent:
+            target_picker.failed(received_tick)
+
+    def reengage_telos(boss, player):
+        """Left-click Telos's centre tile so melee resumes; return whether the click was sent."""
+        pose = next(
+            (
+                p
+                for p in reader.npc_spatial[: reader.spatial.npc_count]
+                if p.instance_id == boss.instance_id and p.valid_mask & SpatialFlags.TILE
+            ),
+            None,
+        )
+        if pose is None or not input_allowed:
+            emit("telos_reengage", sent=False, reason="Telos tile or input unavailable")
+            return False
+        offset = (pose.footprint_size or 1) // 2
+        centre = (pose.tile.x + offset, pose.tile.y + offset)
+        point = project_tile(reader, centre, player.tile.plane, player.fine_height)
+        sent = None if point is None else click_point(point, select_dive=False)
+        emit("telos_reengage", sent=sent, tile=centre)
+        return bool(sent)
+
+    def click_point(
+        point, *, select_dive, validate=None, hover_only=False, failure_event="stomp_dodge_skipped"
+    ):
+        """Move the pointer and validate the destination before any Dive and click.
+
+        With hover_only, True means the hover was verified. Otherwise True means the click was
+        sent. False means focus was lost and None means placement or validation failed.
+        """
+        nonlocal pointer_window
+        try:
+            if pointer_window is None:
+                pointer_window = GameWindow()
+            bounds = pointer_window.bounds()
+            move_pointer(board, pointer_window, bounds, point)
+            if validate is not None and not validate():
+                emit(failure_event, reason="Ground destination unconfirmed", screen_point=point)
+                return None
+            if pointer_window.bounds() != bounds:
+                return None
+            if hover_only:
+                return True
+            if select_dive:
+                # P only selects Dive; the left click on the pointed tile performs it.
+                if not send_chord(bindings["Dive"]):
+                    return False
+                time.sleep(DIVE_SELECT_SECONDS)
+            pointer_window.check_point(*pointer_window.cursor())
+            board.command("CLICK L", check_focus)
+        except FocusLostError:
+            emit("input_interrupted", reason="RuneScape lost foreground focus")
+            return False
+        except RuntimeError as error:
+            if "F12" in str(error):
+                raise
+            emit(failure_event, reason=str(error), screen_point=point)
+            return None
+        return True
+
+    def send_chord(chord):
+        """Press a chord; return False when RuneScape is unfocused or focus was lost mid-press."""
+        if not input_allowed:
+            return False
+        try:
+            board.tap(chord, KEY_HOLD_SECONDS, check_focus, time.sleep)
+        except FocusLostError:
+            emit("input_interrupted", reason="RuneScape lost foreground focus")
+            return False
+        finally:
+            camera["pressed"] = False  # The tap's RELEASE_ALL also lifted the arrow key.
+        return True
+
+    camera_key = parse_chord(CAMERA_LIFT_KEY)[0]
+    camera = {"until_ns": None, "pressed": False, "phase": None}
+
+    def camera_step(phase, actions):
+        """Hold the camera key from the first Telos attack of each phase for CAMERA_LIFT_NS."""
+        now_ns = reader.monotonic_ns()
+        if (
+            camera["phase"] != phase
+            and (flicker is None or flicker.transition_phase is None)
+            and any(action["action_sequence"] in TRANSITION_ATTACK_CUES for action in actions)
+        ):
+            camera["phase"] = phase
+            camera["until_ns"] = now_ns + CAMERA_LIFT_NS
+            emit("camera_lift_started", phase=phase, received_tick=received_tick_counter())
+        until_ns = camera["until_ns"]
+        if until_ns is None:
+            return
+        try:
+            if now_ns >= until_ns or not input_allowed:
+                if camera["pressed"]:
+                    camera["pressed"] = False
+                    board.event(camera_key, False, lambda: None)
+                if now_ns >= until_ns:
+                    camera["until_ns"] = None
+                    emit("camera_lift_ended", phase=phase)
+                return
+            if not camera["pressed"]:
+                board.event(camera_key, True, check_focus)
+                camera["pressed"] = True
+        except FocusLostError:
+            emit("input_interrupted", reason="RuneScape lost foreground focus")
+
+    game = None
+    if not manual_engage:
+        game = GameWindow()
+        if args.approach == args.melee:
+            raise ValueError("Approach and Deflect Melee require different screenshot points")
+        # Validate both points before changing the character's overhead.
+        frame_target(game, args.frame, *args.approach)
+        frame_target(game, args.frame, *args.melee)
+
+    retaliation_point = getattr(args, "auto_retaliate", None)
+    retaliation_pending = None
+    retaliation_changed = False
+    retaliation_initial = getattr(reader, "auto_retaliate", None)
+    if retaliation_point is not None:
+        frame_target(game, args.frame, *retaliation_point)
+
+    def sync_font_retaliation(charging, *, restoring=False):
+        """Suspend automatic targeting during a font charge and observe the settings change."""
+        nonlocal retaliation_pending, retaliation_changed
+        if retaliation_point is None or retaliation_initial is not True:
+            return False
+        now = reader.monotonic_ns()
+        current = reader.auto_retaliate
+        if retaliation_pending is not None:
+            expected, deadline = retaliation_pending
+            if current == expected or now >= deadline:
+                emit("auto_retaliate_outcome", enabled=expected, observed=current)
+                retaliation_pending = None
+                if current is True and expected is True:
+                    retaliation_changed = False
+            else:
+                return False
+        desired = not charging
+        if (desired and not retaliation_changed) or current is None or current == desired:
+            return False
+        if not input_allowed or not 0 <= now - reader.info.monotonic_ns <= MAX_SAMPLE_AGE_NS:
+            return False
+        _, point = frame_target(game, args.frame, *retaliation_point)
+
+        def state_still_current():
+            info, _, boss, phase, hp = boss_sample(reader)
+            return (
+                (info.pid, info.process_creation_time) == identity[:2]
+                and reader.auto_retaliate is current
+                and (restoring or (hp and boss and boss.config_id == ACTIVE_TELOS and phase == 4))
+                and 0 <= reader.monotonic_ns() - info.monotonic_ns <= MAX_SAMPLE_AGE_NS
+            )
+
+        if not click_point(point, select_dive=False, validate=state_still_current):
+            return False
+        retaliation_changed = True
+        retaliation_pending = (desired, reader.monotonic_ns() + ACK_TIMEOUT_NS)
+        emit("auto_retaliate_sent", enabled=desired, font_instance_id=font_duty.font)
+        return True
+
+    def restore_font_retaliation():
+        """Restore the setting when an attempt ends mid-charge and the game still has focus."""
+        if not retaliation_changed:
+            return
+        if keys.game_window(identity) != window:
+            emit("auto_retaliate_restore_deferred", reason="RuneScape lost foreground focus")
+            return
+        try:
+            deadline = reader.monotonic_ns() + 2 * ACK_TIMEOUT_NS
+            while reader.monotonic_ns() < deadline:
+                info, _, _, _, _ = boss_sample(reader)
+                if (info.pid, info.process_creation_time) != identity[:2]:
+                    break
+                sync_font_retaliation(False, restoring=True)
+                if reader.auto_retaliate is True and retaliation_pending is None:
+                    return
+                time.sleep(POLL_SECONDS)
+            emit("auto_retaliate_restore_deferred", reason="Restore could not be verified")
+        except (OSError, RuntimeError, ValueError) as error:
+            emit("auto_retaliate_restore_deferred", reason=str(error))
+
+    if cleanup is not None and retaliation_point is not None:
+        cleanup.callback(restore_font_retaliation)
+
+    def click_frame(point, expected_boss, *, require_melee=False):
+        bounds, target = frame_target(game, args.frame, *point)
+        check_focus()
+        move_pointer(board, game, bounds, target)
+        if game.bounds() != bounds:
+            raise RuntimeError("RuneScape moved while the pointer was positioning")
+        game.check_point(*game.cursor())
+        latest, latest_player, current_boss, _, latest_hp = boss_sample(reader)
+        if (
+            (latest.pid, latest.process_creation_time, reader.combat.scene_epoch) != identity
+            or latest.status not in (Status.AVAILABLE, Status.PARTIAL)
+            or not 0 <= reader.monotonic_ns() - latest.monotonic_ns <= MAX_SAMPLE_AGE_NS
+            or latest_player.clock_stalled_ns > MAX_SAMPLE_AGE_NS
+            or latest_hp is None
+            or latest_hp <= 0
+            or current_boss is None
+            or current_boss.config_id != DORMANT_TELOS
+            or current_boss.instance_id != expected_boss
+        ):
+            raise RuntimeError("Dormant encounter changed while positioning the pointer")
+        current_prayer = Prayer(reader.active_prayer())
+        if require_melee and current_prayer != Prayer.MELEE:
+            raise RuntimeError("Deflect Melee changed before the approach click")
+        if not require_melee and current_prayer == Prayer.MELEE:
+            return
+        prayer_points = latest_player.variable(Variable.PRAYER_PACKED)
+        if prayer_points is None or not prayer_points & PRAYER_POINTS_MASK:
+            raise RuntimeError("Prayer points unavailable before the encounter click")
+        if game.bounds() != bounds:
+            raise RuntimeError("RuneScape moved before the encounter click")
+        game.check_point(*game.cursor())
+        board.command("CLICK L", check_focus)
+
+    labels = {"Freedom": args.freedom, "Anticipation": args.anticipation}
+    if args.hurricane:
+        labels["Hurricane"] = args.hurricane
+    if args.surge:
+        labels["Surge"] = args.surge
+    if getattr(args, "escape", None):
+        labels["Escape"] = args.escape
+    if getattr(args, "resonance", None):
+        labels["Resonance"] = args.resonance
+    if getattr(args, "dive", None):
+        labels["Dive"] = args.dive
+    if getattr(args, "reflect", None):
+        labels["Reflect"] = args.reflect
+    if getattr(args, "devotion", None):
+        labels["Devotion"] = args.devotion
+    labels["Super Restore"] = getattr(args, "super_restore", None) or DEFAULT_SUPER_RESTORE_KEY
+    if getattr(args, "disruption_shield", None) and getattr(args, "spellbook_swap", None):
+        labels[DISRUPTION_SHIELD] = args.disruption_shield
+        labels[SPELLBOOK_SWAP] = args.spellbook_swap
+    if args.reacquire:
+        labels["Target Cycle"], labels["Opening Attack"] = args.reacquire
+    layout = None
+    if getattr(args, "displayed_keys", False):
+        layout, scan_for_key = window_keyboard_layout(window)
+        bindings = {
+            ability: resolve_layout_chord(label, scan_for_key) for ability, label in labels.items()
+        }
+    else:
+        bindings = {ability: parse_chord(label) for ability, label in labels.items()}
+    if len(set(bindings.values())) != len(bindings):
+        raise ValueError("Combat abilities require distinct bindings")
+    prayer_bindings = {parse_chord(f"Ctrl+F{number}") for number in range(1, 5)}
+    if any(
+        binding in prayer_bindings or binding[-1].virtual_key == F12
+        for binding in bindings.values()
+    ):
+        raise ValueError("Combat bindings must exclude prayer chords and F12")
+    flicker = PrayerFlicker() if getattr(args, "flick_melee", False) else None
+    prayer_chords = {
+        Prayer.MELEE: parse_chord(
+            getattr(args, "flick_melee_key", None) or DEFAULT_FLICK_MELEE_KEY
+        ),
+        Prayer.MAGIC: parse_chord(
+            getattr(args, "flick_magic_key", None) or DEFAULT_FLICK_MAGIC_KEY
+        ),
+        Prayer.SOUL_SPLIT: parse_chord(
+            getattr(args, "flick_soul_split_key", None) or DEFAULT_FLICK_SOUL_SPLIT_KEY
+        ),
+    }
+    if flicker is not None and (
+        len(set(prayer_chords.values())) != len(prayer_chords)
+        or set(prayer_chords.values()) & set(bindings.values())
+        or any(chord[-1].virtual_key == F12 for chord in prayer_chords.values())
+    ):
+        raise ValueError("Flick prayer keys must be distinct from each other, abilities and F12")
+
+    # The received tick last seen and when it was first seen (monotonic ns).
+    tick_clock = {"tick": None, "since_ns": None}
+
+    def received_tick_counter():
+        """The client's received server tick, estimated briefly while the counter is invalid.
+
+        In the 07:12 run the Hold Still cue arrived in a sample with an invalid counter, and
+        without a cue tick the flick windows, Resonance and the stomp dodge all lapsed. A gap of
+        up to TICK_ESTIMATE_MAX_NS counts on from the last valid tick by elapsed time.
+        """
+        tick = reader.encounter.game_tick
+        counter = tick.counter if tick.valid else None
+        now_ns = reader.monotonic_ns()
+        if counter is not None:
+            if counter != tick_clock["tick"]:
+                tick_clock["tick"] = counter
+                tick_clock["since_ns"] = now_ns
+            return counter
+        since_ns = tick_clock["since_ns"]
+        if since_ns is None or now_ns - since_ns > TICK_ESTIMATE_MAX_NS:
+            return None
+        return tick_clock["tick"] + (now_ns - since_ns) // TICK_FALLBACK_NS
+
+    def tick_elapsed_ms(tick):
+        """Milliseconds since received tick ``tick`` was first seen, or None if unknown."""
+        if tick is None or tick_clock["tick"] is None or tick_clock["since_ns"] is None:
+            return None
+        # An estimated tick counts whole ticks on from the last valid one.
+        elapsed_ms = (reader.monotonic_ns() - tick_clock["since_ns"]) // 1_000_000
+        elapsed_ms -= (tick - tick_clock["tick"]) * TICK_MS
+        return elapsed_ms if 0 <= elapsed_ms <= TICK_MS else None
+
+    # Facing is unmapped on Compatibility Mode: the last walking step stands in for it.
+    heading = {"tile": None, "vector": None}
+
+    def update_heading():
+        """Remember the direction of the player's last walking step."""
+        player = reader.spatial.player
+        if not player.valid_mask & SpatialFlags.TILE:
+            return
+        tile = (player.tile.x, player.tile.y)
+        previous = heading["tile"]
+        if previous is not None and tile != previous and chebyshev(tile, previous) <= 2:
+            heading["vector"] = (tile[0] - previous[0], tile[1] - previous[1])
+        heading["tile"] = tile
+
+    def uppercut_choice():
+        """Escape or Surge for the current Uppercut, with the facing and landings it used.
+
+        A player attacking Telos faces his centre; otherwise the last walking step is used.
+        Returns None when a tile, Telos's pose, a heading or the known floor is missing.
+        """
+        player = reader.spatial.player
+        if not player.valid_mask & SpatialFlags.TILE or active_instance is None or not floor_tiles:
+            return None
+        pose = next(
+            (
+                candidate
+                for candidate in reader.npc_spatial[: reader.spatial.npc_count]
+                if candidate.instance_id == active_instance
+                and candidate.valid_mask & SpatialFlags.TILE
+            ),
+            None,
+        )
+        if pose is None:
+            return None
+        size = pose.footprint_size or 1
+        boss_tile = (pose.tile.x, pose.tile.y)
+        player_tile = (player.tile.x, player.tile.y)
+        attacking = bool(
+            player.valid_mask & SpatialFlags.TARGET
+            and player.target_kind == SpatialTargetKind.NPC
+        )
+        if attacking:
+            offset = (size - 1) / 2
+            facing = (
+                boss_tile[0] + offset - player_tile[0],
+                boss_tile[1] + offset - player_tile[1],
+            )
+        else:
+            facing = heading["vector"]
+        bounds = (
+            min(tile[0] for tile in floor_tiles),
+            min(tile[1] for tile in floor_tiles),
+            max(tile[0] for tile in floor_tiles),
+            max(tile[1] for tile in floor_tiles),
+        )
+        choice = uppercut_dodge_choice(player_tile, boss_tile, size, facing, bounds)
+        if choice is None:
+            return None
+        ability, escape, surge = choice
+        return {
+            "ability": ability,
+            "escape_landing": escape,
+            "surge_landing": surge,
+            "facing": facing,
+            "facing_source": "target" if attacking else "last_step",
+            "player_tile": player_tile,
+            "boss_tile": boss_tile,
+            "floor_bounds": bounds,
+        }
+
+    def telos_distance():
+        """Player's grid distance to Telos's footprint, or None without both tiles."""
+        player = reader.spatial.player
+        if not player.valid_mask & SpatialFlags.TILE or active_instance is None:
+            return None
+        for pose in reader.npc_spatial[: reader.spatial.npc_count]:
+            if pose.instance_id == active_instance and pose.valid_mask & SpatialFlags.TILE:
+                return footprint_distance(
+                    (player.tile.x, player.tile.y),
+                    (pose.tile.x, pose.tile.y),
+                    pose.footprint_size or 1,
+                )
+        return None
+
+    def flick_step(actions, phase, prayer, now, sample_ns, gcd_remaining_ms, *, golems=()):
+        """Advance the flicker and send at most one prayer chord."""
+        tick = received_tick_counter()
+        flicker.phase = phase
+        transition = flicker.update_transition(actions, phase)
+        if transition is not None:
+            active, cue = transition
+            emit(
+                "prayer_transition_lockout",
+                active=active,
+                phase=phase,
+                received_tick=tick,
+                cue_native_sequence=cue,
+            )
+        if flicker.transition_phase is not None:
+            return
+        logic_tick = reader.info.logic_tick if phase == 4 else None
+        for action, first_hit, last_hit in flicker.observe_golems(golems, logic_tick):
+            emit(
+                "golem_prayer_cue",
+                instance_id=action["instance_id"],
+                config_id=action["config_id"],
+                cue_native_sequence=action["event_sequence"],
+                first_hit_client_tick=first_hit,
+                last_hit_client_tick=last_hit,
+            )
+        distance = telos_distance() if actions else None
+        cue = flicker.observe(actions, tick, now, distance)
+        if cue is not None:
+            emit(
+                "prayer_flick_cue",
+                animation=cue["action_sequence"],
+                received_tick=cue.get("received_tick", tick),
+                distance=distance,
+                cue_native_sequence=cue["event_sequence"],
+            )
+        if (
+            tick is not None
+            and phase_one.special == HOLD_STILL
+            and phase_one.soul_split_for_heavy_hit(
+                cooldowns(reader, bindings), tick, gcd_remaining_ms, tick_elapsed_ms(tick)
+            )
+            and flicker.release(phase_one.special_event, tick)
+        ):
+            # Resonance takes the heavy hit, so Soul Split is requested early in this tick:
+            # waiting for the cooldown left Soul Split one tick late (06:51 run).
+            emit(
+                "prayer_window_released",
+                reason=(
+                    "Resonance pressed" if phase_one.resonance_committed() else "Resonance due"
+                ),
+                received_tick=tick,
+                cue_native_sequence=phase_one.special_event,
+            )
+        target = flicker.next_prayer(prayer, tick, now, logic_tick)
+        if target is None:
+            return
+        if reader.monotonic_ns() - sample_ns > MAX_SAMPLE_AGE_NS:
+            return  # Retried from the next fresh sample.
+        if not send_chord(prayer_chords[target]):
+            return
+        sent_ns = reader.monotonic_ns()
+        flicker.sent(target, sent_ns)
+        emit(
+            "prayer_flick_sent",
+            prayer=target.name.lower(),
+            previous=prayer.name.lower(),
+            received_tick=tick,
+            cue_native_sequence=flicker.cue_event,
+        )
+
+    if attempt:
+        attempt.write(
+            "configured_abilities",
+            displayed_bindings=labels if layout else None,
+            bindings={
+                ability: "+".join(key.name for key in chord) for ability, chord in bindings.items()
+            },
+        )
+    # The controller runs until the player dies or F12; --duration is an optional bound.
+    duration = getattr(args, "duration", None)
+    deadline = time.monotonic() + duration if duration else math.inf
+    initiated = False
+    active_instance = None
+    p2_transition_cue = None
+    practice_enrage = getattr(args, "practice_enrage", 0)
+    expected_max_hp = ZERO_ENRAGE_HP if practice_enrage == 0 else None
+    phase_one_started = False
+    next_prayer_check = 0
+    next_approach = 0
+    previous_tile = None
+    previous_prayer = None
+    pending_cue = None
+    surge_origin = None
+    surge_sent_ns = None
+    surge_cue = None
+    phase_two_at = None
+    phase_three_at = None
+    phase_four_at = {}
+    phase_four_defeated_ns = None
+    reacquire_at = None
+    reacquire_hp = None
+    # Monotonic time from which Disruption Shield can be cast again (self-timed).
+    shield_ready_ns = 0
+    warned = set()
+
+    def warn_once(reason):
+        if reason not in warned:
+            warned.add(reason)
+            emit("waiting", reason=reason)
+
+    while time.monotonic() < deadline:
+        update_focus()
+        info, player, boss, phase, hp = boss_sample(
+            reader, phase_five=phase_four_defeated_ns is not None
+        )
+        events, lost = reader.drain_npc_action_events()
+        hits, hits_lost = reader.drain_player_hit_events()
+        intervening_samples = {
+            sequence: tick
+            for sequence, (walk_phase, tick, _) in walk_samples.items()
+            if walk_phase == phase
+        }
+        if attempt:
+            attempt.frame(
+                reader,
+                info,
+                phase=phase,
+                actions=events,
+                action_loss=lost,
+                hits=hits,
+                hit_loss=hits_lost,
+                intervening_prayers={
+                    sequence: prayer for sequence, (_, _, prayer) in walk_samples.items()
+                },
+            )
+        walk_samples.clear()
+        if (info.pid, info.process_creation_time) != identity[:2]:
+            # A restarted client has nothing left to control.
+            raise RuntimeError("Client process changed")
+        if reader.combat.scene_epoch != identity[2] and phase_four_defeated_ns is None:
+            emit("encounter_reset", reason="Scene changed")
+            return ENCOUNTER_RESET
+        now = reader.monotonic_ns()
+        if (
+            phase_four_defeated_ns is not None
+            and now - phase_four_defeated_ns >= PHASE_FIVE_HANDOFF_NS
+        ):
+            emit("encounter_reset", reason="Phase 5 actor was not observed after phase 4")
+            return ENCOUNTER_RESET
+        if (
+            info.status not in (Status.AVAILABLE, Status.PARTIAL)
+            or not (0 <= now - info.monotonic_ns <= MAX_SAMPLE_AGE_NS)
+            or player.clock_stalled_ns > MAX_SAMPLE_AGE_NS
+        ):
+            # Never act on stale data; the next fresh sample continues.
+            time.sleep(POLL_SECONDS)
+            continue
+        if hp == 0:
+            raise RuntimeError("Player HP reached zero")
+        if hp is None or hp < 0:
+            time.sleep(POLL_SECONDS)
+            continue
+        if (
+            phase_four_defeated_ns is None
+            and practice_enrage >= PHASE_FIVE_MIN_ENRAGE
+            and phase == 4
+            and boss is not None
+            and boss.config_id == ACTIVE_TELOS
+            and boss.instance_id == active_instance
+            and boss.flags & NPCFlags.HEALTH
+            and boss.health_max > 1
+            and boss.health_current == 0
+        ):
+            phase_four_defeated_ns = now
+            emit("phase_5_handoff_started", boss_instance_id=active_instance)
+        if phase_four_defeated_ns is not None:
+            if (
+                phase == 5
+                and boss is not None
+                and boss.config_id == PHASE_FIVE_TELOS
+                and boss.flags & NPCFlags.HEALTH
+                and boss.health_max > 1
+                and boss.health_current > 0
+            ):
+                emit(
+                    "phase_5_observed",
+                    boss_instance_id=boss.instance_id,
+                    boss_config_id=boss.config_id,
+                    boss_hp=boss.health_current,
+                    player_hp=hp,
+                )
+                reason = observe(
+                    reader,
+                    max(0, deadline - time.monotonic()),
+                    attempt,
+                    phase_five=True,
+                    before_sample=update_focus,
+                )
+                if attempt:
+                    attempt.end_reason = reason
+                return 2
+            time.sleep(POLL_SECONDS)
+            continue
+        if lost or hits_lost:
+            # Counts may be off by the lost events; specials re-synchronise the rotation.
+            emit("event_queue_overflow", npc_actions_lost=lost, player_hits_lost=hits_lost)
+        prayer = Prayer(reader.active_prayer())
+        prayer_raw = player.variable(Variable.PRAYER_PACKED)
+        if not initiated and boss is not None and boss.config_id == ACTIVE_TELOS:
+            # Started mid-fight: join without the opening count; specials re-synchronise.
+            initiated = True
+            emit("joined_active_encounter", phase=phase)
+        if not initiated and boss is not None:
+            if prayer_raw is None or not prayer_raw & PRAYER_POINTS_MASK:
+                warn_once("Restore prayer points before entering the encounter")
+                time.sleep(POLL_SECONDS)
+                continue
+            if prayer != Prayer.MELEE:
+                if now >= next_prayer_check:
+                    sent = True
+                    if manual_engage:
+                        sent = send_chord(prayer_chords[Prayer.MELEE])
+                    else:
+                        click_frame(args.melee, boss.instance_id)
+                    if sent:
+                        emit("baseline_prayer_requested", prayer="melee")
+                        # Unacknowledged presses are simply retried after the timeout.
+                        next_prayer_check = reader.monotonic_ns() + ACK_TIMEOUT_NS
+                time.sleep(POLL_SECONDS)
+                continue
+        if boss is None or boss.config_id != ACTIVE_TELOS:
+            if active_instance is not None:
+                emit("encounter_reset", reason="Active Telos disappeared")
+                return ENCOUNTER_RESET
+            if not initiated and boss is not None and boss.config_id == DORMANT_TELOS:
+                if attempt and next_prayer_check:
+                    attempt.write("baseline_prayer_acknowledged", prayer="melee")
+                initiated = True
+                if manual_engage:
+                    # The operator walks in; the session duration bounds the wait.
+                    emit("waiting_for_engage", overhead=prayer.name.lower())
+                else:
+                    click_frame(args.approach, boss.instance_id, require_melee=True)
+                    next_approach = reader.monotonic_ns() + APPROACH_TIMEOUT_NS
+                    emit("approach", overhead=prayer.name.lower())
+            if initiated and next_approach and now >= next_approach:
+                # The automatic approach did not wake Telos: click again.
+                emit("approach_retry")
+                initiated = False
+                next_approach = 0
+            time.sleep(POLL_SECONDS)
+            continue
+
+        if active_instance is None:
+            active_instance = boss.instance_id
+        if boss.instance_id != active_instance:
+            emit("encounter_reset", reason="Telos instance changed")
+            return ENCOUNTER_RESET
+
+        actions = telos_actions(
+            events, identity, info.sequence, {active_instance},
+            additional_samples=intervening_samples,
+        )
+        if phase in (1, 2) and phase_two_at is None:
+            for action in actions:
+                if action["action_sequence"] == P1_TO_P2_TRANSITION:
+                    p2_transition_cue = action["event_sequence"]
+        hp_known = bool(boss.flags & NPCFlags.HEALTH) and boss.health_max > 1
+        if hp_known and expected_max_hp is None:
+            # Non-zero enrage: lock the first observed maximum for the rest of the attempt.
+            expected_max_hp = boss.health_max
+            emit("boss_max_hp_locked", boss_max_hp=expected_max_hp, enrage=practice_enrage)
+        if hp_known and boss.health_max != expected_max_hp:
+            # P5 and enrage scaling can change the maximum: re-lock rather than stop.
+            emit("boss_max_hp_locked", boss_max_hp=boss.health_max, previous=expected_max_hp)
+            expected_max_hp = boss.health_max
+        if phase not in HANDLED_PHASES or not hp_known:
+            # Unreadable phase or HP: act again from the next sample that has them.
+            time.sleep(POLL_SECONDS)
+            continue
+        if phase_one_started and phase <= 3:
+            confirmed_phase = (
+                3 if phase_three_at is not None else 2 if phase_two_at is not None else 1
+            )
+            try:
+                check_active_phase(
+                    confirmed_phase,
+                    phase,
+                    npc_health_record(boss),
+                    expected_max_hp,
+                    saw_p2_transition=p2_transition_cue is not None,
+                )
+            except RuntimeError as error:
+                warn_once(str(error))
+        # Every reached phase is handled; only the P2 target-cycle trial stops input earlier.
+        continue_phase_three = args.continue_phase_two
+        if flicker is not None and (phase in (1, 2) or (phase >= 3 and continue_phase_three)):
+            flicker.default_prayer = DEFAULT_FLICK_PRAYER_BY_PHASE[phase]
+            golems = (
+                telos_actions(
+                    events,
+                    identity,
+                    info.sequence,
+                    {event.instance_id for event in events if event.config_id in MINION_CONFIGS},
+                    additional_samples=intervening_samples,
+                )
+                if phase == 4 and events
+                else ()
+            )
+            flick_step(
+                actions,
+                phase,
+                prayer,
+                now,
+                info.monotonic_ns,
+                gcd_remaining_now(player, info.monotonic_ns, reader.monotonic_ns()),
+                golems=golems,
+            )
+        prayer_tenths = None if prayer_raw is None else prayer_raw & PRAYER_POINTS_MASK
+        if input_allowed and restorer.due(prayer_tenths, now):
+            if send_chord(bindings["Super Restore"]):
+                restorer.sent(prayer_tenths, reader.monotonic_ns())
+                emit(
+                    "super_restore_sent",
+                    prayer_points=prayer_tenths / 10,
+                    received_tick=received_tick_counter(),
+                )
+        camera_step(phase, actions)
+        if not phase_one_started:
+            if hp_known:
+                emit("engaged", boss_hp=boss.health_current, phase=phase, player_hp=hp)
+                phase_one_started = True
+            else:
+                phase_one.observe(actions)
+                time.sleep(POLL_SECONDS)
+                continue
+        if phase >= 4 and continue_phase_three:
+            if phase_four_at.get(phase) is None:
+                emit(f"phase_{phase}_observed", boss_hp=boss.health_current, player_hp=hp)
+                phase_four_at[phase] = now
+                pending_cue = None
+                # Fonts, golems and bombs are not handled yet; flicks and specials continue.
+                phase_one = PhaseOne(phase=phase, carried_expected=phase_one.expected)
+        elif phase == 3 and continue_phase_three:
+            if phase_three_at is None:
+                emit("phase_three_observed", boss_hp=boss.health_current, player_hp=hp)
+                phase_three_at = now
+                pending_cue = None
+                # P3 attacks are magic only, with their own special order.
+                phase_one = PhaseOne(phase=3, carried_expected=phase_one.expected)
+        elif phase == 3:
+            if (
+                not args.continue_phase_two
+                or encounter_checkpoint(phase, npc_health_record(boss), expected_max_hp) is None
+            ):
+                raise RuntimeError("Unexpected phase 3 checkpoint")
+            emit("phase_three_observed", boss_hp=boss.health_current, player_hp=hp)
+            if attempt and phase_one.pending:
+                ability, confirmed = phase_one.acknowledge(
+                    cooldowns(reader, bindings), now, ending=True
+                )
+                attempt.write(
+                    "cooldown_acknowledgement",
+                    ability=ability,
+                    observed=confirmed,
+                    reason="input_ended",
+                    cue_native_sequence=pending_cue,
+                )
+            if args.observe_transition:
+                board.close()
+                reason = observe(reader, max(0, deadline - time.monotonic()), attempt)
+                if attempt:
+                    attempt.end_reason = reason
+            return 2
+        if phase == 2:
+            first_phase_two_sample = phase_two_at is None
+            if first_phase_two_sample:
+                emit(
+                    "phase_two_observed",
+                    boss_hp=boss.health_current,
+                    phase=phase,
+                    player_hp=hp,
+                    transition_cue_native_sequence=p2_transition_cue,
+                )
+                if attempt and phase_one.pending:
+                    ability, confirmed = phase_one.acknowledge(
+                        cooldowns(reader, bindings), now, ending=True
+                    )
+                    attempt.write(
+                        "cooldown_acknowledgement",
+                        ability=ability,
+                        observed=confirmed,
+                        reason="phase_changed",
+                        cue_native_sequence=pending_cue,
+                    )
+                    pending_cue = None
+                phase_two_at = now
+                if args.continue_phase_two:
+                    # No P1 forecast or pending input is evidence in the new arena.
+                    phase_one = PhaseOne(phase=2, carried_expected=phase_one.expected)
+            if first_phase_two_sample or actions or hits or hits_lost:
+                log(
+                    "observation",
+                    session=identity,
+                    boss_config_id=boss.config_id,
+                    boss_instance_id=boss.instance_id,
+                    phase_candidate=phase,
+                    boss_health=npc_health_record(boss),
+                    hp=hp,
+                    overhead=prayer.name.lower(),
+                    sample_ns=info.monotonic_ns,
+                    npc_actions=actions,
+                    npc_action_events_lost=lost,
+                    player_hits=player_hit_splats_record(reader, hits, hits_lost),
+                )
+            if args.reacquire:
+                if reacquire_at is not None:
+                    damage_seen = boss.health_current < reacquire_hp
+                    if damage_seen or now - reacquire_at >= REACQUIRE_TIMEOUT_NS:
+                        emit(
+                            "phase_two_reacquire_result",
+                            boss_hp=boss.health_current,
+                            damage_observed=damage_seen,
+                        )
+                    else:
+                        time.sleep(POLL_SECONDS)
+                        continue
+                elif boss.health_current < phase_end_hp(expected_max_hp, 1):
+                    emit("phase_two_reacquire_skipped", reason="Boss HP already decreased")
+                elif phase_two_melee_cue(actions, prayer.name.lower()):
+                    if reader.monotonic_ns() - info.monotonic_ns > MAX_SAMPLE_AGE_NS:
+                        time.sleep(POLL_SECONDS)
+                        continue
+                    if not (
+                        send_chord(bindings["Target Cycle"])
+                        and send_chord(bindings["Opening Attack"])
+                    ):
+                        continue
+                    reacquire_at = reader.monotonic_ns()
+                    reacquire_hp = boss.health_current
+                    emit("phase_two_reacquire_sent", boss_hp=reacquire_hp)
+                    time.sleep(POLL_SECONDS)
+                    continue
+                elif now - phase_two_at < REACQUIRE_CUE_TIMEOUT_NS:
+                    time.sleep(POLL_SECONDS)
+                    continue
+                else:
+                    emit(
+                        "phase_two_reacquire_skipped",
+                        reason="No fresh melee cue with Deflect Melee",
+                    )
+            if not args.continue_phase_two:
+                if args.observe_transition:
+                    board.close()
+                    reason = observe(reader, max(0, deadline - time.monotonic()), attempt)
+                    if attempt:
+                        attempt.end_reason = reason
+                return 2
+        # Specials still resolve after boss HP reaches the phase threshold: a 250% Uppercut at
+        # 454,018 HP landed after the 450,000 boundary, so responses continue until the phase
+        # field changes. Inputs during the transition lockout simply have no effect.
+        autos_before = phase_one.autos
+        timed_freedom = getattr(args, "timed_freedom", False)
+        received_tick = None
+        if timed_freedom or "Escape" in bindings or "Resonance" in bindings:
+            received_tick = received_tick_counter()
+            for action in actions:
+                if action.get("received_tick") is None:
+                    action["received_tick"] = received_tick
+        previous_bomb_event = phase_one.bomb_event
+        phase_one.observe(actions)
+        if phase_one.bomb_event != previous_bomb_event:
+            emit(
+                "anima_bomb_observed",
+                cue_native_sequence=phase_one.bomb_event,
+                press_window_ms=tuple(offset // 1_000_000 for offset in phase_one.bomb_window_ns),
+            )
+        previous_bomb_hit = phase_one.bomb_preceding_hit
+        phase_one.observe_hits(hits, received_tick)
+        if phase_one.bomb_preceding_hit != previous_bomb_hit:
+            emit(
+                "anima_bomb_preceding_hit",
+                cue_native_sequence=phase_one.bomb_event,
+                player_hit_sequence=phase_one.bomb_preceding_hit,
+            )
+        position = reader.position
+        tile = (position.x, position.y, position.plane) if position.valid else None
+        if surge_sent_ns is not None:
+            tiles_known = tile is not None and surge_origin is not None
+            displaced = tiles_known and tile != surge_origin
+            if displaced or now - surge_sent_ns >= ACK_TIMEOUT_NS:
+                emit(
+                    "surge_displacement",
+                    origin=surge_origin,
+                    tile=tile,
+                    # None: the player tile was unavailable, so displacement is unknown.
+                    observed=displaced if tiles_known else None,
+                    **({"cue_native_sequence": surge_cue} if attempt else {"sample_ns": now}),
+                )
+                surge_sent_ns = None
+        if actions or hits or hits_lost or tile != previous_tile or prayer != previous_prayer:
+            log(
+                "combat",
+                npc_actions=actions,
+                autos_before=autos_before,
+                autos=phase_one.autos,
+                expected=phase_one.expected,
+                expected_after=phase_one.expected_after,
+                player_hp=hp,
+                boss_hp=boss.health_current,
+                phase=phase,
+                sample_ns=info.monotonic_ns,
+                tile=tile,
+                overhead=prayer.name.lower(),
+                player_hits=player_hit_splats_record(reader, hits, hits_lost),
+            )
+            previous_tile, previous_prayer = tile, prayer
+
+        timers = {
+            name: value for name, value in cooldowns(reader, bindings).items() if name in bindings
+        }
+        if DISRUPTION_SHIELD in bindings:
+            # No client timer: counted from the last press.
+            timers[DISRUPTION_SHIELD] = max(0, shield_ready_ns - now) // 1_000_000
+        gcd_remaining_ms = gcd_remaining_now(player, info.monotonic_ns, reader.monotonic_ns())
+        phase_one.hold_position = font_duty.active  # A new phase object starts without it.
+        dodge_choice = None
+        if {"Escape", "Surge"} & bindings.keys():
+            update_heading()
+            if phase_one.special == UPPERCUT:
+                dodge_choice = uppercut_choice()
+        action = phase_one.next_action(
+            now,
+            timers,
+            gcd_remaining_ms,
+            prayer,
+            received_tick=received_tick,
+            timed_freedom=timed_freedom,
+            flicking=flicker is not None,
+            stun_expiry=active_stun_expiry(reader, getattr(info, "logic_tick", None)),
+            adrenaline_tenths=player.variable(Variable.ADRENALINE),
+            uppercut_choice=dodge_choice["ability"] if dodge_choice else None,
+            tick_elapsed_ms=tick_elapsed_ms(received_tick),
+            earlier_bomb_slot_clear=(
+                phase == 4
+                and phase_one.bomb_preceding_hit is not None
+                and not phase_one.bomb_handled
+                and info.status == Status.AVAILABLE
+                and not any(
+                    npc.config_id in MINION_CONFIGS
+                    and (not npc.flags & NPCFlags.HEALTH or npc.health_current > 0)
+                    for npc in reader.npcs[:info.npc_count]
+                )
+            ),
+        )
+        if phase_one.cast_result:
+            ability, confirmed = phase_one.cast_result
+            if attempt:
+                attempt.write(
+                    "cooldown_acknowledgement",
+                    ability=ability,
+                    observed=confirmed,
+                    cue_native_sequence=pending_cue,
+                )
+            log("cooldown_acknowledgement", ability=ability, observed=confirmed, sample_ns=now)
+            pending_cue = None
+            phase_one.cast_result = None
+        if action:
+            # Movement does not depend on the tile; a missing tile only makes displacement unknown.
+            if reader.monotonic_ns() - info.monotonic_ns > MAX_SAMPLE_AGE_NS:
+                # Decided from an aged sample: decide again from the next fresh one.
+                time.sleep(POLL_SECONDS)
+                continue
+            if action.reason == ANIMA_BOMB_REASON:
+                pending_cue = phase_one.bomb_event
+            elif action.ability == "Anticipation":
+                pending_cue = phase_one.last_auto_event
+            else:
+                pending_cue = phase_one.special_event
+            if attempt:
+                attempt.write(
+                    "ability_requested",
+                    ability=action.ability,
+                    reason=action.reason,
+                    cue_native_sequence=pending_cue,
+                    gcd_remaining_ms=gcd_remaining_ms,
+                    received_tick=received_tick,
+                )
+            press_gcd_ms = gcd_remaining_now(player, info.monotonic_ns, reader.monotonic_ns())
+            if action.ability in GCD_ABILITIES and not gcd_press_ready(press_gcd_ms):
+                # The GCD ended while deciding: Revolution has the slot, so decide again later.
+                emit(
+                    "ability_press_skipped",
+                    ability=action.ability,
+                    reason="GCD window passed before the press",
+                    received_tick=received_tick,
+                )
+                if action.ability == "Freedom":
+                    phase_one.last_freedom_stun = None
+                time.sleep(POLL_SECONDS)
+                continue
+            if action.ability == DISRUPTION_SHIELD:
+                # Spellbook Swap first; its key hold leaves the ~50 ms gap before the spell.
+                delivered = send_chord(bindings[SPELLBOOK_SWAP]) and send_chord(
+                    bindings[DISRUPTION_SHIELD]
+                )
+            else:
+                delivered = send_chord(bindings[action.ability])
+            if not delivered:
+                # Interrupted by focus loss; the decision is made again after focus returns.
+                if action.ability == "Freedom":
+                    phase_one.last_freedom_stun = None
+                time.sleep(POLL_SECONDS)
+                continue
+            sent_ns = reader.monotonic_ns()
+            if action.ability == DISRUPTION_SHIELD:
+                shield_ready_ns = sent_ns + DISRUPTION_SHIELD_COOLDOWN_NS
+            phase_one.sent(action, sent_ns)
+            if attempt:
+                attempt.write(
+                    "ability_sent",
+                    ability=action.ability,
+                    reason=action.reason,
+                    sent_ns=attempt.relative_ns(sent_ns),
+                    cue_native_sequence=pending_cue,
+                    # GCD left when the key went down; measures the GCD_PRESS_LEAD_MS rule.
+                    gcd_at_press_ms=press_gcd_ms,
+                )
+            if action.ability in MOVEMENT_ABILITIES:
+                surge_origin = tile
+                surge_sent_ns = sent_ns
+                surge_cue = pending_cue
+                if action.reason.startswith("Uppercut"):
+                    # Compare the projected landings with surge_displacement and the hitmark.
+                    emit(
+                        "uppercut_dodge_choice",
+                        sent=action.ability,
+                        received_tick=received_tick,
+                        cue_native_sequence=pending_cue,
+                        **(dodge_choice or {"ability": None}),
+                    )
+            log("ability_sent", ability=action.ability, reason=action.reason, sent_ns=sent_ns)
+        remember_floor(phase, boss)
+        movement_busy = phase_one.owns_movement(reader.monotonic_ns(), received_tick)
+        if phase is not None and phase >= 4:
+            font_step(
+                phase_one, boss, received_tick, timers, hits, hits_lost, action_pending=bool(action)
+            )
+        elif phase in BEAM_KIND_BY_PHASE:
+            telos_raw = player.variable(Variable.TELOS_PACKED)
+            meter = None if telos_raw is None else telos_raw & METER_MASK
+            beam_step(phase, phase_one, boss, meter, received_tick, movement_busy=movement_busy)
+        elif phase in BEAM_BLOCK_ALWAYS_PHASES and isinstance(received_tick, int):
+            # Shows whether the red strip block keeps Telos's meter from charging.
+            telos_raw = player.variable(Variable.TELOS_PACKED)
+            observe_feeding(
+                phase, None if telos_raw is None else telos_raw & METER_MASK, received_tick
+            )
+        stomp_dodge(
+            phase_one,
+            boss,
+            received_tick,
+            timers,
+            gcd_remaining_now(player, info.monotonic_ns, reader.monotonic_ns()),
+        )
+        virus_step(phase, boss, received_tick, movement_busy=movement_busy)
+        beam_keep_step(
+            phase,
+            phase_one,
+            boss,
+            received_tick,
+            timers,
+            reader.monotonic_ns(),
+            movement_busy=phase_one.owns_movement(reader.monotonic_ns(), received_tick),
+        )
+        time.sleep(POLL_SECONDS)
+    emit("timeout", active=active_instance is not None)
+    return 1
+
+
+ACTION_BAR_KEY_ARGUMENTS = {
+    "freedom": "Freedom",
+    "anticipation": "Anticipation",
+    "escape": "Escape",
+    "resonance": "Resonance",
+    "dive": "Dive",
+    "reflect": "Reflect",
+    "devotion": "Devotion",
+    "surge": "Surge",
+    "disruption_shield": DISRUPTION_SHIELD,
+    "spellbook_swap": SPELLBOOK_SWAP,
+    "flick_melee_key": "Deflect Melee",
+    "flick_magic_key": "Deflect Magic",
+    "flick_soul_split_key": "Soul Split",
+}
+# Keys used when a bar scan does not find the ability. Devotion on F7 and Surge on K were set up
+# by the account owner on 2026-11-15; the 07:01 scan did not find Devotion on a displayed bar.
+KEY_FALLBACKS = {
+    "flick_melee_key": DEFAULT_FLICK_MELEE_KEY,
+    "flick_magic_key": DEFAULT_FLICK_MAGIC_KEY,
+    "flick_soul_split_key": DEFAULT_FLICK_SOUL_SPLIT_KEY,
+    "devotion": "F7",
+    "surge": "K",
+    # Dive was on P (action bar 3:8) until the 08:31 scan found no Dive and the stomp dodge
+    # was skipped, which ended that run.
+    "dive": "P",
+    "disruption_shield": DEFAULT_DISRUPTION_SHIELD_KEY,
+    "spellbook_swap": DEFAULT_SPELLBOOK_SWAP_KEY,
+}
+
+
+def resolve_enrage(reader, args):
+    """Use the enrage from VARP 6359 unless --practice-enrage overrides it."""
+    reader.sample()
+    enrage = reader.encounter.enrage
+    observed = enrage.value if enrage.valid else None
+    if args.practice_enrage is None:
+        if observed is None:
+            raise RuntimeError("Telos enrage unavailable in memory; pass --practice-enrage")
+        args.practice_enrage = observed
+    log("enrage_resolved", enrage=args.practice_enrage, from_memory=observed)
+
+
+def resolve_action_bar_keys(reader, args, attempt=None):
+    """Fill unset key arguments from the displayed action bars and record their source.
+
+    Explicit command-line keys win. Labels are displayed glyphs, so letter keys are translated
+    through the RuneScape window's keyboard layout. Freedom and Anticipation are required.
+    """
+    reader.sample()
+    bindings = displayed_bindings(reader)
+    sources = {}
+    for argument, name in ACTION_BAR_KEY_ARGUMENTS.items():
+        if getattr(args, argument, None):
+            sources[argument] = "command_line"
+        elif name in bindings:
+            setattr(args, argument, bindings[name].key_label)
+            sources[argument] = f"action_bar {bindings[name].display_bar}:{bindings[name].slot}"
+            args.displayed_keys = True
+        elif argument in KEY_FALLBACKS:
+            setattr(args, argument, KEY_FALLBACKS[argument])
+            sources[argument] = "default"
+    missing = [
+        ACTION_BAR_KEY_ARGUMENTS[argument]
+        for argument in ("freedom", "anticipation")
+        if not getattr(args, argument, None)
+    ]
+    resolved = {argument: getattr(args, argument, None) for argument in ACTION_BAR_KEY_ARGUMENTS}
+    log("keys_resolved", keys=resolved, sources=sources)
+    if attempt:
+        attempt.write("keys_resolved", keys=resolved, sources=sources)
+    if missing:
+        raise RuntimeError(f"Put {', '.join(missing)} on a displayed action bar or pass its key")
+
+
+def main():
+    """Start with bar 18 active and Practice Mode 0% confirmed in the client."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--pid", type=int)
+    parser.add_argument(
+        "--duration",
+        type=int,
+        help="Optional session limit in seconds; by default only death or F12 ends the run",
+    )
+    parser.add_argument("--port", help="Arduino COM port. Omit for observation only.")
+    parser.add_argument("--replay", type=Path, help="Read a local Telos observation JSONL capture")
+    parser.add_argument(
+        "--record-attempt",
+        action="store_true",
+        help="Write an attempt log under training-data/ (always on with --port)",
+    )
+    parser.add_argument("--frame", type=Path, help="Fresh game_console.py screenshot")
+    parser.add_argument(
+        "--approach", type=int, nargs=2, help="Arena floor pixel near dormant Telos"
+    )
+    parser.add_argument("--melee", type=int, nargs=2, help="Deflect Melee action-bar pixel")
+    parser.add_argument("--practice-0-confirmed", action="store_true")
+    # Blocking the black stream during P2 Onslaught is always on (account owner: otherwise the
+    # Onslaught never ends); the old opt-in switch is still accepted.
+    parser.add_argument("--block-black-stream", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--practice-enrage",
+        type=int,
+        help="Override the enrage read from memory (VARP 6359). Non-zero values lock the first "
+        "observed maximum HP and assume the 0%% quarter phase split",
+    )
+    # Prayer flicking, timed Freedom and post-input observation are always on; these old
+    # switches are still accepted so earlier commands keep working.
+    parser.add_argument("--observe-transition", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--flick-melee", action="store_true", help=argparse.SUPPRESS)
+    # Unset keys are read from the displayed action bars (rs3_reader.action_bar_keys).
+    parser.add_argument("--flick-melee-key", help="Deflect Melee key (default: from action bar)")
+    parser.add_argument("--flick-magic-key", help="Deflect Magic key (default: from action bar)")
+    parser.add_argument("--flick-soul-split-key", help="Soul Split key (default: from action bar)")
+    parser.add_argument("--freedom", help="Freedom key (default: from action bar)")
+    parser.add_argument("--anticipation", help="Anticipation key (default: from action bar)")
+    # Without screenshot points the operator wakes Telos (the default); the old switch remains.
+    parser.add_argument("--manual-engage", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--displayed-keys",
+        action="store_true",
+        help="Translate displayed key labels using the RuneScape keyboard layout",
+    )
+    parser.add_argument("--hurricane", help="Current Hurricane binding, if equipped on the bar")
+    parser.add_argument("--timed-freedom", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--surge", help="Surge key (default: from action bar, else K), used for Uppercut instead "
+        "of Escape when Escape lacks room"
+    )
+    parser.add_argument(
+        "--escape", help="Optional Escape binding, sent 4-5 received ticks after Uppercut"
+    )
+    parser.add_argument(
+        "--dive", help="Dive key, used to leave Telos's footprint before the Hold Still stomp"
+    )
+    parser.add_argument(
+        "--resonance",
+        help="Optional Resonance binding, sent after Hold Still's +2 hit to absorb the +4 hit",
+    )
+    parser.add_argument(
+        "--reflect",
+        help="Optional Reflect binding, used on the P4 anima bomb while Resonance is cooling",
+    )
+    parser.add_argument(
+        "--devotion",
+        help="Optional Devotion binding, used for Hold Still's heavy hit when Resonance cannot",
+    )
+    parser.add_argument(
+        "--disruption-shield",
+        help=f"Disruption Shield key (default: from action bar, else "
+        f"{DEFAULT_DISRUPTION_SHIELD_KEY}), for Hold Still and the P4 anima bomb",
+    )
+    parser.add_argument(
+        "--spellbook-swap",
+        help=f"Spellbook Swap key pressed just before Disruption Shield (default: from action "
+        f"bar, else {DEFAULT_SPELLBOOK_SWAP_KEY})",
+    )
+    parser.add_argument(
+        "--super-restore",
+        help=f"Super restore key, drunk at 50 prayer points or fewer "
+        f"(default {DEFAULT_SUPER_RESTORE_KEY})",
+    )
+    parser.add_argument(
+        "--auto-retaliate",
+        nargs=2,
+        metavar=("X", "Y"),
+        type=int,
+        help="Auto-retaliate icon in --frame, switched off during P4 font charging",
+    )
+    # Phases 2 and 3 are always handled; the old opt-in flag is still accepted as a no-op.
+    parser.add_argument("--continue-phase-two", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--reacquire",
+        nargs=2,
+        metavar=("TARGET_CYCLE", "BASIC_ATTACK"),
+        help="Experimental one-shot P2 target cycle and basic attack; input then stops at P2",
+    )
+    args = parser.parse_args()
+    if args.replay and args.port:
+        parser.error("Replay does not open the Arduino")
+    if args.replay and args.record_attempt:
+        parser.error("An attempt log requires a live session")
+    # Input continues through every handled phase (to the P4 checkpoint) unless the one-shot
+    # target-cycle trial is selected, which needs input to end at P2.
+    args.continue_phase_two = not args.reacquire
+    args.flick_melee = args.timed_freedom = args.observe_transition = True
+    if args.port:
+        args.record_attempt = True
+    if args.duration is not None and args.duration <= 0:
+        parser.error("Duration must be positive")
+    approach_points = (args.frame, args.approach, args.melee)
+    # The operator wakes Telos unless every screenshot point for the automatic approach is set.
+    args.manual_engage = not any(approach_points)
+    if args.port and not args.manual_engage and not all(approach_points):
+        parser.error("The automatic approach needs --frame, --melee and --approach together")
+    if args.auto_retaliate is not None and (not args.port or not all(approach_points)):
+        parser.error("--auto-retaliate needs --port, --frame, --melee and --approach")
+    board = stream = attempt = None
+    end_reason = "error"
+    outcome = "incomplete"
+    try:
+        if args.replay:
+            replay(args.replay)
+            return 0
+        with Reader(pid=args.pid, worker_hz=0) as reader:
+            if args.port:
+                resolve_enrage(reader, args)
+            if args.port or args.record_attempt:
+                directory = Path(__file__).resolve().parents[1] / "training-data"
+                directory.mkdir(exist_ok=True)
+                date = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+                path = directory / f"telos-{date}.jsonl"
+                stream = path.open("x", encoding="utf-8", newline="\n")
+                attempt = AttemptLog(
+                    stream,
+                    mode="practice" if args.port else "observation",
+                    enrage=args.practice_enrage,
+                    monotonic_ns=reader.monotonic_ns,
+                    prayer_ack_timeout_ns=ACK_TIMEOUT_NS,
+                )
+                print(f"Attempt log {path}", flush=True)
+            if args.port:
+                resolve_action_bar_keys(reader, args, attempt)
+            if not args.port:
+                observed_end = observe(reader, args.duration or MAX_PRACTICE_SECONDS, attempt)
+                end_reason = observed_end if attempt else "observation_ended"
+                result = 0
+            else:
+                board = ArduinoBackend(args.port)
+                with ExitStack() as cleanup:
+                    result = run(reader, args, board, attempt, cleanup=cleanup)
+                # Setup can cross scenes before engaging. After that, leaving the encounter
+                # closes its log even when the game returns to staging between samples.
+                while result == ENCOUNTER_RESET and not attempt.engaged:
+                    with ExitStack() as cleanup:
+                        result = run(reader, args, board, attempt, cleanup=cleanup)
+                result_reasons = {2: "phase_limit", ENCOUNTER_RESET: "encounter_ended"}
+                end_reason = attempt.end_reason or result_reasons.get(result, "time_limit")
+            return result
+    except KeyboardInterrupt:
+        end_reason = "interrupted"
+        return 130
+    except (OSError, RuntimeError, ValueError) as error:
+        log("stopped", reason=str(error))
+        if attempt:
+            if attempt.engaged and attempt.previous.get("hp") == 0:
+                end_reason = "player_hp_zero"
+            attempt.write("stopped", reason=str(error))
+        return 1
+    finally:
+        try:
+            if board:
+                board.close()
+        finally:
+            if stream:
+                with stream:
+                    if attempt:
+                        if attempt.engaged and attempt.previous.get("hp") == 0:
+                            outcome = "player_hp_zero"
+                        attempt.write("attempt_ended", result=outcome, reason=end_reason)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

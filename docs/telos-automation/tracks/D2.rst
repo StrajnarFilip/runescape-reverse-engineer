@@ -80,6 +80,11 @@ binding. can_send re-runs the C planner and binding checks before dispatch.
 Only newer overhead feedback acknowledges accepted input. Planner FAULT and
 scene/build changes latch until explicit reset after re-observation.
 
+On 2026-11-14 the integrated executor switched its default to deterministic
+Python timing rules. The native adapter remains callable through the C ABI.
+Both planners exercise the measured-window and observed-overhead lifecycle in
+fixture tests. The live catalogue still has zero validated timing bands.
+
 Twelve D2 tests pass, including the actual C planner's protect/WAIT_ACK/observed
 Melee/return-to-Soul-Split sequence on synthetic measured windows. This does
 not calibrate a real server deadline. A real-capture golden replay emits no

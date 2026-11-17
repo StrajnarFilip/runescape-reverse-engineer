@@ -1,0 +1,220 @@
+# Telos attempt logs
+
+Run the Practice Mode controller from the repository root. Stage the character across the gap
+with Telos dormant, the melee action bar selected and auto-retaliate active. The controller
+uses Telos's animations and phase for prayer flicks, special responses and P4 font and golem
+handling. See the coverage table for the evidence and open timing questions. [Setup and bindings](../runescape-knowledge-base/bosses/telos/animation-cues.md) · [Mechanic coverage](../runescape-knowledge-base/bosses/telos/mechanic-coverage.md)
+
+### Running it yourself
+
+Stand on the staging platform with Telos dormant and Revolution on bar 18. Put Freedom,
+Anticipation, Escape, Resonance, Dive and the Deflect Magic, Deflect Melee and Soul Split prayers on
+any displayed action bar. Reflect is optional. Devotion falls back to `F7` and Surge to `K`
+when no bar shows them, and super restores go on the `L` keybind (`--super-restore` changes
+it).
+For Uppercut the controller sends one jump: Escape (7 tiles back) or Surge (10 tiles forward).
+It projects both along the facing direction, snapped to eight directions, within the bounds of
+the floor seen this phase. Facing is Telos's centre while attacking, otherwise the last walking
+step. Escape is used if it moves the player at least 3 tiles and does not land under Telos,
+otherwise Surge if Surge does. The `uppercut_dodge_choice` row records both landings next to
+`surge_displacement`. The controller reads their keys from game memory
+(`rs3_reader.action_bar_keys`) and logs them as `keys_resolved`; a key passed on the command line
+takes precedence. Start the script, click into RuneScape, and wake Telos yourself. After engagement,
+leaving the encounter closes its attempt log. Losing focus pauses input until RuneScape is focused
+again, stale samples are skipped, and F12 stops the script.
+The controller turns on Deflect Melee and takes over when the fight starts. It checks for
+the Hold Still stomp at +3 to +6 received ticks, after checking the cursor's landing tile
+at +2. Up to two targets are tried per tick when a hover is rejected. At +3 the dodge waits
+for a Resonance press due before it could finish. If the player needs to dodge, Dive
+prefers the green strip in P1 or red strip in P3 within ten tiles and clear of Telos.
+The binding `rs3_snapshot_pointer_walk` confirms the current ground tile under the pointer
+before the click. `rs3_snapshot_npc_spatial`, `rs3_snapshot_hazards`,
+`rs3_hazard_terrain_height` and `rs3_project_tile` supply the footprint, beam location,
+terrain height and screen projection.
+
+```powershell
+$env:PYTHONPATH = 'python'
+python work/telos_zero.py --port COM8
+```
+
+The enrage is read from memory (low 12 bits of VARP 6359) and logged as `enrage_resolved`;
+`--practice-enrage` overrides it. Prayer flicking, timed Freedom, the attempt log and recording
+after input ends are always on. Game key codes and slot contents were calibrated
+against this account's bars on 2026-11-14. Raw modifier bits are logged but not used: Soul Split
+reported a modifier while plain F4 works. An unexpected key shows up in `keys_resolved`.
+
+### Automatic approach
+
+```powershell
+$env:PYTHONPATH = 'python'
+$frame = Join-Path $env:TEMP 'telos-practice.png'
+python work/game_console.py shot $frame
+python work/telos_zero.py --port COM8 --practice-0-confirmed --frame $frame `
+    --melee $meleeX $meleeY --approach $approachX $approachY `
+    --freedom Z --anticipation T --displayed-keys --observe-transition
+```
+
+The practice controller relies on Revolution for normal damage. It uses client samples and deterministic Python for the experimental special responses. The separate `python -m rs3_reader.bot` entry point runs the integrated decision stack in shadow mode. The Python prayer planner requires measured protection windows and complete incoming coverage before offering a return to Soul Split. The attack catalogue currently has zero validated protection windows.
+
+## Inspecting an attempt
+
+Confirm the actual ability tooltips before using the example keys. `--displayed-keys` resolves the client window's keyboard layout to physical Arduino keys. `configured_abilities` records the displayed labels and resolved keys.
+
+The practice controller flicks by Telos animation and phase. It uses the measured distance
+bands for `28959` and holds melee through the unanimated follow-up from Tendrils release.
+For Hold Still, the controller deflects the small hit from +0 through +2 after `28935`, using
+Deflect Magic in P3 and Deflect Melee otherwise. If Resonance will take the heavy +4 hit,
+Soul Split returns from the start of the tick in which Resonance is due or was pressed, so that
+Resonance heals the full hit. `prayer_window_released` records this. Otherwise Deflect Melee
+stays for the heavy hit. If Resonance cannot take it, Disruption Shield is cast: Spellbook Swap
+(`I`) and then the spell (`O`), both off the GCD. It goes right after the small hit when
+Resonance is cooling, otherwise at +3 unless Resonance is pressed or due in that tick, since
+the two must never be up together. Its 60 s cooldown is timed by the controller. Devotion
+remains the fallback while the shield is not ready. It is pressed when it is bound, ready and
+affordable (50% adrenaline), and the GCD slot is one Resonance cannot use.
+For the P4 anima bomb, the typeless hit started 2.26–2.32 s after `28942` was observed in all
+four logged bombs, at the start of cue tick +4. Resonance and Disruption Shield block one hit
+only, so they are pressed 1.75–2.05 s after the cue, during tick +3. Resonance is used if its
+GCD slot falls in that window, otherwise the shield. Reflect may go from 0.6 s while the shield
+is not ready. Golem hits can still use the shield up first. GCD abilities are pressed only in the last 200 ms of the GCD because
+ability queueing is off. `ability_sent.gcd_at_press_ms` records the time left, and
+`ability_press_skipped` marks a GCD window that passed while deciding.
+In P1 the controller keeps the player on the green strip, using only tiles in melee reach of
+Telos; auto-attack undid every landing out of reach. In P3 it blocks the red strip at all
+times. It walks onto the nearest strip tile even out of reach, since a walk drops the attack
+target and the player stays. Once on a strip, in P1 or P3, the player only moves for mechanics.
+The reader lists a moving window of strip tiles, so the arrival tile stays anchored after it
+leaves that list. The anchor ends when a mechanic moves the player or the listed strip runs
+along a line that misses the player's tile. A hover on a tile listed in the last two ticks
+still validates, and a rejected hover is retried once in the same tick. After walking onto a
+tile in reach it clicks Telos again. When every listed P3 strip tile is under Telos, he is
+standing on the beam at the wall. The player then Dives onto the strip end farther from his
+centre to displace him (`beam_under_telos_dive`), because a walk click there would attack him.
+`beam_under_telos_waiting` marks a tick when Dive is cooling or kept for the Hold Still stomp. It never lands under Telos. Dive is
+used only for tiles in reach and within Dive range, while it is ready and Hold Still is not the
+forecast special. Its cooldown is read from Bladed Dive's shared timer. `beam_feeding` rows
+show whether the meter still rises in P3. The stomp dodge treats 5 tiles from Telos's centre
+as unsafe. Each attempt is a `beam_keep_move` row with the verified
+hover. `beam_keep_arrival` and `beam_keep_departure` mark changes in standing on the strip.
+Moves wait for a tick with no protection press and yield to Escape, the stomp dodge and the P3
+virus walk. In P4 the anima bomb `28942` gets Resonance, or Reflect if bound with `--reflect`
+or on a bar. Its `ability_sent` reason is `Anima bomb`.
+Uppercut and the phase cues `28963` and `28930` do not schedule protection. A
+`prayer_transition_lockout` row marks when prayer inputs pause at a phase handoff or resume
+on the first recognized attack. A toggle is only resent after its overhead appears or 1.2 s
+passes. Server protection deadlines remain unmeasured.
+
+`--practice-enrage N` runs above 0%. It locks the first observed Telos maximum HP and assumes the
+quarter phase split. See the coverage table and individual traces for timing evidence by enrage.
+
+`--timed-freedom` trials the first clear GCD at received-tick offsets +4 through +7 after `28935`. The observed cast acknowledged one tick after dispatch at +4. This measures the cast path and leaves the landing response unverified.
+
+Each file starts with `attempt_started`. The first `state` row includes the initial `changes` object. Apply subsequent state changes as top-level field replacements. `sequence` orders rows, `timestamp_ms` is Unix time, and `elapsed_ns` and `observed_ns` are relative to the same attempt origin. `client_logic_tick` is the client clock. `game_tick` carries the client's received server-tick counter when valid. `received_tick` rows mark observed counter changes and loss of validity. Receipt time has no calibrated relation to the server's protection check.
+In captures made before the prayer outcome timestamp fix, use `sequence` to order a prayer
+outcome and the immediately following request or attempt end. Their `elapsed_ns` values can
+appear a few microseconds out of order.
+
+`actors` maps attempt-local instance IDs to `[config_id, current_hp, max_hp, action_animation, movement_animation]`. `actor_tiles` maps the same IDs to `[x, y, plane, same_world_confirmed]` when the reader has a tile. `ability_cooldowns` maps ability struct IDs to `[reason, start_client_tick, end_client_tick, active]`. A missing timer stays unknown. NPC and player hitmark rows retain native timing and recipient evidence. Hitmarks lack an attacker field.
+
+`effects` records the native player-effect entries, validated presence and raw candidates.
+The raw expiry stamp is logged on change. For an entry with validated expiry, compare
+that stamp to `client_logic_tick` to reconstruct the countdown.
+
+`beam_tiles` contains `[kind, x, y, plane, config_id]` tuples for the green, black and red
+streams. `beam_ground_heights` adds `[x, y, plane, fine_height]` for tiles the reader can project.
+`camera_viewport` records the render width and height followed by the physical width and height.
+The practice controller reads encounter VARP `6362` in P2 and P3. Join `anima_virus_detected`,
+`anima_virus_move`, `anima_virus_beam_arrival` and `anima_virus_outcome` by `onset_tick` in
+the same phase. The outcome `cleanse_confirmed` requires the countdown reset and a matching
+`anima_stream_cleanse_observed` message ID. `timer_cleared` means the countdown ended without
+the message. The nearest logged beam row can be one tile away when a cleanse occurs.
+Movement rows include the projected target, the observed default action and tile in `hover`,
+and the verified `walk_target` and `dispatch_tick` when a click is sent.
+At 50 prayer points or fewer the controller drinks one super restore dose with `L`
+(`--super-restore` changes the key). It waits for the points to rise, or for 2.4 s, before
+the next dose. Each dose is a `super_restore_sent` row.
+At the first Telos attack of each phase, after any handoff lockout, the up arrow is held for
+3 s to raise the camera fully (`camera_lift_started`, `camera_lift_ended`). Each prayer or
+ability chord releases every key, so the arrow is pressed again until the 3 s have passed.
+During P2 Onslaught the controller always walks into the black stream while it feeds Telos;
+the old `--block-black-stream` switch is accepted as a no-op. Read `beam_feeding` and
+`beam_move` alongside player tiles, VARP `6363` and successive `28959` cues to verify the
+player blocked the stream and the meter drained.
+A log with no `attempt_ended` was interrupted before the writer could record its outcome.
+
+Join `prayer_flick_outcome.request_sequence` to the original `prayer_flick_sent` row. An
+`acknowledged` outcome confirms the overhead observed in the client and records the sampling
+tick. Compare it with the recipient's hitmark and its client clock to assess the window.
+The switch carries the cue of the protection window that selected it, including during an
+overlap. `overhead_at_sample` gives the prayer from the hitmark's native frame when it was
+available, including intermediate cursor checks sampled by the controller.
+For Hold Still, compare `stomp_preflight`, `stomp_dodge` and `stomp_walk_fallback` with
+`stomp_dodge_result`. The preflight only records a cursor check at +2.
+Join the response to `npc_animation` by `cue_native_sequence`. `hover` records the sampled
+Walk tile, MiniMenu cycle, and source frame and client logic tick. In P1 and P3, a verified
+beam destination also carries `hover.beam_config`. `clear_of_stomp` records displacement
+outside the estimated radius, and `landed_on_beam` confirms that the observed player tile
+was on the strip. `observed_tick_delta` gives the position sample's offset from the cue.
+Check it against the hitmark. In one live P3 attempt, Dive moved the player at +8 and the
+stomp still landed at +9.
+
+For P4 fonts, follow `font_charge_started`, `font_arrival`, `font_charged` and
+`font_released` by `font_instance_id`. The charge must reach a charged actor config.
+At release, `in_range` and `player_hp` report the position and HP when the actor
+changes to a released config (`22902`–`22904`) or disappears after the measured hold.
+`font_lost` records an earlier disappearance. Use the surrounding hitmarks to
+check the damage outcome.
+
+A `font_move` row with `waypoint` records an intermediate destination toward an
+off-screen font. Its native hover must resolve to a nearer tile on the same plane.
+Join its `received_tick` or game tick to `font_waypoint_outcome.sent_tick`, then
+compare `distance_before` and `distance_after`. `font_arrival` confirms the actual
+charging ring was reached.
+
+`font_charge_pulse` pairs the charging actor's health decrease with a nearby type 144
+`player_hitmark` from the existing native hit queue. Match `player_hit_sequence` to the
+hitmark's `native_sequence`. `font_resonance` records the cue and predicted hit ticks,
+the press tick and the GCD at press. Match it to `font_resonance_outcome` by font instance
+and expected hit tick. The outcome records the observed cooldown and the paired pulse
+damage. A missing damage field means the charge decrease and hitmark could not be paired.
+
+To suspend auto-retaliate during font charging, add `--auto-retaliate X Y` to the
+automatic approach command. Use the centre of the auto-retaliate icon in the same
+`--frame` PNG and hover it in staging to confirm its label. On Compatibility Mode,
+`auto_retaliate` in the state reflects the `rs3_snapshot_auto_retaliate` result.
+Compare the requested `auto_retaliate_sent.enabled` value with
+`auto_retaliate_outcome.observed`. The controller restores an initially enabled
+setting after charging or when the attempt ends with the game in focus. A
+`auto_retaliate_restore_deferred` row means the final setting needs checking.
+
+`phase_5_handoff_started` records the old Telos actor at zero HP. The controller
+waits for the new actor and packed phase to agree, then records `phase_5_observed` and
+keeps logging native state in the same file. Reaching the handoff alone leaves the
+attempt incomplete.
+
+For phase 4 golems, join `golem_prayer_cue.cue_native_sequence` to the stamped
+`npc_animation` and any associated `prayer_flick_sent`. Inspect `prayer_flick_outcome`
+and the overhead on nearby player hitmarks within `first_hit_client_tick` through
+`last_hit_client_tick`. Two golems can swing together. A player hitmark gives the
+recipient and timing, so use nearby cues to assess attribution.
+
+`anima_bomb_observed` records a phase 4 cue and the response window in milliseconds from
+its observation. The opener sequence `28930`, three `28929` melee attacks, then `28959`
+has a later impact than `28942`. Match the cue, defensive press, cooldown or spell
+acknowledgement, and nearby type 144 hitmarks to check the outcome.
+
+`anima_bomb_preceding_hit` links the ordinary `28942` bomb cue to an earlier melee,
+magic or blocked hitmark by `player_hit_sequence`. With a complete NPC sample free
+of golems and no Disruption Shield available, this can open the preceding GCD slot
+for Resonance. Use `ability_sent.gcd_at_press_ms`, the `state` GCD fields and the
+cue timestamp to check where the press fell.
+
+Join an `ability_sent` row to the `npc_animation` row whose `native_sequence` matches `cue_native_sequence`. Use `cooldown_acknowledgement` and `surge_displacement` for later observations. A cooldown acknowledges a cast. Dodge success, damage prevention and healing each require their own evidence. Inspect `queue_loss` and `attempt_ended` before interpreting a run. The first practice trace predates NPC tile and NPC hitmark logging and has no explicit Anticipation acknowledgement at the phase boundary.
+
+```powershell
+$attempt = Get-ChildItem training-data/telos-*.jsonl | Sort-Object Name | Select-Object -Last 1
+Get-Content $attempt | ForEach-Object { $_ | ConvertFrom-Json } |
+    Where-Object event -In 'ability_sent','cooldown_acknowledgement','queue_loss','attempt_ended'
+```
+
+These logs contain decoded encounter fields and local event numbers. Keep images, chat, account names, process-memory dumps and executable files out of this directory.

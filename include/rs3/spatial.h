@@ -43,6 +43,7 @@ enum rs3_camera_flags
     RS3_CAMERA_MATRIX = 1u,
     RS3_CAMERA_VIEWPORT = 2u,
     RS3_CAMERA_PHYSICAL_ORIGIN = 4u,
+    RS3_CAMERA_SCALED_VIEWPORT = 8u, /**< Physical dimensions are in reserved[0..1]. */
     RS3_CAMERA_COMPLETE = 7u
 };
 
@@ -84,7 +85,7 @@ typedef struct rs3_camera
     int32_t client_screen_x; /**< Physical pixel origin, obtained with per-monitor DPI awareness. */
     int32_t client_screen_y;
     uint64_t process_creation_time;
-    uint32_t reserved[2];
+    uint32_t reserved[2]; /**< Physical client width and height when SCALED_VIEWPORT is set. */
 } rs3_camera;
 
 typedef struct rs3_spatial_info
@@ -111,12 +112,22 @@ typedef struct rs3_screen_point
     uint32_t reserved;
 } rs3_screen_point;
 
+/** Highest-priority closed-menu action and its destination, if it is a ground walk. */
+typedef struct rs3_pointer_walk
+{
+    uint64_t menu_cycle;
+    rs3_position tile;
+    int32_t action;
+    uint32_t valid;
+} rs3_pointer_walk;
+
 enum rs3_spatial_structure
 {
     RS3_SPATIAL_SIZE_ACTOR = 1,
     RS3_SPATIAL_SIZE_CAMERA,
     RS3_SPATIAL_SIZE_INFO,
-    RS3_SPATIAL_SIZE_SCREEN_POINT
+    RS3_SPATIAL_SIZE_SCREEN_POINT,
+    RS3_SPATIAL_SIZE_POINTER_WALK
 };
 
 /** Returns the ABI size for an rs3_spatial_structure, or zero. */
@@ -127,9 +138,12 @@ RS3_API int32_t rs3_snapshot_spatial(const rs3_snapshot *snapshot, rs3_spatial_i
 /** Copies NPC poses in the same order as rs3_snapshot_npcs; reports required capacity. */
 RS3_API int32_t rs3_snapshot_npc_spatial(const rs3_snapshot *snapshot, rs3_actor_spatial *out,
                                          uint32_t capacity, uint32_t *required);
+/** Copy the pointer's default action. Scene Walk uses the observed local player's plane. */
+RS3_API int32_t rs3_snapshot_pointer_walk(const rs3_snapshot *snapshot, rs3_pointer_walk *out,
+                                          uint32_t out_size);
 /**
  * Pure projection of a tile centre at an explicitly known terrain height, in fine units.
- * Terrain height is not yet mapped; callers must not substitute an assumed zero.
+ * Use rs3_hazard_terrain_height for sampled beam tiles.
  * Checks plane, finite inputs, camera validity, positive clip W and viewport bounds.
  * Consumers must additionally check age and process/scene identity before using the pixel.
  */

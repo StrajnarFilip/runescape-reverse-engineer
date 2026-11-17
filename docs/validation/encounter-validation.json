@@ -88,6 +88,21 @@
     "compatibility_mode_semantics": "Raw variable paths are supported; semantic validity is limited to the original profile that was captured.",
     "game_tick_phase_and_protection_deadlines": "The received ordinal counter is mapped on the original profile. Server phase, transport uncertainty and protection-check deadlines remain unknown."
   },
+  "compatibility_received_counter_2026_11_14": {
+    "client_sha256": "7a60c69fcf11eda42a328732721f5e89e1c85a6bc919038ff3451d4643e42dbf",
+    "handler_guard_rva": "0x36952d",
+    "handler_guard_bytes": "488b0db4803601ff81f0db0000e8910b8b00",
+    "owner_global_rva": "0x16d15e8",
+    "counter_offset": "0xdbf0",
+    "staging_probe_seconds": 12,
+    "valid_samples": 785,
+    "observed_transitions": 19,
+    "transition_deltas": [1],
+    "interval_median_ms": 599.4811,
+    "server_phase_validated": false,
+    "protection_deadline_validated": false,
+    "practice_attempt": "training-data/telos-20261114T081931.814573Z.jsonl"
+  },
   "input_sent": false,
   "raw_capture_committed": false,
   "checks": {

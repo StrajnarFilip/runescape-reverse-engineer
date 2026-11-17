@@ -15,6 +15,9 @@ This workspace contains the user's RS3 native-memory reader and live tracker.
 - Do not publish credentials, process-memory dumps, raw gameplay captures,
   Jagex game binaries/cache files, installed third-party tools or Ghidra databases.
   Keep source scripts, version profiles, findings and compact validation reports.
+- The later explicit logging request authorizes versioned, decoded per-attempt
+  JSONL under `training-data/`, including failed and incomplete encounters.
+  This exception does not authorize memory dumps, chat, credentials or game files.
 - No scheduled/background uploader is required; synchronize as part of completing
   authorized project work.
 

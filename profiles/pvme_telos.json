@@ -1,0 +1,956 @@
+{
+  "schema_version": 1,
+  "source_url": "https://pvme.io/pvme-guides/rs3-full-boss-guides/telos/melee/",
+  "reviewed_on": "2026-11-11",
+  "status": "guide_recipe_not_live_validated",
+  "binding_note": "The supplied screenshot does not establish all ability/gear bindings or EoF contents. Null means unknown, never a guessed key.",
+  "timing_note": "600ms is a planning tick, not a measured server clock. Null intervals and offsets require calibration. after_ticks is from the previous step start, or F8 release at a checkpoint.",
+  "tick_seconds": 0.6,
+  "hold_ms": 35,
+  "max_lateness_ms": 100,
+  "actions": {
+    "natural_instinct": {
+      "label": "Natural Instinct",
+      "binding": null
+    },
+    "dragon_battleaxe_spec": {
+      "label": "Equip Dragon battleaxe and activate its special",
+      "binding": null
+    },
+    "devotion": {
+      "label": "Devotion",
+      "binding": null
+    },
+    "surge": {
+      "label": "Surge",
+      "binding": null
+    },
+    "berserk": {
+      "label": "Berserk",
+      "binding": null
+    },
+    "adrenaline_renewal": {
+      "label": "Adrenaline renewal",
+      "binding": null
+    },
+    "greater_barge": {
+      "label": "Greater Barge",
+      "binding": null
+    },
+    "meteor_strike": {
+      "label": "Meteor Strike",
+      "binding": null
+    },
+    "assault": {
+      "label": "Assault",
+      "binding": null
+    },
+    "overpower": {
+      "label": "Overpower",
+      "binding": null
+    },
+    "ezk_spec": {
+      "label": "Equip Ek-ZekKil and activate its special",
+      "binding": null
+    },
+    "dragon_scimitar_spec": {
+      "label": "Equip Dragon scimitar and activate its special",
+      "binding": null
+    },
+    "hurricane": {
+      "label": "Hurricane",
+      "binding": null
+    },
+    "greater_fury": {
+      "label": "Greater Fury",
+      "binding": null
+    },
+    "zgs_spec": {
+      "label": "Equip Zaros godsword and activate its special",
+      "binding": null
+    },
+    "greater_flurry": {
+      "label": "Greater Flurry",
+      "binding": null
+    },
+    "chaos_roar": {
+      "label": "Chaos Roar",
+      "binding": null
+    },
+    "rend": {
+      "label": "Rend",
+      "binding": null
+    },
+    "adaptive_strike": {
+      "label": "Adaptive Strike",
+      "binding": null
+    },
+    "preparation": {
+      "label": "Preparation",
+      "binding": null
+    },
+    "reflect": {
+      "label": "Reflect",
+      "binding": null
+    },
+    "target_cycle_golem": {
+      "label": "Target cycle to the intended golem",
+      "binding": null
+    },
+    "anticipation": {
+      "label": "Anticipation with the guide-required perk/setup",
+      "binding": null
+    },
+    "divert": {
+      "label": "Divert",
+      "binding": null
+    },
+    "sticky_bomb": {
+      "label": "Sticky bomb",
+      "binding": null
+    },
+    "punish": {
+      "label": "Punish",
+      "binding": null
+    },
+    "melee_basic": {
+      "label": "A manually chosen suitable melee basic",
+      "binding": null
+    },
+    "resonance": {
+      "label": "Resonance",
+      "binding": null
+    },
+    "freedom": {
+      "label": "Freedom",
+      "binding": null
+    },
+    "varanus_eof": {
+      "label": "Equip the verified Varanus's Mercy EoF and activate EoF",
+      "binding": null
+    },
+    "dive": {
+      "label": "Dive (destination selection remains manual)",
+      "binding": null
+    },
+    "dismember": {
+      "label": "Dismember",
+      "binding": null
+    },
+    "ezk_stall": {
+      "label": "Stall the Ek-ZekKil special (requires calibrated setup)",
+      "binding": null
+    },
+    "ezk_release": {
+      "label": "Release the stalled Ek-ZekKil special (not a second spec)",
+      "binding": null
+    },
+    "disruption_shield": {
+      "label": "Disruption Shield",
+      "binding": null
+    },
+    "vitality": {
+      "label": "Powerburst of vitality",
+      "binding": null
+    },
+    "barge": {
+      "label": "Barge (guide distinguishes this from Greater Barge)",
+      "binding": null
+    },
+    "barricade": {
+      "label": "Barricade",
+      "binding": null
+    }
+  },
+  "choices": {
+    "red_finisher": {
+      "options": [
+        "hurricane",
+        "punish"
+      ],
+      "selected": "hurricane"
+    },
+    "green_filler": {
+      "options": [
+        "greater_fury",
+        "anticipation"
+      ],
+      "selected": "greater_fury"
+    },
+    "green_finisher": {
+      "options": [
+        "punish",
+        "hurricane"
+      ],
+      "selected": "punish"
+    }
+  },
+  "segments": {
+    "wars": {
+      "checkpoint": "At War's Retreat: manually verify at least two Bloodlust stacks, gear and supplies.",
+      "steps": [
+        {
+          "id": "natural_instinct",
+          "after_ticks": 0,
+          "actions": [
+            {
+              "name": "natural_instinct",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "battleaxe",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "dragon_battleaxe_spec",
+              "at_ms": 0
+            }
+          ]
+        }
+      ]
+    },
+    "p1": {
+      "checkpoint": "Confirm phase 1, target Telos, correct prayers, weapon setup and Surge direction.",
+      "steps": [
+        {
+          "id": "entry",
+          "after_ticks": 0,
+          "actions": [
+            {
+              "name": "devotion",
+              "at_ms": 0
+            },
+            {
+              "name": "surge",
+              "at_ms": null
+            }
+          ]
+        },
+        {
+          "id": "burst",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "berserk",
+              "at_ms": 0
+            },
+            {
+              "name": "adrenaline_renewal",
+              "at_ms": null
+            }
+          ]
+        },
+        {
+          "id": "barge",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "greater_barge",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "meteor",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "meteor_strike",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "assault",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "assault",
+              "at_ms": 0
+            }
+          ],
+          "note": "Verify Greater Barge setup; channel/bleed timing is not inferred."
+        },
+        {
+          "id": "overpower",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "overpower",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "ezk",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "ezk_spec",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "scimitar",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "dragon_scimitar_spec",
+              "at_ms": 0
+            }
+          ]
+        }
+      ]
+    },
+    "p2": {
+      "checkpoint": "Confirm phase 2 has started, Telos is targeted and the required weapons are equipped.",
+      "steps": [
+        {
+          "id": "delayed_barge",
+          "after_ticks": 1,
+          "actions": [
+            {
+              "name": "greater_barge",
+              "at_ms": 0
+            }
+          ],
+          "note": "Guide: one tick after phase entry. F8 is an operator cue, not a measured server tick."
+        },
+        {
+          "id": "assault",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "assault",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "overpower",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "overpower",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "hurricane",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "hurricane",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "fury",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "greater_fury",
+              "at_ms": 0
+            }
+          ]
+        }
+      ]
+    },
+    "p3": {
+      "checkpoint": "Confirm phase 3, target Telos, handle beams/prayers and verify ZGS switch setup.",
+      "steps": [
+        {
+          "id": "zgs",
+          "after_ticks": 0,
+          "actions": [
+            {
+              "name": "zgs_spec",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "barge",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "greater_barge",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "flurry",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "greater_flurry",
+              "at_ms": 0
+            }
+          ],
+          "note": "Calibrate the required channel length; do not assume one GCD."
+        },
+        {
+          "id": "roar",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "chaos_roar",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "overpower",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "overpower",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "rend",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "rend",
+              "at_ms": 0
+            }
+          ]
+        }
+      ]
+    },
+    "p4": {
+      "checkpoint": "Confirm phase 4 opening, target Telos and verify Greater Barge preparation.",
+      "steps": [
+        {
+          "id": "barge",
+          "after_ticks": 0,
+          "actions": [
+            {
+              "name": "greater_barge",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "assault",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "assault",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "hurricane",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "hurricane",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "adaptive",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "adaptive_strike",
+              "at_ms": 0
+            }
+          ]
+        }
+      ]
+    },
+    "font1": {
+      "checkpoint": "Confirm first font; manually move to and interact with the correct font.",
+      "steps": [
+        {
+          "id": "preparation",
+          "after_ticks": 0,
+          "actions": [
+            {
+              "name": "preparation",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "reflect",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "reflect",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "golem",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "target_cycle_golem",
+              "at_ms": 0
+            },
+            {
+              "name": "anticipation",
+              "at_ms": null
+            }
+          ]
+        },
+        {
+          "id": "divert",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "divert",
+              "at_ms": 0
+            }
+          ],
+          "checkpoint": "Verify the intended golem is targeted and font timing is correct."
+        },
+        {
+          "id": "adaptive_bomb",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "adaptive_strike",
+              "at_ms": 0
+            },
+            {
+              "name": "sticky_bomb",
+              "at_ms": null
+            }
+          ]
+        },
+        {
+          "id": "fury",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "greater_fury",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "telos",
+          "after_ticks": 0,
+          "actions": [
+            {
+              "name": "overpower",
+              "at_ms": 0
+            }
+          ],
+          "checkpoint": "Manually target Telos after the first font."
+        },
+        {
+          "id": "punish",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "punish",
+              "at_ms": 0
+            }
+          ]
+        }
+      ]
+    },
+    "font2": {
+      "checkpoint": "Confirm second font; move/interact manually and select the required target.",
+      "steps": [
+        {
+          "id": "adaptive",
+          "after_ticks": 0,
+          "actions": [
+            {
+              "name": "adaptive_strike",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "basic",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "melee_basic",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "meteor",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "meteor_strike",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "resonance",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "resonance",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "freedom_bomb",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "freedom",
+              "at_ms": 0
+            },
+            {
+              "name": "sticky_bomb",
+              "at_ms": null
+            }
+          ],
+          "note": "Guide places the bomb on the final GCD tick; calibrate its at_ms offset."
+        },
+        {
+          "id": "telos",
+          "after_ticks": 2,
+          "actions": [
+            {
+              "name": "greater_barge",
+              "at_ms": 0
+            }
+          ],
+          "checkpoint": "Manually target Telos. Align F8 release to the calibrated bomb/GCD cue.",
+          "note": "Guide specifies Barge two ticks later; that anchor needs live validation."
+        },
+        {
+          "id": "flurry",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "greater_flurry",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "eof_dive",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "varanus_eof",
+              "at_ms": 0
+            },
+            {
+              "name": "dive",
+              "at_ms": null
+            }
+          ],
+          "note": "Select the Dive destination manually after its key. Arduino has no pointer commands."
+        }
+      ]
+    },
+    "font3": {
+      "checkpoint": "Complete Dive manually. Confirm third font, move/interact and select the target.",
+      "steps": [
+        {
+          "id": "basic",
+          "after_ticks": 0,
+          "actions": [
+            {
+              "name": "melee_basic",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "anticipation",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "anticipation",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "adaptive",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "adaptive_strike",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "devotion",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "devotion",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "dismember",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "dismember",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "roar",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "chaos_roar",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "stall",
+          "after_ticks": 0,
+          "actions": [
+            {
+              "name": "ezk_stall",
+              "at_ms": 0
+            }
+          ],
+          "checkpoint": "Set up the calibrated EZK stall and Telos targeting state.",
+          "note": "The guide sEZK/rEZK distinction is a stall/release, not two ordinary specs."
+        },
+        {
+          "id": "release",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "ezk_release",
+              "at_ms": 0
+            }
+          ],
+          "checkpoint": "Verify the special is stalled; set the calibrated release position/target."
+        },
+        {
+          "id": "fury",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "greater_fury",
+              "at_ms": 0
+            }
+          ]
+        }
+      ]
+    },
+    "p5_red": {
+      "checkpoint": "Confirm phase 5 RED route, required adrenaline, Telos target and beam position.",
+      "steps": [
+        {
+          "id": "burst",
+          "after_ticks": 0,
+          "actions": [
+            {
+              "name": "berserk",
+              "at_ms": 0
+            },
+            {
+              "name": "adrenaline_renewal",
+              "at_ms": null
+            },
+            {
+              "name": "disruption_shield",
+              "at_ms": null
+            }
+          ]
+        },
+        {
+          "id": "barge",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "greater_barge",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "assault_dive",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "assault",
+              "at_ms": 0
+            },
+            {
+              "name": "dive",
+              "at_ms": null
+            }
+          ]
+        },
+        {
+          "id": "overpower",
+          "after_ticks": 0,
+          "actions": [
+            {
+              "name": "overpower",
+              "at_ms": 0
+            },
+            {
+              "name": "vitality",
+              "at_ms": null
+            }
+          ],
+          "checkpoint": "Complete Dive destination manually and confirm the red-beam position."
+        },
+        {
+          "id": "eof",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "varanus_eof",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "finish",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "$red_finisher",
+              "at_ms": 0
+            }
+          ]
+        }
+      ]
+    },
+    "p5_green": {
+      "checkpoint": "Confirm phase 5 GREEN fallback for low adrenaline, target and beam position.",
+      "steps": [
+        {
+          "id": "burst",
+          "after_ticks": 0,
+          "actions": [
+            {
+              "name": "berserk",
+              "at_ms": 0
+            },
+            {
+              "name": "adrenaline_renewal",
+              "at_ms": null
+            },
+            {
+              "name": "disruption_shield",
+              "at_ms": null
+            }
+          ]
+        },
+        {
+          "id": "barge",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "barge",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "assault_dive",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "assault",
+              "at_ms": 0
+            },
+            {
+              "name": "dive",
+              "at_ms": null
+            }
+          ]
+        },
+        {
+          "id": "filler",
+          "after_ticks": 0,
+          "actions": [
+            {
+              "name": "$green_filler",
+              "at_ms": 0
+            }
+          ],
+          "checkpoint": "Complete Dive destination manually and confirm the green-beam position."
+        },
+        {
+          "id": "barricade",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "barricade",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "overpower",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "overpower",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "eof_first",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "varanus_eof",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "eof_second",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "varanus_eof",
+              "at_ms": 0
+            }
+          ]
+        },
+        {
+          "id": "finish",
+          "after_ticks": null,
+          "actions": [
+            {
+              "name": "$green_finisher",
+              "at_ms": 0
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

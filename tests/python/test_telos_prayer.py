@@ -183,6 +183,9 @@ class TelosActionTests(unittest.TestCase):
         self.assertEqual([row["event_sequence"] for row in rows], [1, 2])
         self.assertTrue(all(row["isolated_p1_melee_sequence_lead"] for row in rows))
         self.assertTrue(all("user_labeled_melee_auto" not in row for row in rows))
+        rows = telos_actions(events, (1, 2, 3), 14, {7}, additional_samples={13: 20})
+        self.assertEqual([row["event_sequence"] for row in rows], [1, 2, 4])
+        self.assertEqual(rows[-1]["received_tick"], 20)
 
 
 class ManualPrayerKeyTests(unittest.TestCase):
@@ -338,6 +341,24 @@ class ReadOnlyRecorderTests(unittest.TestCase):
                 0,
             )
         telemetry.sample.assert_not_called()
+
+    def test_cli_shadow_trial_records_decisions_without_enabling_live_trial(self):
+        keys = SimpleNamespace(game_window=1234)
+        with (
+            patch("sys.argv", ["telos_prayer", "--pid", "123", "--shadow-trial"]),
+            patch.object(telos_prayer, "ManualPrayerKeys", return_value=keys),
+            patch.object(telos_prayer, "Reader") as reader,
+            patch.object(telos_prayer, "NativeTelemetry") as telemetry,
+            patch.object(telos_prayer, "observe", return_value=0) as observe,
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            telos_prayer.main()
+        reader.assert_called_once_with(pid=123, worker_hz=0)
+        self.assertIs(observe.call_args.args[4], keys)
+        self.assertEqual(observe.call_args.args[5], keys.game_window)
+        self.assertTrue(observe.call_args.kwargs["shadow"])
+        telemetry.assert_not_called()
 
     def test_cli_uses_read_only_synchronous_sampler_and_closes_on_recording_error(self):
         telemetry, _ = self.telemetry()

@@ -1,11 +1,13 @@
 /* Run the actual sketch against non-HID host stubs. No serial device is opened. */
 #include <Arduino.h>
 #include <Keyboard.h>
+#include <Mouse.h>
 
 unsigned long testMillis = 0;
 FakeUSB USBDevice;
 FakeSerial Serial;
 FakeKeyboard Keyboard;
+FakeMouse Mouse;
 
 #include "../serial_keyboard.ino"
 
@@ -39,9 +41,14 @@ int main()
     assert(!Keyboard.held[KEY_LEFT_CTRL]);
     command("PRESS 04\n", "OK");
     command("TAP 04\n", "ERR HELD");
+    command("MOVE -127 127\n", "OK");
+    assert(Mouse.x == -127 && Mouse.y == 127);
+    command("DOWN L\n", "OK");
+    assert(Mouse.held == MOUSE_LEFT);
     Serial.open = false;
     loop();
     assert(!Keyboard.held[140]);
+    assert(!Mouse.held);
     Serial.open = true;
     command("RELEASE_ALL\r\n", "OK");
     command("PRESS 123456789012345\n", "ERR FRAME");

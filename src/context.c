@@ -89,10 +89,13 @@ static void copy_frame(rs3_snapshot *destination, const rs3_snapshot *source)
     destination->profile = source->profile;
     destination->position = source->position;
     destination->combat = source->combat;
+    destination->auto_retaliate = source->auto_retaliate;
     destination->spatial = source->spatial;
     memcpy(destination->npc_spatial, source->npc_spatial,
            source->spatial.npc_count * sizeof(rs3_actor_spatial));
     destination->encounter = source->encounter;
+    destination->pointer_walk = source->pointer_walk;
+    destination->telos_cleanse = source->telos_cleanse;
     destination->encounter_tick_owner = source->encounter_tick_owner;
     destination->encounter_tick_world_state = source->encounter_tick_world_state;
     destination->encounter_tick_last_change_ns = source->encounter_tick_last_change_ns;
@@ -141,6 +144,7 @@ static void clear_unavailable_frame(rs3_context *context, rs3_snapshot *snapshot
     snapshot->spatial.status = RS3_UNAVAILABLE;
     snapshot->spatial.reason = context->failure_reason;
     encounter_clear(snapshot);
+    snapshot->pointer_walk = (rs3_pointer_walk){0};
     snapshot->encounter.status = RS3_UNAVAILABLE;
     snapshot->encounter.reason = context->failure_reason;
 
@@ -198,6 +202,7 @@ static void sample_and_publish(rs3_context *context, rs3_snapshot *snapshot)
     memset(&snapshot->combat, 0, sizeof snapshot->combat);
     memset(&snapshot->spatial, 0, sizeof snapshot->spatial);
     encounter_clear(snapshot);
+    snapshot->pointer_walk = (rs3_pointer_walk){0};
     memset(&snapshot->player_hit_info, 0, sizeof snapshot->player_hit_info);
     snapshot->player_actor_address = 0;
     memset(&snapshot->inventory_info, 0, sizeof snapshot->inventory_info);

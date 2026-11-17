@@ -35,8 +35,8 @@
 #define NPC_ACTION_EVENT_CAPACITY 4096u
 /** Capacity of the local-player hit event queue. */
 #define PLAYER_HIT_EVENT_CAPACITY 4096u
-/** Exclusive upper bound of valid tile coordinates. */
-#define MAX_TILE_COORDINATE 12800
+/** Exclusive upper bound of tile coordinates, including instances above the main map. */
+#define MAX_TILE_COORDINATE 16384
 /** Capacity of one actor's hit mark ring. */
 #define MAX_HITS_PER_RING 64u
 /** Number of distinct NPC runtime IDs (16-bit). */
@@ -72,9 +72,12 @@ struct rs3_snapshot
     rs3_effect effects[RS3_EFFECT_COUNT];
     rs3_position position;
     rs3_combat_state combat;
+    int32_t auto_retaliate;
     rs3_spatial_info spatial;
+    rs3_pointer_walk pointer_walk;
     rs3_actor_spatial npc_spatial[RS3_MAX_NPCS];
     rs3_encounter_state encounter;
+    rs3_telos_cleanse telos_cleanse;
     /* P2 adjacency baseline; never part of the public snapshot ABI. */
     uint64_t encounter_tick_owner;
     uint64_t encounter_tick_world_state;
@@ -224,6 +227,10 @@ struct rs3_context
     player_change_tracker player_changes;
     npc_tracker npcs;
     combat_tracker combat;
+    uint64_t cleanse_chat_manager;
+    uint64_t cleanse_process_creation_time;
+    uint32_t cleanse_chat_next;
+    rs3_telos_cleanse cleanse_chat_cached;
 
     /* Bounded observation queues, protected by event_queue_lock. */
     rs3_event *hit_events;

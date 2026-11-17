@@ -1,9 +1,13 @@
 #include <Arduino.h>
 #include <Keyboard.h>
+#include <Mouse.h>
+#include <stdlib.h>
 #include <string.h>
 
 static constexpr unsigned long serialBaud = 115200;
-static constexpr size_t lineCapacity = sizeof("RELEASE_ALL\r");
+static constexpr size_t lineCapacity = sizeof("MOVE -127 -127\r");
+static constexpr long mouseDeltaLimit = 127;
+static constexpr unsigned long mouseClickMillis = 25;
 static constexpr uint8_t firstKeyUsage = 0x04;
 static constexpr uint8_t lastKeyUsage = 0x73;
 static constexpr uint8_t firstModifierUsage = 0xE0;
@@ -57,10 +61,70 @@ static int parseUsage(const char *argument)
     return -1;
 }
 
-static void releaseAllKeys()
+static void releaseAllInput()
 {
     Keyboard.releaseAll();
     memset(heldKeys, 0, sizeof(heldKeys));
+    Mouse.release(MOUSE_ALL);
+}
+
+static bool parseMouseDelta(const char *argument, char **end, long *value)
+{
+    *value = strtol(argument, end, 10);
+    return *end != argument && *value >= -mouseDeltaLimit && *value <= mouseDeltaLimit;
+}
+
+static const __FlashStringHelper *moveMouse(const char *argument)
+{
+    long horizontal;
+    long vertical;
+    char *end;
+    if (!parseMouseDelta(argument, &end, &horizontal) || *end != ' ' ||
+        !parseMouseDelta(end + 1, &end, &vertical) || *end != '\0')
+    {
+        return F("ERR MOUSE");
+    }
+    Mouse.move(horizontal, vertical, 0);
+    return F("OK");
+}
+
+static uint8_t parseMouseButton(const char *argument)
+{
+    if (strcmp(argument, "L") == 0)
+    {
+        return MOUSE_LEFT;
+    }
+    if (strcmp(argument, "R") == 0)
+    {
+        return MOUSE_RIGHT;
+    }
+    if (strcmp(argument, "M") == 0)
+    {
+        return MOUSE_MIDDLE;
+    }
+    return 0;
+}
+
+static const __FlashStringHelper *mouseButtonCommand(const char *argument, bool press, bool release)
+{
+    const uint8_t button = parseMouseButton(argument);
+    if (button == 0)
+    {
+        return F("ERR MOUSE");
+    }
+    if (press)
+    {
+        Mouse.press(button);
+    }
+    if (press && release)
+    {
+        delay(mouseClickMillis);
+    }
+    if (release)
+    {
+        Mouse.release(button);
+    }
+    return F("OK");
 }
 
 static const __FlashStringHelper *runCommand()
@@ -76,7 +140,7 @@ static const __FlashStringHelper *runCommand()
     }
     if (strcmp(commandLine, "RELEASE_ALL") == 0)
     {
-        releaseAllKeys();
+        releaseAllInput();
         return F("OK");
     }
 
@@ -87,6 +151,34 @@ static const __FlashStringHelper *runCommand()
     }
     *argument = '\0';
     ++argument;
+
+    if (strcmp(commandLine, "MOVE") == 0)
+    {
+        return moveMouse(argument);
+    }
+    if (strcmp(commandLine, "CLICK") == 0)
+    {
+        return mouseButtonCommand(argument, true, true);
+    }
+    if (strcmp(commandLine, "DOWN") == 0)
+    {
+        return mouseButtonCommand(argument, true, false);
+    }
+    if (strcmp(commandLine, "UP") == 0)
+    {
+        return mouseButtonCommand(argument, false, true);
+    }
+    if (strcmp(commandLine, "WHEEL") == 0)
+    {
+        long delta;
+        char *end;
+        if (!parseMouseDelta(argument, &end, &delta) || *end != '\0')
+        {
+            return F("ERR MOUSE");
+        }
+        Mouse.move(0, 0, delta);
+        return F("OK");
+    }
 
     const bool isPress = strcmp(commandLine, "PRESS") == 0;
     const bool isRelease = strcmp(commandLine, "RELEASE") == 0;
@@ -138,21 +230,22 @@ static const __FlashStringHelper *runCommand()
     return F("OK");
 }
 
-/// Initialize the Leonardo's native USB serial and keyboard interfaces.
+/// Initialize the Leonardo's native USB serial and HID interfaces.
 void setup()
 {
     Serial.begin(serialBaud);
     Keyboard.begin();
+    Mouse.begin();
 }
 
-/// Read serial commands while DTR is asserted and clear keyboard state on close.
+/// Read serial commands while DTR is asserted and release input on close.
 void loop()
 {
     if (!USBDevice.configured() || !Serial.dtr())
     {
         if (portWasOpen)
         {
-            releaseAllKeys();
+            releaseAllInput();
             lineLength = 0;
             discardLine = false;
             portWasOpen = false;
@@ -169,7 +262,7 @@ void loop()
     }
     if (keysAreHeld && millis() - lastCommandMs >= heldTimeoutMs)
     {
-        releaseAllKeys();
+        releaseAllInput();
         lineLength = 0;
         discardLine = false;
     }

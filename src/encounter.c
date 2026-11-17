@@ -5,26 +5,47 @@
 #include <string.h>
 
 #include "clock.h"
+#include "decode_utils.h"
 #include "memory.h"
 #include "variables.h"
 
-#define TELOS_PACKED_VARP        6363u
-#define TELOS_STAGE_VARBIT       32640u
-#define TELOS_STAGE_SHIFT        21u
-#define TELOS_STAGE_MASK         7u
-#define TELOS_INSTANCE_VARP      6359u
-#define TELOS_ENRAGE_VARBIT      32626u
-#define TELOS_ENRAGE_MASK        4095u
-#define MAX_SUPPORTED_ENRAGE     4000u
-#define ACTIVE_TELOS_CONFIG_ID   22891
-#define LAST_VALIDATED_STAGE     3u
-#define TELOS_INSTANCE_GUARD_BIT (1u << 29)
-#define TICK_HANDLER_GUARD_RVA   0x36960du
-#define TICK_OWNER_GLOBAL_RVA    0x17345a8u
-#define TICK_COUNTER_OFFSET      0xdbf0u
-#define TICK_MAX_SAMPLE_GAP_NS   150000000ull
-#define TICK_MAX_STALL_NS        1500000000ull
-#define TICK_MAX_FORWARD_STEP    4u
+#define TELOS_PACKED_VARP          6363u
+#define TELOS_STAGE_VARBIT         32640u
+#define TELOS_STAGE_SHIFT          21u
+#define TELOS_STAGE_MASK           7u
+#define TELOS_INSTANCE_VARP        6359u
+#define TELOS_ENRAGE_VARBIT        32626u
+#define TELOS_ENRAGE_MASK          4095u
+#define MAX_SUPPORTED_ENRAGE       4000u
+#define ACTIVE_TELOS_CONFIG_ID     22891
+#define LAST_VALIDATED_STAGE       3u
+#define TELOS_INSTANCE_GUARD_BIT   (1u << 29)
+#define ZERO_ENRAGE_MAX_HP         400000u
+#define ZERO_ENRAGE_PHASE_HP       100000u
+#define COMPAT_LAST_OBSERVED_STAGE 2u
+#define TICK_HANDLER_GUARD_RVA     0x36960du
+#define TICK_OWNER_GLOBAL_RVA      0x17345a8u
+#define COMPAT_TICK_HANDLER_RVA    0x36952du
+#define COMPAT_TICK_OWNER_RVA      0x16d15e8u
+#define TICK_COUNTER_OFFSET        0xdbf0u
+#define TICK_MAX_SAMPLE_GAP_NS     150000000ull
+#define TICK_MAX_STALL_NS          1500000000ull
+#define TICK_MAX_FORWARD_STEP      4u
+#define CHAT_MANAGER_OFFSET        0x19888u
+#define CHAT_MANAGER_VTABLE_RVA    0x150d828u
+#define CHAT_GETTER_RVA            0x350f49u
+#define CHAT_NEXT_SEQUENCE         0x18u
+#define CHAT_BUCKET_ARRAY          0x8c0u
+#define CHAT_BUCKET_COUNT          0x8c8u
+#define CHAT_NODE_NEXT             0xb8u
+#define CHAT_NODE_MESSAGE_ID       0x10u
+#define CHAT_NODE_LOGIC_TICK       0x14u
+#define CHAT_NODE_TYPE             0x20u
+#define CHAT_NODE_MESSAGE          0x90u
+#define CHAT_INLINE_BYTES          24u
+#define CHAT_LOOKBACK              64u
+#define CHAT_MAX_BUCKETS           65536u
+#define CHAT_MAX_CHAIN             32u
 
 /* Raw channels include calibrated sources and neighbouring candidates; presence alone proves no
  * semantics. */
@@ -35,10 +56,13 @@ _Static_assert(sizeof(rs3_encounter_value) == 32, "ABI encounter value");
 _Static_assert(sizeof(rs3_encounter_raw) == 32, "ABI encounter raw");
 _Static_assert(sizeof(rs3_game_tick) == 40, "ABI game tick");
 _Static_assert(sizeof(rs3_encounter_state) == 472, "ABI encounter state");
+_Static_assert(sizeof(rs3_telos_cleanse) == 16, "ABI Telos cleanse");
 
 void encounter_clear(rs3_snapshot *snapshot)
 {
     memset(&snapshot->encounter, 0, sizeof snapshot->encounter);
+    snapshot->auto_retaliate = -1;
+    snapshot->telos_cleanse = (rs3_telos_cleanse){.reason = RS3_ENCOUNTER_UNMAPPED};
     snapshot->encounter.game_tick.phase_ms = NAN;
     snapshot->encounter.game_tick.uncertainty_ms = NAN;
     snapshot->encounter_tick_owner = 0;
@@ -48,32 +72,37 @@ void encounter_clear(rs3_snapshot *snapshot)
     snapshot->encounter_tick_primed = 0;
 }
 
-/** Read the original executable's received-tick counter; never estimate a server phase. */
+/** Read the received-tick counter from a pinned handler for either supported executable. */
 static void stage_game_tick(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_state)
 {
     rs3_game_tick *tick = &snapshot->encounter.game_tick;
     static const unsigned char handler_guard[] = {0x48, 0x8b, 0x0d, 0x94, 0xaf, 0x3c,
                                                   0x01, 0xff, 0x81, 0xf0, 0xdb, 0x00,
                                                   0x00, 0xe8, 0xc1, 0x0c, 0x8b, 0x00};
+    static const unsigned char compat_guard[] = {0x48, 0x8b, 0x0d, 0xb4, 0x80, 0x36,
+                                                 0x01, 0xff, 0x81, 0xf0, 0xdb, 0x00,
+                                                 0x00, 0xe8, 0x91, 0x0b, 0x8b, 0x00};
     unsigned char observed_guard[sizeof handler_guard];
-    if (context->target.profile != &profile_primary ||
+    const client_profile *profile = context->target.profile;
+    int compatibility = profile == &profile_compatibility;
+    uint32_t handler_rva = compatibility ? COMPAT_TICK_HANDLER_RVA : TICK_HANDLER_GUARD_RVA;
+    uint32_t owner_rva = compatibility ? COMPAT_TICK_OWNER_RVA : TICK_OWNER_GLOBAL_RVA;
+    if ((!compatibility && profile != &profile_primary) ||
         snapshot->combat.scene_state != (int32_t)LAYOUT_IN_GAME_STATE || !world_state ||
-        !memory_read(context, context->target.module_base + TICK_HANDLER_GUARD_RVA, observed_guard,
+        !memory_read(context, context->target.module_base + handler_rva, observed_guard,
                      sizeof observed_guard) ||
-        memcmp(observed_guard, handler_guard, sizeof handler_guard))
+        memcmp(observed_guard, compatibility ? compat_guard : handler_guard, sizeof observed_guard))
     {
         return;
     }
     uint64_t owner, owner_after;
     uint32_t counter, counter_after;
     tick->reason = RS3_READ_FAILED;
-    if (!memory_read_pointer(context, context->target.module_base + TICK_OWNER_GLOBAL_RVA,
-                             &owner) ||
-        !owner || !memory_read(context, owner + TICK_COUNTER_OFFSET, &counter, sizeof counter) ||
+    if (!memory_read_pointer(context, context->target.module_base + owner_rva, &owner) || !owner ||
+        !memory_read(context, owner + TICK_COUNTER_OFFSET, &counter, sizeof counter) ||
         !memory_read(context, owner + TICK_COUNTER_OFFSET, &counter_after, sizeof counter_after) ||
         counter_after != counter ||
-        !memory_read_pointer(context, context->target.module_base + TICK_OWNER_GLOBAL_RVA,
-                             &owner_after) ||
+        !memory_read_pointer(context, context->target.module_base + owner_rva, &owner_after) ||
         owner_after != owner)
     {
         return;
@@ -149,15 +178,19 @@ static void invalidate_semantics(rs3_encounter_state *state)
 
 /** Match the single captured active form; dormant entities and duplicate forms cannot authorize
  * data. */
-static int has_active_telos(const rs3_snapshot *snapshot)
+static const rs3_npc *active_telos(const rs3_snapshot *snapshot)
 {
-    unsigned matches = 0;
+    const rs3_npc *active = NULL;
     for (uint32_t index = 0; index < snapshot->info.npc_count; index++)
     {
         const rs3_npc *npc = &snapshot->npcs[index];
         if ((npc->flags & RS3_NPC_CONFIG) && npc->config_id == ACTIVE_TELOS_CONFIG_ID)
         {
-            matches++;
+            if (active != NULL)
+            {
+                return NULL;
+            }
+            active = npc;
         }
     }
     int instance_guard = 0;
@@ -169,7 +202,189 @@ static int has_active_telos(const rs3_snapshot *snapshot)
             instance_guard = ((uint32_t)raw->value & TELOS_INSTANCE_GUARD_BIT) != 0;
         }
     }
-    return matches == 1 && instance_guard;
+    return instance_guard ? active : NULL;
+}
+
+/** Read just the exact system line confirmed by the 250% P2 capture. */
+static int read_cleanse_node(rs3_context *context, uint64_t node, uint32_t message,
+                             rs3_telos_cleanse *out)
+{
+    static const char expected[] = "<col=EB2F2F>The anima stream cleanses you.";
+    unsigned char metadata[CHAT_NODE_TYPE + sizeof(uint32_t)];
+    unsigned char string[CHAT_INLINE_BYTES];
+    if (!memory_read(context, node, metadata, sizeof metadata))
+    {
+        return 0;
+    }
+    if (decode_u32(metadata) != message || decode_u32(metadata + CHAT_NODE_MESSAGE_ID) != message ||
+        decode_u32(metadata + CHAT_NODE_TYPE) != 0)
+    {
+        return 1;
+    }
+    if (!memory_read(context, node + CHAT_NODE_MESSAGE, string, sizeof string))
+    {
+        return 0;
+    }
+    if (!(string[CHAT_INLINE_BYTES - 1] & 0x80u) || decode_u64(string + 8) != sizeof expected - 1)
+    {
+        return 1;
+    }
+    char text[sizeof expected];
+    unsigned char after[sizeof metadata];
+    unsigned char string_after[sizeof string];
+    if (!memory_read(context, decode_u64(string), text, sizeof text))
+    {
+        return 0;
+    }
+    if (memcmp(text, expected, sizeof expected) != 0)
+    {
+        return 1;
+    }
+    if (!memory_read(context, node, after, sizeof after) ||
+        memcmp(metadata, after, sizeof metadata) ||
+        !memory_read(context, node + CHAT_NODE_MESSAGE, string_after, sizeof string_after) ||
+        memcmp(string, string_after, sizeof string))
+    {
+        return 0;
+    }
+    *out = (rs3_telos_cleanse){message, decode_u32(metadata + CHAT_NODE_LOGIC_TICK), 1,
+                               RS3_REASON_NONE};
+    return 1;
+}
+
+void encounter_stage_cleanse(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_state)
+{
+    rs3_telos_cleanse *out = &snapshot->telos_cleanse;
+    if (context->target.profile != &profile_compatibility || !snapshot->encounter.stage_raw.valid ||
+        snapshot->encounter.stage_raw.value < 1 || active_telos(snapshot) == NULL)
+    {
+        return;
+    }
+    static const unsigned char getter[] = {0x48, 0x8b, 0x98, 0x88, 0x98, 1, 0};
+    unsigned char bytes[sizeof getter];
+    uint64_t module = context->target.module_base;
+    if (!memory_read(context, module + CHAT_GETTER_RVA, bytes, sizeof bytes) ||
+        memcmp(getter, bytes, sizeof bytes))
+    {
+        return;
+    }
+    out->reason = RS3_READ_FAILED;
+    uint64_t manager, vtable, buckets;
+    uint32_t next, count;
+    if (!memory_read_pointer(context, world_state + CHAT_MANAGER_OFFSET, &manager) || !manager ||
+        !memory_read_pointer(context, manager, &vtable) ||
+        vtable != module + CHAT_MANAGER_VTABLE_RVA ||
+        !memory_read(context, manager + CHAT_NEXT_SEQUENCE, &next, sizeof next) ||
+        !memory_read_pointer(context, manager + CHAT_BUCKET_ARRAY, &buckets) || !buckets ||
+        !memory_read(context, manager + CHAT_BUCKET_COUNT, &count, sizeof count) || !count ||
+        count > CHAT_MAX_BUCKETS)
+    {
+        return;
+    }
+    if (context->cleanse_chat_manager == manager && context->cleanse_chat_next == next &&
+        context->cleanse_process_creation_time == context->target.process_creation_time)
+    {
+        *out = context->cleanse_chat_cached;
+        return;
+    }
+    rs3_telos_cleanse candidate = {.reason = RS3_NOT_SET};
+    uint64_t sentinel;
+    if (!memory_read(context, buckets + count * sizeof(uint64_t), &sentinel, sizeof sentinel))
+    {
+        return;
+    }
+    for (uint32_t offset = 1; offset <= CHAT_LOOKBACK && offset <= next && !candidate.valid;
+         offset++)
+    {
+        uint32_t message = next - offset;
+        uint64_t node;
+        if (!memory_read(context, buckets + (message % count) * sizeof(uint64_t), &node,
+                         sizeof node))
+        {
+            return;
+        }
+        for (unsigned link = 0; node && node != sentinel; link++)
+        {
+            uint32_t key;
+            if (link == CHAT_MAX_CHAIN || !memory_read(context, node, &key, sizeof key))
+            {
+                return;
+            }
+            if (key == message)
+            {
+                if (!read_cleanse_node(context, node, message, &candidate))
+                {
+                    return;
+                }
+                break;
+            }
+            if (!memory_read(context, node + CHAT_NODE_NEXT, &node, sizeof node))
+            {
+                return;
+            }
+        }
+    }
+    uint64_t manager_after, buckets_after;
+    uint32_t next_after, count_after;
+    if (memory_read_pointer(context, world_state + CHAT_MANAGER_OFFSET, &manager_after) &&
+        manager == manager_after &&
+        memory_read(context, manager + CHAT_NEXT_SEQUENCE, &next_after, sizeof next_after) &&
+        next == next_after &&
+        memory_read_pointer(context, manager + CHAT_BUCKET_ARRAY, &buckets_after) &&
+        buckets == buckets_after &&
+        memory_read(context, manager + CHAT_BUCKET_COUNT, &count_after, sizeof count_after) &&
+        count == count_after)
+    {
+        *out = candidate;
+        context->cleanse_chat_manager = manager;
+        context->cleanse_chat_next = next;
+        context->cleanse_process_creation_time = context->target.process_creation_time;
+        context->cleanse_chat_cached = candidate;
+    }
+}
+
+/** Calibrated 0% phases on Compatibility Mode, with corroborating transmitted HP. */
+static void decode_compatibility_attempt(rs3_encounter_state *state, const rs3_npc *active)
+{
+    /* The enrage varbit is server data. On Compatibility Mode its low bits matched the chat
+     * announcement at 0%, 100%, 250% and 500% (2026-11-14), from staging onwards. */
+    for (uint32_t index = 0; index < state->raw_count; index++)
+    {
+        const rs3_encounter_raw *raw = &state->raw[index];
+        if (raw->varp_id == TELOS_INSTANCE_VARP && raw->valid && raw->value >= INT32_MIN &&
+            raw->value <= UINT32_MAX &&
+            ((uint32_t)raw->value & TELOS_ENRAGE_MASK) <= MAX_SUPPORTED_ENRAGE)
+        {
+            state->enrage = (rs3_encounter_value){.value = (uint32_t)raw->value & TELOS_ENRAGE_MASK,
+                                                  .observed_ns = raw->observed_ns,
+                                                  .valid = 1,
+                                                  .source_varp = TELOS_INSTANCE_VARP,
+                                                  .source_varbit = TELOS_ENRAGE_VARBIT};
+            break;
+        }
+    }
+    if (active == NULL)
+    {
+        state->phase.reason = RS3_ENCOUNTER_NOT_ACTIVE;
+        return;
+    }
+    /* Phase semantics remain calibrated for 0% only. */
+    if (!(active->flags & RS3_NPC_HEALTH) || active->health_max != ZERO_ENRAGE_MAX_HP ||
+        state->enrage.value != 0)
+    {
+        return;
+    }
+    if (state->enrage.valid && state->stage_raw.valid &&
+        state->stage_raw.value <= COMPAT_LAST_OBSERVED_STAGE)
+    {
+        int64_t upper = ZERO_ENRAGE_MAX_HP - state->stage_raw.value * ZERO_ENRAGE_PHASE_HP;
+        if (active->health_current >= upper - ZERO_ENRAGE_PHASE_HP &&
+            active->health_current <= upper)
+        {
+            state->phase = state->stage_raw;
+            state->phase.value++;
+        }
+    }
 }
 
 void encounter_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t player_address,
@@ -189,6 +404,22 @@ void encounter_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t play
     variable_table table;
     uint64_t header = player_address + LAYOUT_PLAYER_VARIABLE_TABLE_OFFSET;
     int opened = variable_table_open(context, header, &table);
+    /* Compatibility Mode: five live toggles correlated the settings icon with VARP 462. */
+    static const uint32_t auto_retaliate_varp = 462;
+    if (opened && context->target.profile == &profile_compatibility)
+    {
+        int first_present, second_present;
+        int64_t first_value, second_value;
+        if (variable_table_find(context, &table, auto_retaliate_varp, &first_value,
+                                &first_present) &&
+            first_present &&
+            variable_table_find(context, &table, auto_retaliate_varp, &second_value,
+                                &second_present) &&
+            second_present && first_value == second_value && (first_value == 0 || first_value == 1))
+        {
+            snapshot->auto_retaliate = first_value == 0;
+        }
+    }
     for (uint32_t index = 0; index < RS3_ENCOUNTER_RAW_CAPACITY; index++)
     {
         rs3_encounter_raw *raw = &state->raw[index];
@@ -217,6 +448,7 @@ void encounter_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t play
     }
     if (!opened || !variable_table_unchanged(context, header, &table))
     {
+        snapshot->auto_retaliate = -1;
         for (uint32_t index = 0; index < state->raw_count; index++)
         {
             state->raw[index].valid = 0;
@@ -246,7 +478,7 @@ void encounter_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t play
     /* These semantics were calibrated only on the original profile, phases 1..4. */
     if (context->target.profile == &profile_primary)
     {
-        if (!has_active_telos(snapshot))
+        if (active_telos(snapshot) == NULL)
         {
             state->phase.reason = RS3_ENCOUNTER_NOT_ACTIVE;
             state->enrage.reason = RS3_ENCOUNTER_NOT_ACTIVE;
@@ -291,6 +523,10 @@ void encounter_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t play
             }
         }
     }
+    else if (context->target.profile == &profile_compatibility)
+    {
+        decode_compatibility_attempt(state, active_telos(snapshot));
+    }
     /* A predicted cadence or client_logic_tick / 30 never validates a game tick. */
 }
 
@@ -316,6 +552,8 @@ uint32_t rs3_encounter_sizeof(uint32_t structure)
             return sizeof(rs3_game_tick);
         case RS3_ENCOUNTER_SIZE_STATE:
             return sizeof(rs3_encounter_state);
+        case RS3_ENCOUNTER_SIZE_TELOS_CLEANSE:
+            return sizeof(rs3_telos_cleanse);
         default:
             return 0;
     }

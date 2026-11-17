@@ -13,9 +13,13 @@ The installed, running executable on 2026-11-11 is the original 951-3 profile
 (``fd8afd32...358d45``), not the Compatibility Mode executable selected by S0b.
 P1 currently enables these new fields only on that original profile, after
 checking additional position, facing and projection instruction signatures.
-Compatibility Mode remains explicitly unsupported by P1 until its additional
-spatial layouts/signatures can be checked; its existing position reader remains
-unchanged. This does not change the roadmap's chosen eventual runtime profile.
+Compatibility Mode ``6ada3f59-1a86000`` now supplies player and NPC tiles. The
+player and NPC vtable entries at ``+0xb0`` both resolve to the guarded getter at
+``0x6ee110``. The base constructor stores the world owner at ``+0x60`` (guarded
+instruction at ``0x38523``). Actor poses require the matching vtable, runtime
+ID and two consistent reads. The local-player NPC target resolver has matching
+instruction guards at ``0x3ffe86`` and ``0x3ffeb0``. Compatibility Mode camera
+and facing remain unmapped.
 
 The 2026-11-13 P1 update also publishes the original profile's guarded player
 tile through ``rs3_snapshot_position``. It copies the committed P1 pose after
@@ -48,6 +52,11 @@ Actor fields on the original profile:
   unknown. An entity reference can also identify a familiar's owner or follow
   target: it does not declare an attack, damage style or protection deadline.
 
+  Extra loaded-code guards pin the kind and UID reads. Only the observed NPC
+  kind and explicit clear are enabled; player-versus-player and NPC attack
+  targets remain unmapped. Torn target reads preserve a usable pose while
+  making the target unknown.
+
 Camera and projection
 ---------------------
 
@@ -66,11 +75,17 @@ window using a temporarily per-monitor-aware thread DPI context. The previous
 DPI context is restored. A viewport outside the physical client rectangle,
 multiple windows or an unavailable origin invalidates physical projection.
 This does not move/focus the window or pointer and reads no screenshot.
+On Compatibility Mode, a full-origin viewport whose dimensions scale
+proportionally to the physical client rectangle uses the physical extent for
+tile and actor projection. The raw viewport remains available in the camera
+record. ``RS3_CAMERA_SCALED_VIEWPORT`` marks the physical width and height in
+``reserved[0..1]``.
 
 ``rs3_project_actor`` projects the observed actor position plus a supplied
 vertical offset. ``rs3_project_tile`` requires an explicit terrain height in
-fine units: the height map is not yet mapped, and unknown height must not
-default to zero. Both reject an unknown camera, wrong plane, non-finite inputs,
+fine units. The Compatibility Mode beam reader also exposes a sampled height
+per tile through ``rs3_hazard_terrain_height``. Both projection calls reject an unknown
+camera, wrong plane, non-finite inputs,
 nonpositive clip W and points outside the viewport. A projected point does not
 establish visibility through occluding geometry or UI overlays.
 

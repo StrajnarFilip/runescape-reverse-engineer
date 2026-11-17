@@ -1,0 +1,83 @@
+# Telos beam acquisition
+
+| Phase | Beam | Mechanic evidence |
+| --- | --- | --- |
+| 1 | Green | Scene locations `103545` and `103546` matched the visible beam. At 1000%, the visible line held a fixed direction as Telos moved. The meter rose by 3 on some ticks while the beam was visible and stayed flat on others. |
+| 2 | Black | Scene locations `103547` and `103548` matched the visible beam in two placements during the same 500% attempt. Walking into the beam is the account owner's confirmed black-virus cleanse. |
+| 3 | Red | Scene locations `103549` and `103550` matched the visible red stream in a 250% capture. The location probe observed the strip along Y 3537 at tick 10154 and along X 6485 after relocation. |
+| 5 | Green | The account owner confirmed the player should stay in the green stream throughout phase 5. Locate its same-plane tiles and reacquire the strip when it moves. The phase 5 location IDs still need a live capture. |
+
+## Virus onset and cleanse
+
+- In phases 2 and 3, existing encounter raw VARP `6362` rises from zero or absent to `3840` on infection and counts down in steps of 128 every two game ticks. In seven P2 recordings with damage, the first recurring type 144 hitmark started 87–91 client logic ticks after onset, approximately three game ticks. P3 samples show the same initial value and countdown. Other mechanics also produce type 144 hitmarks.
+- In the [250% attempt](../../../training-data/telos-20261114T140424.801454Z.jsonl), the timer rose at game tick 10090 and reset at tick 10092. A system message reported the cleanse at client logic tick 303626, during that reset. The player was one tile from the nearest location row at the reset. In two later P2 attempts the countdown reset after the player moved to within one tile. One P3 countdown reset after two game ticks while the player was already one tile from a red row.
+- A phase transition can clear the countdown. Require the system message in the same phase to count a verified cleanse. Walking to the matching strip is the response as soon as the timer and a usable destination are sampled. Three game ticks is the observed time to the first damage, and the last tick at which a cleanse beats expiry is unmeasured.
+- In the [250% automated walk trial](../../../training-data/telos-20261114T192117.698426Z.jsonl), phase 3 infection and the first click were recorded at tick 2554. The player moved but never reached the red strip. The countdown was still active at death. P1 stream rows carried 4544 fine units, while P2 and P3 rows carried zero. Several later projected red destinations fell over the game's action bars. The delivered clicks cannot establish ground-click accuracy or successful cleansing.
+- In the [250% follow-up](../../../training-data/telos-20261114T193511.217029Z.jsonl), the reader found all three colours during one attempt. The red virus started at tick 3917, with the player at `(10330, 4303, 0)`, one tile from the nearest red location. The tile stayed fixed and the timer cleared at tick 3919. The controller matched system message 826 and emitted `cleanse_confirmed`. The phase 2 timer stayed at zero, and this encounter produced no beam walk to verify.
+- The [500% follow-up](../../../training-data/telos-20261114T194114.813483Z.jsonl) found the green and black beams before a phase 2 death. No active virus timer was sampled.
+- Another [250% run](../../../training-data/telos-20261114T194717.352574Z.jsonl) died in phase 2 after repeated `28959` projectiles. The player stood four tiles from the black strip. The meter gained three points on successive ticks between projectile spends. The four largest magic hitmarks were 2,566–3,920 with Deflect Magic observed at each hitmark. The strip needs a movement response even when the virus timer is zero. The existing practice option for testing this movement can use the same verified Walk destination as the virus response.
+- In the [250% projection trial](../../../training-data/telos-20261114T195201.817028Z.jsonl), the render viewport was 1280×1377 inside a 1920×2066 physical client. At tick 5511 the point projected for black tile `(8077, 4757, 0)` gave a native Walk action to `(8083, 4750, 0)`. The controller rejected it and later rejected similarly displaced red destinations. After scaling the projection to the physical client extent, five staging hovers matched their intended tiles on the next client process at a 1279×1370 viewport and 1918×2054 physical client.
+- In the [250% scaled-projection trial](../../../training-data/telos-20261115T050912.459288Z.jsonl), the controller sent five verified black-stream walks. The player occupied the observed strip starting at tick 448. It moved during the barrage, and the meter did not stay at zero. There was no P2 virus in this attempt.
+- The same trial recorded two automatic red-virus cleanses. The first infection started at 542 with the player six tiles from the strip. The first verified walk was issued at 544 after an action bar intercepted the first candidate. The player reached the last verified Walk tile `(11281, 5075, 0)` and the game confirmed the cleanse at 560. The second infection started two tiles from the strip at 596. The controller sent a verified walk on that tick and the cleanse arrived at 598, one tile short of the Walk target. The player later died in P3.
+- The next 250% attempt confirmed automatic cleanses on black in P2 and twice on red in P3. It issued the first Walk on each onset tick. Black started seven tiles from the strip at 1317 and cleared at 1325 after the target was updated for the moving strip. Red started ten tiles away at 1433 and cleared at 1441. A second red infection cleared at 1491, four ticks after onset and one tile from the Walk target. The countdown reached zero and the native cleanse message was observed in each case. [Black and red cleanse attempt](../../../training-data/telos-20261115T051748.568834Z.jsonl)
+- A later 250% attempt confirmed black at 2454 and red at 2549. The black strip moved as the player approached. The first Walk tile was occupied at 2433, but the player was two tiles from the new strip. Escape took priority during the next Uppercut. The red virus cleared four ticks after onset. [Moving-strip attempt](../../../training-data/telos-20261115T052849.237600Z.jsonl)
+
+## Player status search
+
+The account owner reports a player status for each of the three strips and for the virus.
+`work/log_variables.py` logged every varp and varc change during the 08:47 250% attempt (log
+kept local under `work/variable_logs/`). The player stood on the red strip several times in P3.
+P4 has no strips (account owner). Variable changes were aligned to the attempt log by player tile and ranked by how
+often they fell within 1.2 s of strip arrivals, departures and virus events.
+
+- VARP `6362`, the virus countdown, matched every virus onset and cleanse. It is the virus
+  status the controller already uses.
+- No varp or varc tracked standing on a strip. The best match, VARP `1776`, sets bits `0x1800`
+  about three ticks after each Hold Still cue in every phase and clears them later. It is
+  most likely the Hold Still stun or bind state. VARP `11726` toggles 0 and 4 every 15–20 s
+  in all phases, and VARP `95` reads 1320 around Hold Still.
+- The strip statuses are therefore probably drawn from the buff bar interface rather than sent
+  as player or client variables. The reader does not read that interface yet. [Status search attempt](../../../training-data/telos-20261115T084759.202810Z.jsonl)
+
+## Hold Still Dive
+
+- For a required Hold Still dodge in P1 and P3, prefer the nearest reachable tile on the green or red strip respectively (account owner, 2026-11-15). A landing under Telos can make him move back into the beam. Require a same-plane stream location with a terrain height, within ten tiles, outside his current footprint and outside the provisional four-tile stomp radius. Recheck the pointer's actual Walk tile against the current strip and actor pose before sending Dive. Use observed safe floor when no beam tile qualifies.
+- The input window is +4 to +7 received ticks from `28935`. At +3 the controller can position
+  the cursor and check a landing candidate. The hover alone sends no movement input. It
+  rechecks the landing tile before Dive or Walk during the input window. If Dive is cooling
+  down or does not move the player, the controller checks a Walk destination before clicking.
+  Verify position after the action and check any type 144 hitmarks at the expected landing
+  time. A beam location matched on the cursor and a subsequent player position on the beam
+  are logged separately.
+- In the [300% green-beam test](../../../training-data/telos-20261115T091100.770410Z.jsonl),
+  phase 1 Dive was sent at +4 and the player arrived on green tile `(7648, 1871, 0)`
+  at +6. Telos's 5×5 footprint started at `(7639, 1869, 0)`. The landing was seven
+  tiles from its centre and no stomp hit appeared. In phase 3 the shared Dive cooldown
+  was still active. The verified fallback Walk headed for a red tile eight tiles away
+  and was still inside the stomp radius when a 3,918 typeless hit landed at +5.
+
+The captured phase 1 line was roughly at world X 15698 and spanned approximately Z 2826–2850. These are estimates from the rendered beam and the arena camera. They describe one instance and one beam placement. The ends of the visible effect and the tiles that clear a virus still need independent confirmation.
+
+Phase 1 and 2 captures are indexed by the received game tick in the [1000% attempt](../../../training-data/telos-20261114T132221.181601Z.jsonl) and [500% attempt](../../../training-data/telos-20261114T132803.123153Z.jsonl). The P1 visual sample covers the interval around ticks 5753–5768. The P2 visual sample overlaps the raw phase-2 meter changes at ticks 6422–6438. The scripted log for the 500% attempt ends at tick 6382, when the stage first changed to P2. Subsequent observations were read-only.
+
+In the follow-up 500% attempt, the location probe recorded the actual green strip at X 13397 and Z 3215–3233. It first sampled the green IDs at probe tick 8405 and sampled their removal at 8425. It sampled the black IDs at X 13463 starting at probe tick 8473 and at X 13461 as the beam relocated. Probe tick counters can have a constant offset from the fight runner during a segment. Align records by `sample_ns` and the stage word. The player died in phase 2 before a labelled virus cleanse. [Decoded tile observations](../../../docs/validation/telos-beam-locations-2026-11-14.json) · [500% attempt](../../../training-data/telos-20261114T134849.728786Z.jsonl)
+
+## Native observations and research probe
+
+- Compatibility Mode exposes the projection matrix at actor world `+0x13900` and the viewport at scene manager `+0x84`. The native reader checks the corresponding accesses at RVAs `0x5a31e`, `0x5a371` and `0x4042e0`. The scene manager comes from world state `+0x199e8`. The live client returned a 2560×1377 viewport and projected both the player and dormant Telos to the corresponding rendered positions.
+- The 1000% attempt started on player tile `(15712, 2829, 0)`. Native pose, regular position, and movement validation now accept instance coordinates above the old 12800 limit.
+- The client location-event path at RVA `0x4042d0` follows the scene manager's selected world and its map-square vectors to animate locations. The client's Lua `LocList` traversal at RVA `0xc219c0` follows the same map-square vectors. [Jagex LocList API](https://developer.runescape.com/rs/game/list/loclist.html) · [Jagex location events](https://developer.runescape.com/rs/core/events.html)
+- The runtime uses the Compatibility Mode scene-location layout to publish the green, black and red tile IDs through `rs3_snapshot_hazard_info` and `rs3_snapshot_hazards`. Each row carries `RS3_HAZARD_SCENE_LOCATION`, a config ID and a tile. The log records `beam_tiles`, `beam_ground_heights` and the hazard reason and dropped count. `rs3_hazard_terrain_height` supplies the sampled tile-centre height to `rs3_project_tile`. Server interaction area and exact deadlines remain unmeasured.
+- `rs3_snapshot_telos_cleanse` returns the sequence and client logic tick of the newest recognized cleanse line. The reader verifies the Compatibility Mode getter and manager vtable and checks only the exact system message. The attempt logger emits a recent match once as `anima_stream_cleanse_observed`.
+- Compatibility Mode's MiniMenu owner is at world state `+0x19938`. The native reader checks its vtable, verifies the update instruction at RVA `0x39024b`, and reads the highest-priority entry of the closed menu. `rs3_snapshot_pointer_walk` exposes the action and its ground tile only when the entry is Walk. Hovering over staging floor returned Walk (23) at `(3817, 7051, 0)`. Hovering over an action bar returned interface action 57 with no walk tile. The controller checks a new menu cycle after moving the pointer and sends the click only if the current Walk tile is on the matching strip outside Telos's footprint. [Jagex MiniMenu API](https://developer.runescape.com/rs/game/minimenu.html)
+- The Walk builder at RVA `0x395c20` passes the scene/minimap flag and the X/Y pair to the entry constructor at `0x394100`. The constructor stores the flag at `+0x48` and coordinates at `+0x4c` and `+0x50`. The scene hover path at `0x395190` passes zero and the minimap path at `0x320c80` passes one. Reading the flag as a plane caused P4 Walk destinations to report plane 0 while the font and player were on plane 1. The binding now exposes a tile for scene Walk with the observed local-player plane. [Attempt that stalled at the first font](../../../training-data/telos-20261115T051748.568834Z.jsonl)
+- A later P4 hover at 3827 confirmed the reader returned `(10002, 104, 1)` for the first font's charging ring. The controller issued the click and the player had moved three tiles toward the font by death at 3832. [Plane 1 Walk capture](../../../training-data/telos-20261115T054049.902492Z.jsonl)
+- Live staging returned location IDs `103521` and `103567`. Keep the occasional additional strip-adjacent configs `103552`, `103555` and `103583` as research evidence until their roles are clear. The positional effect pool at scene `+0x19a50` is a supplementary research channel.
+
+To collect a labelled sample alongside a practice attempt, run the read-only [location probe](../../../work/probe_telos_locations.py) from the repository root. Write its output under the ignored build directory.
+
+```powershell
+python work/probe_telos_locations.py --pid <game-pid> --duration 180 > build/telos-locations.ndjson
+```
+
+Compare `stage_meter_raw`, `game_tick`, and `sample_ns` with a synchronized screen capture. Location rows contain class RVA, plane, X, Y, config ID and candidate sequence. Positional-effect rows contain plane, X, Y, config ID and effect kind. A changed location or effect is a candidate until it matches the beam at appearance, after relocation, and at expiry. A disappearing damage sequence is also insufficient to identify a cleanse because death, phase changes, and natural expiry can end the same sequence.

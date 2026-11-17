@@ -39,6 +39,9 @@ Current capabilities
   capture observed about 1.8s Soul Split / 0.6s Melee with both predicted hits
   protected. Other phases and Magic cue classification remain unvalidated.
 
+  calibration. The C planner keeps automatic flicking disabled pending validated
+  deadlines. The separate Telos practice controller below flicks on Telos cues.
+
 Previously verified in live combat: Goblin **550/550 HP**, Giant spider
 **1000/1000 HP**, and Goblin **550 -> 326 HP** alongside the independently reported
 **224** hit. The same capture includes reported hits of 550 and 1000. The C port's
@@ -111,9 +114,47 @@ On client build **6ada3f59-1a86000**, the desktop tracker shows **Player Tile**
 alongside life points, prayer, adrenaline, cooldowns, nearby NPCs and inventory.
 
 JSONL records carry ``position`` with integer ``x`` (east), ``y`` (north), and
-``plane`` (0–3). The tile is ``null`` when unavailable. For repeatable boss
+``plane`` (0â€“3). The tile is ``null`` when unavailable. For repeatable boss
 markers, record tile offsets relative to a recognizable arena landmark and
 locate that landmark each run.
+
+Telos practice controller
+-------------------------
+
+``work/telos_zero.py`` fights Telos through an Arduino keyboard on a COM port. It
+flicks prayers, times defensives and moves the character. Build the DLL first, then
+stand on the staging platform with Telos dormant, Revolution on bar 18 and
+auto-retaliate on. Start the script, click into RuneScape and wake Telos yourself::
+
+    $env:PYTHONPATH = "python"
+    python work/telos_zero.py --port COM8
+
+The enrage comes from memory (VARP 6359). Ability and prayer keys come from the
+displayed action bars: Freedom and Anticipation are required. Escape, Resonance,
+Dive, Deflect Magic, Deflect Melee and Soul Split are used when present, and
+Reflect is optional. Devotion falls back to ``F7``, Surge to ``K``, Spellbook Swap
+to ``I`` and Disruption Shield to ``O`` when no bar shows them. Disruption Shield is
+cast as Spellbook Swap followed by the spell. Super restore is drunk with ``L`` at 50 prayer points or fewer. At the
+first Telos attack of each phase the up arrow is held for 3 seconds to raise the camera. The script runs until the player dies or F12 is pressed. Losing
+foreground focus pauses input. Each attempt is logged to ``training-data/telos-*.jsonl``.
+
+Optional arguments:
+
+* ``--practice-enrage N`` overrides the enrage read from memory.
+* ``--duration SECONDS`` bounds the session.
+* ``--pid ID`` selects the client process.
+* ``--freedom``, ``--anticipation``, ``--escape``, ``--surge``, ``--resonance``, ``--dive``,
+  ``--reflect``, ``--devotion``, ``--spellbook-swap``, ``--disruption-shield`` and
+  ``--flick-melee-key`` / ``--flick-magic-key`` /
+  ``--flick-soul-split-key`` override a key read from the bars. Displayed letters are
+  translated through the game window's keyboard layout.
+* ``--super-restore KEY`` changes the super restore key (default ``L``).
+* Without ``--port`` the script only observes, and ``--replay FILE`` replays a capture.
+
+`Attempt logs <training-data/README.md>`_ describe the log rows and timing
+rules. `Animation cues <runescape-knowledge-base/bosses/telos/animation-cues.md>`_
+and the `run log <runescape-knowledge-base/bosses/telos/run-log.md>`_ hold the
+evidence behind them.
 
 Layout and verification
 -----------------------
@@ -174,7 +215,9 @@ checks. Static PE research scripts use ``pefile==2024.8.26`` and
 
     .\work\decompile.ps1 -Name native_vars -Addresses '140c08610','140c08db0'
 
-Generated decompilation, game binaries/cache, tools and raw gameplay logs stay
-local. Research scripts produce candidates, not automatically verified offsets.
+Generated decompilation, game binaries/cache, tools and process-memory dumps
+stay local. Versioned decoded encounter logs under ``training-data/`` are
+published at the user's explicit request, including failed attempts.
+Research scripts produce candidates, not automatically verified offsets.
 The user requested publishing completed project changes to this GitHub repository;
 ``AGENTS.md`` preserves that workflow. No background uploader is installed.

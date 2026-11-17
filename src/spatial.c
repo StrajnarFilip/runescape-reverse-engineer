@@ -2,6 +2,7 @@
 #include "spatial.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "clock.h"
@@ -9,35 +10,61 @@
 #include "memory.h"
 #include "position.h"
 
-#define ACTOR_POSE_BYTES           0x290u
-#define ACTOR_RUNTIME_OFFSET       0x88u
-#define ACTOR_PLANE_OFFSET         0x50u
-#define ACTOR_WORLD_OFFSET         0x60u
-#define ACTOR_SIZE_OFFSET          0x18cu
-#define ACTOR_QUATERNION_OFFSET    0x1ccu
-#define ACTOR_FINE_OFFSET          0x280u
-#define WORLD_TO_CLIP_OFFSET       0x13900u
-#define SCENE_MANAGER_OFFSET       0x199e8u
-#define VIEWPORT_OFFSET            0x84u
-#define FINE_UNITS_PER_TILE        512.0
-#define MAX_FOOTPRINT              64u
-#define MAX_VIEWPORT_DIMENSION     32768
-#define QUATERNION_NORM_TOLERANCE  0.02
-#define DEGREES_PER_RADIAN         57.29577951308232
-#define MIN_CLIP_W                 0.0001
-#define POSITION_GETTER_RVA        0x6ee1f0u
-#define FACING_GETTER_RVA          0x44b690u
-#define PROJECTION_INSTRUCTION_RVA 0x5a34eu
-#define ACTOR_TARGET_UID_OFFSET    0x1c4u
-#define ACTOR_TARGET_KIND_OFFSET   0x238u
-#define ACTOR_TARGET_NONE_VALUE    127u
-#define TARGET_KIND_GUARD_RVA      0x3fff66u
-#define TARGET_UID_GUARD_RVA       0x3fff90u
+#define ACTOR_POSE_BYTES            0x290u
+#define ACTOR_RUNTIME_OFFSET        0x88u
+#define ACTOR_PLANE_OFFSET          0x50u
+#define ACTOR_WORLD_OFFSET          0x60u
+#define ACTOR_SIZE_OFFSET           0x18cu
+#define ACTOR_QUATERNION_OFFSET     0x1ccu
+#define ACTOR_FINE_OFFSET           0x280u
+#define WORLD_TO_CLIP_OFFSET        0x13900u
+#define SCENE_MANAGER_OFFSET        0x199e8u
+#define VIEWPORT_OFFSET             0x84u
+#define FINE_UNITS_PER_TILE         512.0
+#define MAX_FOOTPRINT               64u
+#define MAX_SPATIAL_PLANE           3
+#define MAX_VIEWPORT_DIMENSION      32768
+#define QUATERNION_NORM_TOLERANCE   0.02
+#define DEGREES_PER_RADIAN          57.29577951308232
+#define MIN_CLIP_W                  0.0001
+#define POSITION_GETTER_RVA         0x6ee1f0u
+#define COMPAT_POSITION_GETTER_RVA  0x6ee110u
+#define COMPAT_ACTOR_WORLD_RVA      0x38523u
+#define ACTOR_POSITION_VTABLE_SLOT  0xb0u
+#define FACING_GETTER_RVA           0x44b690u
+#define PROJECTION_INSTRUCTION_RVA  0x5a34eu
+#define ACTOR_TARGET_UID_OFFSET     0x1c4u
+#define ACTOR_TARGET_KIND_OFFSET    0x238u
+#define ACTOR_TARGET_NONE_VALUE     127u
+#define TARGET_KIND_GUARD_RVA       0x3fff66u
+#define TARGET_UID_GUARD_RVA        0x3fff90u
+#define COMPAT_PROJECTION_RVA       0x5a31eu
+#define COMPAT_VIEWPORT_RVA         0x5a371u
+#define COMPAT_SCENE_MANAGER_RVA    0x4042e0u
+#define PLAYER_TARGET_UID_OFFSET    0x1c4u
+#define PLAYER_TARGET_KIND_OFFSET   0x238u
+#define PLAYER_TARGET_NONE_VALUE    127u
+#define COMPAT_TARGET_KIND_RVA      0x3ffe86u
+#define COMPAT_TARGET_UID_RVA       0x3ffeb0u
+#define MENU_OWNER_OFFSET           0x19938u
+#define MENU_VTABLE_RVA             0x150d5b0u
+#define MENU_GUARD_RVA              0x39024bu
+#define MENU_VECTOR_OFFSET          0x90u
+#define MENU_OPEN_OFFSET            0x17b0u
+#define MENU_CYCLE_OFFSET           0x21d0u
+#define MENU_REFERENCE_BYTES        16u
+#define MENU_ENTRY_ACTION_OFFSET    0x38u
+#define MENU_ENTRY_WALK_DATA_OFFSET 0x48u
+#define MENU_ACTION_ID_OFFSET       0x40u
+#define MENU_WALK_ACTION_RVA        0x16be960u
+#define MENU_WALK_ACTION            23
+#define MENU_MAX_ENTRIES            512u
 
 _Static_assert(sizeof(rs3_actor_spatial) == 88, "ABI spatial actor");
 _Static_assert(sizeof(rs3_camera) == 136, "ABI camera");
 _Static_assert(sizeof(rs3_spatial_info) == 272, "ABI spatial info");
 _Static_assert(sizeof(rs3_screen_point) == 24, "ABI screen point");
+_Static_assert(sizeof(rs3_pointer_walk) == 32, "ABI pointer walk");
 
 /** Exact additional instruction guards for the original profile's newly followed fields. */
 static int spatial_layout_verified(rs3_context *context)
@@ -61,6 +88,107 @@ static int spatial_layout_verified(rs3_context *context)
            memory_read(context, context->target.module_base + PROJECTION_INSTRUCTION_RVA, bytes,
                        sizeof projection_instruction) &&
            memcmp(bytes, projection_instruction, sizeof projection_instruction) == 0;
+}
+
+static int compatibility_tiles_verified(rs3_context *context)
+{
+    const client_profile *profile = context->target.profile;
+    if (profile != &profile_compatibility)
+    {
+        return 0;
+    }
+    static const unsigned char position_getter[] = {0x48, 0x8d, 0x81, 0x80, 0x02, 0, 0, 0xc3};
+    static const unsigned char world_owner[] = {0x49, 0x8b, 0x40, 0x08, 0x48, 0x89, 0x41, 0x60};
+    unsigned char bytes[sizeof position_getter];
+    uint64_t base = context->target.module_base;
+    uint64_t player_getter, npc_getter;
+    return memory_read(context, base + COMPAT_POSITION_GETTER_RVA, bytes, sizeof bytes) &&
+           memcmp(bytes, position_getter, sizeof bytes) == 0 &&
+           memory_read(context, base + COMPAT_ACTOR_WORLD_RVA, bytes, sizeof bytes) &&
+           memcmp(bytes, world_owner, sizeof bytes) == 0 &&
+           memory_read_pointer(context,
+                               base + profile->player_actor_vtable_rva + ACTOR_POSITION_VTABLE_SLOT,
+                               &player_getter) &&
+           memory_read_pointer(context,
+                               base + profile->npc_entity_vtable_rva + ACTOR_POSITION_VTABLE_SLOT,
+                               &npc_getter) &&
+           player_getter == base + COMPAT_POSITION_GETTER_RVA && npc_getter == player_getter;
+}
+
+static int compatibility_camera_verified(rs3_context *context)
+{
+    static const unsigned char matrix[] = {0x0f, 0x59, 0x81, 0x00, 0x39, 0x01, 0x00};
+    static const unsigned char manager[] = {0x48, 0x8b, 0x90, 0xe8, 0x99, 0x01, 0x00};
+    static const unsigned char viewport[] = {
+        0xf3, 0x41, 0x0f, 0x2a, 0x80, 0x8c, 0,    0,    0, /* width */
+        0xf3, 0x0f, 0x59, 0x15, 0x6e, 0x92, 0x58, 0x01, 0xf3,
+        0x41, 0x0f, 0x2a, 0x88, 0x84, 0,    0,    0, /* x */
+    };
+    unsigned char bytes[sizeof viewport];
+    uint64_t base = context->target.module_base;
+    return memory_read(context, base + COMPAT_PROJECTION_RVA, bytes, sizeof matrix) &&
+           memcmp(bytes, matrix, sizeof matrix) == 0 &&
+           memory_read(context, base + COMPAT_SCENE_MANAGER_RVA, bytes, sizeof manager) &&
+           memcmp(bytes, manager, sizeof manager) == 0 &&
+           memory_read(context, base + COMPAT_VIEWPORT_RVA, bytes, sizeof viewport) &&
+           memcmp(bytes, viewport, sizeof viewport) == 0;
+}
+
+static int player_target_layout_verified(rs3_context *context)
+{
+    const client_profile *profile = context->target.profile;
+    int compatibility = profile == &profile_compatibility;
+    if (!compatibility && profile != &profile_primary)
+    {
+        return 0;
+    }
+    static const unsigned char kind_guard[] = {0x80, 0xb9, 0x38, 0x02, 0, 0, 0x7f};
+    static const unsigned char uid_guard[] = {0x0f, 0xb6, 0x81, 0x38, 0x02, 0, 0,
+                                              0x48, 0x63, 0x91, 0xc4, 0x01, 0, 0};
+    unsigned char observed[sizeof uid_guard];
+    uint32_t kind_rva = compatibility ? COMPAT_TARGET_KIND_RVA : TARGET_KIND_GUARD_RVA;
+    uint32_t uid_rva = compatibility ? COMPAT_TARGET_UID_RVA : TARGET_UID_GUARD_RVA;
+    return memory_read(context, context->target.module_base + kind_rva, observed,
+                       sizeof kind_guard) &&
+           memcmp(observed, kind_guard, sizeof kind_guard) == 0 &&
+           memory_read(context, context->target.module_base + uid_rva, observed,
+                       sizeof uid_guard) &&
+           memcmp(observed, uid_guard, sizeof uid_guard) == 0;
+}
+
+static void decode_player_target(rs3_context *context, const unsigned char *before,
+                                 const unsigned char *after, rs3_actor_spatial *out)
+{
+    if (!player_target_layout_verified(context))
+    {
+        return;
+    }
+    if (memcmp(before + PLAYER_TARGET_UID_OFFSET, after + PLAYER_TARGET_UID_OFFSET,
+               sizeof(int32_t)) ||
+        before[PLAYER_TARGET_KIND_OFFSET] != after[PLAYER_TARGET_KIND_OFFSET])
+    {
+        out->target_reason = RS3_READ_FAILED;
+        return;
+    }
+    uint32_t kind = before[PLAYER_TARGET_KIND_OFFSET];
+    int32_t runtime_id = decode_i32(before + PLAYER_TARGET_UID_OFFSET);
+    if (kind == PLAYER_TARGET_NONE_VALUE)
+    {
+        /* The native resolver ignores the retained UID when the kind is explicitly clear. */
+        out->target_kind = RS3_SPATIAL_TARGET_NONE;
+        out->target_runtime_id = -1;
+    }
+    else if (kind == RS3_SPATIAL_TARGET_NPC && runtime_id >= 0 && runtime_id <= UINT16_MAX)
+    {
+        out->target_kind = RS3_SPATIAL_TARGET_NPC;
+        out->target_runtime_id = runtime_id;
+    }
+    else
+    {
+        return;
+    }
+    out->valid_mask |= RS3_SPATIAL_TARGET;
+    out->target_reason = RS3_REASON_NONE;
 }
 
 /** Verify the original client's typed entity-target resolver, independent of pose guards. */
@@ -141,8 +269,8 @@ int spatial_decode_actor(rs3_context *context, uint64_t actor, uint32_t vtable_r
         return 0;
     }
     const uint32_t offsets[] = {ACTOR_PLANE_OFFSET, ACTOR_SIZE_OFFSET, ACTOR_FINE_OFFSET,
-                                ACTOR_QUATERNION_OFFSET, ACTOR_WORLD_OFFSET};
-    const uint32_t lengths[] = {4, 4, 12, 16, 8};
+                                ACTOR_WORLD_OFFSET};
+    const uint32_t lengths[] = {4, 4, 12, 8};
     for (unsigned index = 0; index < sizeof offsets / sizeof offsets[0]; index++)
     {
         if (memcmp(before + offsets[index], after + offsets[index], lengths[index]) != 0)
@@ -154,8 +282,8 @@ int spatial_decode_actor(rs3_context *context, uint64_t actor, uint32_t vtable_r
     uint32_t size = decode_u32(before + ACTOR_SIZE_OFFSET);
     float position[3];
     memcpy(position, before + ACTOR_FINE_OFFSET, sizeof position);
-    if (plane >= 0 && plane <= 3 && size >= 1 && size <= MAX_FOOTPRINT && isfinite(position[0]) &&
-        isfinite(position[1]) && isfinite(position[2]))
+    if (plane >= 0 && plane <= MAX_SPATIAL_PLANE && size >= 1 && size <= MAX_FOOTPRINT &&
+        isfinite(position[0]) && isfinite(position[1]) && isfinite(position[2]))
     {
         double x = floor(position[0] / FINE_UNITS_PER_TILE - size / 2u);
         double y = floor(position[2] / FINE_UNITS_PER_TILE - size / 2u);
@@ -170,11 +298,22 @@ int spatial_decode_actor(rs3_context *context, uint64_t actor, uint32_t vtable_r
             out->tile_reason = RS3_REASON_NONE;
         }
     }
+    if (context->target.profile == &profile_compatibility)
+    {
+        out->facing_reason = RS3_SPATIAL_UNMAPPED;
+        if (vtable_rva == context->target.profile->player_actor_vtable_rva)
+        {
+            decode_player_target(context, before, after, out);
+        }
+        out->observed_ns = clock_monotonic_ns();
+        return out->valid_mask != 0;
+    }
     float q[4];
     memcpy(q, before + ACTOR_QUATERNION_OFFSET, sizeof q);
     double norm =
         (double)q[0] * q[0] + (double)q[1] * q[1] + (double)q[2] * q[2] + (double)q[3] * q[3];
-    if (isfinite(norm) && fabs(norm - 1.0) <= QUATERNION_NORM_TOLERANCE)
+    if (memcmp(before + ACTOR_QUATERNION_OFFSET, after + ACTOR_QUATERNION_OFFSET, sizeof q) == 0 &&
+        isfinite(norm) && fabs(norm - 1.0) <= QUATERNION_NORM_TOLERANCE)
     {
         double yaw =
             atan2(2.0 * (q[0] * q[2] + q[3] * q[1]), 1.0 - 2.0 * (q[0] * q[0] + q[1] * q[1])) *
@@ -213,7 +352,7 @@ static BOOL CALLBACK find_spatial_window(HWND window, LPARAM parameter)
 }
 
 /** Read physical window geometry without moving, focusing or clicking it. */
-static int physical_origin(uint32_t pid, rs3_camera *camera)
+static int physical_origin(uint32_t pid, int compatibility, rs3_camera *camera)
 {
     spatial_window selection = {.pid = pid};
     EnumWindows(find_spatial_window, (LPARAM)&selection);
@@ -239,6 +378,17 @@ static int physical_origin(uint32_t pid, rs3_camera *camera)
     {
         camera->client_screen_x = origin.x;
         camera->client_screen_y = origin.y;
+        /* Compatibility Mode can render a full-window logical viewport at 150% scaling.
+         * Apply the physical extent only for a full-origin, proportional viewport. */
+        if (compatibility && camera->viewport_x == 0 && camera->viewport_y == 0 &&
+            client.right > camera->viewport_width && client.bottom > camera->viewport_height &&
+            llabs((int64_t)client.right * camera->viewport_height -
+                  (int64_t)client.bottom * camera->viewport_width) <= client.right)
+        {
+            camera->reserved[0] = (uint32_t)client.right;
+            camera->reserved[1] = (uint32_t)client.bottom;
+            camera->valid_mask |= RS3_CAMERA_SCALED_VIEWPORT;
+        }
     }
     return valid;
 }
@@ -288,7 +438,8 @@ static void read_camera(rs3_context *context, uint64_t world_state, uint64_t act
     camera->viewport_height = viewport[3];
     camera->valid_mask = RS3_CAMERA_MATRIX | RS3_CAMERA_VIEWPORT;
     camera->reason = RS3_SPATIAL_WINDOW_UNKNOWN;
-    if (physical_origin(context->target.pid, camera))
+    if (physical_origin(context->target.pid, context->target.profile == &profile_compatibility,
+                        camera))
     {
         camera->valid_mask |= RS3_CAMERA_PHYSICAL_ORIGIN;
         camera->reason = RS3_REASON_NONE;
@@ -296,10 +447,70 @@ static void read_camera(rs3_context *context, uint64_t world_state, uint64_t act
     camera->observed_ns = clock_monotonic_ns();
 }
 
+/** Read the top closed-menu action and only decode the ground fields of Walk. */
+static void stage_pointer_walk(rs3_context *context, uint64_t world_state,
+                               const rs3_actor_spatial *player, rs3_pointer_walk *out)
+{
+    static const unsigned char cycle_increment[] = {0xff, 0x81, 0xd0, 0x21, 0, 0};
+    unsigned char instruction[sizeof cycle_increment];
+    uint64_t module = context->target.module_base, menu, vtable, cycle, cycle_after;
+    uint64_t entries[2], entries_after[2], entry, entry_after, action;
+    unsigned char open, open_after;
+    int32_t action_id;
+    struct
+    {
+        int32_t from_minimap;
+        int32_t x;
+        int32_t y;
+    } ground = {0};
+    if (context->target.profile != &profile_compatibility ||
+        !memory_read(context, module + MENU_GUARD_RVA, instruction, sizeof instruction) ||
+        memcmp(instruction, cycle_increment, sizeof cycle_increment) ||
+        !memory_read_pointer(context, world_state + MENU_OWNER_OFFSET, &menu) || !menu ||
+        !memory_read_pointer(context, menu, &vtable) || vtable != module + MENU_VTABLE_RVA ||
+        !memory_read_pointer(context, menu + sizeof(uint64_t), &vtable) || vtable != world_state ||
+        !memory_read(context, menu + MENU_OPEN_OFFSET, &open, sizeof open) || open ||
+        !memory_read(context, menu + MENU_CYCLE_OFFSET, &cycle, sizeof cycle) ||
+        !memory_read(context, menu + MENU_VECTOR_OFFSET, entries, sizeof entries) ||
+        entries[1] <= entries[0] || (entries[1] - entries[0]) % MENU_REFERENCE_BYTES != 0 ||
+        (entries[1] - entries[0]) / MENU_REFERENCE_BYTES > MENU_MAX_ENTRIES ||
+        !memory_read_pointer(context, entries[1] - sizeof(uint64_t), &entry) || !entry ||
+        !memory_read_pointer(context, entry + MENU_ENTRY_ACTION_OFFSET, &action) || !action ||
+        !memory_read(context, action + MENU_ACTION_ID_OFFSET, &action_id, sizeof action_id))
+    {
+        return;
+    }
+    int walk = action == module + MENU_WALK_ACTION_RVA && action_id == MENU_WALK_ACTION;
+    if ((walk &&
+         !memory_read(context, entry + MENU_ENTRY_WALK_DATA_OFFSET, &ground, sizeof ground)) ||
+        !memory_read_pointer(context, entries[1] - sizeof(uint64_t), &entry_after) ||
+        entry_after != entry ||
+        !memory_read(context, menu + MENU_VECTOR_OFFSET, entries_after, sizeof entries_after) ||
+        memcmp(entries, entries_after, sizeof entries) ||
+        !memory_read(context, menu + MENU_OPEN_OFFSET, &open_after, sizeof open_after) ||
+        open_after ||
+        !memory_read(context, menu + MENU_CYCLE_OFFSET, &cycle_after, sizeof cycle_after) ||
+        cycle_after != cycle)
+    {
+        return;
+    }
+    out->menu_cycle = cycle;
+    out->action = action_id;
+    out->valid = 1;
+    /* Scene Walk supplies only X/Y. Ground movement uses the local player's plane. */
+    if (walk && !ground.from_minimap && player->tile.valid &&
+        (player->valid_mask & RS3_SPATIAL_SAME_WORLD) && ground.x >= 0 &&
+        ground.x < MAX_TILE_COORDINATE && ground.y >= 0 && ground.y < MAX_TILE_COORDINATE)
+    {
+        out->tile = (rs3_position){1, ground.x, ground.y, player->tile.plane};
+    }
+}
+
 void spatial_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_state)
 {
     rs3_spatial_info *info = &snapshot->spatial;
     memset(info, 0, sizeof *info);
+    memset(&snapshot->pointer_walk, 0, sizeof snapshot->pointer_walk);
     info->status = RS3_UNAVAILABLE;
     info->reason = RS3_UNSUPPORTED_CLIENT;
     info->player.tile_reason = RS3_UNSUPPORTED_CLIENT;
@@ -307,7 +518,8 @@ void spatial_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_
     info->player.target_reason = RS3_SPATIAL_UNMAPPED;
     info->player.target_runtime_id = -1;
     info->camera.reason = RS3_UNSUPPORTED_CLIENT;
-    if (!spatial_layout_verified(context))
+    int full_layout = spatial_layout_verified(context);
+    if (!full_layout && !compatibility_tiles_verified(context))
     {
         return;
     }
@@ -331,10 +543,14 @@ void spatial_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t world_
             {
                 info->player.valid_mask |= RS3_SPATIAL_SAME_WORLD;
             }
-            read_camera(context, world_state, actor, &info->camera);
-            info->camera.plane = info->player.tile.plane;
+            if (full_layout || compatibility_camera_verified(context))
+            {
+                read_camera(context, world_state, actor, &info->camera);
+                info->camera.plane = info->player.tile.plane;
+            }
         }
     }
+    stage_pointer_walk(context, world_state, &info->player, &snapshot->pointer_walk);
     info->npc_count = snapshot->info.npc_count;
     for (uint32_t npc = 0; npc < info->npc_count; npc++)
     {
@@ -397,6 +613,8 @@ uint32_t rs3_spatial_sizeof(uint32_t structure)
             return sizeof(rs3_spatial_info);
         case RS3_SPATIAL_SIZE_SCREEN_POINT:
             return sizeof(rs3_screen_point);
+        case RS3_SPATIAL_SIZE_POINTER_WALK:
+            return sizeof(rs3_pointer_walk);
         default:
             return 0;
     }
@@ -451,10 +669,21 @@ static int32_t project(const rs3_camera *camera, int32_t plane, double x, double
         out->reason = RS3_SPATIAL_OFF_SCREEN;
         return RS3_OK;
     }
-    double pixel_x = camera->client_screen_x + (double)camera->viewport_x +
-                     (nx + 1) * camera->viewport_width / 2;
-    double pixel_y = camera->client_screen_y + (double)camera->viewport_y +
-                     (ny + 1) * camera->viewport_height / 2;
+    double width = camera->viewport_width;
+    double height_pixels = camera->viewport_height;
+    if (camera->valid_mask & RS3_CAMERA_SCALED_VIEWPORT)
+    {
+        width = camera->reserved[0];
+        height_pixels = camera->reserved[1];
+        if (width <= 0 || height_pixels <= 0)
+        {
+            out->reason = RS3_SPATIAL_WINDOW_UNKNOWN;
+            return RS3_OK;
+        }
+    }
+    double pixel_x = camera->client_screen_x + (double)camera->viewport_x + (nx + 1) * width / 2;
+    double pixel_y =
+        camera->client_screen_y + (double)camera->viewport_y + (ny + 1) * height_pixels / 2;
     if (pixel_x < INT32_MIN || pixel_x > INT32_MAX || pixel_y < INT32_MIN || pixel_y > INT32_MAX)
     {
         out->reason = RS3_SPATIAL_OFF_SCREEN;
