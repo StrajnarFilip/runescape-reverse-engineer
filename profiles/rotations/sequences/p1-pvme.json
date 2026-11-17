@@ -32,7 +32,7 @@
       "opening_only": true,
       "actions": [
         {"id": "berserk", "kind": "ability", "ability_id": 14707, "name": "Berserk", "key": "F"},
-        {"id": "renewal", "kind": "item", "role": "adrenaline_renewal", "key": "PgDn", "item_id": null}
+        {"id": "renewal", "kind": "item", "role": "adrenaline_renewal", "key": "PgDn", "item_id": null, "completion": "attempt"}
       ]
     },
     {

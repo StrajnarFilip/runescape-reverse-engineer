@@ -176,3 +176,10 @@ Requests
   is 7 and its special is 6. A stays separately user-declared. These are saved
   observations; D8 still rechecks the live role before dispatch and does not
   ask the user to remap them each session.
+* Relentless-aware completion, 2026-11-17: the user confirmed Relentless 5.
+  Renewal remains second in the Berserk input batch, but its declared completion
+  is now an accepted attempt, not a mandatory dose decrement. Berserk still
+  needs native cooldown acknowledgement. This permits retained-adrenaline
+  outcomes without pretending a potion was consumed or a perk proc was read.
+  Subsequent ability eligibility continues to use observed adrenaline. The
+  pure coordinator regression covers progression without renewal consumption.
