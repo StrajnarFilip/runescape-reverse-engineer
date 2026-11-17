@@ -183,3 +183,5 @@ Requests
   outcomes without pretending a potion was consumed or a perk proc was read.
   Subsequent ability eligibility continues to use observed adrenaline. The
   pure coordinator regression covers progression without renewal consumption.
+  The sequence profile persists the user-confirmed rank with explicit null
+  carrier, gizmo slot and proc state. Native perk decoding is not implemented.

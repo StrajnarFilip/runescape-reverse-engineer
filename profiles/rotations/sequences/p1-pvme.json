@@ -13,6 +13,18 @@
   "acknowledgement_timeout_ms": 2500,
   "client_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
   "starting_equipment": {"main_hand": 52061, "off_hand": 52063},
+  "perk_observations": [
+    {
+      "name": "Relentless",
+      "rank": 5,
+      "source": "user_confirmation_2026-11-17",
+      "native_decoded": false,
+      "carrier_item_id": null,
+      "gizmo_slot": null,
+      "proc_state": null,
+      "reference": "https://runescape.wiki/w/Relentless"
+    }
+  ],
   "binding_source": "Saved native UI labels in observed_bindings; re-read by role before every dispatch",
   "stored_special_identity_source": "User declaration, not decoded from item ID or colour",
   "preparation_reference": ["At least two Bloodlust stacks", "Natural Instinct", "Dragon battleaxe special"],
