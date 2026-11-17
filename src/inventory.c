@@ -61,8 +61,8 @@ void inventory_reset_tracking(inventory_state *inventory)
     }
 }
 
-/** Fills the catalog-derived fields of an occupied slot. */
-static void describe_item(const item_catalog *catalog, rs3_item *item)
+/** Fill definition fields without changing an item's live identity or slot. */
+void inventory_describe_item(const item_catalog *catalog, rs3_item *item)
 {
     item->doses = -1;
     item->next_dose_item_id = -1;
@@ -140,7 +140,7 @@ static int read_container(rs3_context *context, rs3_snapshot *snapshot, const un
         {
             return context_fail(context, RS3_READ_FAILED, "Invalid inventory item record");
         }
-        describe_item(catalog, &item);
+        inventory_describe_item(catalog, &item);
         snapshot->items[(*item_count)++] = item;
     }
     return 1;

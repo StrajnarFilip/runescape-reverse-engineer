@@ -8,9 +8,6 @@ import json
 import time
 from ctypes import wintypes
 
-from mss import MSS
-from PIL import Image, PngImagePlugin
-
 from rs3_reader.rotation_keys import ArduinoBackend, bind, parse_chord, windows_library
 
 WINDOW_TITLES = ("RuneScape (Compatibility Mode)", "RuneScape")
@@ -85,6 +82,9 @@ class GameWindow:
 
 def capture(window, path, height):
     """Capture a desktop crop and embed the geometry used to map image pixels back to it."""
+    from mss import MSS
+    from PIL import Image, PngImagePlugin
+
     bounds = window.bounds()
     left, top, right, bottom = bounds
     region = {"left": left, "top": top, "width": right - left, "height": bottom - top}
@@ -105,6 +105,8 @@ def capture(window, path, height):
 
 def frame_target(window, path, x, y):
     """Translate a screenshot pixel and reject moved or replaced client windows."""
+    from PIL import Image
+
     bounds = window.bounds()
     with Image.open(path) as frame:
         if frame.info.get(FRAME_TAG) != json.dumps([window.handle, *bounds]):

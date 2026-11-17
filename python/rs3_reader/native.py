@@ -773,7 +773,13 @@ class PointerWalk(ctypes.Structure):
     ]
 
 
-SIZED_SPATIAL_STRUCTURES = {1: ActorSpatial, 2: Camera, 3: SpatialInfo, 4: ScreenPoint, 5: PointerWalk}
+SIZED_SPATIAL_STRUCTURES = {
+    1: ActorSpatial,
+    2: Camera,
+    3: SpatialInfo,
+    4: ScreenPoint,
+    5: PointerWalk,
+}
 
 
 class HazardFlags(IntFlag):
@@ -837,6 +843,7 @@ class HazardInfo(ctypes.Structure):
 
 SIZED_HAZARD_STRUCTURES = {1: HazardInfo, 2: Hazard}
 
+
 class EncounterValue(ctypes.Structure):
     _fields_ = [
         ("value", ctypes.c_int64),
@@ -846,6 +853,7 @@ class EncounterValue(ctypes.Structure):
         ("source_varp", ctypes.c_uint32),
         ("source_varbit", ctypes.c_uint32),
     ]
+
 
 class EncounterRaw(ctypes.Structure):
     _fields_ = [
@@ -857,6 +865,7 @@ class EncounterRaw(ctypes.Structure):
         ("observed_ns", ctypes.c_uint64),
     ]
 
+
 class GameTick(ctypes.Structure):
     _fields_ = [
         ("counter", ctypes.c_uint64),
@@ -867,6 +876,7 @@ class GameTick(ctypes.Structure):
         ("uncertainty_ms", ctypes.c_float),
         ("reserved", ctypes.c_uint32 * 2),
     ]
+
 
 class EncounterState(ctypes.Structure):
     _fields_ = [
@@ -888,6 +898,7 @@ class EncounterState(ctypes.Structure):
         ("game_tick", GameTick),
     ]
 
+
 class TelosCleanse(ctypes.Structure):
     _fields_ = [
         (name, ctypes.c_uint32) for name in ("message_id", "client_logic_tick", "valid", "reason")
@@ -905,6 +916,7 @@ SIZED_ENCOUNTER_STRUCTURES = {
 
 class EffectsInfo(ctypes.Structure):
     _fields_ = [(name, ctypes.c_uint32) for name in ("status", "reason", "count", "complete")]
+
 
 class Effect(ctypes.Structure):
     _fields_ = [
@@ -925,6 +937,7 @@ class Effect(ctypes.Structure):
         *((name, ctypes.c_int32) for name in ("active", "stacks", "remaining_ms")),
         ("reserved", ctypes.c_uint32),
     ]
+
 
 # Structures checked against rs3_sizeof() and rs3_combat_sizeof().
 SIZED_STRUCTURES = {
@@ -1066,6 +1079,7 @@ def _function_prototypes():
         "snapshot_abilities": (i32, [handle, ctypes.POINTER(Ability), u32, ctypes.POINTER(u32)]),
         "item_events_since": (i32, [handle, u64, ctypes.POINTER(ItemEvent), u32, *cursor_outputs]),
         "load_catalog": (i32, [handle, ctypes.c_char_p]),
+        "describe_item": (i32, [handle, i32, ctypes.POINTER(Item), u32]),
     }
 
 
@@ -1218,6 +1232,22 @@ class Reader:
             )
         )
         return label
+
+    def describe_item(self, item_id):
+        """Return C catalog metadata, not a live slot, for an item or action-bar seed ID.
+
+        No game sampling or event drain occurs. The result has no occupied-slot
+        identity or quantity. A missing definition raises RuntimeError.
+        """
+        if type(item_id) is not int or not 0 <= item_id <= 0x7FFFFFFF:
+            raise ValueError("Item ID must be a nonnegative signed 32-bit integer")
+        definition = Item()
+        self.check_result(
+            self.library.rs3_describe_item(
+                self.context, item_id, ctypes.byref(definition), ctypes.sizeof(definition)
+            )
+        )
+        return definition
 
     def monotonic_ns(self) -> int:
         """Return the native monotonic clock used by Info.monotonic_ns."""

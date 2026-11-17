@@ -6,6 +6,7 @@ import runpy
 import sys
 import tempfile
 import unittest
+from contextlib import nullcontext, redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -35,6 +36,75 @@ RELEASE = controller["TENDRILS_RELEASE"]
 UPPERCUT = controller["UPPERCUT"]
 HOLD_STILL = controller["HOLD_STILL"]
 SECOND_NS = 1_000_000_000
+
+
+class InputBackendSelectionTests(unittest.TestCase):
+    def test_invalid_live_selection_and_replay_never_construct_input_or_reader(self):
+        main = controller["main"]
+        with patch.dict(
+            main.__globals__,
+            {"Reader": Mock(), "SendInputBackend": Mock(), "ArduinoBackend": Mock()},
+        ):
+            for arguments in (
+                ["--input-backend", "win32"],
+                ["--input-backend", "arduino", "--pid", "123"],
+                ["--input-backend", "win32", "--port", "COM8", "--pid", "123"],
+                ["--input-backend", "win32", "--pid", "123", "--replay", "capture.jsonl"],
+            ):
+                with self.subTest(arguments=arguments), redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit):
+                        main(arguments)
+            main.__globals__["Reader"].assert_not_called()
+            main.__globals__["SendInputBackend"].assert_not_called()
+            main.__globals__["ArduinoBackend"].assert_not_called()
+
+    def test_observation_default_never_opens_a_device(self):
+        main = controller["main"]
+        mocks = {
+            "Reader": Mock(return_value=nullcontext(SimpleNamespace())),
+            "SendInputBackend": Mock(),
+            "ArduinoBackend": Mock(),
+            "observe": Mock(return_value=None),
+        }
+        with patch.dict(main.__globals__, mocks), redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["--pid", "123", "--duration", "1"]), 0)
+        mocks["SendInputBackend"].assert_not_called()
+        mocks["ArduinoBackend"].assert_not_called()
+        mocks["observe"].assert_called_once()
+
+    def test_explicit_win32_uses_no_serial_and_records_the_incomplete_attempt(self):
+        main = controller["main"]
+        reader = SimpleNamespace(monotonic_ns=lambda: 1000)
+        backend = Mock()
+        mocks = {
+            "Reader": Mock(return_value=nullcontext(reader)),
+            "SendInputBackend": Mock(return_value=backend),
+            "ArduinoBackend": Mock(),
+            "resolve_enrage": Mock(),
+            "resolve_action_bar_keys": Mock(),
+            "run": Mock(return_value=2),
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.dict(main.__globals__, mocks), redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        ["--pid", "123", "--input-backend", "win32", "--practice-enrage", "1000"],
+                        attempt_directory=temporary,
+                    ),
+                    2,
+                )
+            paths = list(Path(temporary).glob("telos-*.jsonl"))
+            self.assertEqual(len(paths), 1)
+            rows = [json.loads(line) for line in paths[0].read_text().splitlines()]
+            self.assertEqual(
+                next(row for row in rows if row["event"] == "input_backend")["backend"], "win32"
+            )
+            self.assertEqual(rows[-1]["event"], "attempt_ended")
+            self.assertEqual(rows[-1]["result"], "incomplete")
+        mocks["SendInputBackend"].assert_called_once()
+        mocks["ArduinoBackend"].assert_not_called()
+        mocks["resolve_action_bar_keys"].assert_called_once()
+        backend.close.assert_called_once()
 
 
 class CurrentAccountBindingTests(unittest.TestCase):

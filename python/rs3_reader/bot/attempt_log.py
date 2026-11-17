@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import time
 
+from ..inventory_records import item_change_record, item_record
 from ..native import (
     PRAYER_POINTS_MASK,
     AbilityFlags,
     HazardFlags,
+    InventoryFlags,
     NPCActionFlags,
     NPCFlags,
     SpatialFlags,
@@ -49,6 +51,8 @@ class AttemptLog:
         self.pending_prayer = None
         self.prayer_ack_timeout_ns = prayer_ack_timeout_ns
         self.end_reason = None
+        self.inventory_events = ()
+        self.inventory_lost = None
         self.write("attempt_started", mode=mode, enrage_label=enrage)
 
     def relative_ns(self, value):
@@ -123,6 +127,7 @@ class AttemptLog:
         """Record only encounter-relevant decoded fields and preserve queue event ordering."""
         player = reader.player
         npc_hits, npc_hit_loss = reader.drain_events()
+        self.inventory_events, self.inventory_lost = reader.drain_item_events()
         session = (info.pid, info.process_creation_time, reader.combat.scene_epoch)
         if session != self.session:
             self.session = session
@@ -157,6 +162,8 @@ class AttemptLog:
             effect.pop("remaining_ms")
         state = {
             "session": self.session_index,
+            "process_identity": session,
+            "client_sha256": info.executable_sha256.decode("ascii"),
             "status": info.status,
             "reason": info.reason,
             "client_version": reader.client_version(),
@@ -267,6 +274,31 @@ class AttemptLog:
             "hazard_observation_reason": reader.hazard_info.reason,
             "hazard_candidates_dropped": reader.hazard_info.dropped_count,
             "player_hit_status": reader.player_hit_info.status,
+            "inventory_status": {
+                "status": reader.inventory_info.status,
+                "reason": reader.inventory_info.reason,
+                "flags": reader.inventory_info.flags,
+                "catalog_status": reader.inventory_info.catalog_status,
+            },
+            "inventory": (
+                {
+                    item.slot: item_record(item)
+                    for item in reader.items[: reader.inventory_info.backpack_count]
+                }
+                if reader.inventory_info.flags & InventoryFlags.BACKPACK_READ
+                else None
+            ),
+            "equipment": (
+                {
+                    item.slot: item_record(item)
+                    for item in reader.items[
+                        reader.inventory_info.backpack_count : reader.inventory_info.backpack_count
+                        + reader.inventory_info.equipment_count
+                    ]
+                }
+                if reader.inventory_info.flags & InventoryFlags.EQUIPMENT_READ
+                else None
+            ),
         }
         # Replace changed fields as units, so removals and unknown values survive replay.
         changes = {name: value for name, value in state.items() if value != self.previous.get(name)}
@@ -290,9 +322,21 @@ class AttemptLog:
                     phase_candidate=phase,
                     tile=state["tile"],
                 )
-        if action_loss or hit_loss or npc_hit_loss:
+        if action_loss or hit_loss or npc_hit_loss or self.inventory_lost:
             self.write(
-                "queue_loss", npc_actions=action_loss, player_hits=hit_loss, npc_hits=npc_hit_loss
+                "queue_loss",
+                npc_actions=action_loss,
+                player_hits=hit_loss,
+                npc_hits=npc_hit_loss,
+                inventory_changes=self.inventory_lost,
+            )
+        for event in self.inventory_events:
+            self.write(
+                "inventory_change",
+                native_sequence=event.sequence,
+                event_timestamp_ns=event.observed_at_ns,
+                same_process=(event.pid, event.process_creation_time) == session[:2],
+                change=item_change_record(event),
             )
         for event in actions:
             source = (event.pid, event.process_creation_time, event.scene_epoch)

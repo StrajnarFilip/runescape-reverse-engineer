@@ -31,6 +31,36 @@ vulnerability S, Greater Barge G, EZK equip Page Up, weapon special =, red EoF e
 These observations are saved in the P1 profile and rechecked by role before input.
 Other accounts' unmodified function keys and fallback keys below do not apply.
 
+## Prayer supplies and input integration (2026-11-17)
+
+**Observed, read-only:** the intended client's native UI reports Spiritual prayer
+potion on **C**. The backpack contains item 49027 in logical slot 3 (displayed
+slot 4), six doses, family 177, next variant 49025. The C metadata lookup returns
+the same family for the bar seed. These are acquisition checks outside combat;
+no potion press or resource restoration was tested in this check.
+
+**Controller rule:** resolve the restorative from a fresh native bar label,
+positive prayer-effect metadata and the carried potion family. Keep all eligible
+tokens when identical potions are carried. Re-resolve after slot, dose or bar
+changes; do not substitute another account's Super restore key. The existing
+threshold is 50 prayer points, with a 2.4-second retry delay. Urgent protection
+and defensive work is processed first. Log accepted input separately from the
+later native dose transition and prayer-point increase. An increase alone does
+not prove which item restored prayer. Inventory queue loss or session changes
+leave consumption inconclusive.
+
+**Clock detail:** native inventory events use Unix wall time in
+`observed_at_ns`. Attack events and input timing use the native monotonic clock.
+Associate inventory events by process lifetime, event cursor and a newer sampled
+frame; do not subtract their wall timestamp from a monotonic input timestamp.
+
+**Implemented, offline-tested:** the experimental practice controller now accepts
+an explicit Win32 keyboard/mouse backend as well as Arduino. Both require a
+pinned PID for live input. Win32 packet acceptance and release-on-failure tests
+are transport checks. In-game mouse movement and ability acceptance still need
+live evidence. Ordered P1 rotation integration, complete P5 combat, and full
+prayer/healing verification remain open.
+
 ## Earlier account setup and research history
 
 The following entries describe the November 13 session, not current bindings or

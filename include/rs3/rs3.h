@@ -576,6 +576,17 @@ RS3_API int32_t rs3_item_events_since(rs3_context *context, uint64_t after, rs3_
  */
 RS3_API int32_t rs3_load_catalog(rs3_context *context, const char *path);
 
+/**
+ * Copy one definition from the loaded, version-pinned C metadata catalog.
+ * This does not sample the game. The result is NOT an occupied inventory slot:
+ * token, quantity and container_id are zero; slot is UINT32_MAX. Only item_id,
+ * RS3_ITEM_METADATA and the catalog-derived fields describe the definition.
+ * Missing catalog/item returns RS3_E_STATE without modifying caller storage.
+ * Safe while the collector runs. No internal pointer escapes.
+ */
+RS3_API int32_t rs3_describe_item(rs3_context *context, int32_t item_id, rs3_item *out,
+                                  uint32_t out_size);
+
 /* -------------------------------------------------------------------------
  * Foreground input (opt-in)
  *

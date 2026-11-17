@@ -78,6 +78,9 @@ void inventory_destroy(inventory_state *inventory);
 /** Forgets the previous observation so the next commit establishes a new baseline. */
 void inventory_reset_tracking(inventory_state *inventory);
 
+/** Fill catalog-derived fields only; absent definitions keep metadata unknown. */
+void inventory_describe_item(const item_catalog *catalog, rs3_item *item);
+
 /** Stages slots, Bone Shield tier and abilities into the snapshot. */
 void inventory_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t player_address,
                      uint64_t client_address, uint64_t world_state);

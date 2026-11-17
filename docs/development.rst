@@ -32,6 +32,14 @@ validation gate. It is separate from the roadmap's autonomous decision engine.
 The `Telos automation roadmap <telos-automation/README.rst>`_ splits the
 remaining work into one brief per agent under ``docs/telos-automation/tracks/``.
 New decision code goes in ``python/rs3_reader/bot/``.
+
+``work/telos_zero.py`` is the experimental native-state practice controller.
+It supports explicit Win32 or Arduino input with a pinned PID. See
+``training-data/README.md`` for transport selection, recording and current gaps.
+``bot/consumables.py`` resolves carried prayer potions by C metadata family and
+matches accepted inputs to the single inventory-event drain in ``bot/attempt_log.py``.
+It does not sample memory or issue input. Ordered P1 opening integration and
+complete P5 responses remain pending.
 `Action cooldowns <telos-automation/action-cooldowns.rst>`_ lists which
 actions have their own timer, which share one, and what may go out in one tick.
 

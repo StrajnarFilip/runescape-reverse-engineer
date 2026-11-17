@@ -46,6 +46,42 @@ $env:PYTHONPATH = 'python'
 python work/import_p1_attempt.py LOCAL_CAPTURE.jsonl training-data/telos-p1-ATTEMPT.jsonl
 ```
 
+## Current practice-controller transport and inventory records
+
+The standalone controller supports explicit `--input-backend win32` or
+`--input-backend arduino --port COM8`. Live input requires `--pid` for the intended
+client; `--port` also selects Arduino. Omitting both transport options observes
+only. F12 stops the practice controller; its stop key is separate from the
+supervised pilot's Ctrl+Shift+F12. Focus loss pauses input and the native process
+lifetime remains pinned. The current machine has no detected Leonardo, so
+Win32 support removes that transport dependency. Ordered opening integration
+and P5 combat remain incomplete.
+
+For example, after replacing `CURRENT_PID` with the intended process:
+
+```powershell
+$env:PYTHONPATH = 'python'
+python work/telos_zero.py --pid CURRENT_PID --record-attempt --duration 30
+```
+
+This command records without input. Selecting `--input-backend win32` enables
+the experimental practice controller. A live-input session always writes a
+versioned attempt file and records its selected backend.
+
+Schema 1 initial state and deltas now include native inventory/equipment slots
+and acquisition status. `inventory_change` retains the native event sequence,
+process lifetime, original Unix `event_timestamp_ns` and before/after item
+records. The outer sequence remains the attempt's sequence. `queue_loss` reports
+inventory loss explicitly. Each queue is drained once and the same owned
+inventory events feed the potion outcome monitor.
+
+`potion_use_sent` records the fresh native chord, family, candidate tokens and
+pre-dispatch monotonic time; it does not assert consumption. A later
+`potion_use_outcome` may identify the exact token, slots and dose transition.
+Prayer-point increase is reported separately. Timeouts, queue loss, session
+changes and an unfinished attempt preserve unconfirmed outcomes. Inventory
+event wall timestamps must not be subtracted from input monotonic timestamps.
+
 ## Earlier standalone controller and schema 1
 
 The fallback-key descriptions in this section apply only to the explicit

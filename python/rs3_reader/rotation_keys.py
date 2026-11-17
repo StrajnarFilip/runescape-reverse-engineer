@@ -18,6 +18,7 @@ POLL_SECONDS = 0.01
 SERIAL_TIMEOUT_SECONDS = 1.0
 SERIAL_REPLY_LIMIT = 64
 INPUT_KEYBOARD = 1
+INPUT_MOUSE = 0
 KEYEVENTF_EXTENDEDKEY = 0x0001
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_SCANCODE = 0x0008
@@ -29,6 +30,11 @@ SERIAL_BAUD = 115200
 SERIAL_BINARY_DTR_FLAGS = 0x11
 DWORD_MAX = 0xFFFFFFFF
 USER_MODIFIERS = (0x10, 0x11, 0x12, 0x5B, 0x5C)
+MOUSE_MOVE = 0x0001
+MOUSE_WHEEL = 0x0800
+WHEEL_DELTA = 120
+MAXIMUM_RELATIVE_REPORT = 127
+MOUSE_BUTTON_FLAGS = {"L": (0x0002, 0x0004), "R": (0x0008, 0x0010), "M": (0x0020, 0x0040)}
 
 
 @dataclass(frozen=True)
@@ -250,10 +256,19 @@ class KeyboardBackend:
 
 
 class SendInputBackend(KeyboardBackend):
-    """Physical scancode SendInput backend, with checked delivery counts."""
+    """Checked keyboard and relative-pointer transport for the same single writer.
+
+    ``command`` accepts the movement controller's small Arduino-compatible
+    mouse vocabulary. Game observation, focus and destination checks remain
+    the caller's responsibility and run before every input. No serial port or
+    screenshot package is required.
+    """
 
     def __init__(self, sender=None):
         super().__init__()
+        self.possible_keys = []
+        self.possible_buttons = []
+        self.failed = False
         self.sender = sender
         if sender is None:
             self.sender = bind(
@@ -265,7 +280,12 @@ class SendInputBackend(KeyboardBackend):
 
     def event(self, key, down, check):
         """Insert one event; zero accepted events is a hard failure."""
+        if self.closed or (self.failed and down):
+            raise RuntimeError("Win32 input backend is closed or faulted")
         check()
+        # Also track direct event() calls, such as the held camera arrow.
+        if down and key not in self.possible_keys:
+            self.possible_keys.append(key)
         flags = KEYEVENTF_SCANCODE
         if key.extended:
             flags |= KEYEVENTF_EXTENDEDKEY
@@ -273,7 +293,89 @@ class SendInputBackend(KeyboardBackend):
             flags |= KEYEVENTF_KEYUP
         packet = Input(INPUT_KEYBOARD, InputData(keyboard=KeyboardInput(0, key.scan_code, flags)))
         if self.sender(1, ctypes.byref(packet), ctypes.sizeof(Input)) != 1:
+            self.failed = True
             raise OSError("SendInput rejected an event (check focus and process integrity levels)")
+        if not down and key in self.possible_keys:
+            self.possible_keys.remove(key)
+
+    def _mouse(self, flags, check, *, x=0, y=0, data=0):
+        check()
+        packet = Input(INPUT_MOUSE, InputData(mouse=MouseInput(x, y, data, flags)))
+        if self.sender(1, ctypes.byref(packet), ctypes.sizeof(Input)) != 1:
+            self.failed = True
+            raise OSError("SendInput rejected a mouse event")
+
+    def _button(self, button, down, check):
+        check()
+        if down and button not in self.possible_buttons:
+            self.possible_buttons.append(button)
+        self._mouse(MOUSE_BUTTON_FLAGS[button][0 if down else 1], check)
+        if not down and button in self.possible_buttons:
+            self.possible_buttons.remove(button)
+
+    def command(self, command, check):
+        """Send a bounded pointer command; clicks always release after interruption.
+
+        The shared caller can keep using MOVE/CLICK/DOWN/UP/WHEEL. These are
+        parsed locally, never passed to a shell. Invalid or oversized reports
+        send nothing. An uncertain delivery latches a fault; releases remain
+        available for shutdown.
+        """
+        if command == "RELEASE_ALL":
+            self.release_all()
+            return
+        if self.closed or self.failed:
+            raise RuntimeError("Win32 input backend is closed or faulted")
+        parts = command.split()
+        if len(parts) == 3 and parts[0] == "MOVE":
+            try:
+                horizontal, vertical = (int(value) for value in parts[1:])
+            except ValueError as error:
+                raise ValueError("MOVE needs two integer relative coordinates") from error
+            if max(abs(horizontal), abs(vertical)) > MAXIMUM_RELATIVE_REPORT:
+                raise ValueError("MOVE exceeds the bounded relative report")
+            self._mouse(MOUSE_MOVE, check, x=horizontal, y=vertical)
+        elif len(parts) == 2 and parts[0] == "WHEEL":
+            try:
+                notches = int(parts[1])
+            except ValueError as error:
+                raise ValueError("WHEEL needs an integer notch count") from error
+            if abs(notches) > MAXIMUM_RELATIVE_REPORT:
+                raise ValueError("WHEEL exceeds the bounded relative report")
+            self._mouse(MOUSE_WHEEL, check, data=(notches * WHEEL_DELTA) & DWORD_MAX)
+        elif len(parts) == 2 and parts[0] in ("CLICK", "DOWN", "UP"):
+            operation, button = parts
+            if button not in MOUSE_BUTTON_FLAGS:
+                raise ValueError("Unknown mouse button")
+            if operation == "CLICK":
+                try:
+                    self._button(button, True, check)
+                finally:
+                    if button in self.possible_buttons:
+                        self._button(button, False, lambda: None)
+            else:
+                self._button(button, operation == "DOWN", check)
+        else:
+            raise ValueError("Unsupported Win32 pointer command")
+
+    def release_all(self):
+        """Release every possibly held key/button, including direct camera holds."""
+        errors = []
+        keys = list(dict.fromkeys(self.held + self.possible_keys))
+        for key in reversed(keys):
+            try:
+                self.event(key, False, lambda: None)
+                if key in self.held:
+                    self.held.remove(key)
+            except (OSError, RuntimeError) as error:
+                errors.append(str(error))
+        for button in tuple(reversed(self.possible_buttons)):
+            try:
+                self._button(button, False, lambda: None)
+            except (OSError, RuntimeError) as error:
+                errors.append(str(error))
+        if errors:
+            raise RuntimeError("Input release failed: " + "; ".join(errors))
 
 
 class DeviceControlBlock(ctypes.Structure):

@@ -1,7 +1,7 @@
-"""Observe Telos, or run the melee practice controller through phases 1-3.
+"""Observe Telos or explicitly enable the experimental native-state practice controller.
 
-With --port, keys come from the displayed action bars and the enrage from memory. The operator
-wakes Telos unless screenshot points are given for the automatic approach.
+Select Win32 or Arduino input; keys come from guarded native UI labels and the
+enrage from memory. Entry/rotation integration and P5 combat remain incomplete.
 """
 
 from __future__ import annotations
@@ -18,6 +18,11 @@ from pathlib import Path
 
 from rs3_reader.action_bar_keys import displayed_bindings, refresh_binding
 from rs3_reader.bot.attempt_log import CLEANSE_MAX_AGE_CLIENT_TICKS, AttemptLog
+from rs3_reader.bot.consumables import (
+    PRAYER_RESTORATION_ROLE,
+    PotionUseMonitor,
+    resolve_prayer_potion,
+)
 from rs3_reader.native import (
     LOGIC_TICK_MS,
     PRAYER_POINTS_MASK,
@@ -38,6 +43,7 @@ from rs3_reader.native import (
 from rs3_reader.prayer import Prayer
 from rs3_reader.rotation_keys import (
     ArduinoBackend,
+    SendInputBackend,
     parse_chord,
     resolve_layout_chord,
     window_keyboard_layout,
@@ -1168,7 +1174,7 @@ SUPER_RESTORE_RETRY_NS = 4 * TICK_FALLBACK_NS
 
 
 class PrayerRestorer:
-    """Decide when to drink a super restore dose from the sampled prayer points."""
+    """Decide when to use the selected prayer restorative from sampled points."""
 
     def __init__(self):
         self.sent_ns = None
@@ -2592,6 +2598,20 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
 
     beam_keeper = BeamKeeper()
     restorer = PrayerRestorer()
+    potion_monitor = PotionUseMonitor()
+    potion_binding_scan = {"next_ns": 0}
+
+    def emit_potion(record):
+        record = dict(record)
+        event = record.pop("event")
+        emit(event, **record)
+
+    def finish_potion_observation():
+        if potion_monitor.pending is not None:
+            emit_potion(potion_monitor.finish("incomplete_attempt_end"))
+
+    if cleanup is not None:
+        cleanup.callback(finish_potion_observation)
 
     def dive_under_telos(phase, phase_one, boss, pose, tile, player, timers):
         """Dive onto the strip's wall end under Telos to displace him (P3, account owner).
@@ -3684,7 +3704,7 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
     if getattr(args, "devotion", None):
         labels["Devotion"] = args.devotion
     if getattr(args, "super_restore", None):
-        labels["Super Restore"] = args.super_restore
+        labels[PRAYER_RESTORATION_ROLE] = args.super_restore
     if getattr(args, "disruption_shield", None) and getattr(args, "spellbook_swap", None):
         labels[DISRUPTION_SHIELD] = args.disruption_shield
         labels[SPELLBOOK_SWAP] = args.spellbook_swap
@@ -3718,6 +3738,63 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
         or any(chord[-1].virtual_key == F12 for chord in prayer_chords.values())
     ):
         raise ValueError("Flick prayer keys must be distinct from each other, abilities and F12")
+
+    def restore_prayer(points_tenths):
+        """Use a currently carried restorative after urgent protection/defensive work."""
+        now_ns = reader.monotonic_ns()
+        if (
+            not input_allowed
+            or potion_monitor.pending is not None
+            or not restorer.due(points_tenths, now_ns)
+        ):
+            return
+        potion = None
+        if getattr(args, "prayer_restore_source", None) == "native":
+            evidence = args.native_bindings.get(PRAYER_RESTORATION_ROLE)
+            fresh = refresh_binding(reader, evidence) if evidence is not None else None
+            if fresh is not None:
+                potion = resolve_prayer_potion(
+                    reader,
+                    {fresh.name: fresh},
+                    preferred_family=getattr(args, "prayer_potion_family", None),
+                )
+            if potion is None and now_ns >= potion_binding_scan["next_ns"]:
+                potion_binding_scan["next_ns"] = now_ns + SUPER_RESTORE_RETRY_NS
+                potion = resolve_prayer_potion(
+                    reader,
+                    displayed_bindings(reader),
+                    preferred_family=getattr(args, "prayer_potion_family", None),
+                )
+            if potion is None:
+                return
+            chord = (
+                resolve_layout_chord(potion.binding.key_label, scan_for_key)
+                if layout is not None
+                else parse_chord(potion.binding.key_label)
+            )
+            if (
+                chord
+                in {value for name, value in bindings.items() if name != PRAYER_RESTORATION_ROLE}
+                or chord in prayer_chords.values()
+            ):
+                raise RuntimeError("Prayer potion chord conflicts with another current role")
+            bindings[PRAYER_RESTORATION_ROLE] = chord
+            args.native_bindings[PRAYER_RESTORATION_ROLE] = potion.binding
+            args.prayer_potion_family = potion.family_id
+        if PRAYER_RESTORATION_ROLE not in bindings:
+            return
+        sent_ns = reader.monotonic_ns()
+        if send_chord(bindings[PRAYER_RESTORATION_ROLE]):
+            restorer.sent(points_tenths, sent_ns)
+            if potion is not None:
+                emit_potion(potion_monitor.sent(potion, sent_ns, points_tenths))
+            else:
+                emit(
+                    "prayer_restore_sent",
+                    prayer_points=points_tenths / 10,
+                    source="explicit_or_legacy_chord",
+                    consumption_confirmed=False,
+                )
 
     # The received tick last seen and when it was first seen (monotonic ns).
     tick_clock = {"tick": None, "since_ns": None}
@@ -3977,6 +4054,12 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
         if reader.combat.scene_epoch != identity[2] and phase_four_defeated_ns is None:
             emit("encounter_reset", reason="Scene changed")
             return ENCOUNTER_RESET
+        if attempt:
+            outcome = potion_monitor.observe(
+                reader, attempt.inventory_events, attempt.inventory_lost
+            )
+            if outcome is not None:
+                emit_potion(outcome)
         now = reader.monotonic_ns()
         if (
             phase_four_defeated_ns is not None
@@ -4157,14 +4240,6 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                 golems=golems,
             )
         prayer_tenths = None if prayer_raw is None else prayer_raw & PRAYER_POINTS_MASK
-        if input_allowed and "Super Restore" in bindings and restorer.due(prayer_tenths, now):
-            if send_chord(bindings["Super Restore"]):
-                restorer.sent(prayer_tenths, reader.monotonic_ns())
-                emit(
-                    "super_restore_sent",
-                    prayer_points=prayer_tenths / 10,
-                    received_tick=received_tick_counter(),
-                )
         camera_step(phase, actions)
         if not phase_one_started:
             if hp_known:
@@ -4480,6 +4555,7 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                         **(dodge_choice or {"ability": None}),
                     )
             log("ability_sent", ability=action.ability, reason=action.reason, sent_ns=sent_ns)
+        restore_prayer(prayer_tenths)
         remember_floor(phase, boss)
         movement_busy = phase_one.owns_movement(reader.monotonic_ns(), received_tick)
         if phase is not None and phase >= 4:
@@ -4533,7 +4609,7 @@ ACTION_BAR_KEY_ARGUMENTS = {
     "flick_magic_key": "Deflect Magic",
     "flick_soul_split_key": "Soul Split",
     "hurricane": "Hurricane",
-    "super_restore": "Super Restore",
+    "super_restore": PRAYER_RESTORATION_ROLE,
 }
 # Keys used when a bar scan does not find the ability. Devotion on F7 and Surge on K were set up
 # by the account owner on 2026-11-15; the 07:01 scan did not find Devotion on a displayed bar.
@@ -4573,9 +4649,26 @@ def resolve_action_bar_keys(reader, args, attempt=None):
     reader.sample()
     legacy = getattr(args, "legacy_unmodified_bar_keys", False)
     bindings = displayed_bindings(reader, legacy_unmodified=legacy)
+    args.prayer_restore_source = (
+        "native"
+        if not legacy and not getattr(args, "super_restore", None)
+        else "explicit_or_legacy"
+    )
+    potion = (
+        resolve_prayer_potion(reader, bindings)
+        if args.prayer_restore_source == "native"
+        and getattr(reader, "inventory_info", None) is not None
+        else None
+    )
     sources, evidence = {}, {}
     for argument, name in ACTION_BAR_KEY_ARGUMENTS.items():
-        if getattr(args, argument, None):
+        if argument == "super_restore" and potion is not None:
+            args.super_restore = potion.binding.key_label
+            args.prayer_potion_family = potion.family_id
+            args.displayed_keys = True
+            sources[argument] = "native_inventory_potion_family"
+            evidence[name] = potion.binding
+        elif getattr(args, argument, None):
             sources[argument] = "command_line"
         elif name in bindings:
             setattr(args, argument, bindings[name].key_label)
@@ -4603,12 +4696,14 @@ def resolve_action_bar_keys(reader, args, attempt=None):
     log("keys_resolved", keys=resolved, sources=sources, native_evidence=details)
     if attempt:
         attempt.write("keys_resolved", keys=resolved, sources=sources, native_evidence=details)
+        if potion is not None:
+            attempt.write("prayer_potion_resolved", **potion.record())
     if missing:
         raise RuntimeError(f"Put {', '.join(missing)} on a displayed action bar or pass its key")
 
 
-def main():
-    """Start with bar 18 active and Practice Mode 0% confirmed in the client."""
+def main(argv=None, *, attempt_directory=None):
+    """Observe by default; explicitly select a backend and PID for live input."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pid", type=int)
     parser.add_argument(
@@ -4616,7 +4711,12 @@ def main():
         type=int,
         help="Optional session limit in seconds; by default only death or F12 ends the run",
     )
-    parser.add_argument("--port", help="Arduino COM port. Omit for observation only.")
+    parser.add_argument("--port", help="Arduino COM port; implies --input-backend arduino")
+    parser.add_argument(
+        "--input-backend",
+        choices=("win32", "arduino"),
+        help="Enable input through Win32 or Arduino; omit both this and --port to observe",
+    )
     parser.add_argument(
         "--legacy-unmodified-bar-keys",
         action="store_true",
@@ -4626,7 +4726,7 @@ def main():
     parser.add_argument(
         "--record-attempt",
         action="store_true",
-        help="Write an attempt log under training-data/ (always on with --port)",
+        help="Write an attempt log under training-data/ (always on with live input)",
     )
     parser.add_argument("--frame", type=Path, help="Fresh game_console.py screenshot")
     parser.add_argument(
@@ -4712,26 +4812,35 @@ def main():
         metavar=("TARGET_CYCLE", "BASIC_ATTACK"),
         help="Experimental one-shot P2 target cycle and basic attack; input then stops at P2",
     )
-    args = parser.parse_args()
-    if args.replay and args.port:
-        parser.error("Replay does not open the Arduino")
+    args = parser.parse_args(argv)
+    if args.port:
+        if args.input_backend == "win32":
+            parser.error("--port cannot be combined with --input-backend win32")
+        args.input_backend = "arduino"
+    if args.input_backend == "arduino" and not args.port:
+        parser.error("Arduino input requires --port")
+    live_input = args.input_backend is not None
+    if live_input and (args.pid is None or args.pid <= 0):
+        parser.error("Live input requires --pid to pin the intended client")
+    if args.replay and live_input:
+        parser.error("Replay never opens an input backend")
     if args.replay and args.record_attempt:
         parser.error("An attempt log requires a live session")
     # Input continues through every handled phase (to the P4 checkpoint) unless the one-shot
     # target-cycle trial is selected, which needs input to end at P2.
     args.continue_phase_two = not args.reacquire
     args.flick_melee = args.timed_freedom = args.observe_transition = True
-    if args.port:
+    if live_input:
         args.record_attempt = True
     if args.duration is not None and args.duration <= 0:
         parser.error("Duration must be positive")
     approach_points = (args.frame, args.approach, args.melee)
     # The operator wakes Telos unless every screenshot point for the automatic approach is set.
     args.manual_engage = not any(approach_points)
-    if args.port and not args.manual_engage and not all(approach_points):
+    if live_input and not args.manual_engage and not all(approach_points):
         parser.error("The automatic approach needs --frame, --melee and --approach together")
-    if args.auto_retaliate is not None and (not args.port or not all(approach_points)):
-        parser.error("--auto-retaliate needs --port, --frame, --melee and --approach")
+    if args.auto_retaliate is not None and (not live_input or not all(approach_points)):
+        parser.error("--auto-retaliate needs live input, --frame, --melee and --approach")
     board = stream = attempt = None
     end_reason = "error"
     outcome = "incomplete"
@@ -4740,30 +4849,39 @@ def main():
             replay(args.replay)
             return 0
         with Reader(pid=args.pid, worker_hz=0) as reader:
-            if args.port:
+            if live_input:
                 resolve_enrage(reader, args)
-            if args.port or args.record_attempt:
-                directory = Path(__file__).resolve().parents[1] / "training-data"
+            if live_input or args.record_attempt:
+                directory = (
+                    Path(attempt_directory)
+                    if attempt_directory is not None
+                    else Path(__file__).resolve().parents[1] / "training-data"
+                )
                 directory.mkdir(exist_ok=True)
                 date = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
                 path = directory / f"telos-{date}.jsonl"
                 stream = path.open("x", encoding="utf-8", newline="\n")
                 attempt = AttemptLog(
                     stream,
-                    mode="practice" if args.port else "observation",
+                    mode="practice" if live_input else "observation",
                     enrage=args.practice_enrage,
                     monotonic_ns=reader.monotonic_ns,
                     prayer_ack_timeout_ns=ACK_TIMEOUT_NS,
                 )
                 print(f"Attempt log {path}", flush=True)
-            if args.port:
+            if live_input:
                 resolve_action_bar_keys(reader, args, attempt)
-            if not args.port:
+            if not live_input:
                 observed_end = observe(reader, args.duration or MAX_PRACTICE_SECONDS, attempt)
                 end_reason = observed_end if attempt else "observation_ended"
                 result = 0
             else:
-                board = ArduinoBackend(args.port)
+                board = (
+                    SendInputBackend()
+                    if args.input_backend == "win32"
+                    else ArduinoBackend(args.port)
+                )
+                attempt.write("input_backend", backend=args.input_backend)
                 with ExitStack() as cleanup:
                     result = run(reader, args, board, attempt, cleanup=cleanup)
                 # Setup can cross scenes before engaging. After that, leaving the encounter

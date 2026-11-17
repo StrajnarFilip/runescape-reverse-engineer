@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-17",
+  "branch": "telos/integration",
+  "baseline_commit": "d1092f2",
+  "result": "offline_integration_passed_and_read_only_binding_observed",
+  "changes": [
+    "Explicit Win32 keyboard and bounded mouse transport in the standalone practice controller; Arduino remains selectable",
+    "A live transport requires an explicit PID and always records an attempt",
+    "Additive caller-owned C item-definition lookup without game sampling or queue drains",
+    "Prayer restorative binding matched to current C inventory by potion family, including dose and slot changes",
+    "Separate accepted-input, dose-transition and prayer-increase observations",
+    "Single inventory-event drain shared by attempt logging and the potion outcome monitor"
+  ],
+  "checks": {
+    "release_build": "passed",
+    "ctest_targets_passed": 16,
+    "ctest_targets_failed": 0,
+    "python_tests_passed": 560,
+    "python_tests_skipped": 0,
+    "firmware_host_test": "passed_with_zig_cpp",
+    "new_inventory_native_fixture_groups": 2,
+    "native_inventory_fixture_groups_total": 8,
+    "python_formatting": "passed_for_changed_python_files",
+    "c_formatting": "applied_repository_clang_format"
+  },
+  "read_only_observation": {
+    "client_profile": "original_951_3",
+    "executable_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
+    "health": 10400,
+    "maximum_health": 10400,
+    "native_action_bar_roles": 55,
+    "prayer_restorative": {
+      "name": "Spiritual prayer potion",
+      "key_label": "C",
+      "item_id": 49027,
+      "family_id": 177,
+      "logical_inventory_slot": 3,
+      "displayed_inventory_slot": 4,
+      "doses": 6,
+      "next_dose_item_id": 49025
+    },
+    "metadata_lookup_has_live_identity": false,
+    "automatic_game_inputs_sent": 0
+  },
+  "clock_contract": {
+    "inventory_event_observed_at_ns": "unix_epoch_nanoseconds",
+    "input_and_frame_monotonic_ns": "native_qpc_nanoseconds",
+    "ordering": "same_process_lifetime_and_scene_with_event_cursor_and_newer_snapshot",
+    "cross_domain_timestamp_subtraction": false
+  },
+  "remaining_live_checks": [
+    "Win32 input acceptance by the pinned game window, including movement and release on interruption",
+    "Prayer potion input followed by the native dose transition and resource observation",
+    "Independent ground projection, Walk hover and movement outcome checks"
+  ],
+  "remaining_integration": [
+    "Ordered PVME P1 opening composed with the practice mechanic and prayer controller",
+    "Complete P5 responses",
+    "Verified protection deadlines, attack attribution and Soul Split healing coverage"
+  ],
+  "full_kill_verified": false
+}

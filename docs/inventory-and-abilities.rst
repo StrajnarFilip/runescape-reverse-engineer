@@ -92,6 +92,18 @@ costs 4 bytes per ID, about 252 KB for the current cache.
 Potions and item identity
 -------------------------
 
+``rs3_describe_item(context, item_id, out, out_size)`` copies one item definition
+from the loaded, version-pinned C catalog into caller-owned ``rs3_item`` storage.
+Python exposes it as ``Reader.describe_item(item_id)``. It neither samples the
+game nor drains an event queue, so callers can resolve a hotbar seed ID even
+after its carried six-dose variant has become a five-dose variant. Match its
+family against the current inventory rather than requiring the same item ID.
+The result describes metadata: token, quantity and container are zero and slot
+is ``UINT32_MAX``. It does not assert possession. Missing catalog/definition
+returns ``RS3_E_STATE`` and leaves the output unchanged. Lifecycle locking makes
+the lookup safe alongside collection and catalog replacement; no internal
+pointer escapes. Existing ABI structures retain their sizes.
+
 Doses come from explicit variant IDs, not a name suffix. For example the installed
 Saradomin brew family links flask (6) **23351** to flask (5) **23353**. Both retain
 the same family and healing tag; the dose count changes. Its effect definition

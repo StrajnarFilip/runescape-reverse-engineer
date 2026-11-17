@@ -4,8 +4,87 @@ import copy
 import io
 import json
 import unittest
+from contextlib import ExitStack
+from unittest.mock import patch
 
+from rs3_reader.bot.attempt_log import AttemptLog
 from rs3_reader.bot.telemetry_attempt import TelemetryAttemptLog, read_attempt_records
+from rs3_reader.native import ItemChange, ItemEvent, Reader, library_path
+
+
+@unittest.skipUnless(library_path().is_file(), "Build rs3_native to run ABI tests")
+class NativeAttemptLogTests(unittest.TestCase):
+    def test_frame_drains_each_queue_once_and_preserves_unknown_initial_inventory(self):
+        stream = io.StringIO()
+        with Reader(pid=0xFFFFFFFF, worker_hz=0) as reader:
+            reader.sample()
+            info = reader.info
+            attempt = AttemptLog(stream, mode="observation", enrage=None)
+            names = (
+                "drain_npc_action_events",
+                "drain_player_hit_events",
+                "drain_events",
+                "drain_item_events",
+            )
+            with ExitStack() as stack:
+                drains = {
+                    name: stack.enter_context(
+                        patch.object(reader, name, wraps=getattr(reader, name))
+                    )
+                    for name in names
+                }
+                actions, action_loss = reader.drain_npc_action_events()
+                hits, hit_loss = reader.drain_player_hit_events()
+                attempt.frame(
+                    reader,
+                    info,
+                    phase=None,
+                    actions=actions,
+                    action_loss=action_loss,
+                    hits=hits,
+                    hit_loss=hit_loss,
+                )
+                for drain in drains.values():
+                    drain.assert_called_once_with()
+            self.assertEqual(attempt.inventory_events, [])
+            self.assertEqual(attempt.inventory_lost, 0)
+        rows = [json.loads(line) for line in stream.getvalue().splitlines()]
+        initial = next(row["changes"] for row in rows if row["event"] == "state")
+        self.assertIsNone(initial["inventory"])
+        self.assertIsNone(initial["equipment"])
+        self.assertIsNone(initial["hp"])
+        self.assertEqual([row["sequence"] for row in rows], list(range(1, len(rows) + 1)))
+
+    def test_inventory_wall_clock_identity_and_loss_are_preserved(self):
+        stream = io.StringIO()
+        event = ItemEvent(
+            sequence=91,
+            observed_at_ns=1_800_000_000_000_000_000,
+            pid=22,
+            process_creation_time=33,
+            kind=ItemChange.DOSES_CHANGED,
+        )
+        event.before.item_id, event.after.item_id = 49027, 49025
+        event.before.doses, event.after.doses = 6, 5
+        with Reader(pid=0xFFFFFFFF, worker_hz=0) as reader:
+            reader.sample()
+            info = reader.info
+            attempt = AttemptLog(stream, mode="observation", enrage=None)
+            with patch.object(reader, "drain_item_events", return_value=([event], 2)) as drain:
+                attempt.frame(
+                    reader, info, phase=None, actions=[], action_loss=0, hits=[], hit_loss=0
+                )
+                drain.assert_called_once_with()
+            self.assertEqual(attempt.inventory_events, [event])
+        rows = [json.loads(line) for line in stream.getvalue().splitlines()]
+        loss = next(row for row in rows if row["event"] == "queue_loss")
+        self.assertEqual(loss["inventory_changes"], 2)
+        change = next(row for row in rows if row["event"] == "inventory_change")
+        self.assertEqual(change["native_sequence"], 91)
+        self.assertEqual(change["event_timestamp_ns"], event.observed_at_ns)
+        self.assertEqual(change["change"]["observed_at_ms"], 1_800_000_000_000)
+        self.assertFalse(change["same_process"])
+        self.assertEqual(change["change"]["after"]["doses"], 5)
 
 
 class TelemetryAttemptLogTests(unittest.TestCase):

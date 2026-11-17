@@ -375,6 +375,51 @@ static void validates_catalogs_and_reports_item_queue_gaps(void)
     fixture_destroy(test_fixture);
 }
 
+static void describes_unowned_item_definitions_without_fabricating_inventory_identity(void)
+{
+    fixture *test_fixture = fixture_create_inventory();
+    rs3_item definition;
+    assert(rs3_describe_item(test_fixture->context, FIXTURE_ITEM_BREW_6, &definition,
+                             sizeof definition) == RS3_OK);
+    assert(definition.item_id == FIXTURE_ITEM_BREW_6 && definition.doses == 6);
+    assert(definition.flags == RS3_ITEM_METADATA && definition.family_id != 0);
+    assert(definition.next_dose_item_id == FIXTURE_ITEM_BREW_5);
+    assert(definition.effect_flags & RS3_HEALS);
+    assert(!definition.token && !definition.quantity && !definition.container_id);
+    assert(definition.slot == UINT32_MAX);
+    rs3_item lower_dose;
+    assert(rs3_describe_item(test_fixture->context, FIXTURE_ITEM_BREW_5, &lower_dose,
+                             sizeof lower_dose) == RS3_OK);
+    assert(lower_dose.family_id == definition.family_id && lower_dose.doses == 5);
+    /* The lower-dose definition exists without that item occupying a slot. */
+    assert(test_fixture->snapshot->info.sequence == 0);
+    fixture_destroy(test_fixture);
+}
+
+static void metadata_lookup_validates_arguments_and_preserves_output_on_failure(void)
+{
+    fixture *test_fixture = fixture_create_inventory();
+    rs3_item definition;
+    memset(&definition, 0xa5, sizeof definition);
+    rs3_item original = definition;
+    assert(rs3_describe_item(NULL, FIXTURE_ITEM_BREW_6, &definition, sizeof definition) ==
+           RS3_E_ARGUMENT);
+    assert(rs3_describe_item(test_fixture->context, -1, &definition, sizeof definition) ==
+           RS3_E_ARGUMENT);
+    assert(rs3_describe_item(test_fixture->context, FIXTURE_ITEM_BREW_6, NULL, sizeof definition) ==
+           RS3_E_ARGUMENT);
+    assert(rs3_describe_item(test_fixture->context, FIXTURE_ITEM_BREW_6, &definition,
+                             sizeof definition - 1) == RS3_E_ABI);
+    assert(rs3_describe_item(test_fixture->context, INT32_MAX, &definition, sizeof definition) ==
+           RS3_E_STATE);
+    assert(memcmp(&definition, &original, sizeof definition) == 0);
+    catalog_free(&test_fixture->context->inventory->catalog);
+    assert(rs3_describe_item(test_fixture->context, FIXTURE_ITEM_BREW_6, &definition,
+                             sizeof definition) == RS3_E_STATE);
+    assert(memcmp(&definition, &original, sizeof definition) == 0);
+    fixture_destroy(test_fixture);
+}
+
 int main(void)
 {
     RUN_TEST(tracks_moves_doses_replacements_and_quantities);
@@ -383,6 +428,8 @@ int main(void)
     RUN_TEST(torn_slots_and_duplicates_do_not_invent_identities);
     RUN_TEST(looks_up_items_through_the_direct_index);
     RUN_TEST(validates_catalogs_and_reports_item_queue_gaps);
+    RUN_TEST(describes_unowned_item_definitions_without_fabricating_inventory_identity);
+    RUN_TEST(metadata_lookup_validates_arguments_and_preserves_output_on_failure);
     puts("PASS: inventory tests");
     return 0;
 }

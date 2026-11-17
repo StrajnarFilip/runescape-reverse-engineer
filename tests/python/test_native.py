@@ -32,6 +32,16 @@ ABSENT_PID = 0xFFFFFFFF
 
 @unittest.skipUnless(library_path().is_file(), "Build rs3_native to run ABI tests")
 class NativeLibraryTests(unittest.TestCase):
+    def test_metadata_lookup_has_no_live_inventory_identity_and_does_not_sample(self):
+        with Reader(pid=ABSENT_PID, worker_hz=0) as reader:
+            sequence = reader.info.sequence
+            for invalid in (-1, True, 0x80000000, "49027"):
+                with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                    reader.describe_item(invalid)
+            with self.assertRaises(RuntimeError):
+                reader.describe_item(0x7FFFFFFF)
+            self.assertEqual(reader.info.sequence, sequence)
+
     def test_structure_sizes_and_field_offsets_match_the_c_abi(self):
         library = load_library()
         for structure_id, structure in SIZED_STRUCTURES.items():

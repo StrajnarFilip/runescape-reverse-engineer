@@ -525,6 +525,30 @@ int32_t rs3_copy_latest(rs3_context *context, rs3_snapshot *out)
     return RS3_OK;
 }
 
+int32_t rs3_describe_item(rs3_context *context, int32_t item_id, rs3_item *out, uint32_t out_size)
+{
+    if (context == NULL || out == NULL || item_id < 0)
+    {
+        return RS3_E_ARGUMENT;
+    }
+    if (out_size < sizeof *out)
+    {
+        return RS3_E_ABI;
+    }
+    rs3_item staged = {0};
+    staged.item_id = item_id;
+    staged.slot = UINT32_MAX;
+    AcquireSRWLockShared(&context->lifecycle_lock);
+    inventory_describe_item(&context->inventory->catalog, &staged);
+    ReleaseSRWLockShared(&context->lifecycle_lock);
+    if (!(staged.flags & RS3_ITEM_METADATA))
+    {
+        return RS3_E_STATE;
+    }
+    *out = staged;
+    return RS3_OK;
+}
+
 int32_t rs3_load_catalog(rs3_context *context, const char *path)
 {
     if (context == NULL || path == NULL)

@@ -290,6 +290,88 @@ class ExecutionTests(unittest.TestCase):
 
 
 class TransportTests(unittest.TestCase):
+    def test_win32_relative_pointer_reports_match_the_movement_command_interface(self):
+        packets = []
+
+        def sender(count, pointer, size):
+            packet = keys.Input.from_buffer_copy(ctypes.string_at(pointer, size))
+            mouse = packet.data.mouse
+            packets.append((packet.type, mouse.x, mouse.y, mouse.data, mouse.flags))
+            return count
+
+        backend = keys.SendInputBackend(sender=sender)
+        backend.command("MOVE -20 100", lambda: None)
+        backend.command("WHEEL -2", lambda: None)
+        backend.command("CLICK L", lambda: None)
+        self.assertEqual(
+            packets,
+            [
+                (keys.INPUT_MOUSE, -20, 100, 0, keys.MOUSE_MOVE),
+                (
+                    keys.INPUT_MOUSE,
+                    0,
+                    0,
+                    (-2 * keys.WHEEL_DELTA) & keys.DWORD_MAX,
+                    keys.MOUSE_WHEEL,
+                ),
+                (keys.INPUT_MOUSE, 0, 0, 0, keys.MOUSE_BUTTON_FLAGS["L"][0]),
+                (keys.INPUT_MOUSE, 0, 0, 0, keys.MOUSE_BUTTON_FLAGS["L"][1]),
+            ],
+        )
+        self.assertEqual(backend.possible_buttons, [])
+        backend.command("DOWN R", lambda: None)
+        backend.close()
+        self.assertEqual(packets[-1][-1], keys.MOUSE_BUTTON_FLAGS["R"][1])
+
+    def test_win32_releases_an_uncertain_click_and_latches_delivery_failure(self):
+        sender = Mock(side_effect=[0, 1])
+        backend = keys.SendInputBackend(sender=sender)
+        with self.assertRaises(OSError):
+            backend.command("CLICK L", lambda: None)
+        self.assertEqual(backend.possible_buttons, [])
+        self.assertTrue(backend.failed)
+        with self.assertRaisesRegex(RuntimeError, "faulted"):
+            backend.command("MOVE 1 1", lambda: None)
+        self.assertEqual(sender.call_count, 2)
+        backend.close()
+
+    def test_win32_retains_failed_mouse_release_for_shutdown_retry(self):
+        sender = Mock(side_effect=[1, 0, 1])
+        backend = keys.SendInputBackend(sender=sender)
+        with self.assertRaises(OSError):
+            backend.command("CLICK L", lambda: None)
+        self.assertEqual(backend.possible_buttons, ["L"])
+        backend.close()
+        self.assertEqual(backend.possible_buttons, [])
+        self.assertTrue(backend.closed)
+
+    def test_win32_direct_camera_hold_is_released_with_chord_and_focus_loss(self):
+        backend = keys.SendInputBackend(sender=Mock(return_value=1))
+        backend.event(keys.KEYS["UP"], True, lambda: None)
+        with self.assertRaises(KeyboardInterrupt):
+            backend.tap(
+                keys.parse_chord("Ctrl+F4"), 0.05, lambda: None, Mock(side_effect=KeyboardInterrupt)
+            )
+        self.assertEqual(backend.possible_keys, [])
+        self.assertEqual(backend.held, [])
+
+    def test_win32_pointer_validation_sends_nothing_for_unsupported_or_large_reports(self):
+        sender = Mock(return_value=1)
+        backend = keys.SendInputBackend(sender=sender)
+        for value in (
+            "MOVE 128 0",
+            "MOVE 0 -128",
+            "MOVE 1.5 2",
+            "WHEEL 128",
+            "WHEEL nan",
+            "CLICK X",
+            "MOVE 0 0; anything",
+            "KEY A",
+        ):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                backend.command(value, lambda: None)
+        sender.assert_not_called()
+
     def test_serial_win32_structure_layouts(self):
         self.assertEqual(ctypes.sizeof(keys.DeviceControlBlock), 28)
         self.assertEqual(keys.DeviceControlBlock.byte_size.offset, 18)
