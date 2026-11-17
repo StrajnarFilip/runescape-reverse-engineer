@@ -652,6 +652,14 @@ class OrderedP1Rotation:
                     )
                     or not isinstance(action.get("key"), str)
                     or not action["key"]
+                    or action.get("completion", "effect") not in ("effect", "attempt")
+                    or (
+                        action.get("completion") == "attempt"
+                        and (
+                            action.get("kind") != "item"
+                            or action.get("role") != "adrenaline_renewal"
+                        )
+                    )
                 ):
                     raise ValueError("Invalid or duplicate P1 action")
                 identifiers.add(action["id"])
@@ -663,6 +671,7 @@ class OrderedP1Rotation:
         self._offer = None
         self._pending = None
         self._confirmed = set()
+        self._attempted = set()
         self._last_sample = None
         self._last_time = None
         self._encounter_identity = None
@@ -887,6 +896,12 @@ class OrderedP1Rotation:
         self._pending = batch, sent_ns
         self._offer = None
         self._confirmed.clear()
+        # A renewal is still pressed after Berserk, in the same ordered batch.
+        # At full adrenaline (for example after Relentless) it may not be drunk.
+        # Record the accepted attempt without inventing a consumption effect.
+        self._attempted = {
+            action["id"] for action in batch.actions if action.get("completion") == "attempt"
+        }
 
     def confirm(self, action_id, observation, world):
         """Accept one exact-action confirmation from a strictly newer native frame.
@@ -935,9 +950,10 @@ class OrderedP1Rotation:
         ):
             return False
         self._confirmed.add(action_id)
-        if self._confirmed == identifiers:
+        if self._confirmed | self._attempted == identifiers:
             self.index += 1
             self._pending = None
             self._confirmed.clear()
+            self._attempted.clear()
             self.reasons = ()
         return True

@@ -368,6 +368,8 @@ class OrderedP1Tests(unittest.TestCase):
 
     def confirm_step(self, engine, batch, sample):
         for action in batch.actions:
+            if action.get("completion") == "attempt":
+                continue
             self.assertTrue(
                 engine.confirm(
                     action["id"], Observation(True, 0, "synthetic_native_specific_ack"), sample
@@ -447,17 +449,16 @@ class OrderedP1Tests(unittest.TestCase):
             engine.confirm("devotion", Observation(True, 0, "native"), self.frame(engine, 2, 10050))
         )
 
-    def test_every_batch_action_needs_its_own_later_confirmation(self):
+    def test_berserk_requires_readback_but_renewal_attempt_does_not_require_consumption(self):
         engine = OrderedP1Rotation()
         batch = self.send_step(engine, self.frame(engine))
         self.confirm_step(engine, batch, self.frame(engine, 2, 10050))
         batch = self.send_step(engine, self.frame(engine, 2, 10050))
         sample = self.frame(engine, 3, 10100)
         self.assertTrue(engine.confirm("berserk", Observation(True, 0, "native"), sample))
-        self.assertEqual(engine.index, 1)
-        self.assertFalse(engine.confirm("renewal", Observation(None, 0, "native"), sample))
-        self.assertTrue(engine.confirm("renewal", Observation(True, 0, "native"), sample))
         self.assertEqual(engine.index, 2)
+        self.assertFalse(engine.confirm("renewal", Observation(None, 0, "native"), sample))
+        self.assertEqual(engine.current_step["id"], "wake_target_cycle_vulnerability_barge")
 
     def test_partial_or_reordered_submission_latches_and_does_not_retry(self):
         for accepted in (("berserk",), ("renewal", "berserk")):
