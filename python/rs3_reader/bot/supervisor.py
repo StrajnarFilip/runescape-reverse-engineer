@@ -478,7 +478,7 @@ class P1Attempt:
                 self.reason = (
                     "instance_ready_waiting_for_explicit_start"
                     if ready
-                    else "waiting_for_confirmed_300_instance_and_preparation"
+                    else "waiting_for_confirmed_instance_and_preparation"
                 )
                 if requested:
                     events.append({"event": "start_refused", "reason": self.reason})

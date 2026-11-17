@@ -1037,6 +1037,13 @@ class P1AttemptTests(unittest.TestCase):
         self.step(self.frame())
         self.assertEqual(self.attempt.sent, ["devotion"])
 
+    def test_current_1000_percent_instance_can_start_the_same_p1_opening(self):
+        record = self.frame()
+        record["encounter"]["raw_candidates"]["6359"]["value"] = (1 << 29) | 1000
+        self.step(record)
+        self.assertEqual(self.attempt.sent, ["devotion"])
+        self.assertEqual(len(self.calls), 1)
+
     def test_start_poll_cannot_consume_or_drop_stop_key(self):
         import ctypes
         from rs3_reader.bot.supervisor import GlobalKillSwitch

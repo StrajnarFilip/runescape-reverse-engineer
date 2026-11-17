@@ -195,3 +195,9 @@ Requests
   C predictor and a fake device. No game input was sent. This does not make
   continuous P1 or other mechanics live-validated. The first rotation-only
   retry was stopped with zero inputs when the user expected prayer flicking.
+* User-directed retry, 2026-11-17: the start hotkey was received three times,
+  but the hard-coded 300% writer gate refused the observed 1000% instance.
+  D6 now retains supported enrage as metadata without requiring 300. The
+  supervisor waiting label is generic and a synthetic 1000% frame confirms
+  that the same opening can start. No instance/freshness/foreground/stop
+  guard or production prayer validation flag was removed.
