@@ -201,3 +201,12 @@ Requests
   supervisor waiting label is generic and a synthetic 1000% frame confirms
   that the same opening can start. No instance/freshness/foreground/stop
   guard or production prayer validation flag was removed.
+* Relentless correction, 2026-11-17: D4 now declares renewal as an attempt-only
+  action after Berserk. D8 records accepted input separately from a native
+  dose transition and observes consumption without blocking the rotation.
+  Unchanged adrenaline or a retained dose never identifies a Relentless proc.
+  A real Berserk cooldown acknowledgement is still required. Three regression
+  cases cover unchanged 120% adrenaline and four doses through the old timeout,
+  advancement into A-S-G, consumption when observed, and a missing Berserk cast.
+  The 46 D8 tests pass with one intentionally absent local-capture replay skip;
+  the shared native DLL is explicitly selected in the isolated worktree.

@@ -37,6 +37,7 @@ PRODUCER_MODULES = {
     "trip": "trip_loop",
 }
 NATIVE_EVENT_STREAMS = ("npc_actions", "npc_hits", "player_hits", "inventory_changes")
+OPTIONAL_ITEM_OBSERVATION_NS = 2_500 * NS_PER_MS
 MAXIMUM_PROPOSALS = 256
 ACTIVE_TELOS_CONFIG = 22891
 NORMAL_STOPS = {"kill_count_cap", "wall_time_cap", "keyboard_interrupt", "capture_complete"}
@@ -69,7 +70,8 @@ class P1Attempt:
         self.locations, self.pending = {}, None
         self.identity, self.previous = None, None
         self.stopped, self.reason = False, "waiting_for_dormant_telos"
-        self.sent, self.confirmed = [], []
+        self.sent, self.confirmed, self.attempted = [], [], []
+        self.optional_item_effects = {}
         self.last_log, self.blocked_since = {}, None
         self.armed_ns = None
         self.prayer_trial = None
@@ -371,6 +373,34 @@ class P1Attempt:
             self.stopped, self.reason = True, reason
             self.writer.close()
 
+    def _observe_optional_item_effects(self, world, events):
+        """Log consumption separately from accepted presses without delaying combat.
+
+        An unchanged dose does not identify a perk proc or prove that no drink
+        occurred. Only a fresh native dose transition confirms consumption.
+        """
+        for identifier, (action, before, sent_ns) in tuple(self.optional_item_effects.items()):
+            outcome = None
+            if self.stopped:
+                outcome = "unconfirmed_at_stop"
+            elif world.sample_sequence > before.sample_sequence and world.observed_ns > sent_ns:
+                if self._acknowledged(action, before, world):
+                    outcome = "consumption_confirmed"
+                    self.confirmed.append(identifier)
+                elif world.observed_ns - sent_ns >= OPTIONAL_ITEM_OBSERVATION_NS:
+                    outcome = "consumption_not_observed"
+            if outcome is not None:
+                events.append(
+                    {
+                        "event": "optional_item_outcome",
+                        "action": identifier,
+                        "sent_ns": sent_ns,
+                        "outcome": outcome,
+                        "perk_proc": None,
+                    }
+                )
+                del self.optional_item_effects[identifier]
+
     def _guard(self, world):
         now = self.clock()
         if self.kill_switch():
@@ -489,6 +519,7 @@ class P1Attempt:
                 except Exception as error:
                     self.stop("bounded_prayer_trial_fault:" + str(error))
         if self.engine is not None and not self.stopped:
+            self._observe_optional_item_effects(world, events)
             if self.pending:
                 batch, before, sent_ns = self.pending
                 for action in batch.actions:
@@ -520,10 +551,26 @@ class P1Attempt:
                             {
                                 "event": "batch_accepted",
                                 "actions": list(accepted),
+                                "sent_ns": sent_ns,
                                 "server_same_tick_confirmed": False,
                             }
                         )
                         self.engine.note_sent(batch, accepted, sent_ns)
+                        if self.engine.fault is None:
+                            for action in batch.actions:
+                                if action.get("completion") != "attempt":
+                                    continue
+                                self.attempted.append(action["id"])
+                                self.optional_item_effects[action["id"]] = action, world, sent_ns
+                                events.append(
+                                    {
+                                        "event": "action_attempted",
+                                        "action": action["id"],
+                                        "sent_ns": sent_ns,
+                                        "consumption_confirmed": False,
+                                        "blocks_sequence": False,
+                                    }
+                                )
                         self.pending = batch, world, sent_ns
                         self.reason = "awaiting_individual_native_confirmations"
                         self.blocked_since = None
@@ -539,6 +586,8 @@ class P1Attempt:
                             self.blocked_since = self.clock()
                         elif self.clock() - self.blocked_since > 6000 * NS_PER_MS:
                             self.stop("readiness_timeout:" + self.reason)
+        if self.stopped:
+            self._observe_optional_item_effects(world, events)
         self.last_log = {
             "kind": "supervised_p1",
             "sample_sequence": world.sample_sequence,
@@ -551,6 +600,7 @@ class P1Attempt:
             "events": events,
             "sent": list(self.sent),
             "confirmed": list(self.confirmed),
+            "attempted_without_required_effect": list(self.attempted),
             "adrenaline": world.player.adrenaline_percent.value,
             "health": world.player.health.current.value,
             "phase": world.telos.phase.value,
@@ -1387,6 +1437,7 @@ def _run_p1_attempt(arguments, output):
                 "reason": attempt.reason,
                 "sent": attempt.sent,
                 "confirmed": attempt.confirmed,
+                "attempted_without_required_effect": attempt.attempted,
                 "ladder_pass": False,
                 "prayer_trial_selected": arguments.opening_prayer_trial,
                 "prayer_trial_state": attempt.prayer_trial.state if attempt.prayer_trial else None,

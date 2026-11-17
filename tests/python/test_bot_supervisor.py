@@ -846,6 +846,59 @@ class P1AttemptTests(unittest.TestCase):
             self.attempt.confirmed[-3:], ["target_cycle", "vulnerability", "greater_barge"]
         )
 
+    def test_full_adrenaline_and_unchanged_renewal_dose_do_not_block_wake_batch(self):
+        self.step(self.frame())
+        record = self.frame()
+        self.cooldown(record, 25028)
+        sent = self.step(record)
+        self.assertEqual(self.attempt.sent, ["devotion", "berserk", "renewal"])
+        self.assertEqual(sent["attempted_without_required_effect"], ["renewal"])
+        self.assertEqual(
+            [event["action"] for event in sent["events"] if event["event"] == "action_attempted"],
+            ["renewal"],
+        )
+        self.assertEqual([action.virtual_key for action in self.calls[-1]], [ord("F"), 0x22])
+        record = self.frame()
+        self.cooldown(record, 14707)
+        self.step(record)
+        self.assertEqual(record["adrenaline_percent"], 120)
+        self.assertEqual(record["inventory"]["slots"][0]["item_id"], 49079)
+        self.assertEqual(self.attempt.engine.index, 2)
+        self.assertNotIn("renewal", self.attempt.confirmed)
+        # Retain the dose throughout the old failure window. No retry, inferred
+        # consumption or assumed Relentless proc is needed to continue.
+        result = self.step(self.frame(time_ms=self.now / MS + 2600))
+        self.assertFalse(self.attempt.stopped)
+        outcome = next(
+            event for event in result["events"] if event["event"] == "optional_item_outcome"
+        )
+        self.assertEqual(outcome["outcome"], "consumption_not_observed")
+        self.assertIsNone(outcome["perk_proc"])
+        self.step(self.frame(dormant=False, time_ms=self.now / MS + 50))
+        self.assertEqual(self.attempt.sent[-3:], ["target_cycle", "vulnerability", "greater_barge"])
+        self.assertEqual(self.attempt.sent.count("renewal"), 1)
+
+    def test_optional_renewal_does_not_replace_berserk_cast_acknowledgement(self):
+        self.step(self.frame())
+        record = self.frame()
+        self.cooldown(record, 25028)
+        self.step(record)
+        self.step(self.frame(time_ms=self.now / MS + 2600))
+        self.assertEqual(self.attempt.reason, "acknowledgement_timeout")
+        self.assertNotIn("berserk", self.attempt.confirmed)
+        self.assertNotIn("target_cycle", self.attempt.sent)
+
+    def test_optional_renewal_consumption_is_logged_when_observed(self):
+        self.opening()
+        self.assertIn("renewal", self.attempt.confirmed)
+        outcome = next(
+            event
+            for event in self.attempt.last_log["events"]
+            if event["event"] == "optional_item_outcome"
+        )
+        self.assertEqual(outcome["outcome"], "consumption_confirmed")
+        self.assertIsNone(outcome["perk_proc"])
+
     def test_gcd_or_input_acceptance_alone_does_not_confirm_or_retry(self):
         self.step(self.frame())
         self.assertEqual(self.attempt.engine.index, 0)
