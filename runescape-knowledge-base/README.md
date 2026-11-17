@@ -1,6 +1,9 @@
 # RuneScape knowledge base
 
-The current milestone is a verified 0% melee Telos kill. Start in Practice Mode while learning and use each run to build toward 4000% enrage.
+The current goal is deterministic melee Telos automation across the intended
+300%–4000% range, with every mechanic and required prayer flick verified in attempt
+logs. Work and Practice Mode tests remain incomplete. The 0% playbook below is
+earlier research, not the current account's rotation or a required test enrage.
 
 - [Getting to Telos](bosses/telos/access.md)
 - [0% encounter playbook](bosses/telos/zero-enrage.md)
@@ -11,4 +14,10 @@ The current milestone is a verified 0% melee Telos kill. Start in Practice Mode 
 - [Enrage progression](bosses/telos/enrage-progression.md)
 - [Run log](bosses/telos/run-log.md)
 
-Label claims as **observed**, **guide reference**, or **hypothesis**. For an observation, include the date, enrage, phase or font, cue, action and outcome. Use one entry per attempt and update the playbook when an observation changes a decision. Keep account details and raw captures local. Record victory from the enrage shown at entry and the in-game reward or kill confirmation.
+Label claims as **observed**, **user-confirmed**, **guide reference**, or
+**hypothesis**. For an observation, include the date, enrage, phase or font, cue,
+action and outcome. Use one entry per attempt and update the playbook when an
+observation changes a decision. Publish versioned decoded attempt logs under
+`training-data/`, including failures, as explicitly requested. Keep account
+identifiers, images, chat, process dumps and game files local. Record victory
+from the enrage shown at entry and the in-game reward or kill confirmation.

@@ -1,5 +1,53 @@
 # Telos attempt logs
 
+## Current native P1 captures (schema 2)
+
+`python -m rs3_reader.bot --mode supervised-p1` now also writes one
+`training-data/telos-p1-*.jsonl` file automatically. It receives the controller's
+owned native telemetry, including all four already-drained event streams. It
+does not poll or drain the game again. A failed setup or interrupted run gets
+an incomplete report when cleanup can write one. The earlier schema 1 logs and
+standalone controller described below retain their own event format.
+
+Schema 2 is a lossless delta format. The first `record_delta` contains `initial`,
+the complete decoded controller record. Each later row has `set` pairs of
+`[path, value]` and `remove` paths. A path is an array of object keys and array
+indexes. Apply removals before replacements in their recorded order. Unknowns,
+queue loss, list removals and controller events are preserved. `sequence` orders
+records; a missing delta makes the file unsuitable for reconstruction past that
+point. A normally interrupted final line may be incomplete and must be reported.
+
+`timestamp_ms`, `observed_ns`, `client_logic_tick` and `game_tick` come from the
+source observation when available. `recorded_at_ms` is the time of writing, which
+can be much later for imported historical logs. Unknown source timestamps stay
+null with a reason. Header ticks describe the sampled frame; stamped native
+events inside it retain their original event timing and source identity.
+
+Use the checked decoder rather than treating a delta packet as a native frame:
+
+```python
+from rs3_reader.bot.telemetry_attempt import read_attempt_records
+
+with open("training-data/telos-p1-20261117-attempt02.jsonl", encoding="utf-8") as stream:
+    for record in read_attempt_records(stream):
+        for event in record.get("events", []):
+            print(record.get("observed_ns"), event)
+```
+
+An `action_attempted` renewal means its input was accepted after Berserk. Only
+`optional_item_outcome: consumption_confirmed` establishes a native dose
+transition. A retained dose or 120% adrenaline does not prove a Relentless proc.
+The corrected coordinator can continue without inventing consumption.
+
+Historical decoded P1 files can be imported without sending input:
+
+```powershell
+$env:PYTHONPATH = 'python'
+python work/import_p1_attempt.py LOCAL_CAPTURE.jsonl training-data/telos-p1-ATTEMPT.jsonl
+```
+
+## Earlier standalone controller and schema 1
+
 Run the Practice Mode controller from the repository root. Stage the character across the gap
 with Telos dormant, the melee action bar selected and auto-retaliate active. The controller
 uses Telos's animations and phase for prayer flicks, special responses and P4 font and golem

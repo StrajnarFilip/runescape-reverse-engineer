@@ -296,3 +296,19 @@ Requests
 * P1/P5/A2: physical minimap/UI geometry, complete view and exact hit-test/path
   providers remain the next movement dependencies. The modern open-state
   research does not authorize point selection or bypass A1/D6 checks.
+* Whole-project continuation, 2026-11-17: integrated the existing S0b
+  deterministic controller, guarded Compatibility Mode scene/camera APIs and
+  89 decoded historical attempt logs. Original-profile typed target resolution
+  and current Ctrl+F prayer bindings were preserved. The older standalone
+  controller's account-specific fallback keys are not current-account bindings.
+* D4/D8 retained-adrenaline correction is integrated. A user-confirmed
+  Relentless 5 entry has explicit unknown carrier/gizmo/proc fields. Renewal
+  remains after Berserk in one batch, with accepted attempt and native dose
+  outcome logged separately; only Berserk's effect is required to advance.
+  Synthetic tests cover 120% adrenaline with an unchanged four-dose potion
+  through the old timeout and into A-S-G. This is not a live clear.
+* Added schema-2 lossless decoded telemetry deltas and automatic per-session P1
+  training logs. Logging consumes owned C telemetry and never drains a queue
+  twice. Four November 16–17 failed/stopped sessions were imported, including
+  the outside-cast incident. Their original records can be reconstructed for
+  offline replay; source event timestamps are not replaced with import time.

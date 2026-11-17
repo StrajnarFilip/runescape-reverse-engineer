@@ -1355,15 +1355,29 @@ def _load_bounded_prayer_trial(send_prayer):
     return module.PrayerCheckTrial(0, send_prayer, predictor=CyclePredictor(), cycles=2)
 
 
-def _run_p1_attempt(arguments, output):
+def _run_p1_attempt(arguments, output, *, training_directory=None):
     """Run one opt-in experiment; all acquisition and balanced input are native C."""
     from ..telemetry import NativeTelemetry
     from .actuator_sendinput import NativeSnapshotDevice
     from .arbiter import P1BatchArbiter
+    from .telemetry_attempt import TelemetryAttemptLog
 
     telemetry = device = hotkey = attempt = None
+    directory = training_directory or Path(__file__).resolve().parents[3] / "training-data"
+    directory.mkdir(parents=True, exist_ok=True)
+    name = time.strftime("telos-p1-%Y%m%dT%H%M%S", time.gmtime())
+    training_stream = (directory / f"{name}-{time.time_ns() % 1_000_000_000:09d}.jsonl").open(
+        "x", encoding="utf-8", newline="\n"
+    )
+    training_log = TelemetryAttemptLog(training_stream)
+    report_logged = False
 
     def emit(record):
+        nonlocal report_logged
+        # Write owned observations before returning to combat. Never resample or
+        # drain an event queue for logging; NativeTelemetry already copied them.
+        training_log.record(record)
+        report_logged |= record.get("kind") == "p1_report"
         output.write(json.dumps(record, sort_keys=True, allow_nan=False) + "\n")
         output.flush()
 
@@ -1398,6 +1412,7 @@ def _run_p1_attempt(arguments, output):
             {
                 "kind": "p1_preflight",
                 "bindings": bindings,
+                "perk_observations": attempt.template.document.get("perk_observations", []),
                 "input_sent": False,
                 "movement_owner": "user",
                 "prayer_policy": (
@@ -1447,6 +1462,7 @@ def _run_p1_attempt(arguments, output):
         )
         return 0
     finally:
+        exception = sys.exc_info()[1]
         if attempt:
             attempt.stop("closed")
         if device:
@@ -1455,6 +1471,25 @@ def _run_p1_attempt(arguments, output):
             telemetry.close()
         if hotkey:
             hotkey.close()
+        try:
+            if not report_logged:
+                training_log.record(
+                    {
+                        "kind": "p1_report",
+                        "timestamp_ms": time.time_ns() // 1_000_000,
+                        "reason": (
+                            "runner_exception:" + type(exception).__name__
+                            if exception is not None
+                            else attempt.reason if attempt else "setup_incomplete"
+                        ),
+                        "sent": attempt.sent if attempt else [],
+                        "confirmed": attempt.confirmed if attempt else [],
+                        "attempted_without_required_effect": attempt.attempted if attempt else [],
+                        "ladder_pass": False,
+                    }
+                )
+        finally:
+            training_stream.close()
 
 
 def main(argv=None):

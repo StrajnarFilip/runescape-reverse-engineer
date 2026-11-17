@@ -1,5 +1,37 @@
 # Telos run log
 
+## 2026-11-16–17 original-profile P1 openings
+
+- **Observed, November 16:** the first runner incorrectly treated a visible
+  dormant Telos as encounter entry and pressed Devotion, Berserk and renewal
+  outside the instance. The native instance bit was false. This failure is
+  retained in the [decoded attempt log](../../../training-data/telos-p1-20261116-attempt01.jsonl).
+  The corrected instance gate produced zero device calls when replayed against
+  those 173 native frames. A later [stopped session](../../../training-data/telos-p1-20261116-attempt02.jsonl)
+  sent no input. These are incomplete attempts, not P1 successes.
+- **Observed, November 17, 1000%:** three start requests were refused by the
+  old fixed-300% gate despite the intended instance being at 1000%. The user
+  confirmed that enrage and requested removal of the equality check.
+  [Refused-start log](../../../training-data/telos-p1-20261117-attempt01.jsonl).
+  Enrage is now supported-range metadata; native instance, freshness, process,
+  scene and foreground checks remain required.
+- **Observed, November 17, 1000%, P1:** Devotion was accepted and its cooldown
+  started. Berserk followed by renewal was accepted in one ordered native
+  batch, and Berserk's cooldown started. Adrenaline remained 120% and renewal
+  remained four doses, item 49079. The old runner timed out waiting for a dose
+  decrement, before A–S–G could be sent. The prayer experiment reached its
+  control stage; no completed flick cycle is established by this attempt.
+  [Failed opening log](../../../training-data/telos-p1-20261117-attempt02.jsonl).
+- **User-confirmed:** this account has Relentless 5. **Guide reference:** it can
+  retain adrenaline that an ability would ordinarily consume. This does not
+  confirm a proc in the failed opening. The native gizmo/perk decoder remains
+  missing. See [retained-adrenaline preparation rules](../../combat/melee-preparation.md).
+- **Offline correction:** renewal is pressed once after Berserk and its
+  consumption is observed separately. An unchanged dose no longer blocks the
+  wake sequence. Regression tests confirm this at 120% adrenaline, and still
+  require Berserk's specific acknowledgement. No post-fix live result or
+  completed P1 clear is claimed.
+
 ## 2026-11-13 preparation
 
 - Verified the Draynor lodestone shortcut and War's Insignia entrance to War's Retreat.

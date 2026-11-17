@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-17",
+  "status": "offline_correction_verified_live_retry_pending",
+  "observed_failure": {
+    "attempt": "training-data/telos-p1-20261117-attempt02.jsonl",
+    "enrage_raw": 1000,
+    "phase": 1,
+    "accepted_inputs": [
+      "devotion",
+      "berserk",
+      "renewal"
+    ],
+    "native_cooldown_confirmations": [
+      "devotion",
+      "berserk"
+    ],
+    "adrenaline_percent": 120,
+    "renewal_item_id": 49079,
+    "renewal_doses": 4,
+    "stop_reason": "acknowledgement_timeout",
+    "relentless_proc_confirmed": false
+  },
+  "perk_information": {
+    "name": "Relentless",
+    "rank": 5,
+    "source": "user_confirmation",
+    "native_decoded": false,
+    "carrier_item_id": null,
+    "gizmo_slot": null,
+    "proc_state": null,
+    "reference": "https://runescape.wiki/w/Relentless"
+  },
+  "corrected_rule": {
+    "ordered_batch": [
+      "berserk",
+      "renewal"
+    ],
+    "berserk_completion": "specific_native_cooldown_transition",
+    "renewal_completion": "accepted_input_attempt",
+    "consumption_observation": "separate_nonblocking_native_dose_transition",
+    "subsequent_adrenaline_source": "fresh_native_observation",
+    "unchanged_dose_causes_abort": false,
+    "unchanged_adrenaline_identifies_proc": false
+  },
+  "checks": {
+    "ctest_targets_passed": 16,
+    "python_tests_run": 532,
+    "python_tests_skipped": 0,
+    "firmware_host_test": "passed_with_local_zig_cpp",
+    "d8_tests_passed": 47,
+    "new_lossless_delta_tests_passed": 3,
+    "retained_adrenaline_reaches_wake_batch": "synthetic_regression_passed",
+    "missing_berserk_ack_still_stops": true,
+    "new_live_inputs_sent": 0
+  },
+  "imported_attempts": [
+    {
+      "log": "training-data/telos-p1-20261116-attempt01.jsonl",
+      "records": 175,
+      "bytes": 414877,
+      "source_sha256": "007c2391311c994a15e87af7bfc71b508f0ac264086001285e28747101cd3d60",
+      "log_sha256": "ce163e93aa53e7dee00d5acec91943cf3571105cddef189bd91eb5236de1b423",
+      "exact_record_round_trip": true,
+      "log_encoding": "utf-8_lf"
+    },
+    {
+      "log": "training-data/telos-p1-20261116-attempt02.jsonl",
+      "records": 4081,
+      "bytes": 8675456,
+      "source_sha256": "66261263fa8fd355db108691a448e917aae05fa2bfd224b1154238bb7b44dac4",
+      "log_sha256": "d58fa5f50eb128949a3f8df5c807ab4bd7a72a931101be2883d26cb704add670",
+      "exact_record_round_trip": true,
+      "log_encoding": "utf-8_lf"
+    },
+    {
+      "log": "training-data/telos-p1-20261117-attempt01.jsonl",
+      "records": 5528,
+      "bytes": 15409893,
+      "source_sha256": "418c0fa9b4860debf6ef229aa280501e4a0b77d6146a6816ae3abdc422c2d0b3",
+      "log_sha256": "fc555b719839e77d5c40b5499a47eacb1fe86b0b76b034b8b9bca2e1604926a6",
+      "exact_record_round_trip": true,
+      "log_encoding": "utf-8_lf"
+    },
+    {
+      "log": "training-data/telos-p1-20261117-attempt02.jsonl",
+      "records": 3825,
+      "bytes": 8528880,
+      "source_sha256": "5efbd38af2e100b1279373cd0fd4b6507cad0bcb737fd95dc69ce5f6f6852cbb",
+      "log_sha256": "dd9ff4ca5c92cba0bead3dde4cf18b16446f2682159c211889d82ffffafe9530",
+      "exact_record_round_trip": true,
+      "log_encoding": "utf-8_lf"
+    }
+  ],
+  "limits": [
+    "No post-fix live encounter was performed in this correction.",
+    "Equipment identity does not decode equipped gizmos or perk ranks.",
+    "No automated P1 clear or complete kill is established.",
+    "Existing standalone controller fallback keys describe another account and are not current native role bindings.",
+    "The full deterministic mechanic and prayer-verification goal remains incomplete."
+  ]
+}

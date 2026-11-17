@@ -624,6 +624,30 @@ class ReadinessTests(unittest.TestCase):
 
 
 class P1AttemptTests(unittest.TestCase):
+    def test_setup_failure_preserves_incomplete_training_log_without_opening_device(self):
+        from rs3_reader.bot.supervisor import _run_p1_attempt
+        from rs3_reader.bot.telemetry_attempt import read_attempt_records
+
+        arguments = SimpleNamespace(kill_key="Ctrl+Shift+F12", pid=123)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            with (
+                patch("rs3_reader.bot.supervisor.GlobalKillSwitch") as hotkey,
+                patch("rs3_reader.telemetry.NativeTelemetry", side_effect=RuntimeError("offline")),
+                patch("rs3_reader.bot.actuator_sendinput.NativeSnapshotDevice") as device,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "offline"):
+                    _run_p1_attempt(arguments, io.StringIO(), training_directory=directory)
+            device.assert_not_called()
+            hotkey.return_value.close.assert_called_once()
+            paths = list(directory.glob("telos-p1-*.jsonl"))
+            self.assertEqual(len(paths), 1)
+            with paths[0].open(encoding="utf-8") as stream:
+                records = list(read_attempt_records(stream))
+            self.assertEqual(records[0]["kind"], "p1_report")
+            self.assertEqual(records[0]["reason"], "runner_exception:RuntimeError")
+            self.assertEqual(records[0]["sent"], [])
+
     def setUp(self):
         from rs3_reader.bot.arbiter import P1BatchArbiter
 
