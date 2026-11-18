@@ -3,7 +3,7 @@
   "date": "2026-11-18",
   "status": "Manual preparation and route recorded; automatic reproduction not yet verified.",
   "decoded_log": "training-data/telos-route-20261118-manual.jsonl",
-  "decoded_log_sha256": "26c3ed63014610992b6becc839892a4cf0d586afc252dab0b26e9a9452ee3ec4",
+  "decoded_log_sha256": "25dfc054743a965f3663c28a6e0d02e18fbcba5f928c5f09755ff8833de58c76",
   "native_frames": 9747,
   "input_events": 3207,
   "screen_frames": 506,
@@ -23,7 +23,7 @@
   "native_span_seconds": 219.657999,
   "native_sample_gaps_over_100ms": 0,
   "timing_origin_native_ns": 517338327453900,
-  "route_steps": 13,
+  "route_steps": 14,
   "private_artifacts": [
     "work/manual-route-20261118T1610.jsonl.gz",
     "work/manual-route-20261118T1610-frames/frames.jsonl"
@@ -35,5 +35,37 @@
     "Recorded client coordinates depend on window geometry and camera; do not blindly replay them. Ground click destinations were not decoded.",
     "Scene-local instanced tile coordinates require fresh anchors before reproduction.",
     "The demonstrated endpoint is dormant Telos with 120% adrenaline and Dragon battleaxe equipped, not a combat attempt or verified automatic route."
-  ]
+  ],
+  "required_rotation_start": {
+    "user_confirmed": "One tile diagonally after appearing in the Telos boss room; this is required rotation setup.",
+    "observed_from_tile": [
+      9952,
+      141,
+      0
+    ],
+    "observed_to_tile": [
+      9951,
+      142,
+      0
+    ],
+    "recorded_grid_delta": [
+      -1,
+      1,
+      0
+    ],
+    "recorded_dormant_telos_tile": [
+      9939,
+      147,
+      0
+    ],
+    "recorded_player_offset_from_dormant_telos": [
+      12,
+      -5,
+      0
+    ],
+    "anchor_portability_validated": false,
+    "automatic_position_gate_implemented": false,
+    "automatic_reproduction_verified": false,
+    "acceptance_requirement": "Fresh native state confirms the correct scene-relative starting tile before the rotation begins."
+  }
 }

@@ -136,6 +136,17 @@ zoom and ground clicks then placed the character at the staging edge with Telos
 still dormant. Dragon battleaxe remained equipped and adrenaline remained 120%.
 This demonstration contained no fight.
 
+**Required starting-position correction, confirmed by the account owner:** once
+in the Telos boss room, move **one tile diagonally** into the rotation's starting
+position. This is a separate required action, not merely a camera adjustment.
+The final recorded move is from `(9952, 141, 0)` to `(9951, 142, 0)`, a grid delta
+of `(-1, +1, 0)`. The recorded dormant Telos tile is `(9939, 147, 0)`, giving a
+final player offset of `(12, -5, 0)`. These coordinates belong to that captured
+scene; the offset's portability across instances remains unverified. Future
+route execution must confirm the correct starting position from fresh native
+state before beginning the opening. The automatic position gate is not yet
+implemented, and no automatic route replay has passed.
+
 The durable [decoded route](../../training-data/telos-route-20261118-manual.jsonl)
 retains step times and native waypoints. The
 [capture report](../../docs/validation/wars-retreat-telos-route-2026-11-18.json)
