@@ -73,9 +73,29 @@ special from a generic button timer or GCD change.
 `combatv2_buff_dragon_scimitar_effect_end_client`. Both were readable on the
 pinned original client. A sample at logic tick 457747 retained endpoints
 445632 and 445843, so positive raw values alone do not establish active effects.
-C effect IDs 15 and 16 keep units, presence and semantic expiry unknown until
-labelled transitions establish them. The Dragon scimitar effect is a cast lead,
-not an EoF cooldown.
+C effect IDs 15 and 16 originally retained unknown units and semantic expiry.
+The Dragon scimitar effect is a cast lead, not an EoF cooldown.
+
+**Native validation, November 17–18:** two dummy captures paired each physical
+EZK and red-EoF press with a changed endpoint 2998–3000 client logic ticks ahead.
+On this original executable only, C now exposes the deadline at 20 ms per client
+tick (60 seconds initially). Presence and early cancellation remain unknown.
+Only a new same-session, matching-equipment endpoint with a near-60-second
+deadline can acknowledge the stored special. Cached endpoints and generic GCD
+or adrenaline changes cannot. A fresh process can report `not_set` until first
+use; that permits one bounded attempt and remains unknown until observed.
+Compatibility Mode is not calibrated by these captures.
+[Evidence and all nine decoded probes](../../docs/validation/telos-special-effects-and-precast-2026-11-18.json)
+
+**Damage precast, November 18:** the account owner confirmed continuous timing
+apart from waiting for Adaptive Strike. The trace records four consecutive
+basic starts 1800 ms apart, with queued inputs at 580–600 ms remaining GCD.
+The probe then accidentally fell through into a physical special. Keep that
+mixed trace; it does not validate an eight-cast basic-only run. The fallthrough
+is fixed. The selector now considers Greater Fury, Adaptive Strike, Dismember,
+Rend and Punish using each native timer, cost and equipment eligibility.
+Clean repetition is pending. Defensive impact windows retain their narrower
+existing press limit; this damage trace proves no prayer-check deadline.
 
 **Integration rule:** the ordered opening and mechanics share one backend and
 four event drains. Protection and defensives precede rotation dispatch. A

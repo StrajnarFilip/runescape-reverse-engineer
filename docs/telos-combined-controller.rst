@@ -79,14 +79,54 @@ Two appended native effect candidates come from revision-951 gamevals:
 * ID 16, ``dragon_scimitar``: VarClient 7092,
   ``combatv2_buff_dragon_scimitar_effect_end_client``.
 
-Both were readable on the pinned original client. Units, presence and
-action-specific acknowledgement still need labelled validation: old positive
-endpoints remain cached. No special is confirmed from a generic GCD, adrenaline
-decrease or an unvalidated candidate. The next calibration must pair the
-accepted special with its exact effect transition and sampled logic clock.
-Greater Barge's channel conversion also needs a validated signal.
+Two original-profile dummy captures on November 17 paired each special with
+its own fresh endpoint, 2998--3000 client logic ticks ahead on observation.
+These support 20 ms deadline units and a 60-second initial deadline. The C
+collector now reports remaining time for these two rows on the original
+profile only. Compatibility Mode retains raw, unvalidated candidates.
+Active presence and early cancellation remain unknown. An expired cached
+endpoint is a zero deadline, not evidence of an inactive buff or a new cast.
+
+The opening acknowledges a special only from a strictly newer same-session
+frame with the exact equipment and variable, a changed endpoint, and a newly
+started deadline of at least 57.5 seconds. A generic GCD or adrenaline change
+cannot acknowledge it. An explicitly ``not_set`` native variable permits one
+bounded first-use attempt without inventing an expired timer; read failures
+still block. The physical special waits for its own cooldown. EoF never waits
+for the Dragon scimitar effect to expire. Greater Barge's channel conversion
+still needs a validated signal.
 
 ``rs3_effect`` remains 72 bytes and IDs 1-14 retain their meanings.
 ``RS3_EFFECT_COUNT`` is now 16. C/Java consumers must honor the accessor's
 ``required`` count and ``RS3_E_BUFFER`` negotiation. Python's buffer and names
-were updated. Raw reads do not set semantic active/remaining flags.
+were updated. These deadline rows set only ``RS3_EFFECT_REMAINING_KNOWN``;
+``active`` and ``stacks`` stay unknown. See the complete evidence and capture
+limitations in ``docs/validation/telos-special-effects-and-precast-2026-11-18.json``.
+
+Damage queueing and the bounded dummy probe
+------------------------------------------
+
+Ordered damage and the Tendrils Hurricane response can be pressed in the last
+600 ms of GCD. Pending input is not repeated while its native cast outcome is
+awaited. Defensive responses retain their existing 200 ms press limit and
+their individual incoming-hit windows; wider damage queueing does not validate
+protection or defensive timing.
+
+The standalone probe can record eight basic casts without specials::
+
+    python work/calibrate_special_effects.py --pid CURRENT_PID --duration 45 --basic-casts 8
+
+It requires the intended 10,400-HP original-profile account, equipped EZK and
+an exact native training-dummy target. It resolves current bindings from C UI
+labels and selects eligible Greater Fury, Adaptive Strike, Dismember, Rend or
+Punish, rather than waiting solely for Adaptive Strike. F12 stops it. Focus,
+process, target, health and event-loss checks end the bounded run. Without
+``--basic-casts`` it instead calibrates one physical special and one red-EoF
+special, building adrenaline with basics as needed.
+
+The November 18 trace has four consecutive basic starts 1800 ms apart, followed
+by an unintended physical special caused by a probe-mode fallthrough. The bug
+is fixed and covered by a loop-level regression test. The original trace is
+preserved as a mixed run, not an eight-cast clean pass. A clean repeat with all
+five basics remains pending. This probe does not implement a full boss rotation;
+the broad controller's ordinary damage fallback still depends on Revolution.

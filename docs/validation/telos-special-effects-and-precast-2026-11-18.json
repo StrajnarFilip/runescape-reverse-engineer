@@ -1,0 +1,476 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-18",
+  "status": "Special deadline units and fresh effect transitions validated on the original profile; basic-only repeat pending.",
+  "runtime_profile": {
+    "client_version": "951-3",
+    "executable_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45"
+  },
+  "acquisition": "One Windows C DLL snapshot per loop; Python consumes decoded fields and native event queues. No image-derived combat state.",
+  "validated_scope": {
+    "client_logic_tick_ms": 20,
+    "special_deadline_ticks": 3000,
+    "special_deadline_ms": 60000,
+    "repeat_captures": [
+      "training-data/telos-special-effects-20261117T183219.356108Z.jsonl",
+      "training-data/telos-special-effects-20261117T183534.755046Z.jsonl"
+    ],
+    "physical_effect": {
+      "effect_id": 15,
+      "varclient": 8301,
+      "equipped_main_hand": 52543
+    },
+    "scimitar_effect": {
+      "effect_id": 16,
+      "varclient": 7092,
+      "equipped_neck": 51065,
+      "stored_weapon_identity_source": "User declaration, corroborated by the matching native Dragon scimitar effect transition"
+    },
+    "effect_presence": "Unknown. Deadline countdowns do not prove active/cancellable buff presence.",
+    "eof_personal_cooldown": "Not required. The Dragon scimitar effect deadline is not a readiness delay for EoF."
+  },
+  "implementation": {
+    "c_flags": "RS3_EFFECT_REMAINING_KNOWN only; active and stacks remain unknown; Compatibility Mode keeps unvalidated raw candidates.",
+    "cast_acknowledgement": "A newer same-session frame, exact gear and candidate variable, validated near-60-second deadline and changed raw endpoint. Generic GCD/adrenaline changes never suffice.",
+    "first_use": "An exact native NOT_SET candidate permits one bounded attempt. It is not an observed zero timer; read failures block.",
+    "damage_precast_lead_ms": 600,
+    "defensive_press_lead_ms": 200,
+    "defensive_limit_reason": "Keep existing impact-specific press windows; wider damage queueing is not evidence of defensive hit coverage.",
+    "basic_priority": [
+      "Greater Fury",
+      "Adaptive Strike",
+      "Dismember",
+      "Rend",
+      "Punish"
+    ],
+    "cadence_mode_isolation": "No equipment or special fallthrough when all candidate basics are cooling. Regression test exercises the dispatch loop."
+  },
+  "limitations": [
+    "None of these probes is a Telos encounter or complete kill.",
+    "Raw logs retain semantics_validated=false as captured; this report provides the subsequent analysis without rewriting history.",
+    "Two Nov 17 repetitions support both special endpoints; the Nov 18 mixed probe additionally captured physical NOT_SET-to-known behavior.",
+    "Eight-cast basic-only clean repeat is pending. The mixed capture proves only the first four uninterrupted basic starts at 1800 ms intervals.",
+    "No new prayer protection deadline, Soul Split healing attribution, wake-targetability, Greater Barge conversion, P5 response or full-fight verification is established."
+  ],
+  "captures": [
+    {
+      "path": "training-data/telos-special-effects-20261117T182917.158330Z.jsonl",
+      "sha256": "68ffcc4fd7ce10372d96eae1910780b0db285d726d2c81754c0c288e513ede9e",
+      "bytes": 330285,
+      "rows": 681,
+      "result": "time_limit",
+      "sequence_contiguous": true,
+      "queue_loss_events": 0,
+      "requested_inputs": {},
+      "target_cycle_requests": 0,
+      "effect_transitions": [],
+      "basic_starts": [],
+      "basic_start_intervals_ms": [],
+      "gcd_ms_at_basic_input": [],
+      "complete_kill": false,
+      "encounter_attempt": false,
+      "clean_basic_only_validation": false
+    },
+    {
+      "path": "training-data/telos-special-effects-20261117T183219.356108Z.jsonl",
+      "sha256": "750b969b6184bfc99a1a4dd1264b45bb6387a6e07e2c552f7837cab450a00af8",
+      "bytes": 314046,
+      "rows": 376,
+      "result": "both_effect_transitions_recorded",
+      "sequence_contiguous": true,
+      "queue_loss_events": 0,
+      "requested_inputs": {
+        "basic": 10,
+        "physical": 1,
+        "equip": 1,
+        "eof": 1
+      },
+      "target_cycle_requests": 0,
+      "effect_transitions": [
+        {
+          "special": "physical",
+          "sequence": 294,
+          "request_sequence": 285,
+          "endpoint_before": 445632,
+          "endpoint_after": 508493,
+          "input_client_tick": 505455,
+          "observed_client_tick": 505494,
+          "deadline_delta_client_ticks": 2999,
+          "input_to_observation_ms": 747.743,
+          "adrenaline_before_tenths": 1095,
+          "adrenaline_after_tenths": 795,
+          "expiry_var": 8301
+        },
+        {
+          "special": "eof",
+          "sequence": 375,
+          "request_sequence": 369,
+          "endpoint_before": 445843,
+          "endpoint_after": 509033,
+          "input_client_tick": 505995,
+          "observed_client_tick": 506034,
+          "deadline_delta_client_ticks": 2999,
+          "input_to_observation_ms": 744.426,
+          "adrenaline_before_tenths": 1065,
+          "adrenaline_after_tenths": 840,
+          "expiry_var": 7092
+        }
+      ],
+      "basic_starts": [
+        {
+          "ability_id": 14679,
+          "start_client_tick": 504053,
+          "sequence": 11
+        },
+        {
+          "ability_id": 52781,
+          "start_client_tick": 504173,
+          "sequence": 40
+        },
+        {
+          "ability_id": 14679,
+          "start_client_tick": 504352,
+          "sequence": 89
+        },
+        {
+          "ability_id": 14679,
+          "start_client_tick": 504654,
+          "sequence": 137
+        },
+        {
+          "ability_id": 52781,
+          "start_client_tick": 504773,
+          "sequence": 164
+        },
+        {
+          "ability_id": 14679,
+          "start_client_tick": 504956,
+          "sequence": 205
+        },
+        {
+          "ability_id": 14679,
+          "start_client_tick": 505254,
+          "sequence": 243
+        },
+        {
+          "ability_id": 52781,
+          "start_client_tick": 505375,
+          "sequence": 268
+        },
+        {
+          "ability_id": 14679,
+          "start_client_tick": 505614,
+          "sequence": 323
+        },
+        {
+          "ability_id": 14679,
+          "start_client_tick": 505914,
+          "sequence": 361
+        }
+      ],
+      "basic_start_intervals_ms": [
+        2400,
+        3580,
+        6040,
+        2380,
+        3660,
+        5960,
+        2420,
+        4780,
+        6000
+      ],
+      "gcd_ms_at_basic_input": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "complete_kill": false,
+      "encounter_attempt": false,
+      "clean_basic_only_validation": false
+    },
+    {
+      "path": "training-data/telos-special-effects-20261117T183534.755046Z.jsonl",
+      "sha256": "56029acd671536e50cd805df9b3876cbdb7df147f15c37f59e08de5e86b196c8",
+      "bytes": 117376,
+      "rows": 133,
+      "result": "both_effect_transitions_recorded",
+      "sequence_contiguous": true,
+      "queue_loss_events": 0,
+      "requested_inputs": {
+        "basic": 4,
+        "physical": 1,
+        "eof": 1
+      },
+      "target_cycle_requests": 0,
+      "effect_transitions": [
+        {
+          "special": "physical",
+          "sequence": 47,
+          "request_sequence": 37,
+          "endpoint_before": 508493,
+          "endpoint_after": 517045,
+          "input_client_tick": 514005,
+          "observed_client_tick": 514047,
+          "deadline_delta_client_ticks": 2998,
+          "input_to_observation_ms": 812.122,
+          "adrenaline_before_tenths": 1110,
+          "adrenaline_after_tenths": 810,
+          "expiry_var": 8301
+        },
+        {
+          "special": "eof",
+          "sequence": 132,
+          "request_sequence": 120,
+          "endpoint_before": 509033,
+          "endpoint_after": 517585,
+          "input_client_tick": 514547,
+          "observed_client_tick": 514585,
+          "deadline_delta_client_ticks": 3000,
+          "input_to_observation_ms": 749.587,
+          "adrenaline_before_tenths": 1080,
+          "adrenaline_after_tenths": 855,
+          "expiry_var": 7092
+        }
+      ],
+      "basic_starts": [
+        {
+          "ability_id": 14679,
+          "start_client_tick": 513805,
+          "sequence": 7
+        },
+        {
+          "ability_id": 52781,
+          "start_client_tick": 513925,
+          "sequence": 28
+        },
+        {
+          "ability_id": 14679,
+          "start_client_tick": 514164,
+          "sequence": 71
+        },
+        {
+          "ability_id": 14679,
+          "start_client_tick": 514465,
+          "sequence": 108
+        }
+      ],
+      "basic_start_intervals_ms": [
+        2400,
+        4780,
+        6020
+      ],
+      "gcd_ms_at_basic_input": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "complete_kill": false,
+      "encounter_attempt": false,
+      "clean_basic_only_validation": false
+    },
+    {
+      "path": "training-data/telos-special-effects-20261117T183910.188192Z.jsonl",
+      "sha256": "0e6b882342ac0c1f7288ed3453826ff03a22ea21fab342f782ec13906bce7f45",
+      "bytes": 150550,
+      "rows": 275,
+      "result": "time_limit",
+      "sequence_contiguous": true,
+      "queue_loss_events": 0,
+      "requested_inputs": {},
+      "target_cycle_requests": 0,
+      "effect_transitions": [],
+      "basic_starts": [],
+      "basic_start_intervals_ms": [],
+      "gcd_ms_at_basic_input": [],
+      "complete_kill": false,
+      "encounter_attempt": false,
+      "clean_basic_only_validation": false
+    },
+    {
+      "path": "training-data/telos-special-effects-20261117T184232.734723Z.jsonl",
+      "sha256": "60a2af150718f1a6f7aa488d01b7c7544b86f470161172700ff00061635af118",
+      "bytes": 38533,
+      "rows": 17,
+      "result": "dummy_target_not_acquired",
+      "sequence_contiguous": true,
+      "queue_loss_events": 0,
+      "requested_inputs": {},
+      "target_cycle_requests": 1,
+      "effect_transitions": [],
+      "basic_starts": [],
+      "basic_start_intervals_ms": [],
+      "gcd_ms_at_basic_input": [],
+      "complete_kill": false,
+      "encounter_attempt": false,
+      "clean_basic_only_validation": false
+    },
+    {
+      "path": "training-data/telos-special-effects-20261117T184419.262751Z.jsonl",
+      "sha256": "01c34062a1eb0eb6da04e8ef177a1bed51aa1cbe9a553d7e285f660a88d4a3f9",
+      "bytes": 37420,
+      "rows": 15,
+      "result": "dummy_target_not_acquired",
+      "sequence_contiguous": true,
+      "queue_loss_events": 0,
+      "requested_inputs": {},
+      "target_cycle_requests": 1,
+      "effect_transitions": [],
+      "basic_starts": [],
+      "basic_start_intervals_ms": [],
+      "gcd_ms_at_basic_input": [],
+      "complete_kill": false,
+      "encounter_attempt": false,
+      "clean_basic_only_validation": false
+    },
+    {
+      "path": "training-data/telos-special-effects-20261118T151504.252278Z.jsonl",
+      "sha256": "628a02e5e3322daa728806d1e8cee4a422c9c03620454abccaa9429f0136d6f3",
+      "bytes": 112559,
+      "rows": 218,
+      "result": "time_limit",
+      "sequence_contiguous": true,
+      "queue_loss_events": 0,
+      "requested_inputs": {},
+      "target_cycle_requests": 0,
+      "effect_transitions": [],
+      "basic_starts": [],
+      "basic_start_intervals_ms": [],
+      "gcd_ms_at_basic_input": [],
+      "complete_kill": false,
+      "encounter_attempt": false,
+      "clean_basic_only_validation": false
+    },
+    {
+      "path": "training-data/telos-special-effects-20261118T151718.769562Z.jsonl",
+      "sha256": "6967e5bdf16374f872499f870db3632285e3a2e85f565e138060edbbea841e87",
+      "bytes": 176569,
+      "rows": 182,
+      "result": "basic_cadence_recorded",
+      "sequence_contiguous": true,
+      "queue_loss_events": 0,
+      "requested_inputs": {
+        "basic": 8,
+        "physical": 1
+      },
+      "target_cycle_requests": 0,
+      "effect_transitions": [
+        {
+          "special": "physical",
+          "sequence": 76,
+          "request_sequence": 69,
+          "endpoint_before": null,
+          "endpoint_after": 57503,
+          "input_client_tick": 54474,
+          "observed_client_tick": 54506,
+          "deadline_delta_client_ticks": 2997,
+          "input_to_observation_ms": 620.458,
+          "adrenaline_before_tenths": 1200,
+          "adrenaline_after_tenths": 750,
+          "expiry_var": 8301
+        }
+      ],
+      "basic_starts": [
+        {
+          "ability_id": 14679,
+          "start_client_tick": 54143,
+          "sequence": 8
+        },
+        {
+          "ability_id": 52781,
+          "start_client_tick": 54233,
+          "sequence": 29
+        },
+        {
+          "ability_id": 14701,
+          "start_client_tick": 54323,
+          "sequence": 44
+        },
+        {
+          "ability_id": 14679,
+          "start_client_tick": 54413,
+          "sequence": 61
+        },
+        {
+          "ability_id": 14679,
+          "start_client_tick": 54714,
+          "sequence": 113
+        },
+        {
+          "ability_id": 52781,
+          "start_client_tick": 54805,
+          "sequence": 137
+        },
+        {
+          "ability_id": 14679,
+          "start_client_tick": 55014,
+          "sequence": 166
+        },
+        {
+          "ability_id": 14701,
+          "start_client_tick": 55104,
+          "sequence": 181
+        }
+      ],
+      "basic_start_intervals_ms": [
+        1800,
+        1800,
+        1800,
+        6020,
+        1820,
+        4180,
+        1800
+      ],
+      "gcd_ms_at_basic_input": [
+        null,
+        580,
+        600,
+        580,
+        0,
+        580,
+        0,
+        600
+      ],
+      "complete_kill": false,
+      "encounter_attempt": false,
+      "clean_basic_only_validation": false,
+      "limitation": "Mixed-mode bug sent a physical special after the fourth basic. First four basic starts have three consecutive 1800 ms intervals; the full run is not a clean cadence pass."
+    },
+    {
+      "path": "training-data/telos-special-effects-20261118T152331.346351Z.jsonl",
+      "sha256": "ced100e0dbfd09d0fcfd3742774c0950c0b2c6ae693d6ff05538d0644b0d59fd",
+      "bytes": 32549,
+      "rows": 3,
+      "result": "pinned_window_not_foreground",
+      "sequence_contiguous": true,
+      "queue_loss_events": 0,
+      "requested_inputs": {},
+      "target_cycle_requests": 0,
+      "effect_transitions": [],
+      "basic_starts": [],
+      "basic_start_intervals_ms": [],
+      "gcd_ms_at_basic_input": [],
+      "complete_kill": false,
+      "encounter_attempt": false,
+      "clean_basic_only_validation": false
+    }
+  ],
+  "offline_checks": {
+    "ctest_targets_passed": 16,
+    "python_tests_passed": 590,
+    "includes": [
+      "Native deadline flags, bounds and profile isolation",
+      "Complete synthetic ordered opening with both special effect acknowledgements",
+      "Cadence-mode loop does not fall through into specials",
+      "Stale/cached/changed-session/first-use acknowledgement cases"
+    ],
+    "live_kill_verified": false
+  }
+}

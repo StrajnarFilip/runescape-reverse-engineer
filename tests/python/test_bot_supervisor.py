@@ -729,11 +729,36 @@ class P1AttemptTests(unittest.TestCase):
                 },
                 "telos": {"phase": None if dormant else 1},
                 "player": {
+                    "effects": {
+                        "status": "partial",
+                        "source": "native_memory",
+                        "reason": "unvalidated_source",
+                        "entries": [
+                            {
+                                "id": name,
+                                "source": "native_memory",
+                                "active": None,
+                                "reason": "effect_presence_unmapped",
+                                "remaining_ms": 0,
+                                "candidate": {
+                                    "domain": "varclient",
+                                    "expiry_var": variable,
+                                    "raw_expiry": 0,
+                                    "expiry_validated": True,
+                                    "presence_validated": False,
+                                },
+                            }
+                            for name, variable in (
+                                ("igneous_showdown_cooldown", 8301),
+                                ("dragon_scimitar", 7092),
+                            )
+                        ],
+                    },
                     "target": (
                         {"kind": "npc", "instance_id": 4, "runtime_id": 7, "config_id": 22891}
                         if selected
                         else {"kind": "none"}
-                    )
+                    ),
                 },
                 "npcs": {
                     "status": "available",

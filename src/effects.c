@@ -10,6 +10,7 @@ _Static_assert(offsetof(rs3_effect, raw_expiry) == 32, "ABI effect raw alignment
 _Static_assert(sizeof(rs3_effects_info) == 16, "ABI effect info layout");
 
 #define MAX_EFFECT_CLOCK_INTERVAL_TICKS 180000
+#define MAX_SPECIAL_EFFECT_FUTURE_TICKS 3000
 
 typedef struct effect_candidate
 {
@@ -162,10 +163,20 @@ void effects_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t player
      * does not validate presence or early cancellation: never set ACTIVE_KNOWN from a positive
      * timer.
      */
-    const uint32_t expiry_validated[] = {RS3_EFFECT_OVERLOAD};
+    /* Original-profile dummy probes on 2026-11-17 paired both special inputs
+     * with fresh endpoints 2999 logic ticks ahead on first observation.
+     * These establish 20 ms deadline units, not cancellable buff presence. */
+    const uint32_t expiry_validated[] = {RS3_EFFECT_OVERLOAD, RS3_EFFECT_IGNEOUS_SHOWDOWN_COOLDOWN,
+                                         RS3_EFFECT_DRAGON_SCIMITAR};
     for (unsigned index = 0; index < sizeof expiry_validated / sizeof *expiry_validated; index++)
     {
         rs3_effect *effect = &snapshot->effects[expiry_validated[index] - 1];
+        int special_effect = effect->effect_id == RS3_EFFECT_IGNEOUS_SHOWDOWN_COOLDOWN ||
+                             effect->effect_id == RS3_EFFECT_DRAGON_SCIMITAR;
+        if (special_effect && context->target.profile != &profile_primary)
+        {
+            continue;
+        }
         if (effect->reason == RS3_EFFECT_UNVALIDATED && (effect->raw_valid_mask & 1) &&
             effect->raw_expiry >= 0 && effect->raw_expiry <= UINT32_MAX)
         {
@@ -174,7 +185,8 @@ void effects_stage(rs3_context *context, rs3_snapshot *snapshot, uint64_t player
                 difference <= INT32_MAX ? difference : (int64_t)difference - 4294967296ll;
             /* Reject future timestamps beyond one hour; past endpoints mean timer expiry only. */
             if (remaining <= MAX_EFFECT_CLOCK_INTERVAL_TICKS &&
-                remaining >= -MAX_EFFECT_CLOCK_INTERVAL_TICKS)
+                remaining >= -MAX_EFFECT_CLOCK_INTERVAL_TICKS &&
+                (!special_effect || remaining <= MAX_SPECIAL_EFFECT_FUTURE_TICKS))
             {
                 effect->remaining_ms =
                     remaining > 0 ? (int32_t)remaining * LAYOUT_LOGIC_TICK_MS : 0;

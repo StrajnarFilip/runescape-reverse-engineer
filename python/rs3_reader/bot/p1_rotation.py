@@ -6,10 +6,19 @@ practice controller reuse these exact role, readiness and outcome checks.
 
 from __future__ import annotations
 
+from typing import Mapping
+
 from .rotation import OrderedP1Rotation
 from .world_state import Observation, WorldState
 
 MAXIMUM_AGE_NS = 150_000_000
+GCD_PRECAST_MS = 600
+MAX_SPECIAL_EFFECT_MS = 60_000
+MIN_NEW_SPECIAL_EFFECT_MS = MAX_SPECIAL_EFFECT_MS - 2500
+SPECIAL_EFFECT_CHANNELS = {
+    "weapon_special": ("igneous_showdown_cooldown", 8301, 28430, 3, 52543),
+    "eof_special": ("dragon_scimitar", 7092, 11748, 2, 51065),
+}
 OPTIONAL_ITEM_TIMEOUT_NS = 2_500_000_000
 EVENT_STREAMS = ("npc_actions", "npc_hits", "player_hits", "inventory_changes")
 ROTATION_FIELDS = (
@@ -139,6 +148,76 @@ class P1ActionEvidence:
             for item in world.equipment.value.get("slots", ())
         )
 
+    def _special_observation(self, action, world):
+        """Read exact C effect provenance, including an explicitly not-set variable.
+
+        Presence can remain unknown and unrelated effects may be unmapped. Only
+        this row's native expiry-validation flag permits using its deadline.
+        It never turns a positive cached endpoint into a successful cast.
+        """
+        channel = SPECIAL_EFFECT_CHANNELS.get(action["kind"])
+        if channel is None or action.get("ability_id") != channel[2]:
+            return None
+        if action["kind"] == "weapon_special":
+            if action.get("required_weapon_id") != channel[4]:
+                return None
+        elif (
+            action.get("required_amulet_id") != channel[4]
+            or action.get("stored_weapon") != "Dragon scimitar"
+        ):
+            return None
+        effects = world.player.effects
+        if (
+            effects.value is None
+            or not effects.source
+            or effects.age_ms is None
+            or not 0 <= effects.age_ms <= 150
+        ):
+            return None
+        matches = [row for row in effects.value if row.get("id") == channel[0]]
+        if len(matches) != 1:
+            return None
+        row = matches[0]
+        candidate = row.get("candidate") or {}
+        if (
+            row.get("source") != "native_memory"
+            or row.get("reason") not in (None, "effect_presence_unmapped", "not_set")
+            or not isinstance(candidate, Mapping)
+            or candidate.get("domain") != "varclient"
+            or candidate.get("expiry_var") != channel[1]
+        ):
+            return None
+        return row
+
+    def _special_timer(self, action, world):
+        """Return only a deadline whose units were validated in the C collector."""
+        row = self._special_observation(action, world)
+        if row is None:
+            return None
+        candidate, remaining = row["candidate"], row.get("remaining_ms")
+        if (
+            candidate.get("expiry_validated") is not True
+            or not _integer(candidate.get("raw_expiry"))
+            or candidate["raw_expiry"] > 0xFFFFFFFF
+            or not _integer(remaining)
+            or remaining > MAX_SPECIAL_EFFECT_MS
+        ):
+            return None
+        return row
+
+    def _special_not_set(self, action, world):
+        """Permit a bounded first-use attempt without claiming a missing timer is zero."""
+        row = self._special_observation(action, world)
+        return (
+            row is not None
+            and row["reason"] == "not_set"
+            and (
+                row["candidate"].get("raw_expiry") is None
+                and row["candidate"].get("expiry_validated") is False
+                and row.get("remaining_ms") is None
+            )
+        )
+
     def _ready(self, action, world):
         kind = action["kind"]
         if kind == "target_cycle":
@@ -156,15 +235,19 @@ class P1ActionEvidence:
         cooldown = entry.get("cooldown") or {}
         remaining, reason = cooldown.get("remaining_ms"), cooldown.get("reason")
         # A missing first-use timer permits an experimental attempt, not a ready claim.
-        if kind == "eof_special":
+        if kind == "weapon_special":
+            timer = self._special_timer(action, world)
+            if (timer is None and not self._special_not_set(action, world)) or (
+                timer is not None and timer["remaining_ms"] != 0
+            ):
+                return False
+        elif kind == "eof_special":
             # EoF has the ordinary GCD, not its own cooldown. Its generic
             # ability timer cannot establish the stored weapon's cast or delay.
             pass
         elif reason == "not_set":
             if remaining is not None:
                 return False
-        elif kind == "weapon_special" and reason == "timer_mapping_pending":
-            pass
         elif reason is not None or not _integer(remaining) or remaining != 0:
             return False
         if not self._fresh(world.player.adrenaline_percent):
@@ -182,7 +265,11 @@ class P1ActionEvidence:
             return False
         gcd = world.player.gcd
         return self._fresh(gcd) and (
-            (gcd.value.get("reason") is None and gcd.value.get("remaining_ms") == 0)
+            (
+                gcd.value.get("reason") is None
+                and _integer(gcd.value.get("remaining_ms"))
+                and gcd.value["remaining_ms"] <= GCD_PRECAST_MS
+            )
             or (self.engine.index < 2 and gcd.value.get("reason") == "not_set")
         )
 
@@ -217,11 +304,24 @@ class P1ActionEvidence:
     def _acknowledged(self, action, before, world):
         kind = action["kind"]
         if kind in ("weapon_special", "eof_special"):
-            # Weapon-specific debuff/buff candidates are now acquired in C.
-            # They still need labelled validation before confirming a cast.
-            # In particular, an EoF-specific cooldown does not exist, and a
-            # generic GCD or special-button timer is never its acknowledgement.
-            return False
+            old, current = self._special_timer(action, before), self._special_timer(action, world)
+            channel = SPECIAL_EFFECT_CHANNELS[kind]
+            return (
+                (old is not None or self._special_not_set(action, before))
+                and current is not None
+                and world.session == before.session
+                and world.sample_sequence > before.sample_sequence
+                and world.observed_ns > before.observed_ns
+                and world.raw.get("executable_sha256") == before.raw.get("executable_sha256")
+                and self._equipped(before, channel[3], channel[4])
+                and self._equipped(world, channel[3], channel[4])
+                and (kind != "weapon_special" or old is None or old["remaining_ms"] == 0)
+                and MIN_NEW_SPECIAL_EFFECT_MS <= current["remaining_ms"] <= MAX_SPECIAL_EFFECT_MS
+                and (
+                    old is None
+                    or current["candidate"]["raw_expiry"] != old["candidate"]["raw_expiry"]
+                )
+            )
         if kind == "target_cycle":
             return self._fresh(world.player.target) and (
                 world.player.target.value == self.engine._encounter_npc(world)
@@ -384,6 +484,13 @@ class IntegratedP1Rotation(P1ActionEvidence):
             return self._report()
         if self.engine is None:
             actor = self.template._encounter_npc(world)
+            weapon_special = next(
+                action
+                for step in self.template.document["steps"]
+                for action in step["actions"]
+                if action["kind"] == "weapon_special"
+            )
+            weapon_timer = self._special_timer(weapon_special, world)
             ready = (
                 actor is not None
                 and actor.config_id == 22892
@@ -394,6 +501,10 @@ class IntegratedP1Rotation(P1ActionEvidence):
                 and self._equipped(world, 3, 52061)
                 and self._equipped(world, 5, 52063)
                 and self._fresh(world.game_tick)
+                and (
+                    (weapon_timer is not None and weapon_timer["remaining_ms"] == 0)
+                    or self._special_not_set(weapon_special, world)
+                )
                 and self.writer.focus_checker(world) is True
             )
             if not ready:
@@ -438,6 +549,11 @@ class IntegratedP1Rotation(P1ActionEvidence):
                         dict(
                             event="p1_action_confirmed",
                             action=action["id"],
+                            native_effect=(
+                                SPECIAL_EFFECT_CHANNELS[action["kind"]][0]
+                                if action["kind"] in SPECIAL_EFFECT_CHANNELS
+                                else None
+                            ),
                             sent_ns=sent_ns,
                             observed_native_ns=world.observed_ns,
                         )
@@ -466,7 +582,7 @@ class IntegratedP1Rotation(P1ActionEvidence):
                     if special["kind"] == "weapon_special"
                     else "dragon_scimitar"
                 )
-                self.reason = "awaiting_validated_native_effect:" + effect_id
+                self.reason = "awaiting_native_effect_transition:" + effect_id
         return events + self._report()
 
     def dispatch(self, world, *, deferred=False):

@@ -388,13 +388,15 @@ class PhaseOneTests(unittest.TestCase):
         phase = PhaseOne()
         phase.observe([event(1, TENDRILS)])
         timers = {"Hurricane": None}
-        early = controller["GCD_PRESS_LEAD_MS"] + 20
+        early = controller["GCD_PRECAST_MS"] + 20
         self.assertIsNone(phase.next_action(SECOND_NS, timers, early, Prayer.MELEE))
-        self.assertEqual(phase.next_action(SECOND_NS, timers, 0, Prayer.MELEE).ability, "Hurricane")
+        self.assertEqual(
+            phase.next_action(SECOND_NS, timers, 600, Prayer.MELEE).ability, "Hurricane"
+        )
         phase.observe([event(2, RELEASE)])
         self.assertIsNone(phase.next_action(2 * SECOND_NS, timers, 0, Prayer.MELEE))
 
-    def test_anticipation_waits_for_the_gcd_end_and_retries_once(self):
+    def test_anticipation_precasts_on_the_final_gcd_tick_and_retries_once(self):
         phase = PhaseOne()
         phase.observe([event(1, UPPERCUT), event(2, AUTO), event(3, AUTO)])
         timers = {"Anticipation": 0}
@@ -402,7 +404,7 @@ class PhaseOneTests(unittest.TestCase):
         timeout = controller["ACK_TIMEOUT_NS"]
         # 2026-11-15: presses with 1,760-1,780 ms left never cast, 360-600 ms always did.
         lead = controller["GCD_PRESS_LEAD_MS"]
-        for gcd in (1780, 600, lead + 1, None):
+        for gcd in (1780, lead + 20, lead + 1, None):
             self.assertIsNone(phase.next_action(now, timers, gcd, Prayer.SOUL_SPLIT, flicking=True))
         action = phase.next_action(now, timers, lead, Prayer.SOUL_SPLIT, flicking=True)
         self.assertEqual(action.ability, "Anticipation")

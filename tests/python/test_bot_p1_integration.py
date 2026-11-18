@@ -34,6 +34,100 @@ class IntegratedP1Tests(unittest.TestCase):
         self.fixture.current = WorldState.from_telemetry(record)
         return self.fixture.current
 
+    def special_frame(self, kind, *, endpoint=0, remaining_ms=0):
+        record, _ = self.world(dormant=False, selected=True)
+        record["equipment"]["slots"][0]["item_id"] = 52543
+        record["equipment"]["slots"].append(
+            dict(slot=2, item_id=51065, quantity=1, identity_ambiguous=False)
+        )
+        wanted = "igneous_showdown_cooldown" if kind == "weapon_special" else "dragon_scimitar"
+        row = next(row for row in record["player"]["effects"]["entries"] if row["id"] == wanted)
+        row["remaining_ms"] = remaining_ms
+        row["candidate"]["raw_expiry"] = endpoint
+        action = next(
+            a
+            for s in self.opening.template.document["steps"]
+            for a in s["actions"]
+            if a["kind"] == kind
+        )
+        return action, record, row
+
+    def test_special_casts_require_a_fresh_matching_validated_effect_transition(self):
+        for kind in ("weapon_special", "eof_special"):
+            with self.subTest(kind=kind):
+                action, old, _ = self.special_frame(kind)
+                before = self.use(old)
+                _, current, row = self.special_frame(kind, endpoint=3500, remaining_ms=59800)
+                self.assertTrue(self.opening._acknowledged(action, before, self.use(current)))
+                row["candidate"]["expiry_validated"] = False
+                self.assertFalse(self.opening._acknowledged(action, before, self.use(current)))
+                row["candidate"]["expiry_validated"] = True
+                row["candidate"]["expiry_var"] = 999
+                self.assertFalse(self.opening._acknowledged(action, before, self.use(current)))
+                row["candidate"]["expiry_var"] = 8301 if kind == "weapon_special" else 7092
+                current["process_creation_time"] = 999
+                self.assertFalse(self.opening._acknowledged(action, before, self.use(current)))
+
+    def test_cached_endpoints_and_generic_timer_changes_do_not_confirm_specials(self):
+        for kind in ("weapon_special", "eof_special"):
+            with self.subTest(kind=kind):
+                action, old, _ = self.special_frame(kind, endpoint=1000)
+                before = self.use(old)
+                _, after, _ = self.special_frame(kind, endpoint=1000, remaining_ms=60000)
+                self.fixture.cooldown(after, action["ability_id"])
+                self.assertFalse(self.opening._acknowledged(action, before, self.use(after)))
+
+    def test_first_use_can_be_observed_after_not_set_without_inventing_a_zero_timer(self):
+        _, world = self.world()
+        self.opening.observe(world)
+        self.opening.engine.index = 7
+        action, record, row = self.special_frame("weapon_special")
+        row.update(reason="not_set", remaining_ms=None)
+        row["candidate"].update(raw_expiry=None, expiry_validated=False)
+        before = self.use(record)
+        self.assertIsNone(self.opening._special_timer(action, before))
+        self.assertTrue(self.opening._ready(action, before))
+        _, current, _ = self.special_frame("weapon_special", endpoint=3500, remaining_ms=60000)
+        self.assertTrue(self.opening._acknowledged(action, before, self.use(current)))
+        row["reason"] = "read_failed"
+        self.assertFalse(self.opening._ready(action, self.use(record)))
+        self.assertFalse(self.opening._acknowledged(action, self.use(record), self.use(current)))
+
+    def test_late_cached_effect_arrival_is_not_a_fresh_cast(self):
+        action, old, _ = self.special_frame("eof_special")
+        before = self.use(old)
+        _, after, _ = self.special_frame("eof_special", endpoint=3500, remaining_ms=30000)
+        self.assertFalse(self.opening._acknowledged(action, before, self.use(after)))
+
+    def test_eof_effect_can_refresh_while_weapon_cooldown_blocks_another_physical_press(self):
+        _, world = self.world()
+        self.opening.observe(world)
+        self.opening.engine.index = 9
+        action, old, _ = self.special_frame("eof_special", endpoint=1000, remaining_ms=10000)
+        before = self.use(old)
+        self.assertTrue(self.opening._ready(action, before))
+        _, after, _ = self.special_frame("eof_special", endpoint=3500, remaining_ms=60000)
+        self.assertTrue(self.opening._acknowledged(action, before, self.use(after)))
+        physical, record, _ = self.special_frame(
+            "weapon_special", endpoint=3500, remaining_ms=60000
+        )
+        self.assertFalse(self.opening._ready(physical, self.use(record)))
+
+    def test_ordered_damage_can_precast_in_last_six_hundred_ms_without_repeating_pending_input(
+        self,
+    ):
+        self.first_two_batches()
+        record, _ = self.world(dormant=False, selected=True)
+        self.opening.engine.index = 3
+        record["gcd"] = dict(remaining_ms=600, reason=None)
+        world = self.use(record)
+        self.opening.observe(world)
+        self.opening.dispatch(world)
+        self.assertEqual(len(self.fixture.calls), 3)
+        self.assertEqual(self.fixture.calls[-1][0].ability_id, 14688)
+        self.opening.dispatch(world)
+        self.assertEqual(len(self.fixture.calls), 3)
+
     def first_two_batches(self):
         _, world = self.world()
         self.opening.observe(world)
@@ -51,6 +145,75 @@ class IntegratedP1Tests(unittest.TestCase):
         self.fixture.cooldown(record, 14707)
         self.opening.observe(self.use(record))
         self.assertEqual(self.opening.engine.index, 2)
+
+    def test_complete_synthetic_opening_needs_both_action_specific_special_edges(self):
+        """Check integration through the last step; this does not validate live combat."""
+        self.first_two_batches()
+        main_hand, neck = 52061, None
+        confirmations = []
+        for step_index in range(2, 10):
+            with self.subTest(step=step_index):
+                record, _ = self.world(
+                    dormant=False,
+                    selected=step_index > 2,
+                    time_ms=self.fixture.now // fixtures.MS + (50 if step_index == 2 else 1800),
+                )
+                record["game_tick"]["value"]["index"] += 3 * step_index
+                record["equipment"]["slots"][0]["item_id"] = main_hand
+                if neck is not None:
+                    record["equipment"]["slots"].append(
+                        dict(slot=2, item_id=neck, quantity=1, identity_ambiguous=False)
+                    )
+                current = self.use(record)
+                self.opening.observe(current)
+                self.assertEqual(self.opening.engine.index, step_index)
+                step = self.opening.engine.current_step
+                self.opening.dispatch(current)
+                self.assertEqual(len(self.fixture.calls), step_index + 1, self.opening.reason)
+                # Pending accepted input never dispatches twice.
+                self.opening.dispatch(current)
+                self.assertEqual(len(self.fixture.calls), step_index + 1)
+                after, _ = self.world(
+                    dormant=False, selected=True, time_ms=self.fixture.now // fixtures.MS + 50
+                )
+                after["game_tick"]["value"]["index"] += 3 * step_index
+                for action in step["actions"]:
+                    if action["kind"] == "ability":
+                        self.fixture.cooldown(after, action["ability_id"])
+                    elif action["id"] == "vulnerability":
+                        after["inventory"]["slots"][1]["quantity"] -= 1
+                    elif action["id"] == "equip_ezk":
+                        main_hand = 52543
+                    elif action["id"] == "equip_red_eof":
+                        neck = 51065
+                    elif action["kind"] in ("weapon_special", "eof_special"):
+                        name = (
+                            "igneous_showdown_cooldown"
+                            if action["kind"] == "weapon_special"
+                            else "dragon_scimitar"
+                        )
+                        effect = next(
+                            row
+                            for row in after["player"]["effects"]["entries"]
+                            if row["id"] == name
+                        )
+                        effect["remaining_ms"] = 59900
+                        effect["candidate"]["raw_expiry"] = 3500
+                after["equipment"]["slots"][0]["item_id"] = main_hand
+                if neck is not None:
+                    after["equipment"]["slots"].append(
+                        dict(slot=2, item_id=neck, quantity=1, identity_ambiguous=False)
+                    )
+                confirmations.extend(self.opening.observe(self.use(after)))
+                self.assertEqual(
+                    self.opening.engine.index, step_index + 1, (self.opening.reason, confirmations)
+                )
+        self.assertTrue(self.opening.engine.complete)
+        self.assertEqual(self.opening.reason, "ordered_sequence_confirmed")
+        self.assertEqual(
+            [event["native_effect"] for event in confirmations if event.get("native_effect")],
+            ["igneous_showdown_cooldown", "dragon_scimitar"],
+        )
 
     def test_dormant_npc_outside_instance_does_not_arm_or_send(self):
         record, _ = self.world()

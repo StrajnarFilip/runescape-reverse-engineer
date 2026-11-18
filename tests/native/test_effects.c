@@ -57,30 +57,62 @@ static void torn_values_invalidate_the_observation(void)
     fixture_destroy(test_fixture);
 }
 
-static void special_effect_candidates_are_not_fictitious_ability_cooldowns(void)
+static void special_effect_timers_preserve_unknown_presence(void)
 {
     fixture *test_fixture = fixture_create();
     const uint64_t second_node = EFFECT_NODES + 0x100;
     fixture_add_block(test_fixture, EFFECT_NODES, FIXTURE_VARIABLE_NODE_BYTES);
     fixture_add_block(test_fixture, second_node, FIXTURE_VARIABLE_NODE_BYTES);
-    fixture_put_variable(test_fixture, FIXTURE_CLIENT_TABLE, EFFECT_NODES, 8301, 1500);
-    fixture_put_variable(test_fixture, FIXTURE_CLIENT_TABLE, second_node, 7092, 1600);
+    fixture_put_variable(test_fixture, FIXTURE_CLIENT_TABLE, EFFECT_NODES, 8301,
+                         FIXTURE_LOGIC_TICK + 100);
+    fixture_put_variable(test_fixture, FIXTURE_CLIENT_TABLE, second_node, 7092,
+                         FIXTURE_LOGIC_TICK + 200);
     assert(fixture_decode(test_fixture));
     const rs3_effect *weapon =
         &test_fixture->snapshot->effects[RS3_EFFECT_IGNEOUS_SHOWDOWN_COOLDOWN - 1];
     const rs3_effect *stored = &test_fixture->snapshot->effects[RS3_EFFECT_DRAGON_SCIMITAR - 1];
-    assert(weapon->expiry_var == 8301 && weapon->raw_expiry == 1500);
-    assert(stored->expiry_var == 7092 && stored->raw_expiry == 1600);
+    assert(weapon->expiry_var == 8301 && weapon->raw_expiry == FIXTURE_LOGIC_TICK + 100);
+    assert(stored->expiry_var == 7092 && stored->raw_expiry == FIXTURE_LOGIC_TICK + 200);
     assert(weapon->raw_valid_mask == 1 && stored->raw_valid_mask == 1);
-    assert(weapon->reason == RS3_EFFECT_UNVALIDATED && stored->reason == RS3_EFFECT_UNVALIDATED);
-    assert(!weapon->flags && !stored->flags);
-    assert(weapon->remaining_ms == -1 && stored->active == -1);
+    assert(weapon->reason == RS3_EFFECT_PRESENCE_UNMAPPED);
+    assert(stored->reason == RS3_EFFECT_PRESENCE_UNMAPPED);
+    assert(weapon->flags == RS3_EFFECT_REMAINING_KNOWN);
+    assert(stored->flags == RS3_EFFECT_REMAINING_KNOWN);
+    assert(weapon->remaining_ms == 2000 && stored->remaining_ms == 4000);
+    assert(weapon->active == -1 && stored->active == -1);
     /* Existing IDs and ABI record sizes remain stable; old small buffers negotiate capacity. */
     rs3_effect output[14];
     memset(output, 0x5a, sizeof output);
     uint32_t required = 0;
     assert(rs3_snapshot_effects(test_fixture->snapshot, output, 14, &required) == RS3_E_BUFFER);
     assert(required == 16 && output[0].effect_id == 0x5a5a5a5a);
+    fixture_destroy(test_fixture);
+}
+
+static void special_deadlines_reject_outliers_and_do_not_calibrate_other_profiles(void)
+{
+    fixture *test_fixture = fixture_create();
+    fixture_add_block(test_fixture, EFFECT_NODES, FIXTURE_VARIABLE_NODE_BYTES);
+    fixture_put_variable(test_fixture, FIXTURE_CLIENT_TABLE, EFFECT_NODES, 8301,
+                         FIXTURE_LOGIC_TICK + 3001);
+    assert(fixture_decode(test_fixture));
+    const rs3_effect *effect =
+        &test_fixture->snapshot->effects[RS3_EFFECT_IGNEOUS_SHOWDOWN_COOLDOWN - 1];
+    assert(effect->raw_valid_mask == 1 && effect->flags == 0 && effect->remaining_ms == -1);
+    fixture_put_u32(test_fixture, EFFECT_NODES + 8, FIXTURE_LOGIC_TICK - 1);
+    assert(fixture_decode(test_fixture));
+    assert(effect->remaining_ms == 0 && effect->flags == RS3_EFFECT_REMAINING_KNOWN);
+    assert(effect->active == -1);
+    fixture_destroy(test_fixture);
+
+    test_fixture = fixture_create_for_profile(&profile_compatibility);
+    fixture_add_block(test_fixture, EFFECT_NODES, FIXTURE_VARIABLE_NODE_BYTES);
+    fixture_put_variable(test_fixture, FIXTURE_CLIENT_TABLE, EFFECT_NODES, 7092,
+                         FIXTURE_LOGIC_TICK + 100);
+    effects_stage(test_fixture->context, test_fixture->snapshot, FIXTURE_PLAYER, FIXTURE_CLIENT);
+    effect = &test_fixture->snapshot->effects[RS3_EFFECT_DRAGON_SCIMITAR - 1];
+    assert(effect->raw_valid_mask == 1 && effect->reason == RS3_EFFECT_UNVALIDATED);
+    assert(effect->flags == 0 && effect->remaining_ms == -1);
     fixture_destroy(test_fixture);
 }
 
@@ -148,7 +180,8 @@ int main(void)
     RUN_TEST(unknown_is_not_absent);
     RUN_TEST(raw_changes_are_not_buff_proof);
     RUN_TEST(torn_values_invalidate_the_observation);
-    RUN_TEST(special_effect_candidates_are_not_fictitious_ability_cooldowns);
+    RUN_TEST(special_effect_timers_preserve_unknown_presence);
+    RUN_TEST(special_deadlines_reject_outliers_and_do_not_calibrate_other_profiles);
     RUN_TEST(profile_and_frame_invalidation);
     RUN_TEST(expiry_does_not_prove_presence);
     RUN_TEST(caller_owned_accessors);

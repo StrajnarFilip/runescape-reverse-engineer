@@ -1,5 +1,23 @@
 # Telos attempt logs
 
+## Special effects and damage precast probes
+
+`telos-special-effects-*.jsonl` uses schema 1, including failed and incomplete
+dummy probes. These are not Telos encounters. Read `attempt_ended.result`,
+`encounter_attempt` and `complete_kill` before interpreting them.
+`calibration_input_requested` retains the exact native target, binding, resource
+state and raw baseline. OS input acceptance never confirms a cast.
+`calibration_basic_observed` records a changed action-specific cooldown start;
+`special_effect_transition` pairs the input with its raw endpoint and logic clock.
+Historical `semantics_validated: false` records remain unchanged; subsequent
+analysis is in the [November 18 report](../docs/validation/telos-special-effects-and-precast-2026-11-18.json).
+
+The November 18 `151718` trace contains an unintended physical special after
+four basics due to a mode-isolation bug. It supports the first three 1800 ms
+basic intervals, not a clean eight-cast cadence pass. The bug is fixed; the
+repeat remains pending. The other logs retain target-acquisition failures,
+time limits and foreground refusal rather than hiding unsuccessful probes.
+
 ## Current native P1 captures (schema 2)
 
 `python -m rs3_reader.bot --mode supervised-p1` now also writes one

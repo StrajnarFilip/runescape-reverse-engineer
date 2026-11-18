@@ -42,8 +42,11 @@ It does not sample memory or issue input. The
 `combined practice controller <telos-combined-controller.rst>`_ joins the ordered
 P1 opening to mechanics and prayers through a shared backend and event owner.
 ``bot/p1_rotation.py`` also supplies the bounded pilot's native action checks.
-Special-effect acknowledgement, P5 responses and full live verification remain
-pending.
+Original-profile EZK/Dragon scimitar effect transitions now acknowledge their
+specific casts; buff presence, P5 responses and full live verification remain
+pending. ``work/calibrate_special_effects.py`` is the bounded native dummy
+probe for special endpoints or basic-only damage cadence. Its decoded logs
+include failures, and its documented cadence repeat is still pending.
 `Action cooldowns <telos-automation/action-cooldowns.rst>`_ lists which
 actions have their own timer, which share one, and what may go out in one tick.
 

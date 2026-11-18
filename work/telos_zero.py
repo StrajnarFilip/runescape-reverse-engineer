@@ -24,7 +24,7 @@ from rs3_reader.bot.consumables import (
     PotionUseMonitor,
     resolve_prayer_potion,
 )
-from rs3_reader.bot.p1_rotation import IntegratedP1Rotation
+from rs3_reader.bot.p1_rotation import GCD_PRECAST_MS, IntegratedP1Rotation
 from rs3_reader.native import (
     LOGIC_TICK_MS,
     PRAYER_POINTS_MASK,
@@ -995,12 +995,9 @@ def magic_flick_ticks(distance):
 # Uppercut's 2,634 hitmark appeared 7 received ticks after 28938 on 2026-11-14 at 100%.
 # Escape is sent two to three ticks before that hitmark; the server hit deadline is unmeasured.
 UPPERCUT_ESCAPE_TICKS = (4, 5)
-# Ability queueing is off in the client, so a GCD ability pressed while the GCD runs is dropped.
-# 2026-11-15 250% logs: Anticipation and Resonance pressed with 1,140-1,800 ms left never cast;
-# with 360-620 ms left or an idle GCD they cast on the next tick. A press is therefore sent only
-# in the last GCD_PRESS_LEAD_MS before the GCD ends (or while it is idle) and reaches the server
-# on the tick the GCD ends, ahead of Revolution. Escape, Surge and Dive are off the GCD.
-# A 100 ms lead was too late: Anticipation pressed with 76 ms left did not cast (06:30 run).
+# Defensive impact windows retain their measured press limit. Ordered damage
+# and Hurricane use the user's one-tick (600 ms) precast lead. A queued defensive
+# must still fit its particular incoming-hit window; Surge/Dive remain off GCD.
 GCD_PRESS_LEAD_MS = 200
 GCD_ABILITIES = frozenset(
     {"Resonance", "Anticipation", "Freedom", "Hurricane", "Reflect", "Devotion"}
@@ -1058,7 +1055,11 @@ DEVOTION_ADRENALINE_TENTHS = 500
 
 
 def gcd_press_ready(gcd_remaining_ms):
-    """Whether a GCD ability pressed now casts on the tick the global cooldown ends."""
+    """Keep defensive input inside its existing bounded press window.
+
+    Ordered damage uses the wider one-tick precast window separately. Neither
+    deadline by itself guarantees the server accepted an ability or blocked a hit.
+    """
     return gcd_remaining_ms is not None and gcd_remaining_ms <= GCD_PRESS_LEAD_MS
 
 
@@ -1466,6 +1467,16 @@ class PhaseOne:
                     reason = "Uppercut escape" if ability == "Escape" else "Uppercut Surge"
                     return Action(ability, reason)
         if not gcd_ready:
+            if (
+                active_special
+                and self.special == TENDRILS
+                and "Hurricane" not in self.handled
+                and "Hurricane" in cooldowns
+                and not cooldowns["Hurricane"]
+                and gcd_remaining_ms is not None
+                and 0 <= gcd_remaining_ms <= GCD_PRECAST_MS
+            ):
+                return Action("Hurricane", "Tendrils damage check")
             return None
         if (
             self.expected == HOLD_STILL
@@ -4609,7 +4620,12 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                     received_tick=received_tick,
                 )
             press_gcd_ms = gcd_remaining_now(player, info.monotonic_ns, reader.monotonic_ns())
-            if action.ability in GCD_ABILITIES and not gcd_press_ready(press_gcd_ms):
+            press_ready = (
+                press_gcd_ms is not None and 0 <= press_gcd_ms <= GCD_PRECAST_MS
+                if action.ability == "Hurricane"
+                else gcd_press_ready(press_gcd_ms)
+            )
+            if action.ability in GCD_ABILITIES and not press_ready:
                 # The GCD ended while deciding: Revolution has the slot, so decide again later.
                 emit(
                     "ability_press_skipped",
