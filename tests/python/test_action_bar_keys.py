@@ -98,6 +98,7 @@ class NativeBindingTests(unittest.TestCase):
             (ord("A"), 3, "Ctrl+Shift+A"),
             (0x21, 0, "PageUp"),
             (0x22, 0, "PageDown"),
+            (0x2D, 0, "Insert"),
             (0xBB, 0, "Equals"),
         ):
             self.assertEqual(native_key_label(virtual, modifiers), expected)

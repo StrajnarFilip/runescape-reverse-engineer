@@ -3,7 +3,7 @@
   "phase": 1,
   "name": "Conservative melee phase 1",
   "definition_version": "951-3",
-  "ability_bindings_sha256": "4170332c15a5fa2dbf861eaaf5c863f22f2791542594d80a712be07f0040910c",
+  "ability_bindings_sha256": "43f5994bffc485d9dc07c05264d36ab4b754c20cf4317e1bc046544c16d39bfd",
   "client_sha256": [
     "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45",
     "7a60c69fcf11eda42a328732721f5e89e1c85a6bc919038ff3451d4643e42dbf"

@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-18",
+  "status": "Failed live combined attempt; fixes have offline and read-only native-key checks, no successful retry yet.",
+  "capture": {
+    "path": "training-data/telos-20261118T155501.788252Z.jsonl",
+    "sha256": "0fed6230c23dde424546ea121634c6246fe764dcf606c6fdd777003ca5c14274",
+    "rows": 220,
+    "result": "player_hp_zero"
+  },
+  "observed": {
+    "accepted_opening_inputs": [
+      "Devotion: Alt+G"
+    ],
+    "confirmed_opening_casts": [
+      "Devotion"
+    ],
+    "next_step": "berserk_then_renewal",
+    "failure": "dispatch_fault:Unsupported native key in the client layout",
+    "later_opening_inputs": [],
+    "boss_hp_final": 600000,
+    "player_hp_final": 0,
+    "complete_kill": false
+  },
+  "root_cause": "The actual MapVirtualKeyExW translator returned 0x51/0x49 for Page Down/Up without E0. SharedKeyBatchDevice rejected these while the standalone probe used the C native-input path and did not exercise this translator.",
+  "additional_failure": "An ordered opening fault ended only the opening, leaving the mechanic controller running without its attack sequence.",
+  "fixes": [
+    "Preserve extended navigation-key identity only when the exact known virtual key has its expected unprefixed scan. Unknown scans still reject.",
+    "Preflight all 13 current native opening keys through SharedKeyBatchDevice before Devotion or any opening input.",
+    "Latch a failed opening as a whole practice-run error rather than silently continuing.",
+    "Require first-two-step readiness before spending Devotion.",
+    "Decode the currently observed Ins binding and preserve its dedicated extended-key flag."
+  ],
+  "read_only_client_check": {
+    "window": 1311612,
+    "layout": 69469193,
+    "all_opening_keys_passed": 13,
+    "game_input_sent": false
+  },
+  "remaining": [
+    "Full combined P1 retry",
+    "Prayer and mechanic outcome verification",
+    "P5 handling and complete zero-miss final verification"
+  ],
+  "offline_checks": {
+    "ctest_targets_passed": 16,
+    "python_tests_passed": 602,
+    "actual_unprefixed_navigation_scans_reproduced": true,
+    "corrected_shared_batch_dispatch_tested_with_fake_sender": true,
+    "live_retry_passed": false
+  }
+}

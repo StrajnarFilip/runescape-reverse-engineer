@@ -15,6 +15,7 @@ from pathlib import Path
 
 from rs3_reader.bot.actuator_sendinput import NativeKeyAction, NativeSnapshotDevice
 from rs3_reader.bot.attempt_log import AttemptLog
+from rs3_reader.bot.damage_cadence import BASIC_ABILITIES, ready_damage
 from rs3_reader.bot.p1_rotation import GCD_PRECAST_MS
 from rs3_reader.bot.world_state import WorldState
 from rs3_reader.native import (
@@ -47,13 +48,6 @@ EQUIP_TIMEOUT_NS = 2_000_000_000
 SAMPLE_SECONDS = 0.05
 GCD_LEAD_MS = GCD_PRECAST_MS
 CALIBRATION_RESERVE_TENTHS = 1000
-BASIC_ABILITIES = (
-    (14701, "Greater Fury"),
-    (14679, "Adaptive Strike"),
-    (44244, "Dismember"),
-    (52781, "Rend"),
-    (14700, "Punish"),
-)
 
 
 def effect_endpoint(reader, effect_id):
@@ -151,48 +145,17 @@ def role_descriptor(reader, *, ability_id=None, item_id=None, name=None):
 
 def ready_basic(reader):
     """Choose a version-pinned, zero-cost melee basic with known equipment eligibility."""
-    first_use = reader.player.gcd_reason == Reason.NOT_SET
-    if not first_use and (
-        reader.player.gcd_reason != Reason.NONE
-        or not 0 <= reader.player.gcd_remaining_ms <= GCD_LEAD_MS
-    ):
-        return None
-    # A bounded first-use attempt seeds the sparse GCD variables. This is not
-    # an observation of zero GCD; read failures still authorize nothing.
-    own_timer_limit = 0 if first_use else reader.player.gcd_remaining_ms
-    for identity, name in BASIC_ABILITIES:
-        matches = [
-            row
-            for row in reader.abilities[: reader.inventory_info.ability_count]
-            if row.struct_id == identity
-        ]
-        if len(matches) != 1:
-            continue
-        row = matches[0]
-        if (
-            row.flags & AbilityFlags.IN_BOOK
-            and row.equipment_match == EquipmentMatch.ALLOWED
-            and row.adrenaline_requirement_raw == 0
-            and (
-                row.reason == Reason.NOT_SET
-                or (
-                    row.reason == Reason.NONE
-                    and row.flags & AbilityFlags.TIMER_VALID
-                    and row.remaining_ms <= own_timer_limit
-                )
-            )
-        ):
-            return identity, name, row.start_tick
-    return None
+    return ready_damage(reader, basic_only=True)
 
 
-def run(reader, device, keys, attempt, *, duration=120, basic_casts=0):
+def run(reader, device, keys, attempt, *, duration=120, basic_casts=0, damage_casts=0):
     """Perform at most one physical and one EoF press under a fixed native session."""
     identity = None
     phase = "physical"
     pending = None
     previous_status = None
     basics_observed = 0
+    cadence_casts = basic_casts or damage_casts
     acquisition_sent_ns = None
     start = time.monotonic()
     telemetry = NativeTelemetry(reader=reader)
@@ -270,7 +233,7 @@ def run(reader, device, keys, attempt, *, duration=120, basic_casts=0):
             continue
         if pending:
             kind, before, sent_ns, sent_tick = pending
-            if kind == "basic":
+            if kind in ("basic", "damage"):
                 entry = next(
                     (
                         row
@@ -287,14 +250,20 @@ def run(reader, device, keys, attempt, *, duration=120, basic_casts=0):
                     and entry.start_tick != before["start"]
                 ):
                     attempt.write(
-                        "calibration_basic_observed",
+                        (
+                            "calibration_damage_observed"
+                            if damage_casts
+                            else "calibration_basic_observed"
+                        ),
                         ability_id=before["id"],
                         start_tick=entry.start_tick,
                     )
                     pending = None
                     basics_observed += 1
-                    if basic_casts and basics_observed >= basic_casts:
-                        return "basic_cadence_recorded"
+                    if cadence_casts and basics_observed >= cadence_casts:
+                        return (
+                            "damage_cadence_recorded" if damage_casts else "basic_cadence_recorded"
+                        )
                 elif now - sent_ns >= EQUIP_TIMEOUT_NS:
                     return "basic_cooldown_not_observed"
             elif kind == "equip":
@@ -331,13 +300,15 @@ def run(reader, device, keys, attempt, *, duration=120, basic_casts=0):
         if pending is None:
             adrenaline = reader.player.variable(Variable.ADRENALINE)
             ready = target is not None and equipped(reader, 3, EZK_ITEM)
-            basic = ready_basic(reader) if ready else None
+            basic = (
+                (ready_damage(reader) if damage_casts else ready_basic(reader)) if ready else None
+            )
             if (
                 ready
                 and phase in ("physical", "eof")
                 and adrenaline is not None
                 and (
-                    basic_casts
+                    cadence_casts
                     or adrenaline < CALIBRATION_RESERVE_TENTHS
                     or reader.player.gcd_reason == Reason.NOT_SET
                 )
@@ -345,8 +316,11 @@ def run(reader, device, keys, attempt, *, duration=120, basic_casts=0):
             ):
                 ability_id, name, baseline_start = basic
                 descriptor, binding = role_descriptor(reader, ability_id=ability_id, name=name)
-                kind, endpoint = "basic", {"id": ability_id, "start": baseline_start}
-            elif basic_casts:
+                kind, endpoint = (
+                    "damage" if damage_casts else "basic",
+                    {"id": ability_id, "start": baseline_start},
+                )
+            elif cadence_casts:
                 # Cadence mode never falls through into equipment or specials
                 # while all currently eligible basics are cooling.
                 time.sleep(SAMPLE_SECONDS)
@@ -440,14 +414,26 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pid", type=int, required=True)
     parser.add_argument("--duration", type=int, default=120)
-    parser.add_argument(
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument(
         "--basic-casts",
         type=int,
         default=0,
         help="Record this many basic casts instead of sending specials",
     )
+    modes.add_argument(
+        "--damage-casts",
+        type=int,
+        default=0,
+        help="Record non-channel damage casts, including affordable ultimates and Hurricane",
+    )
     args = parser.parse_args()
-    if args.pid <= 0 or not 1 <= args.duration <= 180 or not 0 <= args.basic_casts <= 20:
+    if (
+        args.pid <= 0
+        or not 1 <= args.duration <= 180
+        or not 0 <= args.basic_casts <= 20
+        or not 0 <= args.damage_casts <= 20
+    ):
         parser.error("Positive PID and duration 1..180 are required")
     directory = Path(__file__).resolve().parents[1] / "training-data"
     path = directory / (
@@ -475,6 +461,7 @@ def main():
                     attempt,
                     duration=args.duration,
                     basic_casts=args.basic_casts,
+                    damage_casts=args.damage_casts,
                 )
             except (RuntimeError, OSError, ValueError, KeyboardInterrupt) as error:
                 attempt.write("calibration_error", error=str(error))
@@ -485,7 +472,16 @@ def main():
                     "attempt_ended", result=reason, encounter_attempt=False, complete_kill=False
                 )
             print(json.dumps({"result": reason, "log": str(path)}), flush=True)
-    return 0 if reason in ("both_effect_transitions_recorded", "basic_cadence_recorded") else 1
+    return (
+        0
+        if reason
+        in (
+            "both_effect_transitions_recorded",
+            "basic_cadence_recorded",
+            "damage_cadence_recorded",
+        )
+        else 1
+    )
 
 
 if __name__ == "__main__":

@@ -270,7 +270,10 @@ class P1ActionEvidence:
                 and _integer(gcd.value.get("remaining_ms"))
                 and gcd.value["remaining_ms"] <= GCD_PRECAST_MS
             )
-            or (self.engine.index < 2 and gcd.value.get("reason") == "not_set")
+            or (
+                (self.engine is None or self.engine.index < 2)
+                and gcd.value.get("reason") == "not_set"
+            )
         )
 
     def prepare(self, action, world):
@@ -506,6 +509,11 @@ class IntegratedP1Rotation(P1ActionEvidence):
                     or self._special_not_set(weapon_special, world)
                 )
                 and self.writer.focus_checker(world) is True
+                and all(
+                    self._ready(action, world)
+                    for step in self.template.document["steps"][:2]
+                    for action in step["actions"]
+                )
             )
             if not ready:
                 self.reason = "waiting_for_dormant_telos_and_preparation"

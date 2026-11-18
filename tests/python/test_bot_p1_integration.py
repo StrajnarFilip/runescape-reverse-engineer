@@ -224,6 +224,15 @@ class IntegratedP1Tests(unittest.TestCase):
         self.assertIsNone(self.opening.engine)
         self.assertEqual(self.fixture.calls, [])
 
+    def test_berserk_cooldown_blocks_preparation_before_devotion_is_spent(self):
+        record, _ = self.world()
+        self.fixture.cooldown(record, 14707)
+        world = self.use(record)
+        self.opening.observe(world)
+        self.opening.dispatch(world)
+        self.assertIsNone(self.opening.engine)
+        self.assertEqual(self.fixture.calls, [])
+
     def test_scoped_world_retains_all_p1_evidence_and_owns_its_copy(self):
         record, full = self.world()
         record["abilities"]["entries"].append({"struct_id": 999999, "name": "unrelated"})
@@ -376,6 +385,30 @@ class IntegratedP1Tests(unittest.TestCase):
 
 
 class SharedBatchTests(unittest.TestCase):
+    def test_actual_page_scan_shape_preflights_and_sends_on_the_combined_path(self):
+        sender = Mock(side_effect=lambda count, *_: count)
+        backend = SendInputBackend(sender=sender)
+        scans = {ord("F"): 0x21, 0x22: 0x51, 0x21: 0x49, 0x2D: 0x52}
+        device = SharedKeyBatchDevice(
+            backend, lambda: None, lambda _: True, lambda: 100, scan_for_key=scans.get
+        )
+        actions = [
+            SimpleNamespace(virtual_key=key, modifiers=0) for key in (ord("F"), 0x22, 0x21, 0x2D)
+        ]
+        chords = device.preflight_bindings(actions)
+        self.assertEqual(
+            [chord[-1].name for chord in chords], ["F", "PAGEDOWN", "PAGEUP", "INSERT"]
+        )
+        self.assertTrue(all(chord[-1].extended for chord in chords[1:]))
+        sender.assert_not_called()
+        device.dispatch_key_batch(actions[:2], object())
+        sender.assert_called_once()
+        self.assertEqual(sender.call_args.args[0], 4)
+        scans[0x22] = 0x7777
+        with self.assertRaises(ValueError):
+            device.preflight_bindings(actions)
+        sender.assert_called_once()
+
     def test_win32_partial_batch_reports_only_the_inserted_prefix_and_releases_it(self):
         sender = Mock(side_effect=[3, 1])  # A down/up, S down; release S succeeds.
         backend = SendInputBackend(sender=sender)

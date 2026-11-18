@@ -291,8 +291,10 @@ static void navigation_and_oem_bindings_preserve_extended_key_flags(void)
 {
     INPUT events[MAX_CHORD_INPUTS], releases[MAX_CHORD_INPUTS];
     uint32_t count = 0;
-    for (uint32_t key = VK_PRIOR; key <= VK_NEXT; key++)
+    const uint32_t navigation_keys[] = {VK_PRIOR, VK_NEXT, VK_INSERT};
+    for (unsigned index = 0; index < sizeof navigation_keys / sizeof *navigation_keys; index++)
     {
+        uint32_t key = navigation_keys[index];
         assert(input_build_key_chord(key, RS3_KEY_CTRL, events, &count) == RS3_OK);
         assert(count == 4);
         assert(events[1].ki.wVk == key);

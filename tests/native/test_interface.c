@@ -855,6 +855,13 @@ static void action_labels_have_checked_identity_chord_and_copy_contract(void)
     assert(!strcmp(label.key_label, "PgDn") && !strcmp(label.name, "Berserk"));
     assert(label.pid == FIXTURE_PID && label.sample_sequence == sequence);
     assert(label.preset_bar == 1 && label.slot == 12 && label.item_id == -1);
+    unsigned char *key_text = fixture_bytes(test_fixture, LABEL_TEST_NODES + 0x200 + 0x190, 24);
+    memset(key_text, 0, 24);
+    memcpy(key_text, "Ins", 3);
+    key_text[23] = 20;
+    assert(rs3_read_action_label(test_fixture->context, sequence, 1, 12, &label, sizeof label) ==
+           RS3_OK);
+    assert(label.flags == 15 && label.virtual_key == VK_INSERT && label.modifiers == 0);
     assert(rs3_read_action_label(test_fixture->context, sequence + 1, 1, 12, &label,
                                  sizeof label) == RS3_E_STATE);
     assert(label.flags == 0 && label.observed_ns == 0);

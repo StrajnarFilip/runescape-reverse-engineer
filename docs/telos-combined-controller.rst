@@ -52,6 +52,14 @@ remains optional after its ordered press. Retained adrenaline neither blocks
 the opening nor proves a perk proc. Equipment, target, inventory and ordinary
 ability cooldowns each require their own later observation.
 
+Before the first cast, every opening key is translated through the actual
+shared backend's client-layout translator, including A and the Page keys.
+``p1_all_keys_preflight_passed`` records that read-only check. The first two
+steps must be ready before spending Devotion. An opening fault stops the whole
+practice run; it cannot silently leave the mechanic controller fighting alone.
+The November 18 failure and exact Page Down scan-code correction are recorded
+in ``docs/validation/telos-combined-transport-failure-2026-11-18.json``.
+
 Logging
 -------
 
@@ -124,9 +132,41 @@ process, target, health and event-loss checks end the bounded run. Without
 ``--basic-casts`` it instead calibrates one physical special and one red-EoF
 special, building adrenaline with basics as needed.
 
-The November 18 trace has four consecutive basic starts 1800 ms apart, followed
+The first November 18 trace has four consecutive basic starts 1800 ms apart, followed
 by an unintended physical special caused by a probe-mode fallthrough. The bug
 is fixed and covered by a loop-level regression test. The original trace is
-preserved as a mixed run, not an eight-cast clean pass. A clean repeat with all
-five basics remains pending. This probe does not implement a full boss rotation;
-the broad controller's ordinary damage fallback still depends on Revolution.
+preserved as a mixed run, not an eight-cast clean pass. Two later basic-only
+repeats completed eight casts but still had cooldown gaps. Dismember's missing
+namespace mapping is now corrected to VarClients 8380/8381 and live-confirmed.
+
+The wider ``--damage-casts 8`` probe then exercised Meteor Strike, Overpower,
+Hurricane, Greater Fury, Adaptive Strike, Dismember, Rend and Adaptive Strike.
+Its cast observations are three received ticks apart throughout; GCD endpoint
+spacing is 1780--1820 ms. Hurricane's personal cooldown start was backdated, so
+do not use differences between different abilities' personal cooldown starts
+as execution times. This validates the dummy sequence, not a Telos rotation.
+
+Supplementary damage in the combat runner
+---------------------------------------
+
+``--ordered-p1`` now also enables the non-channel damage supplement after the
+ordered opening finishes or hands off to P2. ``--damage-priority`` enables it
+without the ordered opening. It uses the same backend as prayers and mechanics,
+current native UI bindings, personal timers, equipment eligibility and observed
+adrenaline. It considers the wider probe's eight damage candidates and retains
+50% adrenaline when spending. Basics may still build below that reserve.
+
+The supplement requires the exact fresh original-profile combat target and
+same-frame native in-instance bit. It yields to defensive responses, font duty,
+Hold Still/Uppercut and reserved incoming-hit windows. One pending input must
+receive its own later timer transition; timeout, session changes or queue loss
+disable damage rather than repeat an unconfirmed input. Logs retain
+``damage_input_requested``, ``damage_input_accepted`` and ``damage_cast_outcome``,
+including an unconfirmed action when the attempt ends.
+
+Channeled attacks and offensive buffs remain with their explicit sequence
+owners; the supplement does not infer channel completion or full castability.
+It is an experimental practice policy, not the final PVME rotation. The combined
+Telos attempt failed before Berserk on the old Page Down translator. The fixed
+combined path still needs a successful live P1 retry. P5 and complete prayer,
+healing and mechanic verification remain unfinished.

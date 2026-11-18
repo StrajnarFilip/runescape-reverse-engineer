@@ -19,10 +19,17 @@ from pathlib import Path
 from rs3_reader.action_bar_keys import displayed_bindings, refresh_binding
 from rs3_reader.bot.attempt_log import CLEANSE_MAX_AGE_CLIENT_TICKS, AttemptLog
 from rs3_reader.bot.arbiter import P1BatchArbiter
+from rs3_reader.bot.actuator_sendinput import NativeKeyAction
 from rs3_reader.bot.consumables import (
     PRAYER_RESTORATION_ROLE,
     PotionUseMonitor,
     resolve_prayer_potion,
+)
+from rs3_reader.bot.damage_cadence import (
+    DAMAGE_ABILITIES,
+    DamageCadence,
+    current_telos_target,
+    ready_damage,
 )
 from rs3_reader.bot.p1_rotation import GCD_PRECAST_MS, IntegratedP1Rotation
 from rs3_reader.native import (
@@ -1061,6 +1068,17 @@ def gcd_press_ready(gcd_remaining_ms):
     deadline by itself guarantees the server accepted an ability or blocked a hit.
     """
     return gcd_remaining_ms is not None and gcd_remaining_ms <= GCD_PRESS_LEAD_MS
+
+
+def damage_window_reserved(phase_one, *, font_active=False):
+    """Keep filler out of pending defensive, font and forecast Hold Still slots."""
+    return (
+        font_active
+        or phase_one.pending is not None
+        or phase_one.special in (HOLD_STILL, UPPERCUT)
+        or (phase_one.expected == HOLD_STILL and phase_one.autos >= 1)
+        or (phase_one.bomb_ns is not None and not phase_one.bomb_handled)
+    )
 
 
 def gcd_window_this_tick(gcd_remaining_ms, tick_elapsed_ms):
@@ -3813,6 +3831,84 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
     opening = None
     opening_record = None
     opening_telemetry = None
+    damage = (
+        DamageCadence()
+        if getattr(args, "damage_priority", False) or getattr(args, "ordered_p1", False)
+        else None
+    )
+    damage_bindings = {}
+    damage_scan_after_ns = 0
+
+    def finish_damage():
+        if damage is not None:
+            outcome = damage.finish("attempt_ended")
+            if outcome is not None:
+                emit(outcome.pop("event"), **outcome)
+
+    if cleanup is not None:
+        cleanup.callback(finish_damage)
+
+    def dispatch_damage(boss, phase, phase_one, *, deferred=False):
+        """Use the existing input owner only after opening, prayer and defensive work."""
+        nonlocal damage_scan_after_ns
+        now_ns = reader.monotonic_ns()
+        if (
+            damage is None
+            or damage.pending is not None
+            or damage.fault is not None
+            or deferred
+            or not input_allowed
+            or phase not in (1, 2, 3, 4)
+            or boss.config_id != ACTIVE_TELOS
+            or damage_window_reserved(phase_one, font_active=font_duty.active)
+            or not current_telos_target(reader, boss, now_ns)
+            or (opening is not None and not opening.stopped)
+            or (
+                opening is not None
+                and opening.reason not in ("ordered_sequence_confirmed", "phase_one_ended")
+            )
+        ):
+            return
+        if not damage_bindings and now_ns >= damage_scan_after_ns:
+            damage_scan_after_ns = now_ns + 1_000_000_000
+            available = displayed_bindings(reader)
+            damage_bindings.update(
+                (name, available[name]) for _, name in DAMAGE_ABILITIES if name in available
+            )
+        choice = ready_damage(reader, reserve_tenths=500, available_names=damage_bindings)
+        if choice is None:
+            return
+        ability_id, name, _ = choice
+        fresh = refresh_binding(reader, damage_bindings[name])
+        if fresh is None:
+            emit("damage_binding_invalidated", ability=name)
+            damage_bindings.clear()
+            return
+        chord = (
+            resolve_layout_chord(fresh.key_label, scan_for_key)
+            if layout is not None
+            else parse_chord(fresh.key_label)
+        )
+        if chord in prayer_chords.values() or chord[-1].virtual_key == F12:
+            raise RuntimeError("Damage binding conflicts with prayer or stop key")
+        bindings[name] = chord
+        args.native_bindings[name] = fresh
+        if not 0 <= reader.monotonic_ns() - reader.info.monotonic_ns <= MAX_SAMPLE_AGE_NS:
+            return
+        emit(
+            "damage_input_requested",
+            ability_id=ability_id,
+            ability=name,
+            gcd_remaining_ms=reader.player.gcd_remaining_ms,
+            adrenaline_tenths=reader.player.variable(Variable.ADRENALINE),
+            reserve_tenths=500,
+            target_runtime_id=boss.runtime_id,
+            binding=asdict(fresh),
+        )
+        sent_ns = reader.monotonic_ns()
+        if send_chord(chord):
+            damage.sent(reader, choice, sent_ns)
+            emit("damage_input_accepted", ability_id=ability_id, cast_confirmed=False)
 
     def opening_events(records):
         """Persist rotation decisions and outcomes in the mechanic attempt's sequence."""
@@ -3821,6 +3917,14 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
             emit(record.pop("event"), **record)
         if opening is not None and not opening.writer.enabled:
             camera["pressed"] = False
+        if (
+            records
+            and opening is not None
+            and opening.stopped
+            and opening.reason
+            not in ("phase_one_ended", "ordered_sequence_confirmed", "attempt_ended")
+        ):
+            raise RuntimeError("Ordered P1 stopped: " + opening.reason)
 
     if getattr(args, "ordered_p1", False):
         if attempt is None:
@@ -3891,6 +3995,11 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
         )
         opening = IntegratedP1Rotation(writer, reader.read_action_label, reader.monotonic_ns)
         opening.discover_bindings()
+        shared_device.preflight_bindings(
+            [reader.read_action_label(bar, slot) for bar, slot, _ in opening.locations.values()]
+            + [NativeKeyAction(virtual_key=ord("A"))]
+        )
+        emit("p1_all_keys_preflight_passed", count=len(opening.locations) + 1, input_sent=False)
         opening_telemetry = NativeTelemetry(reader=reader)
         emit(
             "p1_rotation_configured",
@@ -4159,6 +4268,25 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                     sequence: prayer for sequence, (_, _, prayer) in walk_samples.items()
                 },
             )
+        if damage is not None:
+            damage_outcome = damage.observe(reader)
+            if damage_outcome is not None:
+                emit(damage_outcome.pop("event"), **damage_outcome)
+            if (
+                damage.fault is None
+                and attempt is not None
+                and any(
+                    count != 0
+                    for count in (
+                        lost,
+                        hits_lost,
+                        attempt.inventory_lost,
+                        attempt.snapshot_events.npc_hits_lost,
+                    )
+                )
+            ):
+                damage.fault = "event_queue_loss"
+                emit("damage_disabled", reason=damage.fault)
         if opening is not None and not opening.stopped:
             opening_record = opening_telemetry.record_current(attempt.snapshot_events)
             opening_events(
@@ -4679,6 +4807,7 @@ def run(reader, args, board, attempt=None, *, cleanup=None):
                     )
             log("ability_sent", ability=action.ability, reason=action.reason, sent_ns=sent_ns)
         dispatch_opening(deferred=action is not None or phase_one.pending is not None)
+        dispatch_damage(boss, phase, phase_one, deferred=action is not None)
         restore_prayer(prayer_tenths)
         remember_floor(phase, boss)
         movement_busy = phase_one.owns_movement(reader.monotonic_ns(), received_tick)
@@ -4847,6 +4976,11 @@ def main(argv=None, *, attempt_directory=None):
         help="Compose the ordered native-acknowledged P1 opening with mechanics and prayers",
     )
     parser.add_argument(
+        "--damage-priority",
+        action="store_true",
+        help="Supplement mechanics with non-channel damage; also enabled after ordered P1",
+    )
+    parser.add_argument(
         "--legacy-unmodified-bar-keys",
         action="store_true",
         help="Use the older Compatibility Mode account's unmodified-key calibration and defaults",
@@ -4955,6 +5089,10 @@ def main(argv=None, *, attempt_directory=None):
         parser.error("Replay never opens an input backend")
     if args.ordered_p1 and (not live_input or args.legacy_unmodified_bar_keys or args.reacquire):
         parser.error("--ordered-p1 needs live native bindings and cannot use --reacquire")
+    if args.damage_priority and (
+        not live_input or args.legacy_unmodified_bar_keys or args.reacquire
+    ):
+        parser.error("--damage-priority needs live native bindings and cannot use --reacquire")
     if args.replay and args.record_attempt:
         parser.error("An attempt log requires a live session")
     # Input continues through every handled phase (to the P4 checkpoint) unless the one-shot

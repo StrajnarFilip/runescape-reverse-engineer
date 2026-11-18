@@ -47,6 +47,7 @@ class InputBackendSelectionTests(unittest.TestCase):
         ):
             for arguments in (
                 ["--ordered-p1"],
+                ["--damage-priority"],
                 [
                     "--ordered-p1",
                     "--input-backend",
@@ -178,6 +179,20 @@ def event(ordinal, animation):
 
 
 class PhaseOneTests(unittest.TestCase):
+    def test_damage_yields_to_fonts_pending_defensives_and_hold_still_forecast(self):
+        phase = PhaseOne()
+        reserved = controller["damage_window_reserved"]
+        self.assertFalse(reserved(phase))
+        self.assertTrue(reserved(phase, font_active=True))
+        phase.pending = ("Resonance", 100)
+        self.assertTrue(reserved(phase))
+        phase.pending = None
+        phase.expected, phase.autos = HOLD_STILL, 1
+        self.assertTrue(reserved(phase))
+        phase.expected, phase.autos = TENDRILS, 0
+        phase.bomb_ns = 100
+        self.assertTrue(reserved(phase))
+
     def test_uppercut_seen_during_beam_click_still_gets_escape_and_owns_movement(self):
         # P3 Uppercut was sampled at frame 4962 during a beam click and drained at 4963.
         marker = NPCActionEvent(

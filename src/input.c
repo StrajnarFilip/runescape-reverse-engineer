@@ -49,19 +49,21 @@ static int is_valid_tile(int32_t tile_x, int32_t tile_y, int32_t plane)
            tile_y < MAX_TILE_COORDINATE && plane >= 0 && plane <= MAX_PLANE;
 }
 
-/** Accept regular action-bar keys plus the observed Page Up/Down and OEM plus key. */
+/** Accept regular action-bar keys plus observed navigation and OEM plus bindings. */
 static int is_bindable_key(uint32_t virtual_key)
 {
     return (virtual_key >= 'A' && virtual_key <= 'Z') ||
            (virtual_key >= '0' && virtual_key <= '9') ||
            (virtual_key >= VK_F1 && virtual_key <= VK_F12) || virtual_key == VK_PRIOR ||
-           virtual_key == VK_NEXT || virtual_key == VK_OEM_PLUS;
+           virtual_key == VK_NEXT || virtual_key == VK_OEM_PLUS || virtual_key == VK_INSERT;
 }
 
-/** Distinguish dedicated Page Up/Down keys from numeric keypad navigation keys. */
+/** Distinguish dedicated navigation keys from numeric keypad keys. */
 static DWORD key_event_flags(uint32_t virtual_key)
 {
-    return virtual_key == VK_PRIOR || virtual_key == VK_NEXT ? KEYEVENTF_EXTENDEDKEY : 0;
+    return virtual_key == VK_PRIOR || virtual_key == VK_NEXT || virtual_key == VK_INSERT
+               ? KEYEVENTF_EXTENDEDKEY
+               : 0;
 }
 
 int32_t input_project_minimap_tile(const rs3_position *player_tile, const rs3_minimap *minimap,

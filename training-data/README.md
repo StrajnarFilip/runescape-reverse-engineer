@@ -15,8 +15,19 @@ analysis is in the [November 18 report](../docs/validation/telos-special-effects
 The November 18 `151718` trace contains an unintended physical special after
 four basics due to a mode-isolation bug. It supports the first three 1800 ms
 basic intervals, not a clean eight-cast cadence pass. The bug is fixed; the
-repeat remains pending. The other logs retain target-acquisition failures,
+later basic-only repeats completed but retained cooldown gaps. The wider
+`154725` capture used Meteor Strike, Overpower, Hurricane and basics, with all
+eight cast observations three received ticks apart. The other logs retain target-acquisition failures,
 time limits and foreground refusal rather than hiding unsuccessful probes.
+
+The `telos-20261118T155501.788252Z.jsonl` combined boss attempt failed after
+Devotion: its input path rejected the Page Down binding before Berserk/renewal.
+The opening stopped while the mechanic loop continued, and the player died
+without damaging Telos. The failed record is retained alongside the
+[transport failure report](../docs/validation/telos-combined-transport-failure-2026-11-18.json).
+The fix preflights every opening key and ends the whole run on an opening fault.
+`telos-preparation-*` retains bounded setup attempts, including a no-input
+failure when the requested main-hand Leng was no longer in inventory.
 
 ## Current native P1 captures (schema 2)
 

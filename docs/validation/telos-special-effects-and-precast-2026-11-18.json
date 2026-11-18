@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "date": "2026-11-18",
-  "status": "Special deadline units and fresh effect transitions validated on the original profile; basic-only repeat pending.",
+  "status": "Special deadlines validated; Dismember namespace alias live-confirmed; wider eight-cast damage sequence has consecutive three-received-tick observations. Complete fight unverified.",
   "runtime_profile": {
     "client_version": "951-3",
     "executable_sha256": "fd8afd32f9829b1fb0a953b238c504e75526b7af5e2920120aa027777a358d45"
@@ -43,14 +43,37 @@
       "Rend",
       "Punish"
     ],
-    "cadence_mode_isolation": "No equipment or special fallthrough when all candidate basics are cooling. Regression test exercises the dispatch loop."
+    "cadence_mode_isolation": "No equipment or special fallthrough when all candidate basics are cooling. Regression test exercises the dispatch loop.",
+    "non_channel_damage_priority": [
+      "Meteor Strike",
+      "Overpower",
+      "Hurricane",
+      "Greater Fury",
+      "Adaptive Strike",
+      "Dismember",
+      "Rend",
+      "Punish"
+    ],
+    "dismember_timer_alias": {
+      "struct_id": 44244,
+      "struct_stem": "strength_dismember",
+      "client_stem": "melee_dismember",
+      "start_varclient": 8380,
+      "end_varclient": 8381,
+      "live_transition_logs": [
+        "training-data/telos-special-effects-20261118T153754.229501Z.jsonl",
+        "training-data/telos-special-effects-20261118T154725.479111Z.jsonl"
+      ]
+    }
   },
   "limitations": [
     "None of these probes is a Telos encounter or complete kill.",
     "Raw logs retain semantics_validated=false as captured; this report provides the subsequent analysis without rewriting history.",
     "Two Nov 17 repetitions support both special endpoints; the Nov 18 mixed probe additionally captured physical NOT_SET-to-known behavior.",
-    "Eight-cast basic-only clean repeat is pending. The mixed capture proves only the first four uninterrupted basic starts at 1800 ms intervals.",
-    "No new prayer protection deadline, Soul Split healing attribution, wake-targetability, Greater Barge conversion, P5 response or full-fight verification is established."
+    "No new prayer protection deadline, Soul Split healing attribution, wake-targetability, Greater Barge conversion, P5 response or full-fight verification is established.",
+    "Both later basic-only repeats completed eight casts but retained cooldown gaps; the corrected Dismember mapping alone did not make five basics a complete damage rotation.",
+    "The 154725 wider damage capture has eight exact timer transitions, seven consecutive three-received-tick observation intervals and GCD-end spacing 1780..1820 ms. It does not validate Telos damage execution or prayer coverage.",
+    "Hurricane has a backdated personal cooldown start in the wider trace. Use observed GCD endpoints and received ticks for cadence, not differences between personal cooldown starts of different abilities."
   ],
   "captures": [
     {
@@ -460,11 +483,314 @@
       "complete_kill": false,
       "encounter_attempt": false,
       "clean_basic_only_validation": false
+    },
+    {
+      "path": "training-data/telos-special-effects-20261118T153349.950068Z.jsonl",
+      "sha256": "882ed50573b5a6a5fddfddb2406ca6b883b1c071a797a0cf90cd2a5be017f3b1",
+      "bytes": 134366,
+      "rows": 140,
+      "result": "basic_cadence_recorded",
+      "sequence_contiguous": true,
+      "queue_loss_events": 0,
+      "requested_inputs": {
+        "basic": 8
+      },
+      "complete_kill": false,
+      "encounter_attempt": false,
+      "casts": [
+        {
+          "ability_id": 14701,
+          "own_cooldown_start_tick": 103711,
+          "observed_game_tick": 3412,
+          "gcd_end_client_tick": 103801,
+          "sequence": 7
+        },
+        {
+          "ability_id": 14679,
+          "own_cooldown_start_tick": 103802,
+          "observed_game_tick": 3415,
+          "gcd_end_client_tick": 103892,
+          "sequence": 23
+        },
+        {
+          "ability_id": 52781,
+          "own_cooldown_start_tick": 103891,
+          "observed_game_tick": 3418,
+          "gcd_end_client_tick": 103981,
+          "sequence": 39
+        },
+        {
+          "ability_id": 14700,
+          "own_cooldown_start_tick": 103982,
+          "observed_game_tick": 3421,
+          "gcd_end_client_tick": 104072,
+          "sequence": 52
+        },
+        {
+          "ability_id": 14679,
+          "own_cooldown_start_tick": 104072,
+          "observed_game_tick": 3424,
+          "gcd_end_client_tick": 104162,
+          "sequence": 65
+        },
+        {
+          "ability_id": 14679,
+          "own_cooldown_start_tick": 104372,
+          "observed_game_tick": 3434,
+          "gcd_end_client_tick": 104462,
+          "sequence": 103
+        },
+        {
+          "ability_id": 14701,
+          "own_cooldown_start_tick": 104463,
+          "observed_game_tick": 3437,
+          "gcd_end_client_tick": 104553,
+          "sequence": 126
+        },
+        {
+          "ability_id": 52781,
+          "own_cooldown_start_tick": 104552,
+          "observed_game_tick": 3440,
+          "gcd_end_client_tick": 104642,
+          "sequence": 139
+        }
+      ],
+      "gcd_end_intervals_ms": [
+        1820,
+        1780,
+        1820,
+        1800,
+        6000,
+        1820,
+        1780
+      ],
+      "observed_game_tick_intervals": [
+        3,
+        3,
+        3,
+        3,
+        10,
+        3,
+        3
+      ],
+      "gcd_ms_at_input": [
+        0,
+        600,
+        560,
+        580,
+        560,
+        0,
+        580,
+        560
+      ],
+      "all_requested_casts_observed": true
+    },
+    {
+      "path": "training-data/telos-special-effects-20261118T153754.229501Z.jsonl",
+      "sha256": "04e4bb326c68d475b0d209f55c000f30d4d3f623b79892b38a23693b27c08042",
+      "bytes": 143480,
+      "rows": 166,
+      "result": "basic_cadence_recorded",
+      "sequence_contiguous": true,
+      "queue_loss_events": 0,
+      "requested_inputs": {
+        "basic": 8
+      },
+      "complete_kill": false,
+      "encounter_attempt": false,
+      "casts": [
+        {
+          "ability_id": 14701,
+          "own_cooldown_start_tick": 115923,
+          "observed_game_tick": 3819,
+          "gcd_end_client_tick": 116013,
+          "sequence": 8
+        },
+        {
+          "ability_id": 14679,
+          "own_cooldown_start_tick": 116013,
+          "observed_game_tick": 3822,
+          "gcd_end_client_tick": 116103,
+          "sequence": 20
+        },
+        {
+          "ability_id": 44244,
+          "own_cooldown_start_tick": 116103,
+          "observed_game_tick": 3825,
+          "gcd_end_client_tick": 116193,
+          "sequence": 45
+        },
+        {
+          "ability_id": 52781,
+          "own_cooldown_start_tick": 116193,
+          "observed_game_tick": 3828,
+          "gcd_end_client_tick": 116283,
+          "sequence": 66
+        },
+        {
+          "ability_id": 14679,
+          "own_cooldown_start_tick": 116284,
+          "observed_game_tick": 3831,
+          "gcd_end_client_tick": 116374,
+          "sequence": 85
+        },
+        {
+          "ability_id": 14700,
+          "own_cooldown_start_tick": 116374,
+          "observed_game_tick": 3834,
+          "gcd_end_client_tick": 116464,
+          "sequence": 103
+        },
+        {
+          "ability_id": 14679,
+          "own_cooldown_start_tick": 116583,
+          "observed_game_tick": 3841,
+          "gcd_end_client_tick": 116673,
+          "sequence": 148
+        },
+        {
+          "ability_id": 14701,
+          "own_cooldown_start_tick": 116673,
+          "observed_game_tick": 3844,
+          "gcd_end_client_tick": 116763,
+          "sequence": 165
+        }
+      ],
+      "gcd_end_intervals_ms": [
+        1800,
+        1800,
+        1800,
+        1820,
+        1800,
+        4180,
+        1800
+      ],
+      "observed_game_tick_intervals": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        7,
+        3
+      ],
+      "gcd_ms_at_input": [
+        0,
+        580,
+        600,
+        560,
+        580,
+        580,
+        0,
+        580
+      ],
+      "all_requested_casts_observed": true
+    },
+    {
+      "path": "training-data/telos-special-effects-20261118T154725.479111Z.jsonl",
+      "sha256": "d8fee33e1277f634fae0936760259b7ea2c8eddd789d708384fc095c548fdada",
+      "bytes": 138445,
+      "rows": 124,
+      "result": "damage_cadence_recorded",
+      "sequence_contiguous": true,
+      "queue_loss_events": 0,
+      "requested_inputs": {
+        "damage": 8
+      },
+      "complete_kill": false,
+      "encounter_attempt": false,
+      "casts": [
+        {
+          "ability_id": 14688,
+          "own_cooldown_start_tick": 144488,
+          "observed_game_tick": 4771,
+          "gcd_end_client_tick": 144578,
+          "sequence": 9
+        },
+        {
+          "ability_id": 14686,
+          "own_cooldown_start_tick": 144578,
+          "observed_game_tick": 4774,
+          "gcd_end_client_tick": 144668,
+          "sequence": 23
+        },
+        {
+          "ability_id": 14685,
+          "own_cooldown_start_tick": 144369,
+          "observed_game_tick": 4777,
+          "gcd_end_client_tick": 144759,
+          "sequence": 38
+        },
+        {
+          "ability_id": 14701,
+          "own_cooldown_start_tick": 144759,
+          "observed_game_tick": 4780,
+          "gcd_end_client_tick": 144849,
+          "sequence": 54
+        },
+        {
+          "ability_id": 14679,
+          "own_cooldown_start_tick": 144848,
+          "observed_game_tick": 4783,
+          "gcd_end_client_tick": 144938,
+          "sequence": 68
+        },
+        {
+          "ability_id": 44244,
+          "own_cooldown_start_tick": 144938,
+          "observed_game_tick": 4786,
+          "gcd_end_client_tick": 145028,
+          "sequence": 88
+        },
+        {
+          "ability_id": 52781,
+          "own_cooldown_start_tick": 145028,
+          "observed_game_tick": 4789,
+          "gcd_end_client_tick": 145118,
+          "sequence": 104
+        },
+        {
+          "ability_id": 14679,
+          "own_cooldown_start_tick": 145119,
+          "observed_game_tick": 4792,
+          "gcd_end_client_tick": 145209,
+          "sequence": 123
+        }
+      ],
+      "gcd_end_intervals_ms": [
+        1800,
+        1820,
+        1800,
+        1780,
+        1800,
+        1800,
+        1820
+      ],
+      "observed_game_tick_intervals": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "gcd_ms_at_input": [
+        0,
+        600,
+        600,
+        580,
+        600,
+        600,
+        560,
+        580
+      ],
+      "all_requested_casts_observed": true
     }
   ],
   "offline_checks": {
     "ctest_targets_passed": 16,
-    "python_tests_passed": 590,
+    "python_tests_passed": 602,
     "includes": [
       "Native deadline flags, bounds and profile isolation",
       "Complete synthetic ordered opening with both special effect acknowledgements",

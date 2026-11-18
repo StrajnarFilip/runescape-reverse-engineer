@@ -151,14 +151,25 @@ def bind(library, name, result, arguments):
     return function
 
 
-def resolve_layout_chord(value, scan_for_virtual_key):
-    """Translate the client-displayed base key to the corresponding physical key."""
-    chord = parse_chord(value)
-    scan = scan_for_virtual_key(chord[-1].virtual_key)
+def _layout_key(base, scan_for_virtual_key):
+    """Preserve dedicated navigation identity when Win32 omits its E0 prefix."""
+    scan = scan_for_virtual_key(base.virtual_key)
     physical = next(
         (key for key in KEYS.values() if scan == (key.scan_code | (0xE000 if key.extended else 0))),
         None,
     )
+    # This client layout returns 0x49/0x51, not 0xE049/0xE051, for the
+    # dedicated Page keys even with MAPVK_VK_TO_VSC_EX. Require the exact
+    # known virtual key and scan; never reinterpret an arbitrary unknown scan.
+    if physical is None and base.extended and scan == base.scan_code:
+        physical = base
+    return physical
+
+
+def resolve_layout_chord(value, scan_for_virtual_key):
+    """Translate the client-displayed base key to the corresponding physical key."""
+    chord = parse_chord(value)
+    physical = _layout_key(chord[-1], scan_for_virtual_key)
     if physical is None:
         raise ValueError(f"No supported physical key for {value!r} in the active keyboard layout")
     return (*chord[:-1], physical)
@@ -172,15 +183,7 @@ def native_chord(virtual_key, modifiers, scan_for_virtual_key=None):
     if type(virtual_key) is not int or base is None or base.name in MODIFIER_NAMES:
         raise ValueError("Unsupported native base key")
     if scan_for_virtual_key is not None:
-        scan = scan_for_virtual_key(virtual_key)
-        base = next(
-            (
-                key
-                for key in KEYS.values()
-                if scan == (key.scan_code | (0xE000 if key.extended else 0))
-            ),
-            None,
-        )
+        base = _layout_key(base, scan_for_virtual_key)
         if base is None or base.name in MODIFIER_NAMES:
             raise ValueError("Unsupported native key in the client layout")
     return tuple(
@@ -224,14 +227,18 @@ class SharedKeyBatchDevice:
         self.on_input = on_input or (lambda index, action, accepted, start, end: None)
         self.on_batch = on_batch or (lambda actions: None)
 
+    def preflight_bindings(self, actions):
+        """Translate all opening keys before the first input; send nothing."""
+        return tuple(
+            native_chord(action.virtual_key, action.modifiers, self.scan_for_key)
+            for action in actions
+        )
+
     def dispatch_key_batch(self, actions, world):
         """Issue one prepared sequence, logging every attempted constituent input."""
         if not 1 <= len(actions) <= 3:
             raise ValueError("Invalid shared-key batch size")
-        chords = [
-            native_chord(action.virtual_key, action.modifiers, self.scan_for_key)
-            for action in actions
-        ]
+        chords = self.preflight_bindings(actions)
 
         def check():
             self.check()

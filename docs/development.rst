@@ -46,7 +46,11 @@ Original-profile EZK/Dragon scimitar effect transitions now acknowledge their
 specific casts; buff presence, P5 responses and full live verification remain
 pending. ``work/calibrate_special_effects.py`` is the bounded native dummy
 probe for special endpoints or basic-only damage cadence. Its decoded logs
-include failures, and its documented cadence repeat is still pending.
+include failures and a wider non-channel damage probe. ``bot/damage_cadence.py``
+provides the shared selector and exact-action outcome tracking used by that
+probe and the practice runner's supplementary damage. Combined-path keyboard
+preflight and whole-run fault propagation protect the ordered opening; a
+successful combined P1 retry remains pending.
 `Action cooldowns <telos-automation/action-cooldowns.rst>`_ lists which
 actions have their own timer, which share one, and what may go out in one tick.
 

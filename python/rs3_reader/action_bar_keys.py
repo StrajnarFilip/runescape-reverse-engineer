@@ -25,7 +25,7 @@ LABEL_FLAGS_REQUIRED = 15
 MAXIMUM_BINDING_AGE_NS = 150_000_000
 COMPATIBILITY_SHA256 = "7a60c69fcf11eda42a328732721f5e89e1c85a6bc919038ff3451d4643e42dbf"
 CTRL, SHIFT, ALT = 1, 2, 4  # rs3_key_modifiers from the C UI-label accessor.
-VIRTUAL_KEY_NAMES = {0x21: "PageUp", 0x22: "PageDown", 0xBB: "Equals"}
+VIRTUAL_KEY_NAMES = {0x21: "PageUp", 0x22: "PageDown", 0x2D: "Insert", 0xBB: "Equals"}
 VIRTUAL_KEY_NAMES.update({0x6F + number: f"F{number}" for number in range(1, 13)})
 VIRTUAL_KEY_NAMES.update({ord(value): value for value in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"})
 

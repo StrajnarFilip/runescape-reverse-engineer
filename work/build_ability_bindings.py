@@ -23,6 +23,11 @@ STRUCT_FILES_PER_GROUP = 32
 ABILITY_BOOK_ENUM = 10148
 GAMEVAL_REFERENCE_COMMIT = "2ae22f569b529e71e97361039976e3b5c53073a3"
 SERVER_TICK_MS = 600
+# The struct kept its Strength-era symbol after its client timer moved to the
+# Melee namespace. Keep this exact revision-951 alias separate from the recasts.
+CLIENT_TIMER_NAMESPACE_ALIASES = {
+    "combatv2_cooldown_strength_dismember": "combatv2_cooldown_melee_dismember",
+}
 
 # Struct parameters.
 ABILITY_ID_PARAMETER = 2793
@@ -45,6 +50,7 @@ def read_reference(name):
 
 def ability_book_structs(enums):
     """Return the struct IDs listed by the ability-book category enums."""
+
     def enum_values(enum_id):
         return decode_enum(enums.read_file(enum_id, ENUM_GROUP_SHIFT))["values"].values()
 
@@ -60,6 +66,12 @@ def client_timer_pair(stem, client_variables):
     end = client_variables.get(stem + "_end_client")
     if start is not None and end is not None:
         return start, end, "client_symbol_pair"
+    alias = CLIENT_TIMER_NAMESPACE_ALIASES.get(stem)
+    if alias is not None and start is None and end is None:
+        alias_start = client_variables.get(alias + "_start_client")
+        alias_end = client_variables.get(alias + "_end_client")
+        if alias_start is not None and alias_end is not None:
+            return alias_start, alias_end, "client_symbol_pair_namespace_alias"
     # Accept spelling differences in underscores only for a unique start/end pair.
     normalized_stem = stem.replace("_", "")
     starts = [

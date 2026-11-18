@@ -94,8 +94,23 @@ The probe then accidentally fell through into a physical special. Keep that
 mixed trace; it does not validate an eight-cast basic-only run. The fallthrough
 is fixed. The selector now considers Greater Fury, Adaptive Strike, Dismember,
 Rend and Punish using each native timer, cost and equipment eligibility.
-Clean repetition is pending. Defensive impact windows retain their narrower
-existing press limit; this damage trace proves no prayer-check deadline.
+Two basic-only repeats subsequently confirmed eight casts but still had gaps.
+Dismember is in the book; its missing timer mapping, not its availability, was
+the issue. The old `strength_dismember` struct resolves to client variables
+8380/8381 under `melee_dismember`, with a live cooldown transition confirmed.
+The wider `154725` probe used Meteor Strike, Overpower, Hurricane, Greater Fury,
+Adaptive Strike, Dismember, Rend and Adaptive Strike with consecutive
+three-received-tick cast observations. Defensive impact windows retain their
+narrower existing press limit; these damage traces prove no prayer-check deadline.
+
+**Failed combined attempt, November 18:** Devotion cast, then the shared input
+translator rejected Page Down. The dummy probe had used a different input path.
+No later opening input was submitted; Telos remained at full HP and the player
+died. Current fixes translate unprefixed dedicated-navigation scans, preflight
+all opening keys before Devotion, and stop the whole attempt if the ordered
+opening faults. A read-only check passed all 13 actual native opening bindings.
+A successful combined P1 retry is still required. Preserve the
+[failed attempt and diagnosis](../../docs/validation/telos-combined-transport-failure-2026-11-18.json).
 
 **Integration rule:** the ordered opening and mechanics share one backend and
 four event drains. Protection and defensives precede rotation dispatch. A

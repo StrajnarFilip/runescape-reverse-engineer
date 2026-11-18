@@ -713,6 +713,11 @@ static int label_chord(const char *label, uint32_t *key, uint32_t *modifiers)
         *key = !strcmp(label, "PgUp") ? VK_PRIOR : !strcmp(label, "PgDn") ? VK_NEXT : VK_OEM_PLUS;
         return 1;
     }
+    if (!strcmp(label, "Ins"))
+    {
+        *key = VK_INSERT;
+        return 1;
+    }
     return 0;
 }
 

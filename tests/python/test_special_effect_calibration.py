@@ -89,7 +89,7 @@ class SpecialEffectCalibrationTests(unittest.TestCase):
             start_tick=100,
         )
         reader = SimpleNamespace(
-            player=SimpleNamespace(gcd_reason=0, gcd_remaining_ms=600),
+            player=SimpleNamespace(gcd_reason=0, gcd_remaining_ms=600, variable=lambda _: 1200),
             inventory_info=SimpleNamespace(ability_count=1),
             abilities=[ability],
         )
@@ -111,7 +111,9 @@ class SpecialEffectCalibrationTests(unittest.TestCase):
             adrenaline_requirement_raw=0,
         )
         reader = SimpleNamespace(
-            player=SimpleNamespace(gcd_reason=Reason.NOT_SET, gcd_remaining_ms=0),
+            player=SimpleNamespace(
+                gcd_reason=Reason.NOT_SET, gcd_remaining_ms=0, variable=lambda _: 1200
+            ),
             inventory_info=SimpleNamespace(ability_count=1),
             abilities=[ability],
         )
@@ -132,7 +134,7 @@ class SpecialEffectCalibrationTests(unittest.TestCase):
             for identity, _ in probe["BASIC_ABILITIES"]
         ]
         reader = SimpleNamespace(
-            player=SimpleNamespace(gcd_reason=0, gcd_remaining_ms=600),
+            player=SimpleNamespace(gcd_reason=0, gcd_remaining_ms=600, variable=lambda _: 1200),
             inventory_info=SimpleNamespace(ability_count=len(rows)),
             abilities=rows,
         )
