@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-18",
+  "status": "Manual preparation and route recorded; automatic reproduction not yet verified.",
+  "decoded_log": "training-data/telos-route-20261118-manual.jsonl",
+  "decoded_log_sha256": "26c3ed63014610992b6becc839892a4cf0d586afc252dab0b26e9a9452ee3ec4",
+  "native_frames": 9747,
+  "input_events": 3207,
+  "screen_frames": 506,
+  "capture_errors": 0,
+  "input_queue_loss": 0,
+  "native_queue_loss": {
+    "manual_actions_lost": 0,
+    "npc_action_events_lost": 0,
+    "hit_splats": 0,
+    "player_hit_splats": 0,
+    "inventory_changes": 0
+  },
+  "nominal_native_hz": 50,
+  "observed_native_hz": 44.37352631988603,
+  "nominal_screen_hz": 10,
+  "screen_frame_span_seconds": 94.3994515,
+  "native_span_seconds": 219.657999,
+  "native_sample_gaps_over_100ms": 0,
+  "timing_origin_native_ns": 517338327453900,
+  "route_steps": 13,
+  "private_artifacts": [
+    "work/manual-route-20261118T1610.jsonl.gz",
+    "work/manual-route-20261118T1610-frames/frames.jsonl"
+  ],
+  "limitations": [
+    "Raw captures and screen images remain local; decoded route steps contain no chat or account names.",
+    "Input hooks are foreground-only; focus transitions can omit release edges after the game loses focus. Zero reported queue loss is not proof of universal OS input delivery.",
+    "The visual capture is a desktop crop gated by foreground identity. Pre-demonstration app-switch frames are not route evidence.",
+    "Recorded client coordinates depend on window geometry and camera; do not blindly replay them. Ground click destinations were not decoded.",
+    "Scene-local instanced tile coordinates require fresh anchors before reproduction.",
+    "The demonstrated endpoint is dormant Telos with 120% adrenaline and Dragon battleaxe equipped, not a combat attempt or verified automatic route."
+  ]
+}

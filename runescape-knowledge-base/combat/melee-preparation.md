@@ -119,6 +119,31 @@ submits each balanced ordered batch without per-key sleeps. Readiness and
 outcome verification remain separate. See the
 [combined controller](../../docs/telos-combined-controller.rst).
 
+## Recorded War's Retreat preparation and entry (2026-11-18)
+
+**Observed manual demonstration:** right-click the bank chest and load the last
+preset. Native changes confirm it equips Dragon battleaxe, carries the main-hand
+Leng in inventory slot 13 (one-based), and replenishes supplies. Click Pray on
+the Altar of War. Move north, using Dive (`Shift+V`) and Surge (`V`) toward the
+adrenaline crystal. Channel to 100%, press `=` for the equipped battleaxe's
+special, then channel again to 120%. Click the portal configured for Telos.
+
+At the entrance, right-click Roots and open entry setup. This demonstration
+selected the last-used 0% enrage and entered Practice mode, then opened the
+custom-enrage prompt inside staging. The operator typed `30`, erased it, entered
+`1000` and pressed Enter; the native packed enrage changed to 1000. Camera drags,
+zoom and ground clicks then placed the character at the staging edge with Telos
+still dormant. Dragon battleaxe remained equipped and adrenaline remained 120%.
+This demonstration contained no fight.
+
+The durable [decoded route](../../training-data/telos-route-20261118-manual.jsonl)
+retains step times and native waypoints. The
+[capture report](../../docs/validation/wars-retreat-telos-route-2026-11-18.json)
+documents coverage and limits. Raw inputs and screen frames stay private.
+Reproduction must resolve current objects, window geometry and scene anchors;
+recorded pixels and instanced tile coordinates are not portable targets.
+Automatic reproduction has not been verified.
+
 ## Earlier account setup and research history
 
 The following entries describe the November 13 session, not current bindings or

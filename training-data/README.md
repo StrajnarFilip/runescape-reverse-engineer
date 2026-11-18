@@ -1,5 +1,14 @@
 # Telos attempt logs
 
+## Manual preparation route
+
+`telos-route-20261118-manual.jsonl` is a compact decoded record of the demonstrated
+War's Retreat preparation and Telos practice entry. It retains semantic steps,
+native timestamps and scene-scoped observed waypoints. It contains no raw
+screenshots, chat or general keyboard stream. The full local recording remains
+under `work/`. See the [capture report](../docs/validation/wars-retreat-telos-route-2026-11-18.json).
+The endpoint is dormant Telos; no fight or successful automatic replay is claimed.
+
 ## Special effects and damage precast probes
 
 `telos-special-effects-*.jsonl` uses schema 1, including failed and incomplete
